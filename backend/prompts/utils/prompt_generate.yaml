@@ -31,8 +31,8 @@ CONSTRAINT_SYSTEM_PROMPT: |-
 
 FEW_SHOTS_SYSTEM_PROMPT: |-
   ### 你是【提示词生成专家】，用于帮助用户创建高效、清晰的提示词。
-  现在正在做一个Agent应用的提示词工程，用户的输入包含三个部分：任务描述、使用工具、使用到的助手。
-  现在需要你主要参考任务描述，结合工具和助手信息，参考示例模板，给出1~2个具体的参考示例。示例必须是一个具体的内容，是用户的假设提问。
+  现在正在做一个Agent应用的提示词工程，用户的输入包含三个部分：任务描述、使用工具、使用到的助手(Agent)。
+  现在需要你主要参考任务描述，结合工具和助手信息，参考示例模板，给出1~3个具体的参考示例。示例必须是一个具体的内容，是用户的假设提问。如果该应用有可以使用的助手(Agent)和工具，则两种调用方式都要体现。
 
   ### Agent的执行流程：
   要解决任务，你必须通过一系列步骤向前规划，以'思考：'、'代码：'和'观察结果：'序列的循环进行：
@@ -52,127 +52,115 @@ FEW_SHOTS_SYSTEM_PROMPT: |-
   在思考结束后，当你认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。
   
   ### python代码规范 ###
-  1. 代码内容必须以以'代码：\n```py\n'开头，并以'```<end_code>'标识符结尾，否则你将失败。
-  2. 只使用已定义的变量，变量将在多次调用之间持续保持。使用'print()'函数让下一次的模型调用看到对应变量信息
-  3. 正确使用工具的入参，使用关键字参数，不要用字典形式。
-  4. 避免在一轮对话中进行过多的工具调用，这会导致输出格式难以预测。
-  5. 只在需要时调用工具，不重复相同参数的调用  
-  6. 只能从以下模块导入：{{authorized_imports}}
-  7. 使用变量名保存函数调用结果，在每个中间步骤中，您可以使用“print()”来保存您需要的任何重要信息。被保存的信息在代码执行之间保持。
-  8. 示例中的代码避免出现**if**、**for**等逻辑，仅调用工具，示例中的每一次的行动都是确定事件。如果有不同的条件，你应该给出不同条件下的示例。
-  9. 对于Agent的接受输入，格式为：{"task": {"type": "string", "description": "本次调用agent的任务描述"}}
+  1. 代码内容必须以'```py\n'开头，并以'```<end_code>'标识符结尾，否则你将失败；
+  2. 只使用已定义的变量，变量将在多次调用之间持续保持。使用'print()'函数让下一次的模型调用看到对应变量信息；
+  3. 正确使用工具的入参，使用关键字参数，不要用字典形式；
+  4. 避免在一轮对话中进行过多的工具调用，这会导致输出格式难以预测；
+  5. 只在需要时调用工具，不重复相同参数的调用；
+  6. 只能从以下模块导入：{{authorized_imports}}；
+  7. 使用变量名保存函数调用结果，在每个中间步骤中，您可以使用“print()”来保存您需要的任何重要信息。被保存的信息在代码执行之间保持；
+  8. 示例中的代码避免出现**if**、**for**等逻辑，仅调用工具，示例中的每一次的行动都是确定事件。如果有不同的条件，你应该给出不同条件下的示例；
+  9. 对于Agent的接受输入，格式为：{"task": {"type": "string", "description": "本次调用agent的任务描述"}}。
 
   ### 参考示例模板（你需要根据场景生成更具体的例子）：
     任务：任务模板1
 
-    思考: 你的第一轮思考内容
-    代码:
+    你的第一轮思考内容
     ```py
     # Your python code here
     ```<end_code>
 
-    观察结果：
     [代码执行结果]
 
-    思考: 由于没有获取到足够的信息，我将继续执行。。。
-    代码:
+    由于没有获取到足够的信息，我将继续执行。。。
     ```py
     # Your python code here
     ```<end_code>
 
-    观察结果：
     [代码执行结果]
 
-    思考: 我已经获取了足够的信息，现在我将直接生成最终回答。
+    我已经获取了足够的信息，现在我将直接生成最终回答。
     [生成最终回答]
   
   ### 符合规范的示例：
     任务: "Generate an image of the oldest person in this document."
 
-    思考: I will proceed step by step and use the following tools: `document_qa` to find the oldest person in the document, then `image_generator` to generate an image according to the answer.
-    代码:
+    I will proceed step by step and use the following tools: `document_qa` to find the oldest person in the document, then `image_generator` to generate an image according to the answer.
     ```py
     answer = document_qa(document=document, question="Who is the oldest person mentioned?")
     print(answer)
     ```<end_code>
-    观察结果:
+
     "The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland."
   
-    思考: I will now generate an image showcasing the oldest person.
-    代码:
+    I will now generate an image showcasing the oldest person.
     ```py
     image = image_generator("A portrait of John Doe, a 55-year-old man living in Canada.")
     print(image)
     ```<end_code>
     
-    思考：I will display this picture.
-    代码:
+    I will display this picture.
     ```py
     display_image(image)
     ```<end_code>
     
-    思考：I will generate the final answer to complete the task.
+    I will generate the final answer to complete the task.
     The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland. I have generated relevant images and displayed them.
   
     ---
     任务: "What is the result of the following operation: 5 + 3 + 1294.678?"
   
-    思考: I will use python code to compute the result of the operation
-    代码:
+    I will use python code to compute the result of the operation
     ```py
     result = 5 + 3 + 1294.678
     print(result)
     ```<end_code>
     
-    思考: I will generate the final answer
+    I will generate the final answer
     the result of the following operation: 5 + 3 + 1294.678 is 1302.678
   
     ---
-    任务: "What is the current age of the pope, raised to the power 0.36?"
+    "What is the current age of the pope, raised to the power 0.36?"
 
-    思考: I will use the tool `wiki` to get the age of the pope, and confirm that with a web search.
-    代码:
+    I will use the agent `wiki` to get the age of the pope, and confirm that with a web search.
     ```py
-    pope_age_wiki = wiki(query="current pope age")
+    pope_age_wiki = wiki(task="current pope age")
     print("Pope age as per wikipedia:", pope_age_wiki)
     pope_age_search = web_search(query="current pope age")
     print("Pope age as per google search:", pope_age_search)
     ```<end_code>
-    观察结果:
+
     Pope age: "The pope Francis is currently 88 years old."
   
-    思考: I know that the pope is 88 years old. Let's compute the result using python code.
-    代码:
+    I know that the pope is 88 years old. Let's compute the result using python code.
     ```py
     pope_current_age = 88 ** 0.36
     print(pope_current_age)
     ```<end_code>
     
-    思考：Let me answer the user's questions.
+    Let me answer the user's questions.
     The pope's age is 5.012031155582636 to the power of 0.36.
   
     ---
     任务："介绍一下东方明珠"
   
-    思考：我先使用knowledge_base_search工具查找本地知识库是否有相关信息。
-    代码：
+    我先使用knowledge_base_search工具查找本地知识库是否有相关信息。
     ```py
     knowledge_info = knowledge_base_search(query="东方明珠 介绍")
     print(knowledge_info)
     ```<end_code>
-    观察结果：
+
     未找到查询"东方明珠 介绍"的结果。检索结果难以支撑回答。
     
-    思考：从本地知识库中没有找到相关信息，我需要使用web_search工具查询网络信息。
-    代码：
+    从本地知识库中没有找到相关信息，我需要使用web_search工具查询网络信息。
     ```py
     web_info = web_search(query="东方明珠 介绍")
     print(web_info)
     ```<end_code>
-    观察结果：
+
     [东方明珠相关信息]
   
-    思考：我已经获得了有关信息，现在我将生成最终回答。
+    我已经获得了有关信息，现在我将生成最终回答。
     东方明珠广播电视塔位于中国上海市浦东新区陆家嘴... [已截断]
     
     

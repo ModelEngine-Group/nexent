@@ -132,7 +132,7 @@ class MessageObserver:
         self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
 
         # 代码块标记模式
-        self.code_pattern = re.compile(r"(代码|Code)(：|:)\s*```")
+        self.code_pattern = re.compile(r"```")
 
     def _init_message_transformers(self):
         """初始化消息类型到转换器的映射"""
@@ -172,20 +172,26 @@ class MessageObserver:
             # 找到了代码块标记
             match_start = match.start()
 
-            # 将匹配位置之前的内容作为思考发送
-            prefix_text = buffer_text[:match_start]
-            if prefix_text:
-                self.message_query.append(
-                    Message(ProcessType.MODEL_OUTPUT_THINKING, prefix_text).to_json())
+            # 只有在思考模式下才进行模式切换
+            if self.current_mode == ProcessType.MODEL_OUTPUT_THINKING:
+                # 将匹配位置之前的内容作为思考发送
+                prefix_text = buffer_text[:match_start]
+                if prefix_text:
+                    self.message_query.append(
+                        Message(ProcessType.MODEL_OUTPUT_THINKING, prefix_text).to_json())
 
-            # 将匹配部分及之后的内容作为代码发送
-            code_text = buffer_text[match_start:]
-            if code_text:
-                self.message_query.append(
-                    Message(ProcessType.MODEL_OUTPUT_CODE, code_text).to_json())
+                # 将匹配部分及之后的内容作为代码发送
+                code_text = buffer_text[match_start:]
+                if code_text:
+                    self.message_query.append(
+                        Message(ProcessType.MODEL_OUTPUT_CODE, code_text).to_json())
 
-            # 切换模式
-            self.current_mode = ProcessType.MODEL_OUTPUT_CODE
+                # 切换模式
+                self.current_mode = ProcessType.MODEL_OUTPUT_CODE
+            else:
+                # 已经在代码模式下，直接发送整个缓冲区内容作为代码
+                self.message_query.append(
+                    Message(ProcessType.MODEL_OUTPUT_CODE, buffer_text).to_json())
 
             # 清空缓冲区
             self.token_buffer.clear()
