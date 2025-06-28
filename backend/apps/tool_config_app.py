@@ -45,3 +45,4 @@ async def update_tool_info_api(request: ToolInstanceInfoRequest, authorization: 
     except Exception as e:
         logging.error(f"Failed to update tool, error in: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update tool, error in: {str(e)}")
+

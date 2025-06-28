@@ -3,7 +3,6 @@ import logging
 from typing import List
 
 from fastapi import HTTPException
-from sqlalchemy import or_
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import ToolInfo, AgentInfo, UserAgent, ToolInstance
@@ -325,12 +324,11 @@ def delete_agent_by_id(agent_id, tenant_id: str = None, user_id: str = None):
                                             UserAgent.user_id == user_id).update(
             {'delete_flag': 'Y', 'updated_by': user_id})
 
-def update_tool_table_from_scan_tool_list(tool_list: List[ToolInfo]):
+def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools
     """
     try:
-        user_id, tenant_id = get_current_user_id()
         with get_db_session() as session:
             # get all existing tools (including complete information)
             existing_tools = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y').all()
@@ -342,23 +340,21 @@ def update_tool_table_from_scan_tool_list(tool_list: List[ToolInfo]):
             for tool in tool_list:
                 filtered_tool_data = filter_property(tool.__dict__, ToolInfo)
 
+                # check if the tool name is valid
+                is_available = True if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
+
                 if f"{tool.name}&{tool.source}" in existing_tool_dict:
                     # by tool name and source to update the existing tool
                     existing_tool = existing_tool_dict[f"{tool.name}&{tool.source}"]
                     for key, value in filtered_tool_data.items():
                         setattr(existing_tool, key, value)
                     existing_tool.updated_by = user_id
-                    existing_tool.is_available = True
+                    existing_tool.is_available = is_available
                 else:
                     # create new tool
-                    
-                    # check if the tool name is valid
-                    is_available = True if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
                     filtered_tool_data.update({"created_by": tenant_id, "updated_by": tenant_id, "author": tenant_id, "is_available": is_available})
                     new_tool = ToolInfo(**filtered_tool_data)
                     session.add(new_tool)
-                    
-
             session.flush()
         logging.info("Updated tool table in PG database")
     except Exception as e:

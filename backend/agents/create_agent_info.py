@@ -5,6 +5,7 @@ import yaml
 import logging
 from typing import Optional
 from fastapi import Header
+from urllib.parse import urljoin
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig
 from utils.auth_utils import get_current_user_id
@@ -14,7 +15,6 @@ from database.agent_db import search_agent_info_by_agent_id, search_tools_for_su
 from services.elasticsearch_service import ElasticSearchService
 from services.tenant_config_service import get_selected_knowledge_list
 from utils.config_utils import config_manager, tenant_config_manager, get_model_name_from_config
-from utils.user_utils import get_user_info
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("build agent")
@@ -155,7 +155,7 @@ async def create_agent_run_info(agent_id, minio_files, query, history, authoriza
         model_config_list= model_list,
         observer=MessageObserver(),
         agent_config=await create_agent_config(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id, language=language),
-        mcp_host=config_manager.get_config("MCP_SERVICE"),
+        mcp_host=urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse"),
         history=history,
         stop_event=threading.Event()
     )

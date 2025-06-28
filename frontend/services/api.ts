@@ -86,6 +86,14 @@ export const API_ENDPOINTS = {
   tenantConfig: {
     loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
     updateKnowledgeList: `${API_BASE_URL}/tenant_config/update_knowledge_list`,
+  },
+  mcp: {
+    tools: `${API_BASE_URL}/mcp/tools/`,
+    add: `${API_BASE_URL}/mcp/add`,
+    delete: `${API_BASE_URL}/mcp/`,
+    list: `${API_BASE_URL}/mcp/list`,
+    updateTool: `${API_BASE_URL}/mcp/update_tool`,
+    recover: `${API_BASE_URL}/mcp/recover`,
   }
 };
 

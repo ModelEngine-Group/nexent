@@ -66,6 +66,7 @@ export interface ToolPoolProps {
   loadingTools?: boolean;
   mainAgentId?: string | null;
   localIsGenerating?: boolean;
+  onToolsRefresh?: () => void;
 }
 // main component props interface
 export interface BusinessLogicConfigProps {
@@ -100,4 +101,5 @@ export interface BusinessLogicConfigProps {
   isNewAgentInfoValid: boolean;
   setIsNewAgentInfoValid: (valid: boolean) => void;
   onEditingStateChange?: (isEditing: boolean, editingAgent: Agent | null) => void;
+  onToolsRefresh?: () => void;
 }

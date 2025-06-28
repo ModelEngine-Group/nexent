@@ -9,3 +9,4 @@ redis>=5.0.0
 flower>=2.0.1
 nest_asyncio>=1.5.6
 aiohttp>=3.8.0
+fastmcp==2.4.0

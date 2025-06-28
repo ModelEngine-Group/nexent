@@ -2,7 +2,6 @@ import uvicorn
 import logging
 
 from services.agent_service import import_default_agents_to_pg
-from services.tool_configuration_service import initialize_tool_configuration
 
 from apps.base_app import app
 from utils.logging_utils import configure_elasticsearch_logging
@@ -14,9 +13,6 @@ logger = logging.getLogger("main service")
 
 
 if __name__ == "__main__":
-    # scan tools and update to database
-    initialize_tool_configuration()
-
     # scan agents and update to database
     import_default_agents_to_pg()
 
