@@ -1,0 +1,17 @@
+{
+  "username": "xxx",
+  "password": "xxx",
+  "database": {
+    "host": "localhost",
+    "port": "300"
+  },
+  "gecko_path": "D://softwork//geckodriver//geckodriver-v0.36.0-win64//geckodriver.exe",
+  "env_url": "http://120.26.61.157:3000/chat",
+  "auth_button_xpath":"/html/body/div[2]/div/div[2]/div/div[1]/div/div/div/div[2]/button[2]",
+  "confirm_button_xpath": "/html/body/div[2]/div[2]/div/div[1]/div/div[2]/form/div[3]/div/div/div/div/button",
+  "user_id": "email",
+  "password_id": "password",
+  "input_xpath": "/html/body/div/div[1]/div[2]/div/div[1]/div[1]/div/div/div/div/div[1]/div/div/div[2]/div[1]/textarea",
+  "output_xpath": "/html/body/div[1]/div[1]/div[2]/div/div[1]/div[1]/div[1]/div/div/div/div[2]/div/div/div/div[1]",
+  "input_confirm_button_xpath":"/html/body/div/div[1]/div[2]/div/div[1]/div[1]/div/div/div/div/div[1]/div/div/div[2]/div[2]/div/button[3]"
+}
