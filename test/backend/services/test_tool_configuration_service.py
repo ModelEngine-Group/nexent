@@ -78,41 +78,27 @@ class TestGetLocalToolsClasses:
         mock_tool_class2 = type('TestTool2', (), {})
         mock_non_class = "not_a_class"
         
-        # create the mock package, use MagicMock to avoid circular reference problem
-        mock_package = MagicMock()
-        
-        # directly set the attributes instead of through __dict__
-        mock_package.TestTool1 = mock_tool_class1
-        mock_package.TestTool2 = mock_tool_class2
-        mock_package.not_a_class = mock_non_class
-        mock_package.__name__ = 'nexent.core.tools'
-        
-        def mock_dir(obj):
-            return ['TestTool1', 'TestTool2', 'not_a_class', '__name__']
-        
-        def mock_getattr(obj, name):
-            if name == 'TestTool1':
-                return mock_tool_class1
-            elif name == 'TestTool2':
-                return mock_tool_class2
-            elif name == 'not_a_class':
-                return mock_non_class
-            elif name == '__name__':
-                return 'nexent.core.tools'
-            else:
-                raise AttributeError(f"'{type(obj).__name__}' object has no attribute '{name}'")
-        
+        # Create a proper mock object with defined attributes and __dir__ method
+        class MockPackage:
+            def __init__(self):
+                self.TestTool1 = mock_tool_class1
+                self.TestTool2 = mock_tool_class2
+                self.not_a_class = mock_non_class
+                self.__name__ = 'nexent.core.tools'
+                
+            def __dir__(self):
+                return ['TestTool1', 'TestTool2', 'not_a_class', '__name__']
+                
+        mock_package = MockPackage()
         mock_import.return_value = mock_package
         
-        with patch('builtins.dir', side_effect=mock_dir), \
-             patch('builtins.getattr', side_effect=mock_getattr):
-            
-            result = get_local_tools_classes()
-            
-            assert len(result) == 2
-            assert mock_tool_class1 in result
-            assert mock_tool_class2 in result
-            assert mock_non_class not in result
+        result = get_local_tools_classes()
+        
+        # Assertions
+        assert len(result) == 2
+        assert mock_tool_class1 in result
+        assert mock_tool_class2 in result
+        assert mock_non_class not in result
 
     @patch('backend.services.tool_configuration_service.importlib.import_module')
     def test_get_local_tools_classes_import_error(self, mock_import):
@@ -336,7 +322,7 @@ class TestInitializeToolConfiguration:
 class TestSearchToolInfoImpl:
     """ test the function of search_tool_info_impl"""
 
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     @patch('backend.services.tool_configuration_service.query_tool_instances_by_id')
     def test_search_tool_info_impl_success(self, mock_query, mock_get_user):
         """ test the success of search_tool_info_impl"""
@@ -352,7 +338,7 @@ class TestSearchToolInfoImpl:
         assert result["enabled"] is True
         mock_query.assert_called_once_with(1, 1, 1, 1)
 
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     @patch('backend.services.tool_configuration_service.query_tool_instances_by_id')
     def test_search_tool_info_impl_not_found(self, mock_query, mock_get_user):
         """ test the tool info not found of search_tool_info_impl"""
@@ -364,7 +350,7 @@ class TestSearchToolInfoImpl:
         assert result["params"] is None
         assert result["enabled"] is False
 
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     @patch('backend.services.tool_configuration_service.query_tool_instances_by_id')
     def test_search_tool_info_impl_database_error(self, mock_query, mock_get_user):
         """ test the database error of search_tool_info_impl"""
@@ -374,7 +360,7 @@ class TestSearchToolInfoImpl:
         with pytest.raises(ValueError, match="search_tool_info_impl error"):
             search_tool_info_impl(1, 1)
 
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     def test_search_tool_info_impl_invalid_ids(self, mock_get_user):
         """ test the invalid id of search_tool_info_impl"""
         mock_get_user.return_value = (1, 1)
@@ -387,7 +373,7 @@ class TestSearchToolInfoImpl:
 
     def test_search_tool_info_impl_zero_ids(self):
         """ test the zero id of search_tool_info_impl"""
-        with patch('backend.services.tool_configuration_service.get_user_info') as mock_get_user, \
+        with patch('backend.services.tool_configuration_service.get_current_user_id') as mock_get_user, \
              patch('backend.services.tool_configuration_service.query_tool_instances_by_id') as mock_query:
             
             mock_get_user.return_value = (1, 1)
@@ -400,7 +386,7 @@ class TestSearchToolInfoImpl:
 class TestUpdateToolInfoImpl:
     """ test the function of update_tool_info_impl"""
 
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
     def test_update_tool_info_impl_success(self, mock_create_update, mock_get_user):
         """ test the success of update_tool_info_impl"""
@@ -414,7 +400,7 @@ class TestUpdateToolInfoImpl:
         assert result["tool_instance"] == mock_tool_instance
         mock_create_update.assert_called_once_with(mock_request, 1, 1)
 
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
     def test_update_tool_info_impl_database_error(self, mock_create_update, mock_get_user):
         """ test the database error of update_tool_info_impl"""
@@ -463,7 +449,7 @@ class TestToolConfigurationIntegration:
 
     @patch('backend.services.tool_configuration_service.scan_tools')
     @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
-    @patch('backend.services.tool_configuration_service.get_user_info')
+    @patch('backend.services.tool_configuration_service.get_current_user_id')
     @patch('backend.services.tool_configuration_service.query_tool_instances_by_id')
     def test_full_workflow_search_existing_tool(self, mock_query, mock_get_user, 
                                                mock_update_table, mock_scan, sample_tool_info):
