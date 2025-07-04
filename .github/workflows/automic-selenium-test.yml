@@ -1,0 +1,53 @@
+name: Run Automated Selenium Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest selenium -i https://pypi.mirrors.ustc.edu.cn/simple/
+
+      - name: Install Firefox and GeckoDriver
+        run: |
+          sudo install -d -m 0755 /etc/apt/keyrings
+          wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O- | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc > /dev/null
+          gpg -n -q --import --import-options import-show /etc/apt/keyrings/packages.mozilla.org.asc | awk '/pub/{getline; gsub(/^ +| +$/,""); if($0 == "35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3") print "✅ Key fingerprint verified"; else print "❌ Key verification failed"}'
+          echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | sudo tee /etc/apt/sources.list.d/mozilla.list > /dev/null
+          echo 'Package: *
+          Pin: origin packages.mozilla.org
+          Pin-Priority: 1000' | sudo tee /etc/apt/preferences.d/mozilla
+          echo 'Package: firefox*
+          Pin: release o=Ubuntu*
+          Pin-Priority: -1' | sudo tee -a /etc/apt/preferences.d/mozilla
+          sudo apt-get update
+          sudo apt-get install -y firefox
+          firefox --version
+          which firefox
+
+          GECKODRIVER_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest | jq -r .tag_name)
+          wget https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz
+          tar -xvzf geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz
+          sudo mv geckodriver /usr/local/bin/
+          geckodriver --version
+
+      - name: Run Selenium tests with pytest
+        run: |
+          python -m pytest test/web_test/web_test.py --disable-warnings -v --junitxml=test-results/pytest-report.xml
+
+      - name: Publish Test Report
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: 'test-results/pytest-report.xml'
