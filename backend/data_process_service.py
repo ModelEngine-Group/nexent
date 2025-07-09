@@ -741,7 +741,7 @@ def main():
             app, 
             host=args.api_host,
             port=args.api_port,
-            log_level="info"
+            log_level="warning"
         )
         
     except KeyboardInterrupt:

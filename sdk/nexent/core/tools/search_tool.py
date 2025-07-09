@@ -11,7 +11,7 @@ from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage
 
 # Get logger instance
-logger = logging.getLogger("exa_search tool")
+logger = logging.getLogger("exa_search_tool")
 
 
 class SearchTool(Tool):
@@ -24,7 +24,7 @@ class SearchTool(Tool):
     output_type = "string"
     tool_sign = "b"  # Used to distinguish different index sources in summary
 
-    def __init__(self, exa_api_key:str=Field(description="EXA API key (get at exa.ai)"),
+    def __init__(self, exa_api_key:str=Field(description="EXA API key"),
                  observer: MessageObserver=Field(description="Message observer", default=None, exclude=True),
                  max_results:int=Field(description="Maximum number of search results", default=5),
                  image_filter: bool = Field(description="Whether to enable image filtering", default=True)

@@ -54,10 +54,7 @@ async def save_config(config: GlobalConfig, authorization: Optional[str] = Heade
         config_dict = config.model_dump(exclude_none=False)
         env_config = {}
 
-        logger.info(f"config_dict: {config_dict}")
-
         tenant_config_dict = tenant_config_manager.load_config(tenant_id)
-        logger.info(f"Tenant {tenant_id} config: {tenant_config_dict}")
 
         # Process app configuration - use key names directly without prefix
         for key, value in config_dict.get("app", {}).items():

@@ -10,6 +10,8 @@ from database.db_models import ToolInfo, AgentInfo, UserAgent, ToolInstance
 from sqlalchemy import or_
 from consts.const import DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
+logger = logging.getLogger("agent_db")
+
 
 def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, user_id: str = None):
     """
@@ -356,9 +358,9 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                     new_tool = ToolInfo(**filtered_tool_data)
                     session.add(new_tool)
             session.flush()
-        logging.info("Updated tool table in PG database")
+        logger.info("Updated tool table in PG database")
     except Exception as e:
-        logging.error(f"Updated tool table failed due to {e}")
+        logger.error(f"Updated tool table failed due to {e}")
 
 
 def save_agent_prompt(agent_id: int, prompt: str, tenant_id: str = None, user_id: str = None):

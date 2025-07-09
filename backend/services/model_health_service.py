@@ -12,6 +12,8 @@ from consts.const import MODEL_ENGINE_APIKEY, MODEL_ENGINE_HOST
 from consts.model import ModelConnectStatusEnum, ModelResponse
 from database.model_management_db import get_model_by_display_name, update_model_record
 
+logger = logging.getLogger("model_health_service")
+
 
 async def _perform_connectivity_check(
     model_name: str,
@@ -86,12 +88,7 @@ async def check_model_connectivity(display_name: str, authorization: Optional[st
         # Still use repo/name concatenation for model instantiation
         repo, name = model.get("model_repo", ""), model.get("model_name", "")
         model_name = f"{repo}/{name}" if repo else name
-        log_str = f"Checking model connectivity: {model_name}; "
-        if model.get("base_url"):
-            log_str += f"base_url: {model.get('base_url')}; "
-        if model.get("api_key"):
-            log_str += f"api_key: {model.get('api_key')}; "
-        logging.info(log_str)
+        
         
         # Set model to "detecting" status
         update_data = {"connect_status": ModelConnectStatusEnum.DETECTING.value}
@@ -106,19 +103,24 @@ async def check_model_connectivity(display_name: str, authorization: Optional[st
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key
             )
-        except ValueError as e:
+        except Exception as e:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
-            logging.error(str(e))
+            logger.error(f"Error checking model connectivity: {str(e)}")
             update_model_record(model["model_id"], update_data)
             return ModelResponse(code=400, message=str(e),
                 data={"connectivity": False, "connect_status": ModelConnectStatusEnum.UNAVAILABLE.value})
         
+        if connectivity:
+            logger.info(f"CONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {model.get('api_key')}")
+        else:
+            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {model.get('base_url')}; API Key: {model.get('api_key')}")
         connect_status = ModelConnectStatusEnum.AVAILABLE.value if connectivity else ModelConnectStatusEnum.UNAVAILABLE.value
         update_data = {"connect_status": connect_status}
         update_model_record(model["model_id"], update_data)
         return ModelResponse(code=200, message=f"Model {display_name} connectivity {'successful' if connectivity else 'failed'}",
             data={"connectivity": connectivity, "connect_status": connect_status})
     except Exception as e:
+        logger.error(f"Error checking model connectivity: {str(e)}")
         if 'model' in locals() and model:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             update_model_record(model["model_id"], update_data)
@@ -197,20 +199,13 @@ async def verify_model_config_connectivity(model_config: dict):
         model_api_key = model_config["api_key"]
         embedding_dim = model_config.get("embedding_dim", model_config.get("max_tokens", 1024))
         
-        log_str = f"Verifying model config connectivity: {model_name}; "
-        if model_base_url:
-            log_str += f"base_url: {model_base_url}; "
-        if model_api_key:
-            log_str += f"api_key: {model_api_key}; "
-        logging.info(log_str)
-        
         try:
             # Use the common connectivity check function
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, embedding_dim
             )
         except ValueError as e:
-            logging.error(str(e))
+            logger.warning(f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; API Key: {model_api_key}; Error: {str(e)}")
             return ModelResponse(
                 code=400, 
                 message=str(e),
@@ -237,7 +232,7 @@ async def verify_model_config_connectivity(model_config: dict):
         )
     except Exception as e:
         error_message = str(e)
-        logging.error(f"Verify model config connectivity error: {error_message}")
+        logger.warning(f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; API Key: {model_api_key}; Error: {error_message}")
         return ModelResponse(
             code=500, 
             message="",

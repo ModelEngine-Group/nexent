@@ -5,7 +5,7 @@ from database.tenant_config_db import get_tenant_config_info, insert_config, del
 from database.knowledge_db import get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names
 
 
-logger = logging.getLogger("tenant config service")
+logger = logging.getLogger("tenant_config_service")
 
 def get_selected_knowledge_list(tenant_id: str, user_id: str):
     record_list = get_tenant_config_info(tenant_id=tenant_id, user_id=user_id, select_key="selected_knowledge_id")

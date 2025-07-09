@@ -73,7 +73,6 @@ class ConfigManager:
 
         # Update cache
         self.config_cache = {key: value for key, value in os.environ.items()}
-
         logger.info(f"Configuration reloaded at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     def get_config(self, key, default=""):
@@ -161,7 +160,6 @@ class TenantConfigManager:
         self.last_modified_times[tenant_id] = self._get_tenant_config_modified_time(tenant_id)
 
         logger.info(f"Configuration reloaded for tenant {tenant_id} at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"Updated {cache_updates} configuration entries")
 
         return tenant_configs
 
@@ -238,9 +236,7 @@ class TenantConfigManager:
             return
 
         existing_config = get_single_config_info(tenant_id, key)
-        logger.info(f"existing_config: {existing_config}")
         if existing_config:
-            logger.info(f"Deleting config for key: {key}")
             delete_config_by_tenant_config_id(existing_config["tenant_config_id"])
             # Clear cache for this tenant after deleting config
             self.clear_cache(tenant_id)

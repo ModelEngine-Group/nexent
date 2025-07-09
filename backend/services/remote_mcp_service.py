@@ -6,7 +6,7 @@ from database.remote_mcp_db import create_mcp_record, delete_mcp_record_by_name_
     check_mcp_name_exists
 from utils.config_utils import config_manager
 
-logger = logging.getLogger("remote mcp service")
+logger = logging.getLogger("remote_mcp_service")
 
 async def add_remote_proxy(remote_mcp_server: str,
                            remote_mcp_server_name: str) -> JSONResponse:
