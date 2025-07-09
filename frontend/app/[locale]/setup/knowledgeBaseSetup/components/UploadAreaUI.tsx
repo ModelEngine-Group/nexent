@@ -17,6 +17,7 @@ interface UploadAreaUIProps {
   componentHeight: string;
   newKnowledgeBaseName: string;
   selectedFiles: File[];
+  modelMismatch?: boolean;
 }
 
 const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
@@ -29,7 +30,8 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   isUploading,
   disabled,
   componentHeight,
-  newKnowledgeBaseName
+  newKnowledgeBaseName,
+  modelMismatch = false
 }) => {
   const { t } = useTranslation('common');
 
@@ -95,6 +97,21 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
             {t('knowledgeBase.hint.changeName')}
           </p>
         </div>
+      </div>
+    );
+  }
+
+  console.log("modelMismatch:", modelMismatch)
+  // Model mismatch status UI
+  if (modelMismatch) {
+    return (
+      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center" style={{ minHeight: 120 }}>
+        <span
+          className="text-base font-medium text-center"
+          style={{ lineHeight: 1.7, color: '#888' }}
+        >
+          {t('knowledgeBase.upload.modelMismatch.description')}
+        </span>
       </div>
     );
   }

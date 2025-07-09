@@ -144,7 +144,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
       return false;
     }
     // Only selectable when knowledge base model exactly matches current model
-    return kb.embeddingModel === state.currentEmbeddingModel;
+    return kb.embeddingModel === "unknown" || kb.embeddingModel === state.currentEmbeddingModel;
   }, [state.currentEmbeddingModel]);
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback

@@ -287,7 +287,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}>
                           {t('knowledgeBase.tag.model', { model: getModelDisplayName(kb.embeddingModel) })}
                         </span>
-                        {kb.embeddingModel !== currentEmbeddingModel && (
+                        {kb.embeddingModel !== "unknown" && kb.embeddingModel !== currentEmbeddingModel && (
                           <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}>
                             {t('knowledgeBase.tag.modelMismatch')}
                           </span>

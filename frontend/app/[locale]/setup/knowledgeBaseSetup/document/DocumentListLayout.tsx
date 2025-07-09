@@ -424,6 +424,7 @@ const DocumentListLayout: React.FC<DocumentListLayoutProps> = ({
           indexName={knowledgeBaseName}
           newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ''}
           uploadUrl={uploadUrl}
+          modelMismatch={modelMismatch}
         />
       )}
     </div>

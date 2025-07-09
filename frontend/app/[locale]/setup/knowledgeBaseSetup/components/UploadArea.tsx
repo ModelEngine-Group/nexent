@@ -6,7 +6,6 @@ import { API_ENDPOINTS } from '@/services/api';
 import knowledgeBasePollingService from '@/services/knowledgeBasePollingService';
 import UploadAreaUI from './UploadAreaUI';
 import { 
-  customUploadRequest,
   checkKnowledgeBaseNameExists,
   fetchKnowledgeBaseInfo,
   validateFileType,
@@ -27,6 +26,7 @@ interface UploadAreaProps {
   uploadUrl?: string;
   indexName?: string;
   newKnowledgeBaseName?: string;
+  modelMismatch?: boolean;
 }
 
 export interface UploadAreaRef {
@@ -43,7 +43,8 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(({
   uploadUrl = '/api/upload',
   indexName = '',
   newKnowledgeBaseName = '',
-  selectedFiles = []
+  selectedFiles = [],
+  modelMismatch = false
 }, ref) => {
   const { t } = useTranslation('common');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -232,6 +233,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(({
       componentHeight={componentHeight}
       newKnowledgeBaseName={newKnowledgeBaseName}
       selectedFiles={selectedFiles}
+      modelMismatch={modelMismatch}
     />
   );
 });

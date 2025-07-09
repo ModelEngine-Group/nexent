@@ -491,6 +491,7 @@
     "knowledgeBase.tag.createdAt": "创建于{{date}}",
     "knowledgeBase.tag.model": "{{model}}模型",
     "knowledgeBase.tag.modelMismatch": "模型不匹配",
+    "knowledgeBase.upload.modelMismatch.description": "当前知识库的模型与配置模型不匹配，无法上传文件，请切换知识库或调整模型配置",
     "knowledgeBase.list.empty": "暂无知识库，请先创建知识库",
     "knowledgeBase.modal.deleteConfirm.title": "确认删除知识库",
     "knowledgeBase.modal.deleteConfirm.content": "确定要删除这个知识库吗？删除后无法恢复。",

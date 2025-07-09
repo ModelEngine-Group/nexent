@@ -491,6 +491,7 @@
     "knowledgeBase.tag.createdAt": "Created on {{date}}",
     "knowledgeBase.tag.model": "{{model}} Model",
     "knowledgeBase.tag.modelMismatch": "Model Mismatch",
+    "knowledgeBase.upload.modelMismatch.description": "The model of the current knowledge base does not match the configured model, file upload is not allowed, please switch the knowledge base or adjust the model configuration",
     "knowledgeBase.list.empty": "No knowledge bases yet, please create one first",
     "knowledgeBase.modal.deleteConfirm.title": "Confirm Delete Knowledge Base",
     "knowledgeBase.modal.deleteConfirm.content": "Are you sure you want to delete this knowledge base? This action cannot be undone.",
