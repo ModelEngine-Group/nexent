@@ -13,13 +13,18 @@ import torch
 os.environ['REDIS_URL'] = 'redis://mock:6379/0'
 os.environ['REDIS_BACKEND_URL'] = 'redis://mock:6379/0'
 
-# Mock data_process.app module and consts.const
+# Create mocks before importing any modules that will be tested
 import sys
 from unittest.mock import MagicMock
 
-# Mock celery_app - each test will set the appropriate behavior
+# Mock modules to prevent actual import chain
 sys.modules['data_process.app'] = MagicMock()
 sys.modules['data_process.app'].app = MagicMock()
+sys.modules['data_process.tasks'] = MagicMock()
+sys.modules['data_process.ray_actors'] = MagicMock()
+sys.modules['database.attachment_db'] = MagicMock()
+sys.modules['database.client'] = MagicMock()
+sys.modules['database.client'].minio_client = MagicMock()
 
 # Mock constants from consts.const
 mock_const = MagicMock()
@@ -42,9 +47,10 @@ class TestDataProcessService(unittest.TestCase):
         warnings.filterwarnings('ignore', category=UserWarning)
 
         # Reset mocks for each test to prevent interference
-        import data_process.app
-        data_process.app.app = MagicMock()
-        self.mock_celery_app = data_process.app.app
+        # Do not import data_process.app here - use the already mocked module
+        mock_celery_app = sys.modules['data_process.app'].app
+        mock_celery_app.reset_mock()
+        self.mock_celery_app = mock_celery_app
 
     def tearDown(self):
         """Clean up after each test"""

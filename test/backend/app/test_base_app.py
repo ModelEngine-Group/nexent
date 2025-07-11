@@ -12,10 +12,6 @@ patches = [
     patch('boto3.client', return_value=Mock()),
     # Mock boto3 resource
     patch('boto3.resource', return_value=Mock()),
-    # Mock minio client constructor
-    patch('minio.Minio', return_value=Mock()),
-    # Mock database initialization
-    patch('backend.database.client.MinioClient', return_value=Mock()),
     # Mock database sessions
     patch('backend.database.client.get_db_session', return_value=Mock())
 ]

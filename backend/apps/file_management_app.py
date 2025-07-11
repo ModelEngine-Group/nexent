@@ -71,10 +71,11 @@ async def _upload_to_minio(files: List[UploadFile], folder: str) -> List[dict]:
 
         except Exception as e:
             # Log single file upload failure but continue processing other files
+            logger.error(f"Failed to upload file {f.filename}: {e}", exc_info=True)
             results.append({
                 "success": False,
                 "file_name": f.filename,
-                "error": str(e)
+                "error": "An error occurred while processing the file."
             })
     return results
 

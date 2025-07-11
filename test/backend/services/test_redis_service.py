@@ -205,13 +205,15 @@ class TestRedisService(unittest.TestCase):
         
         # Task 1 matches our index
         task1_data = json.dumps({
-            'result': {'index_name': 'test_index', 'some_key': 'some_value'}
+            'result': {'index_name': 'test_index', 'some_key': 'some_value'},
+            'parent_id': '2'  # This will trigger a parent lookup
         }).encode()
         
         # Task 2 has index name in a different location
         task2_data = json.dumps({
             'index_name': 'test_index', 
-            'result': {'some_key': 'some_value'}
+            'result': {'some_key': 'some_value'},
+            'parent_id': None  # No parent
         }).encode()
         
         # Task 3 is for a different index
@@ -223,17 +225,21 @@ class TestRedisService(unittest.TestCase):
         self.mock_backend_client.keys.return_value = task_keys
         self.mock_backend_client.get.side_effect = [task1_data, task2_data, task3_data]
         
+        # We expect delete to be called and return 1 each time
+        self.mock_backend_client.delete.return_value = 1
+        
         # Execute
-        result = self.redis_service._cleanup_celery_tasks("test_index")
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents') as mock_recursive_delete:
+            mock_recursive_delete.side_effect = [(1, {'1'}), (1, {'2'})]
+            result = self.redis_service._cleanup_celery_tasks("test_index")
         
         # Verify
         self.mock_backend_client.keys.assert_called_once_with('celery-task-meta-*')
+        # We expect 3 calls - one for each task key
         self.assertEqual(self.mock_backend_client.get.call_count, 3)
         
-        # Should delete only task1 and task2
-        self.assertEqual(self.mock_backend_client.delete.call_count, 2)
-        self.mock_backend_client.delete.assert_any_call(b'celery-task-meta-1')
-        self.mock_backend_client.delete.assert_any_call(b'celery-task-meta-2')
+        # Should have called recursive delete twice (for task1 and task2)
+        self.assertEqual(mock_recursive_delete.call_count, 2)
         
         # Return value should be the number of deleted tasks
         self.assertEqual(result, 2)
@@ -288,7 +294,8 @@ class TestRedisService(unittest.TestCase):
             'result': {
                 'index_name': 'test_index',
                 'source': 'path/to/doc.pdf'
-            }
+            },
+            'parent_id': '2'  # This will trigger a parent lookup
         }).encode()
         
         # Task 2 has the right index but wrong document
@@ -304,24 +311,29 @@ class TestRedisService(unittest.TestCase):
             'result': {
                 'index_name': 'test_index',
                 'path_or_url': 'path/to/doc.pdf'
-            }
+            },
+            'parent_id': None  # No parent
         }).encode()
         
         # Configure mock responses
         self.mock_backend_client.keys.return_value = task_keys
         self.mock_backend_client.get.side_effect = [task1_data, task2_data, task3_data]
         
+        # We expect delete to be called and return 1 each time
+        self.mock_backend_client.delete.return_value = 1
+        
         # Execute
-        result = self.redis_service._cleanup_document_celery_tasks("test_index", "path/to/doc.pdf")
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents') as mock_recursive_delete:
+            mock_recursive_delete.side_effect = [(1, {'1'}), (1, {'3'})]
+            result = self.redis_service._cleanup_document_celery_tasks("test_index", "path/to/doc.pdf")
         
         # Verify
         self.mock_backend_client.keys.assert_called_once_with('celery-task-meta-*')
+        # We expect 3 calls - one for each task key
         self.assertEqual(self.mock_backend_client.get.call_count, 3)
         
-        # Should delete only task1 and task3
-        self.assertEqual(self.mock_backend_client.delete.call_count, 2)
-        self.mock_backend_client.delete.assert_any_call(b'celery-task-meta-1')
-        self.mock_backend_client.delete.assert_any_call(b'celery-task-meta-3')
+        # Should have called recursive delete twice (for task1 and task3)
+        self.assertEqual(mock_recursive_delete.call_count, 2)
         
         # Return value should be the number of deleted tasks
         self.assertEqual(result, 2)

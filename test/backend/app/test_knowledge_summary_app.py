@@ -10,7 +10,7 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
 # Import and define all necessary Pydantic models
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import List, Optional, Union, Dict, Any
 
 # Define all models that might be used in routes
