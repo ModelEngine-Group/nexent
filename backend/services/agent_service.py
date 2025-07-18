@@ -172,6 +172,12 @@ async def export_agent_impl(agent_id: int, authorization: str = Header(None)):
     user_id, tenant_id = get_current_user_id(authorization)
 
     tool_list = await create_tool_config_list(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+
+    # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
+    for tool in tool_list:
+        if tool.class_name == "KnowledgeBaseSearchTool":
+            tool.metadata = {}
+    
     agent_info_in_db = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
 
     agent_info = ExportAndImportAgentInfo(name=agent_info_in_db["name"],
