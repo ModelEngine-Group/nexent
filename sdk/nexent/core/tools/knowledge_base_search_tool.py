@@ -59,6 +59,9 @@ class KnowledgeBaseSearchTool(Tool):
         card_content = [{"icon": "search", "text": query}]
         self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
+        if len(self.index_names) == 0:
+            return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+
         if search_mode=="hybrid":
             kb_search_data = self.es_search_hybrid(query=query)
         elif search_mode=="accurate":
