@@ -13,7 +13,9 @@ patches = [
     # Mock boto3 resource
     patch('boto3.resource', return_value=Mock()),
     # Mock database sessions
-    patch('backend.database.client.get_db_session', return_value=Mock())
+    patch('backend.database.client.get_db_session', return_value=Mock()),
+    # Mock Elasticsearch to prevent connection errors
+    patch('elasticsearch.Elasticsearch', return_value=Mock())
 ]
 
 for p in patches:

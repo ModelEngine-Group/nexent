@@ -41,6 +41,9 @@ patch('backend.database.client.MinioClient').start()
 patch('backend.database.client.get_db_session').start()
 patch('backend.database.client.db_client').start()
 
+# Mock Elasticsearch to prevent connection errors
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
+
 # Create a mock for consts.model
 consts_model_mock = MagicMock()
 consts_model_mock.SearchRequest = SearchRequest
@@ -322,15 +325,17 @@ async def test_get_list_indices_error(es_core_mock):
         assert response.json() == {"detail": "Error get index: Test error"}
 
 @pytest.mark.asyncio
-async def test_create_index_documents_success(es_core_mock):
+async def test_create_index_documents_success(es_core_mock, auth_data):
     """
     Test indexing documents successfully.
     Verifies that the endpoint returns the expected response after documents are indexed.
     """
     # Setup mocks
     with patch("backend.apps.elasticsearch_app.get_es_core", return_value=es_core_mock), \
-         patch("backend.apps.elasticsearch_app.ElasticSearchService.index_documents") as mock_index:
-        
+         patch("backend.apps.elasticsearch_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+         patch("backend.apps.elasticsearch_app.ElasticSearchService.index_documents") as mock_index, \
+         patch("backend.apps.elasticsearch_app.get_embedding_model", return_value=MagicMock()):
+    
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
         
@@ -345,11 +350,12 @@ async def test_create_index_documents_success(es_core_mock):
         mock_index.return_value = expected_response
         
         # Execute request
-        response = client.post(f"/indices/{index_name}/documents", json=documents)
+        response = client.post(f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
         
         # Verify
         assert response.status_code == 200
         assert response.json() == expected_response.dict()
+        mock_index.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_get_index_files_success(es_core_mock):

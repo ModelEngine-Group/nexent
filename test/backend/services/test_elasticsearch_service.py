@@ -12,7 +12,8 @@ import pytest
 
 # Apply the patches before importing the module being tested
 with patch('botocore.client.BaseClient._make_api_call'), \
-     patch('backend.database.client.MinioClient'):
+     patch('backend.database.client.MinioClient'), \
+     patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     from backend.services.elasticsearch_service import ElasticSearchService, get_es_core
 
 class TestElasticSearchService(unittest.TestCase):

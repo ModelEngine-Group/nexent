@@ -6,6 +6,19 @@ from unittest.mock import patch, MagicMock, mock_open, call
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
+# Create a more specific mock for Elasticsearch
+elasticsearch_client_mock = MagicMock()
+elasticsearch_mock = patch('elasticsearch._sync.client.Elasticsearch', return_value=elasticsearch_client_mock).start()
+patch('elasticsearch.Elasticsearch', return_value=elasticsearch_client_mock).start()
+
+# Mock ElasticSearchCore
+elasticsearch_core_mock = MagicMock()
+patch('sdk.nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=elasticsearch_core_mock).start()
+
+# Mock ElasticSearchService
+elasticsearch_service_mock = MagicMock()
+patch('backend.services.elasticsearch_service.ElasticSearchService', return_value=elasticsearch_service_mock).start()
+
 # Mock MinioClient class before importing the services
 minio_client_mock = MagicMock()
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock):

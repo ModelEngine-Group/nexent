@@ -17,6 +17,10 @@ from typing import List, Optional, Union, Dict, Any
 class ChangeSummaryRequest(BaseModel):
     summary_result: str
 
+# Setup all mocks first - BEFORE any imports
+# Mock Elasticsearch to prevent connection errors
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
+
 # First import consts.model module and replace necessary Pydantic models
 try:
     import consts.model

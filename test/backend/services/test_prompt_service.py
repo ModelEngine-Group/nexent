@@ -7,21 +7,27 @@ import sys
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
+# Mock ElasticSearch before importing other modules
+elasticsearch_mock = MagicMock()
+sys.modules['elasticsearch'] = elasticsearch_mock
+
 # Mock MinioClient class before importing the services
 minio_client_mock = MagicMock()
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
-    from jinja2 import StrictUndefined
+    with patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=MagicMock()):
+        with patch('nexent.vector_database.elasticsearch_core.Elasticsearch', return_value=MagicMock()):
+            from jinja2 import StrictUndefined
 
-    from backend.services.prompt_service import (
-        call_llm_for_system_prompt,
-        generate_and_save_system_prompt_impl,
-        get_enabled_tool_description_for_generate_prompt,
-        get_enabled_sub_agent_description_for_generate_prompt,
-        fine_tune_prompt,
-        generate_system_prompt,
-        join_info_for_generate_system_prompt
-    )
-    from backend.consts.model import AgentInfoRequest
+            from backend.services.prompt_service import (
+                call_llm_for_system_prompt,
+                generate_and_save_system_prompt_impl,
+                get_enabled_tool_description_for_generate_prompt,
+                get_enabled_sub_agent_description_for_generate_prompt,
+                fine_tune_prompt,
+                generate_system_prompt,
+                join_info_for_generate_system_prompt
+            )
+            from backend.consts.model import AgentInfoRequest
 
 
 class TestPromptService(unittest.TestCase):
@@ -33,7 +39,9 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.OpenAIServerModel')
     @patch('backend.services.prompt_service.tenant_config_manager')
     @patch('backend.services.prompt_service.get_model_name_from_config')
-    def test_call_llm_for_system_prompt(self, mock_get_model_name, mock_tenant_config, mock_openai):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_call_llm_for_system_prompt(self, mock_elasticsearch, mock_es_core, mock_get_model_name, mock_tenant_config, mock_openai):
         # Setup
         mock_model_config = {
             "base_url": "http://example.com",
@@ -72,7 +80,9 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
     @patch('backend.services.prompt_service.get_current_user_info')
     @patch('backend.services.prompt_service.update_agent')
-    def test_generate_and_save_system_prompt_impl(self, mock_update_agent, mock_get_user_info, 
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_generate_and_save_system_prompt_impl(self, mock_elasticsearch, mock_es_core, mock_update_agent, mock_get_user_info, 
                                          mock_get_tool_desc, mock_get_agent_desc, 
                                          mock_generate_system_prompt):
         # Setup
@@ -127,7 +137,9 @@ class TestPromptService(unittest.TestCase):
         )
 
     @patch('backend.services.prompt_service.generate_system_prompt')
-    def test_generate_system_prompt(self, mock_generate_system_prompt):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_generate_system_prompt(self, mock_elasticsearch, mock_es_core, mock_generate_system_prompt):
         # Setup - create a simple generator function for the mock
         def mock_generator(*args, **kwargs):
             yield "Prompt 1"
@@ -164,7 +176,9 @@ class TestPromptService(unittest.TestCase):
         )
 
     @patch('backend.services.prompt_service.Template')
-    def test_join_info_for_generate_system_prompt(self, mock_template):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_join_info_for_generate_system_prompt(self, mock_elasticsearch, mock_es_core, mock_template):
         # Setup
         mock_prompt_for_generate = {"USER_PROMPT": "Test User Prompt"}
         mock_sub_agents = [
@@ -198,7 +212,9 @@ class TestPromptService(unittest.TestCase):
         
     @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
     @patch('backend.services.prompt_service.query_tools_by_ids')
-    def test_get_enabled_tool_description_for_generate_prompt(self, mock_query_tools, mock_get_tool_ids):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_get_enabled_tool_description_for_generate_prompt(self, mock_elasticsearch, mock_es_core, mock_query_tools, mock_get_tool_ids):
         # Setup
         mock_get_tool_ids.return_value = [1, 2, 3]
         mock_tools = [{"id": 1, "name": "tool1"}, {"id": 2, "name": "tool2"}, {"id": 3, "name": "tool3"}]
@@ -217,7 +233,9 @@ class TestPromptService(unittest.TestCase):
         mock_query_tools.assert_called_once_with([1, 2, 3])
         
     @patch('backend.services.prompt_service.query_sub_agents')
-    def test_get_enabled_sub_agent_description_for_generate_prompt(self, mock_query_sub_agents):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_get_enabled_sub_agent_description_for_generate_prompt(self, mock_elasticsearch, mock_es_core, mock_query_sub_agents):
         # Setup
         mock_agents = [
             {"id": 1, "name": "agent1", "enabled": True},
@@ -247,7 +265,9 @@ FINE_TUNE_USER_PROMPT: "Test Fine Tune User Prompt {{prompt}} {{command}}"
 FINE_TUNE_SYSTEM_PROMPT: "Fine Tune System Prompt"
 """)
     @patch('backend.services.prompt_service.yaml.safe_load')
-    def test_fine_tune_prompt(self, mock_yaml_load, mock_open_file, mock_call_llm):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_fine_tune_prompt(self, mock_elasticsearch, mock_es_core, mock_yaml_load, mock_open_file, mock_call_llm):
         # Setup
         mock_yaml_data = {
             "FINE_TUNE_USER_PROMPT": "Test Fine Tune User Prompt {{prompt}} {{command}}",
@@ -270,7 +290,9 @@ FINE_TUNE_SYSTEM_PROMPT: "Fine Tune System Prompt"
     @patch('backend.services.prompt_service.OpenAIServerModel')
     @patch('backend.services.prompt_service.tenant_config_manager')
     @patch('backend.services.prompt_service.get_model_name_from_config')
-    def test_call_llm_for_system_prompt_exception(self, mock_get_model_name, mock_tenant_config, mock_openai):
+    @patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore')
+    @patch('elasticsearch.Elasticsearch')
+    def test_call_llm_for_system_prompt_exception(self, mock_elasticsearch, mock_es_core, mock_get_model_name, mock_tenant_config, mock_openai):
         # Setup
         mock_model_config = {
             "base_url": "http://example.com",
