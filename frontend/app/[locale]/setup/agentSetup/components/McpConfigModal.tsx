@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import { Modal, Button, Input, Table, message, Space, Typography, Card, Divider, Tag } from 'antd'
+import { Modal, Button, Input, Table, message, Space, Typography, Card, Divider, Tag, Tooltip } from 'antd'
 import { DeleteOutlined, EyeOutlined, PlusOutlined, LoadingOutlined, ExpandAltOutlined, CompressOutlined, RedoOutlined } from '@ant-design/icons'
 import { getMcpServerList, addMcpServer, deleteMcpServer, getMcpTools, updateToolList, recoverMcpServers, McpServer, McpTool } from '@/services/mcpService'
 import { useTranslation } from 'react-i18next'
@@ -25,8 +25,8 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
   const [currentServerName, setCurrentServerName] = useState('')
   const [loadingTools, setLoadingTools] = useState(false)
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set())
-  const [recovering, setRecovering] = useState(false)
   const [updatingTools, setUpdatingTools] = useState(false)
+  const [healthCheckLoading, setHealthCheckLoading] = useState<{ [key: string]: boolean }>({})
 
   // 加载MCP服务器列表
   const loadServerList = async () => {
@@ -190,45 +190,33 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
     setExpandedDescriptions(newExpanded)
   }
 
-  // 重新挂载所有MCP服务器
-  const handleRecoverServers = async () => {
-    setRecovering(true)
+  // 校验服务器连通性
+  const handleCheckHealth = async (server: McpServer) => {
+    const key = `${server.service_name}__${server.mcp_url}`
+    message.info(t('mcpConfig.message.healthChecking', { name: server.service_name }))
+    setHealthCheckLoading((prev) => ({ ...prev, [key]: true }))
     try {
-      const result = await recoverMcpServers()
-      if (result.success) {
-        message.success(t('mcpConfig.message.remountSuccess'))
-      } else {
-        message.error(result.message)
-      }
-    } catch (error) {
-      message.error(t('mcpConfig.message.remountFailed'))
-    } finally {
-      try {
-        // 不论挂载成功还是失败，都重新加载服务器列表以获取最新状态
-        await loadServerList()
-        
-        // 不论挂载成功还是失败，都更新工具列表并通知工具池刷新
-        setUpdatingTools(true)
-        try {
-          const updateResult = await updateToolList()
-          if (updateResult.success) {
-            message.success(t('mcpConfig.message.toolsListUpdated'))
-            // 通知父组件更新工具列表
-            window.dispatchEvent(new CustomEvent('toolsUpdated'))
-          } else {
-            message.warning(t('mcpConfig.message.toolsListUpdateFailed'))
-          }
-        } catch (updateError) {
-          console.log(t('mcpConfig.debug.autoUpdateToolsFailed'), updateError)
-          message.warning(t('mcpConfig.message.toolsListUpdateFailed'))
-        } finally {
-          setUpdatingTools(false)
+      const response = await fetch(`/api/mcp/healthcheck?mcp_url=${encodeURIComponent(server.mcp_url)}&service_name=${encodeURIComponent(server.service_name)}`, {
+        headers: { ...((window as any).authHeaders || {}) }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        if (data.status === 'success' || response.status === 200) {
+          message.success(t('mcpConfig.message.healthCheckSuccess'))
+          await loadServerList()
+        } else {
+          message.error(t('mcpConfig.message.healthCheckFailed'))
+          await loadServerList()
         }
-      } catch (finalError) {
-        console.error('重新挂载后的清理操作失败:', finalError)
-      } finally {
-        setRecovering(false)
+      } else {
+        message.error(t('mcpConfig.message.healthCheckFailed'))
+        await loadServerList()
       }
+    } catch (e) {
+      message.error(t('mcpConfig.message.healthCheckFailed'))
+      await loadServerList()
+    } finally {
+      setHealthCheckLoading((prev) => ({ ...prev, [key]: false }))
     }
   }
 
@@ -240,20 +228,33 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
       key: 'service_name',
       width: '25%',
       ellipsis: true,
-      render: (text: string, record: McpServer) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              backgroundColor: record.status ? '#52c41a' : '#ff4d4f',
-              flexShrink: 0
-            }}
-          />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
-        </div>
-      ),
+      render: (text: string, record: McpServer) => {
+        const key = `${record.service_name}__${record.mcp_url}`
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              style={{
+                width: 16,
+                height: 16,
+                borderRadius: '50%',
+                backgroundColor: record.status ? '#52c41a' : '#ff4d4f',
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: healthCheckLoading[key] ? 'not-allowed' : 'pointer',
+                border: '1px solid #d9d9d9',
+                boxShadow: '0 0 2px #ccc',
+              }}
+              title={t('mcpConfig.serverList.statusCheckHint')}
+              onClick={() => !healthCheckLoading[key] && handleCheckHealth(record)}
+            >
+              {healthCheckLoading[key] ? <LoadingOutlined style={{ color: record.status ? '#52c41a' : '#ff4d4f' }} /> : null}
+            </div>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
+          </div>
+        )
+      },
     },
     {
       title: t('mcpConfig.serverList.column.url'),
@@ -268,15 +269,28 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
       width: '30%',
       render: (_: any, record: McpServer) => (
         <Space size="small">
-          <Button
-            type="link"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewTools(record)}
-            size="small"
-            disabled={updatingTools}
-          >
-            {t('mcpConfig.serverList.button.viewTools')}
-          </Button>
+          {record.status ? (
+            <Button
+              type="link"
+              icon={<EyeOutlined />}
+              onClick={() => handleViewTools(record)}
+              size="small"
+              disabled={updatingTools}
+            >
+              {t('mcpConfig.serverList.button.viewTools')}
+            </Button>
+          ) : (
+            <Tooltip title={t('mcpConfig.serverList.button.viewToolsDisabledHint')} placement="top">
+              <Button
+                type="link"
+                icon={<EyeOutlined />}
+                size="small"
+                disabled
+              >
+                {t('mcpConfig.serverList.button.viewTools')}
+              </Button>
+            </Tooltip>
+          )}
           <Button
             type="link"
             danger
@@ -416,18 +430,6 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
               <Title level={5} style={{ margin: 0 }}>
                 {t('mcpConfig.serverList.title')}
               </Title>
-              <Button
-                type="text"
-                size="small"
-                icon={recovering ? <LoadingOutlined /> : <RedoOutlined />}
-                onClick={handleRecoverServers}
-                loading={recovering}
-                disabled={recovering || loading || updatingTools}
-                className="text-orange-500 hover:text-orange-600 hover:bg-orange-50"
-                title={t('mcpConfig.serverList.remountTitle')}
-              >
-                {t('mcpConfig.serverList.button.remount')}
-              </Button>
             </div>
             <Table
               columns={columns}

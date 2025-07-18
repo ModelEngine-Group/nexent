@@ -41,7 +41,7 @@ class AgentRunInfo(BaseModel):
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")
     observer: MessageObserver = Field(description="Return data")
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")
-    mcp_host: Optional[str] = Field(description="MCP server address", default=None)
+    mcp_host: Optional[List[str]] = Field(description="MCP server address", default=None)
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
 

@@ -58,6 +58,30 @@ def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id:
             session.rollback()
     return False
 
+def update_mcp_status_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str, status: bool) -> bool:
+    """
+    Update the status of a MCP record by name and URL
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :param status: New status (True/False)
+    :param user_id: User ID
+    :return: True if successful, False otherwise
+    """
+    with get_db_session() as session:
+        try:
+            session.query(McpRecord).filter(
+                McpRecord.mcp_name == mcp_name,
+                McpRecord.mcp_server == mcp_server,
+                McpRecord.tenant_id == tenant_id,
+                McpRecord.delete_flag != 'Y'
+            ).update({"status": status, "updated_by": user_id})
+            session.commit()
+            return True
+        except SQLAlchemyError:
+            session.rollback()
+    return False
+
 def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get all MCP records for a tenant
@@ -69,20 +93,7 @@ def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
         mcp_records = session.query(McpRecord).filter(
             McpRecord.tenant_id == tenant_id,
             McpRecord.delete_flag != 'Y'
-        ).all()
+        ).order_by(McpRecord.create_time.desc()).all()
+
         
         return [as_dict(record) for record in mcp_records]
-
-def check_mcp_name_exists(mcp_name: str) -> bool:
-    """
-    Check if MCP name already exists
-    
-    :param mcp_name: MCP name to check
-    :return: True if name exists, False otherwise
-    """
-    with get_db_session() as session:
-        query = session.query(McpRecord).filter(
-            McpRecord.mcp_name == mcp_name,
-            McpRecord.delete_flag != 'Y'
-        )
-        return query.first() is not None

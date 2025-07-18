@@ -5,9 +5,10 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Header
 
 from services.remote_mcp_service import add_remote_mcp_server_list, delete_remote_mcp_server_list, \
-    get_remote_mcp_server_list, recover_remote_mcp_server
+    get_remote_mcp_server_list, mcp_server_health
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from utils.auth_utils import get_current_user_id
+from database.remote_mcp_db import update_mcp_status_by_name_and_url
 
 router = APIRouter(prefix="/mcp")
 
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")
 
 
-@router.get("/tools/")
+@router.post("/tools")
 async def get_tools_from_remote_mcp(
     service_name: str,
     mcp_url: str,
@@ -99,7 +100,7 @@ async def get_remote_proxies(
 ):
     """ Used to get the list of remote MCP servers """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        _, tenant_id = get_current_user_id(authorization)
         remote_mcp_server_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
         return JSONResponse(
             status_code=200,
@@ -112,26 +113,19 @@ async def get_remote_proxies(
             content={"message": "Failed to get remote MCP proxy", "status": "error"}
         )
 
-@router.get("/recover")
-async def recover_remote_proxies(
-    authorization: Optional[str] = Header(None)
-):
-    """ Used to recover remote MCP servers """
-    try:
-        _, tenant_id = get_current_user_id(authorization)
-        result = await recover_remote_mcp_server(tenant_id=tenant_id)
-        # If result is already a JSONResponse, return it directly
-        if isinstance(result, JSONResponse):
-            return result
-        
-        # Otherwise, return a success result
-        return JSONResponse(
-            status_code=200,
-            content={"message": "Successfully recovered remote MCP proxy", "status": "success"}
-        )
-    except Exception as e:
-        logger.error(f"Failed to recover remote MCP proxy: {e}")
-        return JSONResponse(
-            status_code=400,
-            content={"message": "Failed to recover remote MCP proxy", "status": "error"}
-        )
+@router.get("/healthcheck")
+async def check_mcp_health(mcp_url: str, service_name: str, authorization: Optional[str] = Header(None)):
+    """ Used to check the health of the MCP server, the front end can call it, and automatically update the database status """
+    user_id, tenant_id = get_current_user_id(authorization)
+
+    # check the health of the MCP server
+    response = await mcp_server_health(remote_mcp_server=mcp_url)
+    # update the status of the MCP server in the database
+
+    status = response.status_code == 200
+    update_mcp_status_by_name_and_url(mcp_name=service_name,
+                                        mcp_server=mcp_url,
+                                        tenant_id=tenant_id,
+                                        user_id=user_id,
+                                        status=status)
+    return response

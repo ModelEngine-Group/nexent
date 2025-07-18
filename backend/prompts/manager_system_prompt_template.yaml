@@ -94,3 +94,17 @@ managed_agent:
 
   report: |-
       {{final_answer}}
+
+
+planning:
+  initial_plan: |-
+  
+  update_plan_pre_messages: |-
+
+  update_plan_post_messages: |-
+
+
+final_answer:
+  pre_messages: |-
+
+  post_messages: |-

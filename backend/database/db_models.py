@@ -243,6 +243,7 @@ class McpRecord(TableBase):
     user_id = Column(String(100), doc="User ID")
     mcp_name = Column(String(100), doc="MCP name")
     mcp_server = Column(String(500), doc="MCP server address")
+    status = Column(Boolean, default=None, doc="MCP server connection status, True=connected, False=disconnected, None=unknown")
     create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
     update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
     created_by = Column(String(100), doc="Creator ID, audit field")

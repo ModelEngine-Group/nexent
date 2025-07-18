@@ -4,6 +4,8 @@ import logging
 from urllib.parse import urljoin
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig
+
+from services.remote_mcp_service import get_remote_mcp_server_list
 from utils.auth_utils import get_current_user_id
 
 from database.agent_db import search_agent_info_by_agent_id, search_tools_for_sub_agent, query_sub_agents, \
@@ -150,12 +152,20 @@ async def create_agent_run_info(agent_id, minio_files, query, history, authoriza
     final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
 
     model_list = await create_model_config_list(tenant_id)
+
+    remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
+    default_mcp_url = urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse")
+    mcp_host = [default_mcp_url]
+    for remote_mcp_info in remote_mcp_list:
+        if remote_mcp_info["status"]:
+            mcp_host.append(remote_mcp_info["remote_mcp_server"])
+
     agent_run_info = AgentRunInfo(
         query=final_query,
         model_config_list= model_list,
         observer=MessageObserver(lang=language),
         agent_config=await create_agent_config(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id, language=language),
-        mcp_host=urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse"),
+        mcp_host= mcp_host,
         history=history,
         stop_event=threading.Event()
     )

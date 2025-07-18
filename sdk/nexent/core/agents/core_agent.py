@@ -185,7 +185,7 @@ You have been provided with these additional arguments, that you can access usin
         self.step_number = 1
         while final_answer is None and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
-            memory_step = self._create_memory_step(step_start_time, images)
+            memory_step = self._create_action_step(step_start_time, images)
             try:
                 final_answer = self._execute_step(task, memory_step)
 

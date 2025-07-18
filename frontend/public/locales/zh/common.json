@@ -781,9 +781,10 @@
     "mcpConfig.serverList.column.action": "操作",
     "mcpConfig.serverList.button.viewTools": "查看工具",
     "mcpConfig.serverList.button.delete": "删除",
-    "mcpConfig.serverList.button.remount": "重新挂载",
-    "mcpConfig.serverList.empty": "暂无MCP服务器",
-    "mcpConfig.serverList.remountTitle": "重新挂载所有MCP服务器",
+    "mcpConfig.serverList.statusCheckHint": "点击检测服务器连通性",
+    "mcpConfig.serverList.statusCheckSuccess": "mcp服务器连接成功",
+    "mcpConfig.serverList.statusCheckFailed": "mcp服务器连接失败",
+    "mcpConfig.serverList.button.viewToolsDisabledHint": "请先检查MCP服务可用性",
     "mcpConfig.toolsList.title": "可用工具",
     "mcpConfig.toolsList.column.name": "工具名称",
     "mcpConfig.toolsList.column.description": "描述",
@@ -853,6 +854,13 @@
             "content": "您未选择 <b>Embedding</b> 模型，后续知识库配置和知识检索工具不可用。",
             "tip": "请在模型配置中选择合适的Embedding模型以获得完整体验。",
             "ok_continue": "我知道了，继续下一步"
+        }
+    },
+    "mcpConfig": {
+        "message": {
+            "healthCheckFailed": "无法连接mcp服务器，请检查服务器是否正常运行",
+            "healthChecking": "正在尝试连接mcp服务器 {{name}}",
+            "healthCheckSuccess": "mcp服务器连接成功"
         }
     }
 }

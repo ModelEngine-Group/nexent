@@ -13,7 +13,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
     try:
         mcp_host = agent_run_info.mcp_host
-        if mcp_host is None:
+        if mcp_host is None or len(mcp_host)==0:
             nexent = NexentAgent(
                 observer=agent_run_info.observer,
                 model_config_list=agent_run_info.model_config_list,
@@ -24,7 +24,9 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             nexent.add_history_to_agent(agent_run_info.history)
             nexent.agent_run_with_observer(query=agent_run_info.query, reset=False)
         else:
-            with ToolCollection.from_mcp({"url": mcp_host}) as tool_collection:
+            mcp_client_list = [{"url": mcp_url} for mcp_url in mcp_host]
+
+            with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,

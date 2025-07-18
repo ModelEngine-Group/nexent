@@ -210,6 +210,7 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
     const response = await fetch(
       `${API_ENDPOINTS.mcp.tools}?service_name=${encodeURIComponent(serviceName)}&mcp_url=${encodeURIComponent(mcpUrl)}`,
       {
+        method: 'POST',
         headers: getAuthHeaders(),
       }
     );
