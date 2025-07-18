@@ -8,8 +8,10 @@ from typing import Dict, Any
 from sqlalchemy.sql import func
 from database.tenant_config_db import get_all_configs_by_tenant_id, insert_config, delete_config_by_tenant_config_id, update_config_by_tenant_config_id_and_data, get_single_config_info
 from database.model_management_db import get_model_by_model_id
+from consts.const import MODEL_ENGINE_HOST
 
 logger = logging.getLogger("config_utils")
+
 
 def safe_value(value):
     """Helper function for processing configuration values"""
@@ -32,6 +34,7 @@ def get_env_key(key: str) -> str:
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', key)
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).upper()
 
+
 def get_model_name_from_config(model_config: Dict[str, Any]) -> str:
     """Get model name from model id"""
     if model_config is None:
@@ -41,6 +44,22 @@ def get_model_name_from_config(model_config: Dict[str, Any]) -> str:
     if not model_repo:
         return model_name
     return f"{model_repo}/{model_name}"
+
+
+def get_model_factory_type(base_url: str) -> str:
+    """根据base_url判断应该使用哪种模型工厂
+
+    Args:
+        base_url (str): 模型的base_url
+
+    Returns:
+        str: 模型工厂类型，'openai' 或 'restful'
+    """
+    if (MODEL_ENGINE_HOST and MODEL_ENGINE_HOST in base_url) or "/open/router" in base_url:
+        return "restful"
+    else:
+        return "openai"
+
 
 class ConfigManager:
     """Configuration manager for dynamic loading and caching configurations"""
@@ -90,6 +109,7 @@ class ConfigManager:
         self.last_modified_time = 0
         self.load_config()
         return {"status": "success", "message": "Configuration reloaded"}
+
 
 # Create global configuration manager instance
 _current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))

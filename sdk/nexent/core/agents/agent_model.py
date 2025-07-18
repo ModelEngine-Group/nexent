@@ -12,6 +12,7 @@ class ModelConfig(BaseModel):
     url: str = Field(description="Model endpoint URL")
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
+    model_factory: Optional[str] = Field(description="Model factory type", default="openai")
 
 
 class ToolConfig(BaseModel):
@@ -19,6 +20,7 @@ class ToolConfig(BaseModel):
     params: Dict[str, Any] = Field(description="Initialization parameters")
     source: str = Field(description="Tool source, can be local or mcp")
     metadata: Optional[Dict[str, Any]] = Field(description="Metadata", default=None)
+
 
 class AgentConfig(BaseModel):
     name: str = Field(description="Agent name")

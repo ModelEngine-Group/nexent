@@ -1,6 +1,7 @@
 import threading
 import yaml
 import logging
+import os
 from urllib.parse import urljoin
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig
@@ -10,22 +11,31 @@ from database.agent_db import search_agent_info_by_agent_id, search_tools_for_su
     query_or_create_main_agent_id
 from services.elasticsearch_service import ElasticSearchService, elastic_core, get_embedding_model
 from services.tenant_config_service import get_selected_knowledge_list
-from utils.config_utils import config_manager, tenant_config_manager, get_model_name_from_config
+from utils.config_utils import config_manager, tenant_config_manager, get_model_name_from_config, get_model_factory_type
 
 logger = logging.getLogger("create_agent_info")
 
-async def create_model_config_list(tenant_id):
-     main_model_config = tenant_config_manager.get_model_config(key="LLM_ID", tenant_id=tenant_id)
-     sub_model_config = tenant_config_manager.get_model_config(key="LLM_SECONDARY_ID", tenant_id=tenant_id)
 
-     return [ModelConfig(cite_name="main_model",
-                         api_key=main_model_config.get("api_key", ""),
-                         model_name=get_model_name_from_config(main_model_config) if main_model_config.get("model_name") else "",
-                         url=main_model_config.get("base_url", "")),
-            ModelConfig(cite_name="sub_model",
-                        api_key=sub_model_config.get("api_key", ""),
-                        model_name=get_model_name_from_config(sub_model_config) if sub_model_config.get("model_name") else "",
-                        url=sub_model_config.get("base_url", ""))]
+async def create_model_config_list(tenant_id):
+    main_model_config = tenant_config_manager.get_model_config(key="LLM_ID", tenant_id=tenant_id)
+    sub_model_config = tenant_config_manager.get_model_config(key="LLM_SECONDARY_ID", tenant_id=tenant_id)
+
+    return [
+        ModelConfig(
+            cite_name="main_model",
+            api_key=main_model_config.get("api_key", ""),
+            model_name=get_model_name_from_config(main_model_config) if main_model_config.get("model_name") else "",
+            url=main_model_config.get("base_url", ""),
+            model_factory=get_model_factory_type(main_model_config.get("base_url", ""))
+        ),
+        ModelConfig(
+            cite_name="sub_model",
+            api_key=sub_model_config.get("api_key", ""),
+            model_name=get_model_name_from_config(sub_model_config) if sub_model_config.get("model_name") else "",
+            url=sub_model_config.get("base_url", ""),
+            model_factory=get_model_factory_type(sub_model_config.get("base_url", ""))
+        )
+    ]
 
 
 async def create_agent_config(agent_id, tenant_id, user_id, language: str = 'zh'):

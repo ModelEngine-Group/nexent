@@ -6,6 +6,7 @@ from ..utils.observer import ProcessType
 from .agent_model import ModelConfig, ToolConfig, AgentConfig, AgentHistory
 from ..utils.observer import MessageObserver
 from ..models.openai_llm import OpenAIModel
+from ..models.restful_llm import RestfulLLMModel
 from .core_agent import CoreAgent
 from ..tools import *  # Used for tool creation, do not delete!!!
 
@@ -32,20 +33,36 @@ class NexentAgent:
 
         self.agent = None
 
-
     def create_model(self, model_cite_name: str):
-        """create a model instance"""
-        model_config = next(model_config for model_config in self.model_config_list if model_config.cite_name == model_cite_name)
+        """create a model instance based on model_factory type"""
+        model_config = next((config for config in self.model_config_list if config.cite_name == model_cite_name), None)
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
-        model = OpenAIModel(
-            observer=self.observer,
-            model_id=model_config.model_name,
-            api_key=model_config.api_key,
-            api_base=model_config.url,
-            temperature=model_config.temperature,
-            top_p=model_config.top_p
-        )
+        
+        # 根据model_factory字段选择不同的模型类型
+        model_factory = getattr(model_config, 'model_factory', 'openai')
+        
+        if model_factory == "restful":
+            # 创建RESTful LLM模型
+            model = RestfulLLMModel(
+                observer=self.observer,
+                base_url=model_config.url,
+                api_key=model_config.api_key,
+                model_name=model_config.model_name,
+                temperature=model_config.temperature,
+                top_p=model_config.top_p
+            )
+        else:
+            # 默认创建OpenAI兼容模型
+            model = OpenAIModel(
+                observer=self.observer,
+                model_id=model_config.model_name,
+                api_key=model_config.api_key,
+                api_base=model_config.url,
+                temperature=model_config.temperature,
+                top_p=model_config.top_p
+            )
+        
         model.stop_event = self.stop_event
         return model
 
