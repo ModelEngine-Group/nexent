@@ -90,7 +90,7 @@ jobs:
           rm -rf .git flax_model.msgpack tf_model.h5
       - name: Build data process image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-data-process:amd64 --load -t ccr.ccs.tencentyun.com/nexent/nexent-data-process:amd64 -f make/data_process/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent-data-process:amd64 --load -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64 -f make/data_process/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push data process image (amd64) to DockerHub
@@ -133,7 +133,7 @@ jobs:
           rm -rf .git flax_model.msgpack tf_model.h5
       - name: Build data process image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-data-process:arm64 --load -t ccr.ccs.tencentyun.com/nexent/nexent-data-process:arm64 -f make/data_process/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent-data-process:arm64 --load -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:arm64 -f make/data_process/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push data process image (arm64) to DockerHub
@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build web image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-web:amd64 --load -t ccr.ccs.tencentyun.com/nexent/nexent-web:amd64 -f make/web/Dockerfile .
+          docker buildx build --platform linux/amd64 -t nexent/nexent-web:amd64 --load -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64 -f make/web/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push web image (amd64) to DockerHub
@@ -181,7 +181,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Build web image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-web:arm64 --load -t ccr.ccs.tencentyun.com/nexent/nexent-web:arm64 -f make/web/Dockerfile .
+          docker buildx build --platform linux/arm64 -t nexent/nexent-web:arm64 --load -t ccr.ccs.tencentyun.com/nexent-hub/nexent-web:arm64 -f make/web/Dockerfile .
       - name: Login to DockerHub
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push web image (arm64) to DockerHub
