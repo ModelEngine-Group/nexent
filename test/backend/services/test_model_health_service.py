@@ -26,6 +26,8 @@ sys.modules['nexent.core.agents'] = MockModule()
 sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
+sys.modules['nexent.core.models.restful_llm'] = MockModule()
+sys.modules['nexent.core.utils'] = MockModule()
 
 # Mock apps packages
 sys.modules['apps'] = MockModule()
@@ -66,6 +68,8 @@ with mock.patch.dict('sys.modules', {
     'nexent.core.agents.agent_model': mock.MagicMock(),
     'nexent.core.models': mock.MagicMock(),
     'nexent.core.models.embedding_model': mock.MagicMock(),
+    'nexent.core.models.restful_llm': mock.MagicMock(),
+    'nexent.core.utils': mock.MagicMock(),
     'database': mock.MagicMock(),
     'database.client': mock.MagicMock(), 
     'database.model_management_db': mock.MagicMock(),
@@ -84,6 +88,10 @@ with mock.patch.dict('sys.modules', {
     mock_model_enum.DETECTING = "detecting"
     mock.patch('consts.model.ModelConnectStatusEnum', mock_model_enum)
     
+    # Mock MessageObserver
+    mock_message_observer = mock.MagicMock()
+    mock.patch('nexent.core.MessageObserver', mock_message_observer)
+
     # Now import the module under test
     from backend.services.model_health_service import (
         _perform_connectivity_check,
@@ -152,13 +160,16 @@ async def test_perform_connectivity_check_multi_embedding():
 async def test_perform_connectivity_check_llm():
     # Setup
     with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
-         mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model:
+         mock.patch("backend.services.model_health_service.OpenAIModel") as mock_model, \
+         mock.patch("backend.services.model_health_service.get_model_factory_type") as mock_factory_type:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
         
         mock_model_instance = mock.MagicMock()
         mock_model_instance.check_connectivity.return_value = True
         mock_model.return_value = mock_model_instance
+
+        mock_factory_type.return_value = "openai"
 
         # Execute
         result = await _perform_connectivity_check(
@@ -170,11 +181,46 @@ async def test_perform_connectivity_check_llm():
 
         # Assert
         assert result is True
+        mock_factory_type.assert_called_once_with("https://api.openai.com")
         mock_model.assert_called_once_with(
-            mock_observer_instance,
+            observer=mock_observer_instance,
             model_id="gpt-4",
             api_base="https://api.openai.com",
             api_key="test-key"
+        )
+        mock_model_instance.check_connectivity.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_llm_restful():
+    # Setup
+    with mock.patch("backend.services.model_health_service.MessageObserver") as mock_observer, \
+         mock.patch("backend.services.model_health_service.RestfulLLMModel") as mock_model, \
+         mock.patch("backend.services.model_health_service.get_model_factory_type") as mock_factory_type:
+        mock_observer_instance = mock.MagicMock()
+        mock_observer.return_value = mock_observer_instance
+
+        mock_model_instance = mock.MagicMock()
+        mock_model_instance.check_connectivity.return_value = True
+        mock_model.return_value = mock_model_instance
+
+        mock_factory_type.return_value = "restful"
+
+        # Execute
+        result = await _perform_connectivity_check(
+            "gpt-4",
+            "llm",
+            "https://api.openai.com",
+            "test-key"
+        )
+
+        # Assert
+        assert result is True
+        mock_factory_type.assert_called_once_with("https://api.openai.com")
+        mock_model.assert_called_once_with(
+            observer=mock_observer_instance,
+            base_url="https://api.openai.com",
+            api_key="test-key",
+            model_name="gpt-4"
         )
         mock_model_instance.check_connectivity.assert_called_once()
 

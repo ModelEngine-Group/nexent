@@ -2,11 +2,13 @@ import logging
 import httpx
 from typing import Optional
 from fastapi import Header
+
 from nexent.core import MessageObserver
-from nexent.core.models import OpenAIModel, OpenAIVLModel
+from nexent.core.models import OpenAIModel, RestfulLLMModel, OpenAIVLModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding
+
 from utils.auth_utils import get_current_user_id
-from utils.config_utils import get_model_name_from_config
+from utils.config_utils import get_model_factory_type, get_model_name_from_config
 
 from apps.voice_app import VoiceService
 from consts.const import MODEL_ENGINE_APIKEY, MODEL_ENGINE_HOST
@@ -25,18 +27,18 @@ async def _embedding_dimension_check(
     # Test connectivity based on different model types
     if model_type == "embedding":
         embedding = OpenAICompatibleEmbedding(
-            model_name=model_name, 
-            base_url=model_base_url, 
-            api_key=model_api_key, 
+            model_name=model_name,
+            base_url=model_base_url,
+            api_key=model_api_key,
             embedding_dim=0
         ).dimension_check()
         if len(embedding)>0:
             return len(embedding[0])
     elif model_type == "multi_embedding":
         embedding = JinaEmbedding(
-            model_name=model_name, 
-            base_url=model_base_url, 
-            api_key=model_api_key, 
+            model_name=model_name,
+            base_url=model_base_url,
+            api_key=model_api_key,
             embedding_dim=0
         ).dimension_check()
         if len(embedding)>0:
@@ -53,17 +55,18 @@ async def _perform_connectivity_check(
     embedding_dim: int = 1024
 ) -> bool:
     """
-    Perform specific model connectivity check
+    Perform connectivity check for different model types
+
     Args:
         model_name: Model name
-        model_type: Model type
+        model_type: Model type (llm, embedding, etc.)
         model_base_url: Model base URL
-        model_api_key: API key
-        embedding_dim: Embedding dimension (only for embedding models)
+        model_api_key: Model API key
+        embedding_dim: Embedding dimension for embedding models
+
     Returns:
-        bool: Connectivity check result
+        bool: True if connection is successful, False otherwise
     """
-    connectivity: bool
     
     # Test connectivity based on different model types
     if model_type == "embedding":
@@ -82,12 +85,21 @@ async def _perform_connectivity_check(
         ).dimension_check()) > 0
     elif model_type == "llm":
         observer = MessageObserver()
-        connectivity = OpenAIModel(
-            observer, 
-            model_id=model_name, 
-            api_base=model_base_url, 
-            api_key=model_api_key
-        ).check_connectivity()
+        model_factory_type = get_model_factory_type(model_base_url)
+        if model_factory_type == "restful":
+            connectivity = RestfulLLMModel(
+                observer=observer,
+                base_url=model_base_url,
+                api_key=model_api_key,
+                model_name=model_name
+            ).check_connectivity()
+        else:
+            connectivity = OpenAIModel(
+                observer=observer,
+                model_id=model_name,
+                api_base=model_base_url,
+                api_key=model_api_key
+            ).check_connectivity()
     elif model_type == "rerank":
         connectivity = False
     elif model_type == "vlm":
