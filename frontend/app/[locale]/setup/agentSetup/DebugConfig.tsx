@@ -76,8 +76,10 @@ function AgentDebugging({
             role: "assistant",
             content: content.content,
             timestamp: new Date(),
-            type: content.type
-          });
+            type: content.type,
+            // Preserve subType so TaskWindow can style deep thinking text
+            subType: content.subType as any
+          } as any);
         });
       }
       
