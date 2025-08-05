@@ -164,6 +164,7 @@ export const handleStreamResponse = async (
                   break;
 
                 case "model_output_thinking":
+                case "model_output_deep_thinking":
                   // Process thinking content
                   // If there's no currentStep, create one
                   if (!currentStep) {

@@ -12,6 +12,7 @@ class ModelConfig(BaseModel):
     url: str = Field(description="Model endpoint URL")
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
+    is_deep_thinking: Optional[bool] = Field(description="Deep thinking", default=False)
 
 
 class ToolConfig(BaseModel):

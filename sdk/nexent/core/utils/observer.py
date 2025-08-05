@@ -7,6 +7,7 @@ from typing import Any
 
 class ProcessType(Enum):
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
+    MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
 
     STEP_COUNT = "step_count"  # current step of agent

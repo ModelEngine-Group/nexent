@@ -15,6 +15,7 @@ from database.conversation_db import create_conversation_message, create_source_
     delete_conversation, get_conversation, create_conversation, update_message_opinion
 
 from utils.config_utils import tenant_config_manager,get_model_name_from_config
+from utils.str_utils import remove_think_tags, add_no_think_token
 
 logger = logging.getLogger("conversation_management_service")
 
@@ -250,11 +251,12 @@ def call_llm_for_title(content: str, tenant_id: str) -> str:
                  "content": prompt_template["SYSTEM_PROMPT"]},
                 {"role": "user",
                  "content": user_prompt}]
+    add_no_think_token(messages)
 
     # Call the model
     response = llm(messages, max_tokens=10)
 
-    return response.content.strip()
+    return remove_think_tags(response.content.strip())
 
 
 def update_conversation_title(conversation_id: int, title: str, user_id: str = None) -> bool:

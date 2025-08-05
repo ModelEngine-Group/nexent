@@ -15,6 +15,8 @@ from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.auth_utils import get_current_user_info
 from fastapi import Header, Request
 
+from utils.str_utils import remove_think_tags, add_no_think_token
+
 # Configure logging
 logger = logging.getLogger("prompt_service")
 
@@ -41,6 +43,7 @@ def call_llm_for_system_prompt(user_prompt: str, system_prompt: str, callback=No
     )
     messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}]
+    add_no_think_token(messages)
     try:
         completion_kwargs = llm._prepare_completion_kwargs(
             messages=messages,
@@ -53,6 +56,7 @@ def call_llm_for_system_prompt(user_prompt: str, system_prompt: str, callback=No
         for chunk in current_request:
             new_token = chunk.choices[0].delta.content
             if new_token is not None:
+                new_token = remove_think_tags(new_token)
                 token_join.append(new_token)
                 current_text = "".join(token_join)
                 if callback is not None:

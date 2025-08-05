@@ -20,17 +20,21 @@ from smolagents.utils import BASE_BUILTIN_MODULES
 logger = logging.getLogger("create_agent_info")
 
 async def create_model_config_list(tenant_id):
-     main_model_config = tenant_config_manager.get_model_config(key="LLM_ID", tenant_id=tenant_id)
-     sub_model_config = tenant_config_manager.get_model_config(key="LLM_SECONDARY_ID", tenant_id=tenant_id)
+    main_model_config = tenant_config_manager.get_model_config(key="LLM_ID", tenant_id=tenant_id)
+    sub_model_config = tenant_config_manager.get_model_config(key="LLM_SECONDARY_ID", tenant_id=tenant_id)
 
-     return [ModelConfig(cite_name="main_model",
-                         api_key=main_model_config.get("api_key", ""),
-                         model_name=get_model_name_from_config(main_model_config) if main_model_config.get("model_name") else "",
-                         url=main_model_config.get("base_url", "")),
+    return [ModelConfig(cite_name="main_model",
+                        api_key=main_model_config.get("api_key", ""),
+                        model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
+                            "model_name") else "",
+                        url=main_model_config.get("base_url", ""),
+                        is_deep_thinking=main_model_config.get("is_deep_thinking", False)),
             ModelConfig(cite_name="sub_model",
                         api_key=sub_model_config.get("api_key", ""),
-                        model_name=get_model_name_from_config(sub_model_config) if sub_model_config.get("model_name") else "",
-                        url=sub_model_config.get("base_url", ""))]
+                        model_name=get_model_name_from_config(sub_model_config) if sub_model_config.get(
+                            "model_name") else "",
+                        url=sub_model_config.get("base_url", ""),
+                        is_deep_thinking=main_model_config.get("is_deep_thinking", False))]
 
 
 async def create_agent_config(agent_id, tenant_id, user_id, language: str = 'zh'):
@@ -240,10 +244,11 @@ async def create_agent_run_info(agent_id, minio_files, query, history, authoriza
 
     agent_run_info = AgentRunInfo(
         query=final_query,
-        model_config_list= model_list,
+        model_config_list=model_list,
         observer=MessageObserver(lang=language),
-        agent_config=await create_agent_config(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id, language=language),
-        mcp_host= mcp_host,
+        agent_config=await create_agent_config(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+                                               language=language),
+        mcp_host=mcp_host,
         history=history,
         stop_event=threading.Event()
     )

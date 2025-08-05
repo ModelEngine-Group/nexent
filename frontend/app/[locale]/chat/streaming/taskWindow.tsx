@@ -39,7 +39,9 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) => 
       message.type === "agent_new_run" || 
       message.type === "generating_code" ||
-      message.type === "executing",
+      message.type === "executing" ||
+      message.type === "model_output_thinking" ||
+      message.type === "model_output_deep_thinking",
     render: (message, _t) => (
         <div style={{
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
