@@ -143,6 +143,7 @@ export function ChatStreamMain({
               step.contents.forEach((content: any) => {
                 const taskMsg = {
                   type: content.type,
+                  subType: content.subType, // Preserve subType for styling (e.g., deep_thinking)
                   content: content.content,
                   id: content.id,
                   assistantId: message.id,

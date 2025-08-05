@@ -12,7 +12,7 @@ export interface StepContent {
   content: string
   expanded: boolean
   timestamp: number
-  subType?: "thinking" | "code"
+  subType?: "thinking" | "code" | "deep_thinking"
   isLoading?: boolean
   _preserve?: boolean
   _messageContainer?: {

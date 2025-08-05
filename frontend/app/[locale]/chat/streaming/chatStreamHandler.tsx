@@ -164,9 +164,7 @@ export const handleStreamResponse = async (
                   break;
 
                 case "model_output_thinking":
-                case "model_output_deep_thinking":
-                  // Process thinking content
-                  // If there's no currentStep, create one
+                  // Merge consecutive thinking chunks; create new group only when previous subType is not "thinking"
                   if (!currentStep) {
                     currentStep = {
                       id: `step-thinking-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
@@ -181,34 +179,69 @@ export const handleStreamResponse = async (
                     };
                   }
 
-                  // Ensure contents exists
-                  currentContentText = messageContent;
+                  const shouldAppendThinking =
+                    lastContentType === "model_output" &&
+                    lastModelOutputIndex >= 0 &&
+                    currentStep.contents[lastModelOutputIndex] &&
+                    currentStep.contents[lastModelOutputIndex].subType === "thinking";
 
-                  // If the last streaming output is thinking content, append
-                  if (lastContentType === "model_output" && lastModelOutputIndex >= 0) {
-                    const modelOutput = currentStep.contents[lastModelOutputIndex];
-                    // Update content directly without prefix check
-                    let newContent = modelOutput.content + messageContent;
-                    // Remove "思考：" prefix if present
-                    const thinkingPrefix = t('chatStreamHandler.thinkingPrefix');
-                    if (newContent.startsWith(thinkingPrefix)) {
-                      newContent = newContent.substring(thinkingPrefix.length);
-                    }
-                    modelOutput.content = newContent;
+                  if (shouldAppendThinking) {
+                    // Append to existing thinking content
+                    currentStep.contents[lastModelOutputIndex].content += messageContent;
                   } else {
-                    // Otherwise, create new thinking content
+                    // Create a new thinking content group
                     currentStep.contents.push({
-                      id: `model-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                      id: `thinking-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                       type: "model_output",
                       subType: "thinking",
-                      content: currentContentText,
+                      content: messageContent,
                       expanded: true,
                       timestamp: Date.now()
                     });
                     lastModelOutputIndex = currentStep.contents.length - 1;
                   }
 
-                  // Update the last processed content type
+                  lastContentType = "model_output";
+                  break;
+
+                case "model_output_deep_thinking":
+                  // Consecutive deep_thinking chunks should be combined until a thinking chunk arrives
+                  if (!currentStep) {
+                    currentStep = {
+                      id: `step-thinking-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                      title: "AI Thinking",
+                      content: "",
+                      expanded: true,
+                      contents: [],
+                      metrics: "",
+                      thinking: { content: "", expanded: true },
+                      code: { content: "", expanded: true },
+                      output: { content: "", expanded: true }
+                    };
+                  }
+
+                  const shouldAppendDeep =
+                    lastContentType === "model_output" &&
+                    lastModelOutputIndex >= 0 &&
+                    currentStep.contents[lastModelOutputIndex] &&
+                    currentStep.contents[lastModelOutputIndex].subType === "deep_thinking";
+
+                  if (shouldAppendDeep) {
+                    // Append to existing deep_thinking content
+                    currentStep.contents[lastModelOutputIndex].content += messageContent;
+                  } else {
+                    // Create a new deep_thinking content group
+                    currentStep.contents.push({
+                      id: `deep-thinking-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                      type: "model_output",
+                      subType: "deep_thinking",
+                      content: messageContent,
+                      expanded: true,
+                      timestamp: Date.now()
+                    });
+                    lastModelOutputIndex = currentStep.contents.length - 1;
+                  }
+
                   lastContentType = "model_output";
                   break;
                 
