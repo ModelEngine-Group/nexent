@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { message, Modal } from 'antd'
+import { Modal, App } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { TFunction } from 'i18next'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -124,6 +124,7 @@ export default function BusinessLogicConfig({
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
   const { t } = useTranslation('common');
+  const { message } = App.useApp();
 
   // Common refresh agent list function, moved to the front to avoid hoisting issues
   const refreshAgentList = async (t: TFunction) => {

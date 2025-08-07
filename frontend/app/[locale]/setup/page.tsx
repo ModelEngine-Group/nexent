@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { theme, Modal, message } from 'antd';
+import { theme, Modal, App } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import AppModelConfig from "./modelSetup/config"
@@ -17,6 +17,7 @@ import { useTheme } from 'next-themes';
 
 
 export default function CreatePage() {
+  const { message } = App.useApp();
   const [selectedKey, setSelectedKey] = useState("1")
   const router = useRouter()
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("processing")
@@ -250,11 +251,13 @@ export default function CreatePage() {
         okText={t('embedding.modal.ok_continue')}
         cancelButtonProps={{ style: { display: 'none' } }}
         centered
-        bodyStyle={{
-          padding: '32px 24px 24px 24px',
-          background: isDark ? '#23272f' : '#fffbe6',
-          borderRadius: 12,
-          color: isDark ? '#eee' : '#333',
+        styles={{
+          body: {
+            padding: '32px 24px 24px 24px',
+            background: isDark ? '#23272f' : '#fffbe6',
+            borderRadius: 12,
+            color: isDark ? '#eee' : '#333',
+          }
         }}
         style={{
           borderRadius: 16,

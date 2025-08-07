@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Input, message, Radio, ColorPicker, Button, Typography, Card, Col, Row } from 'antd';
+import { Input, Radio, ColorPicker, Button, Typography, Card, Col, Row, App } from 'antd';
 import { useConfig } from '@/hooks/useConfig';
 import { PlusOutlined } from '@ant-design/icons';
 import { Pencil } from 'lucide-react';
@@ -30,6 +30,7 @@ const cardTheme = {
 
 export const AppConfigSection: React.FC = () => {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const { appConfig, updateAppConfig, getAppAvatarUrl } = useConfig();
   
   // 添加本地状态管理输入值

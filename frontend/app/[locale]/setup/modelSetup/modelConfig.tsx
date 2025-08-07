@@ -1,4 +1,4 @@
-import {Button, Card, Col, message, Row, Space, Modal} from 'antd'
+import {Button, Card, Col, Row, Space, Modal, App} from 'antd'
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -108,6 +108,7 @@ interface ModelConfigSectionProps {
 
 export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigSectionProps>((props, ref): ReactNode => {
   const { t } = useTranslation()
+  const { message } = App.useApp();
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig } = useConfig()
   const modelData = getModelData(t)

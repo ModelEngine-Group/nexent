@@ -7,15 +7,17 @@ import { ReactNode } from 'react';
 import path from 'path';
 import fs from 'fs';
 import I18nProviderWrapper from "@/components/providers/I18nProviderWrapper"
+import { App } from 'antd';
 
 const inter = Inter({ subsets: ["latin"] })
 
 // Dynamic metadata based on locale
 export async function generateMetadata({
-  params: { locale },
+  params,
 }: {
-  params: { locale: string };
+  params: Promise<{ locale: string }>;
 }): Promise<Metadata> {
+  const { locale } = await params;
   let messages: any = {}
   if (['zh', 'en'].includes(locale)) {
     const filePath = path.join(process.cwd(), 'public', 'locales', locale, 'common.json');
@@ -36,13 +38,14 @@ export async function generateMetadata({
   }
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
-  params: { locale },
+  params,
 }: {
   children: ReactNode;
-  params: { locale: string };
+  params: Promise<{ locale: string }>;
 }) {
+  const { locale } = await params;
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
@@ -50,7 +53,9 @@ export default function RootLayout({
       </head>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-          <I18nProviderWrapper>{children}</I18nProviderWrapper>
+          <I18nProviderWrapper>
+            <App>{children}</App>
+          </I18nProviderWrapper>
         </ThemeProvider>
       </body>
     </html>

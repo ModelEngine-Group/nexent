@@ -37,7 +37,8 @@ build/
 *.tgz
 
 # Backend
-backend/assets/
+backend/assets/*
+!backend/assets/test.wav
 backend/flower_db.sqlite
 
 # OS generated files

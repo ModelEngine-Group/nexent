@@ -4,7 +4,7 @@ import type React from "react"
 import { useTranslation } from 'react-i18next' 
 import { useState, useEffect, useRef, useLayoutEffect } from "react"
 
-import { message } from 'antd'
+import { App } from 'antd'
 import { InfoCircleFilled } from '@ant-design/icons'
 
 // Import AppProvider and hooks
@@ -25,7 +25,7 @@ import {
 // Import new components
 import KnowledgeBaseList from './knowledgeBase/KnowledgeBaseList'
 import DocumentList from './document/DocumentListLayout'
-import ConfirmModal from './components/ConfirmModal'
+import { useConfirmModal } from './components/ConfirmModal'
 
 // EmptyState component defined directly in this file
 interface EmptyStateProps {
@@ -85,6 +85,8 @@ interface DataConfigProps {
 
 function DataConfig({ isActive }: DataConfigProps) {
   const { t } = useTranslation();
+  const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
 
   // 组件初始化时清除缓存
   useEffect(() => {
@@ -357,7 +359,7 @@ const getAuthHeaders = () => {
   // Handle knowledge base deletion
   const handleDelete = (id: string) => {
     hasUserInteractedRef.current = true; // 标记用户有交互
-    ConfirmModal.confirm({
+    confirm({
       title: t('knowledgeBase.modal.deleteConfirm.title'),
       content: t('knowledgeBase.modal.deleteConfirm.content'),
       okText: t('common.confirm'),
@@ -410,7 +412,7 @@ const getAuthHeaders = () => {
     const kbId = kbState.activeKnowledgeBase?.id;
     if (!kbId) return;
 
-    ConfirmModal.confirm({
+    confirm({
       title: t('document.modal.deleteConfirm.title'),
       content: t('document.modal.deleteConfirm.content'),
       okText: t('common.confirm'),

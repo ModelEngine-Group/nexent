@@ -1,4 +1,4 @@
-import { Modal, Button, message } from 'antd'
+import { Modal, Button, App } from 'antd'
 import { DeleteOutlined, ExclamationCircleFilled, RightOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { ModelOption, ModelType } from '@/types/config'
@@ -20,6 +20,7 @@ export const ModelDeleteDialog = ({
   customModels 
 }: ModelDeleteDialogProps) => {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const { modelConfig, updateModelConfig } = useConfig()
   const [deletingModelType, setDeletingModelType] = useState<ModelType | null>(null)
   const [deletingModels, setDeletingModels] = useState<Set<string>>(new Set())

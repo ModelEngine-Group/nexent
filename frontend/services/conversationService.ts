@@ -13,6 +13,15 @@ export interface STTResponse {
   text?: string;
 }
 
+// This helper function now ALWAYS connects through the current host and port.
+// This relies on our custom `server.js` to handle the proxying in all environments.
+const getWebSocketUrl = (endpoint: string): string => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}${endpoint}`;
+  console.log(`[WebSocket] Connecting via server proxy: ${wsUrl}`);
+  return wsUrl;
+};
+
 export const conversationService = {
   // Get conversation list
   async getList(): Promise<ConversationListItem[]> {
@@ -139,7 +148,7 @@ export const conversationService = {
   stt: {
     // Create WebSocket connection
     createWebSocket(): WebSocket {
-      return new WebSocket(API_ENDPOINTS.stt.ws);
+      return new WebSocket(getWebSocketUrl(API_ENDPOINTS.stt.ws));
     },
 
     // Process audio data
@@ -177,7 +186,7 @@ export const conversationService = {
   tts: {
     // Create WebSocket connection
     createWebSocket(): WebSocket {
-      return new WebSocket(API_ENDPOINTS.tts.ws);
+      return new WebSocket(getWebSocketUrl(API_ENDPOINTS.tts.ws));
     },
 
     // TTS playback status management
@@ -205,8 +214,8 @@ export const conversationService = {
           }
 
           await initStreamingPlayback(onStatusChange);
-
-          const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${API_ENDPOINTS.tts.ws}`;
+          
+          const wsUrl = getWebSocketUrl(API_ENDPOINTS.tts.ws);
           const ws = new WebSocket(wsUrl);
           wsRef.current = ws;
 
@@ -468,8 +477,7 @@ export const conversationService = {
       // Traditional playback method
       const playAudioTraditional = async (text: string, onStatusChange?: (status: 'idle' | 'generating' | 'playing' | 'error') => void) => {
         audioChunksRef.current = [];
-
-        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${API_ENDPOINTS.tts.ws}`;
+        const wsUrl = getWebSocketUrl(API_ENDPOINTS.tts.ws);
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
