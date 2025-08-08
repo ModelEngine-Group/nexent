@@ -132,8 +132,12 @@ export default function AgentConfigurationSection({
 
   // Optimized click handlers using useCallback
   const handleSegmentClick = useCallback((segment: string) => {
+    // Disable segment control during prompt generation
+    if (isGeneratingAgent) {
+      return;
+    }
     setActiveSegment(segment);
-  }, []);
+  }, [isGeneratingAgent]);
 
   // Set default active segment when entering edit mode
   useEffect(() => {
@@ -367,9 +371,10 @@ export default function AgentConfigurationSection({
                 activeSegment === 'agent-info'
                   ? 'bg-blue-500 text-white'
                   : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
+              } ${isGeneratingAgent ? 'cursor-not-allowed opacity-50' : ''}`}
               style={{ fontSize: '14px' }}
               type="button"
+              disabled={isGeneratingAgent}
             >
               {t('agent.info.title')}
             </button>
@@ -379,9 +384,10 @@ export default function AgentConfigurationSection({
                 activeSegment === 'duty'
                   ? 'bg-blue-500 text-white'
                   : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
+              } ${isGeneratingAgent ? 'cursor-not-allowed opacity-50' : ''}`}
               style={{ fontSize: '14px' }}
               type="button"
+              disabled={isGeneratingAgent}
             >
               {t('systemPrompt.card.duty.title')}
               {isGeneratingAgent && activeSegment === 'duty' && (
@@ -394,9 +400,10 @@ export default function AgentConfigurationSection({
                 activeSegment === 'constraint'
                   ? 'bg-blue-500 text-white'
                   : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
+              } ${isGeneratingAgent ? 'cursor-not-allowed opacity-50' : ''}`}
               style={{ fontSize: '14px' }}
               type="button"
+              disabled={isGeneratingAgent}
             >
               {t('systemPrompt.card.constraint.title')}
               {isGeneratingAgent && activeSegment === 'constraint' && (
@@ -409,9 +416,10 @@ export default function AgentConfigurationSection({
                 activeSegment === 'few-shots'
                   ? 'bg-blue-500 text-white'
                   : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
+              } ${isGeneratingAgent ? 'cursor-not-allowed opacity-50' : ''}`}
               style={{ fontSize: '14px' }}
               type="button"
+              disabled={isGeneratingAgent}
             >
               {t('systemPrompt.card.fewShots.title')}
               {isGeneratingAgent && activeSegment === 'few-shots' && (
@@ -471,6 +479,15 @@ export default function AgentConfigurationSection({
           }
           .segment-button:focus {
             outline: none !important;
+          }
+          /* Disabled segment button styles */
+          .segment-button:disabled {
+            cursor: not-allowed !important;
+            pointer-events: none !important;
+          }
+          .segment-button:disabled:hover {
+            background-color: inherit !important;
+            color: inherit !important;
           }
           /* Responsive button styles */
           .responsive-button {
