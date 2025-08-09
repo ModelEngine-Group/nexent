@@ -9,37 +9,7 @@ echo "📁 Target .env location: Root directory (../)"
 echo ""
 
 # Function to generate MinIO access keys
-generate_minio_ak_sk() {
-  # Check if MinIO keys are already set in environment (e.g., from deploy.sh)
-  if [ -n "$MINIO_ACCESS_KEY" ] && [ -n "$MINIO_SECRET_KEY" ]; then
-    echo "🔑 Using existing MinIO access keys from environment..."
-    return 0
-  fi
-
-  echo "🔑 Generating MinIO access keys..."
-
-  if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "mingw" ] || [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "msys" ]; then
-    # Windows
-    ACCESS_KEY=$(powershell -Command "[System.Convert]::ToBase64String([System.Guid]::NewGuid().ToByteArray()) -replace '[^a-zA-Z0-9]', '' -replace '=.+$', '' | Select-Object -First 12")
-    SECRET_KEY=$(powershell -Command '$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $bytes = New-Object byte[] 32; $rng.GetBytes($bytes); [System.Convert]::ToBase64String($bytes)')
-  else
-    # Linux/Mac
-    # Generate a random AK (12-character alphanumeric) and clean it
-    ACCESS_KEY=$(openssl rand -hex 12 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9]//g')
-
-    # Generate a random SK (32-character high-strength random string) and clean it
-    SECRET_KEY=$(openssl rand -base64 32 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9+/=]//g')
-  fi
-
-  if [ -z "$ACCESS_KEY" ] || [ -z "$SECRET_KEY" ]; then
-    echo "❌ ERROR Failed to generate MinIO access keys"
-    ERROR_OCCURRED=1
-    return 1
-  fi
-
-  export MINIO_ACCESS_KEY=$ACCESS_KEY
-  export MINIO_SECRET_KEY=$SECRET_KEY
-
+echo_minio_ak_sk() {
   echo "✅ MinIO access keys generated successfully"
   echo "   MINIO_ACCESS_KEY: $ACCESS_KEY"
   echo "   MINIO_SECRET_KEY: $SECRET_KEY"
@@ -256,6 +226,32 @@ update_env_file() {
     echo "POSTGRES_PORT=5434" >> ../.env
   fi
 
+  # Supabase PostgreSQL Configuration (only for full version)
+  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+    echo ""
+    echo "# Supabase PostgreSQL Configuration" >> ../.env
+    
+    # Additional Supabase configuration
+    if grep -q "^SUPABASE_URL=" ../.env; then
+      sed -i.bak "s~^SUPABASE_URL=.*~SUPABASE_URL=http://localhost:8000~" ../.env
+    else
+      echo "SUPABASE_URL=http://localhost:8000" >> ../.env
+    fi
+    
+    # Additional Supabase configuration
+    if grep -q "^API_EXTERNAL_URL=" ../.env; then
+      sed -i.bak "s~^API_EXTERNAL_URL=.*~API_EXTERNAL_URL=http://localhost:8000~" ../.env
+    else
+      echo "API_EXTERNAL_URL=http://localhost:8000" >> ../.env
+    fi
+    
+    if grep -q "^SITE_URL=" ../.env; then
+      sed -i.bak "s~^SITE_URL=.*~SITE_URL=http://localhost:3011~" ../.env
+    else
+      echo "SITE_URL=http://localhost:3011" >> ../.env
+    fi
+  fi
+
   # Remove backup file
   rm -f ../.env.bak
 
@@ -294,8 +290,8 @@ main() {
   # Step 1: Prepare .env file
   prepare_env_file || { echo "❌ Failed to prepare .env file"; exit 1; }
 
-  # Step 2: Generate MinIO keys
-  generate_minio_ak_sk || { echo "❌ Failed to generate MinIO keys"; exit 1; }
+  # Step 2: Echo MinIO keys
+  echo_minio_ak_sk || { echo "❌ Failed to echo MinIO keys"; exit 1; }
 
   # Step 3: Try to generate Elasticsearch API key (optional)
   echo ""

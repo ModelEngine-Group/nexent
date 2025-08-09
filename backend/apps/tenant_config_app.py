@@ -8,10 +8,27 @@ from utils.auth_utils import get_current_user_id
 from fastapi.responses import JSONResponse
 
 from utils.auth_utils import get_current_user_id
-from consts.const import ELASTICSEARCH_SERVICE
+from consts.const import ELASTICSEARCH_SERVICE, DEPLOYMENT_VERSION
 
 logger = logging.getLogger("tenant_config_app")
 router = APIRouter(prefix="/tenant_config")
+
+@router.get("/deployment_version")
+def get_deployment_version():
+    """
+    Get current deployment version (speed or full)
+    """
+    try:
+        return JSONResponse(
+            status_code=200,
+            content={"deployment_version": DEPLOYMENT_VERSION, "status": "success"}
+        )
+    except Exception as e:
+        logger.error(f"Failed to get deployment version, error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Failed to get deployment version", "status": "error"}
+        )
 
 @router.get("/load_knowledge_list")
 def load_knowledge_list(

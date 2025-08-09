@@ -63,6 +63,32 @@ get_compose_version() {
     return 1
 }
 
+# Function to install Supabase services based on DEPLOYMENT_VERSION
+install_supabase_services() {
+    # Only install docker-compose-supabase if DEPLOYMENT_VERSION is "full"
+    if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+        echo "🎯 Full version detected - installing Supabase services..."
+        
+        # Check if the supabase compose file exists
+        if [ ! -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" ]; then
+            echo "❌ ERROR Supabase compose file not found: docker-compose-supabase${COMPOSE_FILE_SUFFIX}"
+            ERROR_OCCURRED=1
+            return 1
+        fi
+        
+        # Start Supabase services
+        if ! docker-compose -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
+            echo "❌ ERROR Failed to start supabase services"
+            ERROR_OCCURRED=1
+            return 1
+        fi
+        
+        echo "✅ Supabase services started successfully"
+    else
+        echo "⚡ Speed version detected - skipping Supabase services"
+    fi
+}
+
 # 获取版本信息
 # get docker compose version
 version_info=$(get_compose_version)
@@ -119,6 +145,7 @@ select_deployment_mode() {
     case $mode_choice in
         2)
             export DEPLOYMENT_MODE="infrastructure"
+            export COMPOSE_FILE_SUFFIX=".yml"
             echo "✅ Selected infrastructure mode 🏗️"
             ;;
         3)
@@ -243,17 +270,12 @@ install() {
     return 1
   fi
 
-  # Only install docker-compose-supabase if DEPLOYMENT_VERSION is "full"
-  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    echo "🎯 Full version detected - installing Supabase services..."
-    if ! docker-compose -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
-      echo "❌ ERROR Failed to start supabase services"
-      ERROR_OCCURRED=1
-      return 1
-    fi
-  else
-    echo "⚡ Speed version detected - skipping Supabase services"
-  fi
+  # Install Supabase services based on deployment version
+  install_supabase_services || {
+    echo "❌ ERROR Supabase services installation failed"
+    ERROR_OCCURRED=1
+    return 1
+  }
 
   echo ""
   echo "--------------------------------"
@@ -671,6 +693,48 @@ generate_ssh_keys() {
     fi
 }
 
+generate_minio_ak_sk() {
+  echo "🔑 Generating MinIO access keys..."
+
+  if [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "mingw" ] || [ "$(uname -s | tr '[:upper:]' '[:lower:]')" = "msys" ]; then
+    # Windows
+    ACCESS_KEY=$(powershell -Command "[System.Convert]::ToBase64String([System.Guid]::NewGuid().ToByteArray()) -replace '[^a-zA-Z0-9]', '' -replace '=.+$', '' | Select-Object -First 12")
+    SECRET_KEY=$(powershell -Command '$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $bytes = New-Object byte[] 32; $rng.GetBytes($bytes); [System.Convert]::ToBase64String($bytes)')
+  else
+    # Linux/Mac
+    # Generate a random AK (12-character alphanumeric) and clean it
+    ACCESS_KEY=$(openssl rand -hex 12 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9]//g')
+
+    # Generate a random SK (32-character high-strength random string) and clean it
+    SECRET_KEY=$(openssl rand -base64 32 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9+/=]//g')
+  fi
+
+  if [ -z "$ACCESS_KEY" ] || [ -z "$SECRET_KEY" ]; then
+    echo "❌ ERROR Failed to generate MinIO access keys"
+    ERROR_OCCURRED=1
+    return 1
+  fi
+
+  export MINIO_ACCESS_KEY=$ACCESS_KEY
+  export MINIO_SECRET_KEY=$SECRET_KEY
+
+  if grep -q "^MINIO_ACCESS_KEY=" .env; then
+    sed -i.bak "s~^MINIO_ACCESS_KEY=.*~MINIO_ACCESS_KEY=$ACCESS_KEY~" .env
+    rm .env.bak
+  else
+    echo "MINIO_ACCESS_KEY=$ACCESS_KEY" >> .env
+  fi
+
+  if grep -q "^MINIO_SECRET_KEY=" .env; then
+    sed -i.bak "s~^MINIO_SECRET_KEY=.*~MINIO_SECRET_KEY=$SECRET_KEY~" .env
+    rm .env.bak
+  else
+    echo "MINIO_SECRET_KEY=$SECRET_KEY" >> .env
+  fi
+
+  echo "✅ MinIO access keys generated successfully"
+}
+
 # Main execution flow
 echo  "🚀  Nexent Deployment Script"
 echo ""
@@ -722,6 +786,12 @@ main_deploy() {
       echo "❌ ERROR Failed to start infrastructure services"
       exit 1
     fi
+    
+    # Install Supabase services based on deployment version
+    install_supabase_services || {
+      echo "❌ ERROR Supabase services installation failed"
+      exit 1
+    }
     
     # Wait for services to be healthy, then generate complete environment
     echo "🔑 Generating complete environment file with all keys..."

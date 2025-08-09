@@ -3,8 +3,8 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import Header, Request
-from consts.const import DEFAULT_USER_ID, DEFAULT_TENANT_ID
+from fastapi import Request, HTTPException
+from consts.const import DEFAULT_USER_ID, DEFAULT_TENANT_ID, IS_SPEED_MODE
 import jwt
 from supabase import create_client
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -82,6 +82,11 @@ def get_current_user_id_from_token(authorization: str) -> Optional[str]:
     Returns:
         Optional[str]: User ID, return None if parsing fails
     """
+    # 当IS_SPEED_MODE为True时，直接返回默认用户ID
+    if IS_SPEED_MODE:
+        logging.debug("Speed mode detected - returning default user ID")
+        return DEFAULT_USER_ID
+    
     try:
         # 格式化授权头部
         token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
@@ -95,7 +100,7 @@ def get_current_user_id_from_token(authorization: str) -> Optional[str]:
         return user_id
     except Exception as e:
         logging.error(f"Failed to extract user ID from token: {str(e)}")
-        return DEFAULT_USER_ID
+        raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
 
 
 def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
@@ -108,13 +113,15 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     Returns:
         tuple[str, str]: (user_id, tenant_id)
     """
-    if authorization is None or authorization == Header(None):
+    # 当IS_SPEED_MODE为True时，直接返回默认值
+    if IS_SPEED_MODE:
+        logging.debug("Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
     try:
         user_id = get_current_user_id_from_token(str(authorization))
         if not user_id:
-            return DEFAULT_USER_ID, DEFAULT_TENANT_ID
+            raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
 
         user_tenant_record = get_user_tenant_by_user_id(user_id)
         if user_tenant_record and user_tenant_record.get('tenant_id'):
@@ -128,7 +135,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
 
     except Exception as e:
         logging.error(f"Failed to get user ID and tanent ID: {str(e)}")
-        return DEFAULT_USER_ID, DEFAULT_TENANT_ID
+        raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
 
 
 def get_user_language(request: Request = None) -> str:

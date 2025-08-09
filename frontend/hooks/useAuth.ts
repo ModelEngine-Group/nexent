@@ -9,6 +9,7 @@ import { User, AuthContextType } from "@/types/auth"
 import { EVENTS, STATUS_CODES } from "@/types/auth"
 import { usePathname } from "next/navigation"
 import { useTranslation } from "react-i18next"
+import { API_ENDPOINTS } from "@/services/api"
 
 // 创建认证上下文
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -24,6 +25,8 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
   const [isCheckingSession, setIsCheckingSession] = useState(false)
   const [shouldCheckSession, setShouldCheckSession] = useState(false)
   const [authServiceUnavailable, setAuthServiceUnavailable] = useState(false)
+  const [isSpeedMode, setIsSpeedMode] = useState(false)
+  const [isReady, setIsReady] = useState(false)
   const pathname = usePathname()
 
   // 检查认证服务可用性
@@ -39,6 +42,40 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
       checkAuthService()
     }
   }, [isLoginModalOpen, isRegisterModalOpen])
+
+  // Check deployment version and handle speed mode
+  const checkDeploymentVersion = async () => {
+    try {
+      setIsReady(false);
+      const response = await fetch(API_ENDPOINTS.tenantConfig.deploymentVersion);
+      if (response.ok) {
+        const data = await response.json();
+        const version = data.content?.deployment_version || data.deployment_version;
+        
+        setIsSpeedMode(version === 'speed');
+        
+        // If in speed mode and no user exists, perform auto login
+        if (version === 'speed' && !user) {
+          await performAutoLogin();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check deployment version:', error);
+      setIsSpeedMode(false);
+    } finally {
+      setIsReady(true);
+    }
+  };
+
+  // Auto login function (for speed mode)
+  const performAutoLogin = async () => {
+    try {
+      // Use mock credentials for auto login
+      await login('mock@example.com', 'mockpassword', false);
+    } catch (error) {
+      console.error('Auto-login failed:', error);
+    }
+  };
 
   // 初始化时检查用户会话（只从本地读取，不主动请求后端）
   useEffect(() => {
@@ -81,6 +118,11 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
       window.removeEventListener("storage", handleStorage);
     };
   }, []);
+
+  // 检查部署版本
+  useEffect(() => {
+    checkDeploymentVersion();
+  }, []); // 当用户状态变化时重新检查
 
   // 检查用户登录状态
   useEffect(() => {
@@ -161,7 +203,7 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
     setIsRegisterModalOpen(false)
   }
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, showSuccessMessage: boolean = true) => {
     try {
       setIsLoading(true)
       
@@ -195,7 +237,10 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
         setTimeout(() => {
           configService.loadConfigToFrontend()
           closeLoginModal()
-          message.success(t('auth.loginSuccess'))
+
+          if (showSuccessMessage) {
+            message.success(t('auth.loginSuccess'))
+          }
           // 主动触发 storage 事件
           window.dispatchEvent(new StorageEvent("storage", { key: "session", newValue: localStorage.getItem("session") }))
           
@@ -288,6 +333,8 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
     isRegisterModalOpen,
     isFromSessionExpired,
     authServiceUnavailable,
+    isSpeedMode,
+    isReady,
     openLoginModal,
     closeLoginModal,
     openRegisterModal,

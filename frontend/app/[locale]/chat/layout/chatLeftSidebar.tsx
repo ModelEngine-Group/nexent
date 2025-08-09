@@ -25,7 +25,6 @@ import { getRoleColor } from "@/lib/auth"
 import { useAuth } from "@/hooks/useAuth"
 import { extractColorsFromUri } from "@/lib/avatar"
 import { useTranslation } from "react-i18next"
-import { useUrlParams, urlParamTransforms } from "@/hooks/useUrlParams"
 
 // conversation status indicator component
 const ConversationStatusIndicator = ({ 
@@ -129,7 +128,7 @@ export function ChatSidebar({
   const inputRef = useRef<HTMLInputElement>(null);
 
    // 获取用户认证状态
-  const { isLoading: userAuthLoading } = useAuth();
+  const { isLoading: userAuthLoading, isSpeedMode } = useAuth();
 
   // Add delete dialog status
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -377,7 +376,7 @@ export function ChatSidebar({
               <Spin size="default" />
             </div>
           </div>
-        ) : (
+        ) : !isSpeedMode ? (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -400,30 +399,28 @@ export function ChatSidebar({
               )}
             </Tooltip>
           </TooltipProvider>
-        )}
+        ) : null}
 
         {/* Settings button */}
-        {!hideSettings && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex justify-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 rounded-full hover:bg-slate-100"
-                    onClick={onSettingsClick}
-                  >
-                    <Settings className="h-6 w-6" />
-                  </Button>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {t('chatLeftSidebar.settings')}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 rounded-full hover:bg-slate-100"
+                  onClick={onSettingsClick}
+                >
+                  <Settings className="h-6 w-6" />
+                </Button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {t('chatLeftSidebar.settings')}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </>
     );
   };
@@ -509,7 +506,7 @@ export function ChatSidebar({
                   {t('common.loading')}
                 </span>
               </div>
-            ) : (
+            ) : !isSpeedMode ? (
               <ConfigProvider getPopupContainer={() => document.body}>
                 <div className="flex items-center py-1 px-2">
                   <div className="h-8 w-8 rounded-full overflow-hidden mr-2">
@@ -544,7 +541,7 @@ export function ChatSidebar({
                   </div>
                 </div>
               </ConfigProvider>
-            )}
+            ) : null}
             <Button
               variant="ghost"
               size="icon"
