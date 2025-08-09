@@ -56,10 +56,10 @@ class STTConfig(BaseModel):
     token: str
     ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
     uid: str = "streaming_asr_demo"
-    format: str = "wav"
+    format: str = "pcm"
     rate: int = 16000
     bits: int = 16
-    channel: int = 2
+    channel: int = 1
     codec: str = "raw"
     seg_duration: int = 10
     mp3_seg_size: int = 1000
@@ -107,6 +107,8 @@ class STTModel:
         header.append((serial_method << 4) | compression_type)
         header.append(reserved_data)
         return header
+
+
 
     @staticmethod
     def generate_before_payload(sequence: int):
@@ -240,7 +242,7 @@ class STTModel:
             "request": {"model_name": "bigmodel", "enable_punc": True, # "result_type": "single",
                 # "vad_segment_duration": 800,
             }}
-        logger.info(f"req: {req}", end="\n\n")
+        logger.info(f"req: {req}\n")
         return req
 
     async def process_audio_data(self, audio_data: bytes, segment_size: int) -> Dict[str, Any]:
@@ -642,11 +644,97 @@ class STTModel:
             bool: True if connection successful, False otherwise
         """
         try:
+            logger.info(f"STT connectivity test started with config: ws_url={self.config.ws_url}, format={self.config.format}")
+            logger.info(f"Test voice file path: {self.test_voice_path}")
+            
             result = await self.process_audio_file(self.test_voice_path)
-            # Check if the return result is a dictionary type and non-empty
-            return isinstance(result, dict) and bool(result)
-        except Exception:
+            logger.info(f"STT process_audio_file result: {result}")
+            
+            # Check if the return result indicates success
+            is_success = self._is_stt_result_successful(result)
+            
+            if is_success:
+                logger.info("STT connectivity test successful")
+            else:
+                error_msg = self._extract_stt_error_message(result)
+                logger.error(f"STT connectivity test failed with error: {error_msg}")
+            
+            return is_success
+        except Exception as e:
+            logger.error(f"STT connectivity test failed with exception: {str(e)}")
+            import traceback
+            logger.error(f"STT connectivity test exception traceback: {traceback.format_exc()}")
             return False
+
+    def _is_stt_result_successful(self, result) -> bool:
+        """
+        Check if STT result indicates a successful recognition
+        
+        Args:
+            result: STT processing result
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not isinstance(result, dict) or not result:
+            return False
+            
+        # Check for direct error field
+        if 'error' in result:
+            return False
+            
+        # Check for error code (STT service uses codes like 45000081 for errors)
+        if 'code' in result and result['code'] != 1000:  # 1000 is success code
+            return False
+            
+        # Check for nested error in payload_msg
+        if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
+            if 'error' in result['payload_msg']:
+                return False
+                
+        # For a successful STT result, we expect either:
+        # 1. A payload_msg with result.text, or
+        # 2. No error indicators
+        payload_msg = result.get('payload_msg', {})
+        if isinstance(payload_msg, dict):
+            # If there's a result field, check if it contains valid text
+            if 'result' in payload_msg:
+                return True  # Even empty text can be valid for connectivity test
+                
+        # If no obvious errors and it's a valid dict, consider it successful
+        return True
+
+    def _extract_stt_error_message(self, result) -> str:
+        """
+        Extract error message from STT result
+        
+        Args:
+            result: STT processing result
+            
+        Returns:
+            str: Error message
+        """
+        if not isinstance(result, dict):
+            return f"Invalid result type: {type(result)}"
+            
+        # Check for direct error field
+        if 'error' in result:
+            return str(result['error'])
+            
+        # Check for error code with message
+        if 'code' in result and result['code'] != 1000:
+            error_msg = f"STT service error code: {result['code']}"
+            if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
+                if 'error' in result['payload_msg']:
+                    error_msg += f" - {result['payload_msg']['error']}"
+            return error_msg
+            
+        # Check for nested error in payload_msg
+        if 'payload_msg' in result and isinstance(result['payload_msg'], dict):
+            if 'error' in result['payload_msg']:
+                return str(result['payload_msg']['error'])
+                
+        return f"Unknown error in result: {result}"
 
 
 async def process_audio_item(audio_item: Dict[str, Any], config: STTConfig, test_voice_path: str) -> Dict[str, Any]:

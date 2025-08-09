@@ -1,9 +1,6 @@
 import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallback, useRef } from 'react';
-import { message } from 'antd';
 import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
-import { API_ENDPOINTS } from '@/services/api';
-import knowledgeBasePollingService from '@/services/knowledgeBasePollingService';
 import UploadAreaUI from './UploadAreaUI';
 import { 
   checkKnowledgeBaseName,

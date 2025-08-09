@@ -68,7 +68,7 @@ const HoverableText = ({ text, searchResults }: {
   searchResults?: SearchResult[]
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  const containerRef = React.useRef<HTMLSpanElement>(null);
   const tooltipRef = React.useRef<HTMLDivElement>(null);
   const mousePositionRef = React.useRef({ x: 0, y: 0 });
 
@@ -205,7 +205,7 @@ const HoverableText = ({ text, searchResults }: {
   return (
     <TooltipProvider>
       <Tooltip open={isOpen}>
-        <div
+        <span
           ref={containerRef}
           className="inline-flex items-center relative"
           style={{ zIndex: isOpen ? 1000 : 'auto' }}
@@ -289,7 +289,7 @@ const HoverableText = ({ text, searchResults }: {
               </div>
             </TooltipContent>
           </TooltipPrimitive.Portal>
-        </div>
+        </span>
       </Tooltip>
     </TooltipProvider>
   );

@@ -7,7 +7,7 @@ import { formatFileSize, formatDateTime, sortByStatusAndDate } from '@/lib/utils
 import { Input, Button, Tooltip } from 'antd'
 import { useKnowledgeBaseContext } from '../knowledgeBase/KnowledgeBaseContext'
 import { useDocumentContext } from './DocumentContext'
-import { message } from 'antd'
+import { App } from 'antd'
 import knowledgeBaseService from '@/services/knowledgeBaseService'
 import { useTranslation } from 'react-i18next'
 
@@ -108,6 +108,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
   isUploading = false,
   uploadUrl = '/api/upload'
 }, ref) => {
+  const { message } = App.useApp();
   const uploadAreaRef = useRef<any>(null);
   const { state: docState } = useDocumentContext();
   

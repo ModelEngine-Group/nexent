@@ -1,4 +1,4 @@
-import { Modal, Select, Input, Button, message, Switch, Tooltip } from 'antd'
+import { Modal, Select, Input, Button, Switch, Tooltip, App } from 'antd'
 import { InfoCircleFilled, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, RightOutlined, DownOutlined } from '@ant-design/icons'
 import { useState, useEffect } from 'react'
 import { ModelType, SingleModelConfig, ModelConnectStatus } from '@/types/config'
@@ -25,6 +25,7 @@ type ConnectivityStatusType = "checking" | "available" | "unavailable" | null;
 
 export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogProps) => {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const { updateModelConfig } = useConfig()
   const [form, setForm] = useState({
     type: "llm" as ModelType,

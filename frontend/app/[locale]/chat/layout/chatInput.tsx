@@ -531,30 +531,61 @@ export function ChatInput({
       setIsRecording(false)
       setRecordingStatus("idle")
     } else {
+      let stream: MediaStream | null = null;
+      let audioContext: AudioContext | null = null;
+      let audioSource: MediaStreamAudioSourceNode | null = null;
+      let processor: ScriptProcessorNode | null = null;
+      
       try {
         setRecordingStatus("connecting")
+        console.log('🎤 Starting voice recording...')
 
+        // 1. Request microphone permission
         const audioConstraints = conversationService.stt.getAudioConstraints()
-        const stream = await navigator.mediaDevices.getUserMedia(audioConstraints)
+        console.log('📋 Audio constraints:', audioConstraints)
+        
+        stream = await navigator.mediaDevices.getUserMedia(audioConstraints)
+        console.log('✅ Microphone access granted')
 
-        const audioContext = new AudioContext(conversationService.stt.getAudioContextOptions())
-        const audioSource = audioContext.createMediaStreamSource(stream)
-        const processor = audioContext.createScriptProcessor(4096, 1, 1)
+        // 2. Create audio processing chain
+        audioContext = new AudioContext(conversationService.stt.getAudioContextOptions())
+        console.log('🔊 AudioContext created, state:', audioContext.state)
+        
+        // Resume AudioContext if suspended (browser policy)
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume()
+          console.log('▶️ AudioContext resumed')
+        }
+
+        audioSource = audioContext.createMediaStreamSource(stream)
+        processor = audioContext.createScriptProcessor(4096, 1, 1)
 
         audioSource.connect(processor)
         processor.connect(audioContext.destination)
+        console.log('🔗 Audio processing chain connected')
 
+        // 3. Create MediaRecorder
         const mediaRecorder = new MediaRecorder(stream)
         mediaRecorderRef.current = mediaRecorder
 
+        // 4. Create WebSocket connection
         const ws = conversationService.stt.createWebSocket()
         socketRef.current = ws
+        console.log('🌐 WebSocket connection initiated')
 
         ws.onopen = () => {
-          console.log(t("chatInput.wsConnectionEstablished"))
+          console.log('✅ WebSocket connected:', t("chatInput.wsConnectionEstablished"))
           setIsRecording(true)
           setRecordingStatus("recording")
-          mediaRecorder.start(250)
+          try {
+            mediaRecorder.start(250)
+            console.log('🎬 Recording started successfully')
+          } catch (error) {
+            console.error('❌ Failed to start MediaRecorder:', error)
+            setRecordingStatus("error")
+            setIsRecording(false)
+            cleanup()
+          }
         }
 
         ws.onmessage = (event) => {
@@ -565,56 +596,115 @@ export function ChatInput({
               onInputChange(response.result.text)
             } else if (response.text) {
               onInputChange(response.text)
+            } else if (response.status === 'ready') {
+              console.log('🎯 STT service ready')
+            } else if (response.error) {
+              console.error('❌ STT service error:', response.error)
+              setRecordingStatus("error")
+              setIsRecording(false)
+              cleanup()
             }
           } catch (error) {
-            console.error(t("chatInput.wsParseError"), error)
+            console.error('⚠️ Failed to parse STT response:', error)
           }
         }
 
         ws.onerror = (error) => {
-          console.error(t("chatInput.wsError"), error)
+          console.error('❌ WebSocket error:', error)
           setRecordingStatus("error")
           setIsRecording(false)
           cleanup()
         }
 
-        ws.onclose = () => {
-          console.log(t("chatInput.wsConnectionClosed"))
+        ws.onclose = (event) => {
+          console.log('🔌 WebSocket closed:', event.code, event.reason)
           setIsRecording(false)
           setRecordingStatus("idle")
           cleanup()
         }
 
         processor.onaudioprocess = (e) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const inputData = e.inputBuffer.getChannelData(0)
-            const pcmData = conversationService.stt.processAudioData(inputData)
+          try {
+            if (ws.readyState === WebSocket.OPEN) {
+              const inputData = e.inputBuffer.getChannelData(0)
+              const pcmData = conversationService.stt.processAudioData(inputData)
 
-            if (pcmData.length > 0) {
-              ws.send(pcmData.buffer)
+              if (pcmData.length > 0) {
+                ws.send(pcmData.buffer)
+              }
+            } else {
+              console.warn(`⚠️ WebSocket not ready, state: ${ws.readyState}`)
             }
+          } catch (error) {
+            console.error('❌ Error in audio processing:', error)
+            setRecordingStatus("error")
+            setIsRecording(false)
+            cleanup()
           }
         }
 
         mediaRecorder.onstop = () => {
+          console.log('⏹️ Recording stopped')
           cleanup()
           setIsRecording(false)
           setRecordingStatus("idle")
         }
 
         function cleanup() {
-          stream.getTracks().forEach(track => track.stop())
-          audioSource.disconnect()
-          processor.disconnect()
+          console.log('🧹 Cleaning up audio resources...')
+          console.trace('📍 Cleanup called from:')
+          
+          if (stream) {
+            stream.getTracks().forEach(track => {
+              track.stop()
+              console.log('🛑 Audio track stopped')
+            })
+          }
+          
+          if (audioSource) {
+            try {
+              audioSource.disconnect()
+              console.log('🔌 Audio source disconnected')
+            } catch (e) {
+              console.warn('⚠️ Error disconnecting audio source:', e)
+            }
+          }
+          
+          if (processor) {
+            try {
+              processor.disconnect()
+              console.log('🔌 Processor disconnected')
+            } catch (e) {
+              console.warn('⚠️ Error disconnecting processor:', e)
+            }
+          }
+          
+          if (audioContext && audioContext.state !== 'closed') {
+            try {
+              audioContext.close()
+              console.log('🔌 AudioContext closed')
+            } catch (e) {
+              console.warn('⚠️ Error closing AudioContext:', e)
+            }
+          }
 
-          if (ws.readyState === WebSocket.OPEN) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
             ws.close()
+            console.log('🔌 WebSocket closed by cleanup')
           }
         }
 
       } catch (error) {
-        console.error(t("chatInput.micPermissionFailed"), error)
+        console.error('❌ Failed to start recording:', error)
         setRecordingStatus("error")
+        
+        // Manual cleanup in case of initialization failure
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop())
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+          audioContext.close()
+        }
       }
     }
   }

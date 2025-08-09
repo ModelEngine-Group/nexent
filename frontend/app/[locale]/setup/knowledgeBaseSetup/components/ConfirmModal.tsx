@@ -1,5 +1,5 @@
 import React from 'react'
-import { Modal } from 'antd'
+import { Modal, App } from 'antd'
 import { useTranslation } from 'react-i18next'
 import i18next from 'i18next'
 
@@ -24,13 +24,8 @@ interface StaticConfirmProps {
   onCancel?: () => void
 }
 
-// 创建扩展了静态方法的接口
-interface ConfirmModalComponent extends React.FC<ConfirmModalProps> {
-  confirm: (props: StaticConfirmProps) => ReturnType<typeof Modal.confirm>
-}
-
 // 组件定义
-const ConfirmModal: ConfirmModalComponent = ({ 
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ 
   title,
   content,
   okText,
@@ -57,25 +52,31 @@ const ConfirmModal: ConfirmModalComponent = ({
   )
 }
 
-// 静态方法
-ConfirmModal.confirm = ({
-  title,
-  content,
-  okText,
-  cancelText,
-  danger = false,
-  onConfirm,
-  onCancel
-}: StaticConfirmProps) => {
-  return Modal.confirm({
+// 提供一个 hook 来获取 confirm 方法
+export const useConfirmModal = () => {
+  const { modal } = App.useApp()
+  
+  const confirm = ({
     title,
     content,
-    okText: okText || i18next.t('common.confirm'),
-    cancelText: cancelText || i18next.t('common.cancel'),
-    okButtonProps: { danger },
-    onOk: onConfirm,
+    okText,
+    cancelText,
+    danger = false,
+    onConfirm,
     onCancel
-  })
+  }: StaticConfirmProps) => {
+    return modal.confirm({
+      title,
+      content,
+      okText: okText || i18next.t('common.confirm'),
+      cancelText: cancelText || i18next.t('common.cancel'),
+      okButtonProps: { danger },
+      onOk: onConfirm,
+      onCancel
+    })
+  }
+  
+  return { confirm }
 }
 
-export default ConfirmModal 
+export default ConfirmModal

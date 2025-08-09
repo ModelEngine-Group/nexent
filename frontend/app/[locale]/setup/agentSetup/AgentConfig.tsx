@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import BusinessLogicConfig from './AgentManagementConfig'
 import DebugConfig from './DebugConfig'
 import GuideSteps from './components/GuideSteps'
-import { Row, Col, Drawer, message } from 'antd'
+import { Row, Col, Drawer, App } from 'antd'
 import { fetchTools, fetchAgentList, fetchAgentDetail, exportAgent, deleteAgent, updateAgent } from '@/services/agentConfigService'
 import { generatePromptStream } from '@/services/promptService'
 import { OpenAIModel } from '@/app/setup/agentSetup/ConstInterface'
@@ -30,6 +30,7 @@ const LAYOUT_CONFIG = {
  */
 export default function AgentConfig() {
   const { t } = useTranslation('common')
+  const { message } = App.useApp()
   const [businessLogic, setBusinessLogic] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("")
   const [selectedAgents, setSelectedAgents] = useState<any[]>([])

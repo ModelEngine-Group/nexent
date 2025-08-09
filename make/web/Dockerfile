@@ -22,7 +22,7 @@ RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
     "start": "NODE_ENV=production HOSTNAME=localhost node server.js"\
   },\
   "dependencies": {\
-    "next": "14.2.5",\
+    "next": "15.4.5",\
     "react": "18.2.0",\
     "react-dom": "18.2.0",\
     "http-proxy": "^1.18.1",\
