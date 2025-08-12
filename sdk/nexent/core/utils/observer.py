@@ -135,6 +135,12 @@ class MessageObserver:
         # code block marker mode
         self.code_pattern = re.compile(r"(代码|Code)([：:])\s*```")
 
+        # think tag state management for real-time processing
+        self.think_buffer = deque()
+        self.in_think_mode = False
+        self.think_start_pattern = re.compile(r"<think>")
+        self.think_end_pattern = re.compile(r"</think>")
+
     def _init_message_transformers(self):
         """initialize the mapping of message type to transformer"""
         default_transformer = DefaultTransformer()
@@ -157,13 +163,71 @@ class MessageObserver:
 
     def add_model_new_token(self, new_token):
         """
-        get the streaming output of the model, use the double-ended queue to analyze and classify tokens in real time
+        Process streaming tokens with real-time think tag detection and content classification
         """
+        # Add token to think buffer
+        self.think_buffer.append(new_token)
+        
+        # Check for think tag patterns in the buffer
+        buffer_text = ''.join(self.think_buffer)
+        
+        # Check for think start tag
+        if not self.in_think_mode:
+            start_match = self.think_start_pattern.search(buffer_text)
+            if start_match:
+                # Found <think> tag, switch to think mode
+                self.in_think_mode = True
+                # Clear buffer and keep only content after <think>
+                self.think_buffer.clear()
+                think_content = buffer_text[start_match.end():]
+                if think_content:
+                    self.think_buffer.extend(think_content)
+        
+        # Check for think end tag
+        if self.in_think_mode:
+            end_match = self.think_end_pattern.search(buffer_text)
+            if end_match:
+                # Found </think> tag, exit think mode
+                self.in_think_mode = False
+                # Process think content before </think>
+                think_content = buffer_text[:end_match.start()]
+                if think_content:
+                    self.message_query.append(
+                        Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
+                
+                # Process content after </think> as normal content
+                after_think = buffer_text[end_match.end():]
+                if after_think:
+                    self._process_normal_content(after_think)
+                self.think_buffer.clear()
+        
+        # Manage buffer size to prevent memory issues
+        max_buffer_size = 10
+        if len(self.think_buffer) > max_buffer_size:
+            if self.in_think_mode:
+                # In think mode, output accumulated content as deep thinking
+                think_content = ''.join(list(self.think_buffer)[:5])
+                self.message_query.append(
+                    Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_content).to_json())
+                # Remove processed content
+                for _ in range(5):
+                    self.think_buffer.popleft()
+            else:
+                # Not in think mode, output accumulated content as normal
+                normal_content = ''.join(list(self.think_buffer)[:5])
+                self._process_normal_content(normal_content)
+                # Remove processed content
+                for _ in range(5):
+                    self.think_buffer.popleft()
 
-        # add the new token to the buffer
-        self.token_buffer.append(new_token)
-
-        # concatenate the buffer into text for checking
+    def _process_normal_content(self, content):
+        """
+        Process normal content (non-deep-think content) for code block detection
+        """
+        for token in content:
+            self.token_buffer.append(token)
+        
+        # concatenate the buffer into text for checking code blocks
         buffer_text = ''.join(self.token_buffer)
 
         # find the code block marker
@@ -198,26 +262,38 @@ class MessageObserver:
             self.token_buffer.clear()
         else:
             # not found the code block marker, pop the first token from the queue (if the buffer length exceeds a certain size)
-            max_buffer_size = 10  # set the maximum buffer size, can be adjusted according to needs
-            while len(self.token_buffer) > max_buffer_size:
-                oldest_token = self.token_buffer.popleft()
+            if len(self.token_buffer) >= 5:
+                # Send accumulated content when threshold is reached
+                buffer_text = ''.join(self.token_buffer)
                 self.message_query.append(
-                    Message(self.current_mode, oldest_token).to_json())
+                    Message(self.current_mode, buffer_text).to_json())
+                self.token_buffer.clear()
 
     def flush_remaining_tokens(self):
         """
         send the remaining tokens in the double-ended queue
         """
-        if not self.token_buffer:
-            return
-
-        # concatenate the buffer into text
-        buffer_text = ''.join(self.token_buffer)
-        self.message_query.append(
-            Message(self.current_mode, buffer_text).to_json())
-
-        # clear the buffer
-        self.token_buffer.clear()
+        # Process remaining think buffer content
+        if self.think_buffer:
+            think_buffer_text = ''.join(self.think_buffer)
+            if self.in_think_mode:
+                # Still in think mode, remove any think tags and process as deep thinking
+                think_buffer_text = re.sub(r"<think>|</think>", "", think_buffer_text)
+                if think_buffer_text:
+                    self.message_query.append(
+                        Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_buffer_text).to_json())
+            else:
+                # Not in think mode, process as normal content
+                if think_buffer_text:
+                    self._process_normal_content(think_buffer_text)
+            self.think_buffer.clear()
+        
+        # Process remaining normal buffer content
+        if self.token_buffer:
+            buffer_text = ''.join(self.token_buffer)
+            self.message_query.append(
+                Message(self.current_mode, buffer_text).to_json())
+            self.token_buffer.clear()
 
     def add_message(self, agent_name, process_type, content, **kwargs):
         """add message to the queue"""
@@ -227,6 +303,14 @@ class MessageObserver:
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
         self.message_query.append(
             Message(process_type, formatted_content).to_json())
+
+    def add_model_reasoning_content(self, reasoning_content):
+        """
+        Handle reasoning content from the model with type MODEL_OUTPUT_DEEP_THINKING
+        """
+        if reasoning_content:
+            self.message_query.append(
+                Message(ProcessType.MODEL_OUTPUT_DEEP_THINKING, reasoning_content).to_json())
 
     def get_cached_message(self):
         cached_message = self.message_query

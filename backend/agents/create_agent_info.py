@@ -31,14 +31,12 @@ async def create_model_config_list(tenant_id):
                         api_key=main_model_config.get("api_key", ""),
                         model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
                             "model_name") else "",
-                        url=main_model_config.get("base_url", ""),
-                        is_deep_thinking=main_model_config.get("is_deep_thinking", False)),
+                        url=main_model_config.get("base_url", "")),
             ModelConfig(cite_name="sub_model",
                         api_key=sub_model_config.get("api_key", ""),
                         model_name=get_model_name_from_config(sub_model_config) if sub_model_config.get(
                             "model_name") else "",
-                        url=sub_model_config.get("base_url", ""),
-                        is_deep_thinking=sub_model_config.get("is_deep_thinking", False))]
+                        url=sub_model_config.get("base_url", ""))]
 
 
 async def create_agent_config(agent_id, tenant_id, user_id, language: str = 'zh', last_user_query: str = None):

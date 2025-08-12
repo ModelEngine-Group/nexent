@@ -165,7 +165,6 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "used_token" int4,
   "display_name" varchar(100) COLLATE "pg_catalog"."default",
   "connect_status" varchar(100) COLLATE "pg_catalog"."default",
-  "is_deep_thinking" BOOLEAN DEFAULT FALSE,
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,

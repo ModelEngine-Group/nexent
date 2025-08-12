@@ -132,7 +132,6 @@ class ModelRecord(TableBase):
     used_token = Column(Integer, doc="Number of tokens already used by the model in Q&A")
     display_name = Column(String(100), doc="Model name directly displayed on the frontend, customized by the user")
     connect_status = Column(String(100), doc="Model connectivity status of the latest detection. Optional values: Detecting, Available, Unavailable")
-    is_deep_thinking = Column(Boolean, doc="Whether the model opens up deep thinking")
     tenant_id = Column(String(100), doc="Tenant ID for filtering")
     create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
     delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
