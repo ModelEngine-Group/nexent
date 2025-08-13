@@ -50,17 +50,31 @@ To improve import efficiency, Nexent provides a batch model import feature.
   <img src="./assets/model/add-model-batch.png" style="width: 50%; height: auto;" />
 </div>
 
-## 🗑️ Delete Custom Models
+🔧 Edit Custom Models
 
-If you need to remove unused models, follow these steps:
+When you need to edit model configurations or delete models you no longer use, follow these steps:
 
-1. Click the "Delete Custom Model" button.
-2. Select the model type to delete (LLM/Vector/Visual).
-3. Click the delete button 🗑️ to remove the selected model.
+1. Click the "Edit Custom Models" button.
+2. Select the model type to edit or delete (LLM/Vector/Visual).
+3. Choose whether to batch edit models or edit a single-instance custom model.
+4. For batch edits, you can toggle model switches and add or remove models. Click the "Edit Configuration" button in the top-right to apply configuration edits to the selected models in bulk.
+5. If you are editing a single-instance custom model, click the delete button 🗑️ to remove the target model. To edit its configuration, click the model name to open the edit dialog.
+
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model/delete-model-1.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model/delete-model-2.png" style="width: 50%; height: 80%;" />
+  <img src="./assets/model/edit-model-1.png" style="width: 50%; height: 100%;" />
+  <img src="./assets/model/edit-model-2.png" style="width: 50%; height: 80%;" />
 </div>
+<br>
+<div style="display: flex; gap: 8px;">
+  <img src="./assets/model/edit-model-3.png" style="width: 50%; height: 100%;" />
+  <img src="./assets/model/edit-model-4.png" style="width: 50%; height: 80%;" />
+</div>
+<br>
+<div style="display: flex; gap: 8px;">
+  <img src="./assets/model/edit-model-5.png" style="width: 50%; height: 100%;" />
+  <img src="./assets/model/edit-model-6.png" style="width: 50%; height: 80%;" />
+</div>
+
 
 ## ⚙️ Configure System Models
 

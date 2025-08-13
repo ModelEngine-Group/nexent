@@ -50,15 +50,27 @@ Nexent即将支持与ModelEngine平台的无缝对接，届时可自动同步并
   <img src="./assets/model/add-model-batch.png" style="width: 50%; height: auto;" />
 </div>
 
-## 🗑️ 删除自定义模型
-当您需要清理不再使用的模型时，可以通过以下步骤删除模型：
+## 🔧 修改自定义模型
+当您需要修改模型配置或删除不再使用的模型时，可以通过以下步骤进行操作：
 
-1. 点击“删除自定义模型”按钮。
-2. 选择要删除的模型类型（大语言模型/向量化模型/视觉模型）。
-3. 点击删除按钮 🗑️ ，即可删除目标模型。
+1. 点击“修改自定义模型”按钮。
+2. 选择要修改或删除的模型类型（大语言模型/向量化模型/视觉模型）。
+3. 选择是批量修改模型，还是修改单例自定义模型
+4. 如果批量修改模型，可以通过启动或关闭模型开关，添加或删除模型。您可以通过点击右上角的“修改配置”按钮，对选中的模型进行批量的配置修改
+5. 如果是修改单例自定义模型，点击删除按钮 🗑️ ，即可删除目标模型；想要修改相关配置，点击模型名称，即可弹出修改弹窗进行修改
 <div style="display: flex; gap: 8px;">
-  <img src="./assets/model/delete-model-1.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/model/delete-model-2.png" style="width: 50%; height: 80%;" />
+  <img src="./assets/model/edit-model-1.png" style="width: 50%; height: 100%;" />
+  <img src="./assets/model/edit-model-2.png" style="width: 50%; height: 80%;" />
+</div>
+<br>
+<div style="display: flex; gap: 8px;">
+  <img src="./assets/model/edit-model-3.png" style="width: 50%; height: 100%;" />
+  <img src="./assets/model/edit-model-4.png" style="width: 50%; height: 80%;" />
+</div>
+<br>
+<div style="display: flex; gap: 8px;">
+  <img src="./assets/model/edit-model-5.png" style="width: 50%; height: 100%;" />
+  <img src="./assets/model/edit-model-6.png" style="width: 50%; height: 80%;" />
 </div>
 
 ## ⚙️ 配置系统模型
