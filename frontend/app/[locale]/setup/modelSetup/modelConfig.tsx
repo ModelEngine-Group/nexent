@@ -100,7 +100,6 @@ const getModelData = (t: any) => ({
 // 定义组件对外暴露的方法类型
 export interface ModelConfigSectionRef {
   verifyModels: () => Promise<void>;
-  getSelectedModels: () => Record<string, Record<string, string>>;
 }
 
 interface ModelConfigSectionProps {
@@ -194,8 +193,7 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
-    verifyModels,
-    getSelectedModels: () => selectedModels
+    verifyModels
   }));
 
   // 加载模型列表
