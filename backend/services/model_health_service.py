@@ -63,9 +63,6 @@ async def _perform_connectivity_check(
     Returns:
         bool: Connectivity check result
     """
-    if "localhost" in model_base_url or "127.0.0.1" in model_base_url:
-        model_base_url = model_base_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
-    
     connectivity: bool
     
     # Test connectivity based on different model types

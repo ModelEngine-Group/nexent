@@ -24,10 +24,6 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         user_id, tenant_id = get_current_user_id(authorization)
         logger.info(f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
         model_data = request.model_dump()
-        # Replace localhost with host.docker.internal for local llm
-        model_base_url = model_data.get("base_url", "")
-        if "localhost" in model_base_url or "127.0.0.1" in model_base_url:
-            model_data["base_url"] = model_base_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
         # Split model_name
         model_repo, model_name = split_repo_name(model_data["model_name"])
         # Ensure model_repo is empty string instead of null

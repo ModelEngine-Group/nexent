@@ -58,6 +58,7 @@ You can customize the development environment by modifying:
 
 ## 5. Troubleshooting
 
+### 🔐 Permission Issues
 If you encounter permission issues, you may need to run in container:
 
 ```bash
@@ -69,3 +70,25 @@ If container startup fails, try:
 1. Rebuild container: Press `F1` or `Ctrl+Shift+P`, type `Dev Containers: Rebuild Container`
 2. Check Docker logs: `docker logs nexent-dev`
 3. Check if configuration in `.env` file is correct
+
+### 🌐 Network Connection Issues
+- **Q: How can a Docker container access models deployed on the host machine (e.g., Ollama)?**
+  - A: Since `localhost` inside the container refers to the container itself, use one of these methods to connect to host services:
+
+    **Option 1: Use Docker's special DNS name `host.docker.internal`**  
+    Supported environments: Mac/Windows and newer Docker Desktop versions (Linux version also supported)  
+    ```bash
+    http://host.docker.internal:11434/v1
+    ```
+
+    **Option 2: Use host machine's actual IP (ensure firewall allows access)**
+    ```bash
+    http://[HOST_IP]:11434/v1
+    ```
+
+    **Option 3: Modify Docker Compose configuration**  
+    Add to your docker-compose.yaml file:
+    ```yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ```
