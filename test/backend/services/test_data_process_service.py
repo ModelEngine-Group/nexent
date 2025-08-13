@@ -31,6 +31,8 @@ sys.modules['database.client'].minio_client = MagicMock()
 mock_const = MagicMock()
 mock_const.CLIP_MODEL_PATH = "mock_clip_path"
 mock_const.IMAGE_FILTER = True
+mock_const.REDIS_BACKEND_URL = "redis://mock:6379/0"
+mock_const.REDIS_URL = "redis://mock:6379/0"
 sys.modules['consts.const'] = mock_const
 
 # Import the module to be tested
@@ -80,7 +82,7 @@ class TestDataProcessService(unittest.TestCase):
 
         # Assert that Redis was properly initialized
         mock_pool.assert_called_once_with(
-            'redis://localhost:6379/0',
+            'redis://mock:6379/0',
             max_connections=50,
             decode_responses=True
         )
@@ -103,13 +105,22 @@ class TestDataProcessService(unittest.TestCase):
         if 'REDIS_BACKEND_URL' in os.environ:
             del os.environ['REDIS_BACKEND_URL']
 
-        # Create a fresh instance to trigger init
-        service = DataProcessService()
+        # Temporarily set REDIS_BACKEND_URL to None in the mock
+        import backend.services.data_process_service as dps_module
+        original_redis_backend_url = dps_module.REDIS_BACKEND_URL
+        dps_module.REDIS_BACKEND_URL = None
 
-        # Assert that Redis was not initialized
-        mock_pool.assert_not_called()
-        self.assertIsNone(service.redis_client)
-        self.assertIsNone(service.redis_pool)
+        try:
+            # Create a fresh instance to trigger init
+            service = DataProcessService()
+            
+            # Assert that Redis was not initialized
+            mock_pool.assert_not_called()
+            self.assertIsNone(service.redis_client)
+            self.assertIsNone(service.redis_pool)
+        finally:
+            # Restore the original value
+            dps_module.REDIS_BACKEND_URL = original_redis_backend_url
 
     @patch('backend.services.data_process_service.redis.ConnectionPool.from_url')
     def test_init_redis_client_with_exception(self, mock_pool):

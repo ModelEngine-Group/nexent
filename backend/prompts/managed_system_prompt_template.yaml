@@ -87,6 +87,11 @@ system_prompt: |-
       返回输出类型: {{tool.output_type}}
   {%- endfor %}
 
+  {%- if knowledge_base_summary %}
+  - knowledge_base_search工具只能使用以下知识库索引，请根据用户问题选择最相关的一个或多个知识库索引：
+  {{ knowledge_base_summary }}
+  {%- endif %}
+  
   ### 资源使用要求 ###
   {{ constraint }}
 

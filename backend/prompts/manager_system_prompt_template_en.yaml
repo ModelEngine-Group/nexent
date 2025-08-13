@@ -89,6 +89,11 @@ system_prompt: |-
          Returns output type: {{tool.output_type}}
      {%- endfor %}
 
+     {%- if knowledge_base_summary %}
+     - knowledge_base_search tool can only use the following knowledge base indexes, please select the most relevant one or more knowledge base indexes based on the user's question:
+     {{ knowledge_base_summary }}
+     {%- endif %}
+
   2. Agents (specialized assistants)
      {%- if managed_agents and managed_agents.values() | list %}
      - You can only use the following agents and may not use any other agents:

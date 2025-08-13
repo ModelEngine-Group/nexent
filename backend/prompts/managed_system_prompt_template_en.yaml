@@ -87,6 +87,11 @@ system_prompt: |-
       Returns output type: {{tool.output_type}}
   {%- endfor %}
 
+  {%- if knowledge_base_summary %}
+  - knowledge_base_search tool can only use the following knowledge base indexes, please select the most relevant one or more knowledge base indexes based on the user's question:
+  {{ knowledge_base_summary }}
+  {%- endif %}
+
   ### Resource Usage Requirements ###
   {{ constraint }}
 
