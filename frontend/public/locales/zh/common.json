@@ -1048,10 +1048,11 @@
     "agentConfig.tools.refreshFailed": "刷新工具列表失败",
     "agentConfig.debug.refreshToolsFailed": "刷新工具列表失败:",
     "embedding": {
-        "modal": {
+        "emptyWarningModal": {
             "title": "未选择Embedding模型",
-            "content": "您未选择 <b>Embedding</b> 模型，后续知识库配置和知识检索工具不可用。",
-            "tip": "请在模型配置中选择合适的Embedding模型以获得完整体验。",
+            "content": "您未选择 Embedding 模型，后续知识库配置、知识检索工具、记忆功能将无法使用。",
+            "tip": "建议您在模型配置中选择合适的 Embedding 模型，以获得完整体验。",
+            "cancel": "返回配置",
             "ok_continue": "我知道了，继续下一步"
         }
     },
