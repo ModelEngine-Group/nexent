@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 class ModelConnectStatusEnum:
     OPERATIONAL = "operational"
     NOT_DETECTED = "not_detected"
+    DETECTING = "detecting"
     UNAVAILABLE = "unavailable"
 
     @staticmethod
@@ -447,6 +448,7 @@ def _build_backend_client_with_s3_stub() -> Tuple[TestClient, object]:
         class _ModelConnectStatusEnum(_Enum):
             OPERATIONAL = "operational"
             NOT_DETECTED = "not_detected"
+            DETECTING = "detecting"
             UNAVAILABLE = "unavailable"
             @staticmethod
             def get_value(status):

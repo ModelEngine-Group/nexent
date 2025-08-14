@@ -18,6 +18,7 @@ from typing import List, Dict, Any, Optional, Union
 # Define necessary enums
 class ModelConnectStatusEnum(str, Enum):
     AVAILABLE = "AVAILABLE"
+    DETECTING = "DETECTING"
     UNAVAILABLE = "UNAVAILABLE"
 
 # Define response models

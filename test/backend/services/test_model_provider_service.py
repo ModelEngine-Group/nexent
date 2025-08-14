@@ -26,6 +26,7 @@ sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
 # `ModelConnectStatusEnum.NOT_DETECTED.value` without importing the real enum.
 class _EnumStub:
     NOT_DETECTED = mock.Mock(value="not_detected")
+    DETECTING = mock.Mock(value="detecting")
 
 sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
 

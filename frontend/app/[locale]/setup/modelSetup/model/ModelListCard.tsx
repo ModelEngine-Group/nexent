@@ -7,10 +7,10 @@ import { useTranslation } from 'react-i18next'
 
 // 统一管理模型连接状态颜色
 const CONNECT_STATUS_COLORS: Record<ModelConnectStatus | 'default', string> = {
-  "可用": "#52c41a",
-  "不可用": "#ff4d4f",
-  "检测中": "#2980b9",
-  "未检测": "#95a5a6",
+  "available": "#52c41a",
+  "unavailable": "#ff4d4f",
+  "detecting": "#2980b9",
+  "not_detected": "#95a5a6",
   default: "#17202a"
 };
 
@@ -52,7 +52,7 @@ const getStatusStyle = (status?: ModelConnectStatus): React.CSSProperties => {
     backgroundColor: color,
     boxShadow: `0 0 3px ${color}`,
   };
-  if (status === "检测中") {
+  if (status === "detecting") {
     return {
       ...baseStyle,
       animation: 'pulse 1.5s infinite',
@@ -206,7 +206,7 @@ export const ModelListCard = ({
         const existingModel = prevData.official.find(m => m.name === model.name && m.type === model.type);
         return {
           ...model,
-          connect_status: existingModel?.connect_status || "可用" as ModelConnectStatus
+          connect_status: existingModel?.connect_status || "available" as ModelConnectStatus
         };
       });
       
@@ -214,7 +214,7 @@ export const ModelListCard = ({
         // 优先使用新传入的状态，这样能反映后端的最新状态
         return {
           ...model,
-          connect_status: model.connect_status || "未检测" as ModelConnectStatus
+          connect_status: model.connect_status || "not_detected" as ModelConnectStatus
         };
       });
       
@@ -233,7 +233,7 @@ export const ModelListCard = ({
     
     if (onVerifyModel && displayName) {
       // 先更新本地状态为"检测中"
-      updateLocalModelStatus(displayName, "检测中");
+      updateLocalModelStatus(displayName, "detecting");
       // 然后调用验证函数
       onVerifyModel(displayName, type);
     }

@@ -52,10 +52,10 @@ const cardThemes = {
 
 // 添加ModelConnectStatus的类型定义
 const MODEL_STATUS = {
-  AVAILABLE: "可用",
-  UNAVAILABLE: "不可用",
-  CHECKING: "检测中",
-  UNCHECKED: "未检测"
+  AVAILABLE: "available",
+  UNAVAILABLE: "unavailable",
+  CHECKING: "detecting",
+  UNCHECKED: "not_detected"
 } as const;
 
 type ModelConnectStatus = typeof MODEL_STATUS[keyof typeof MODEL_STATUS];

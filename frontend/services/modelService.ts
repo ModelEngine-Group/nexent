@@ -95,7 +95,7 @@ export const modelService = {
           apiKey: model.api_key,
           apiUrl: model.base_url,
           displayName: model.display_name || model.model_name,
-          connect_status: model.connect_status as ModelConnectStatus || "未检测"
+          connect_status: model.connect_status as ModelConnectStatus || "not_detected"
         }))
       }
       // If API call was not successful, return empty array
@@ -371,7 +371,7 @@ export const modelService = {
         connectivity: false,
         message: result.message || '验证失败',
         error_code: "MODEL_VALIDATION_FAILED",
-        connect_status: "不可用"
+        connect_status: "unavailable"
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -383,7 +383,7 @@ export const modelService = {
         connectivity: false,
         message: `验证失败: ${error}`,
         error_code: "MODEL_VALIDATION_ERROR_UNKNOWN",
-        connect_status: "不可用"
+        connect_status: "unavailable"
       }
     }
   },
