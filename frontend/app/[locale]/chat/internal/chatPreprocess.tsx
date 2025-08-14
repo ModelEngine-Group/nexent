@@ -4,11 +4,11 @@ import { storageService } from '@/services/storageService';
 import { FilePreview } from "@/app/chat/layout/chatInput"
 import { useTranslation } from 'react-i18next';
 
-// 步骤ID计数器
+// Step ID Counter
 const stepIdCounter = {current: 0};
 
 /**
- * 解析代理步骤，将文本内容转换为结构化步骤
+ * Parse agent steps, convert text content to structured steps
  */
 export const parseAgentSteps = (content: string, defaultExpanded: boolean = false, t: any): AgentStep[] => {
   const steps: AgentStep[] = [];
@@ -49,19 +49,22 @@ export const parseAgentSteps = (content: string, defaultExpanded: boolean = fals
 };
 
 /**
- * 处理附件文件预处理
- * @param content 用户消息内容
- * @param attachments 附件列表
- * @param signal AbortController信号
- * @param onProgress 预处理进度回调
- * @returns 预处理后的查询和处理状态
+ * Handle attachment file preprocessing
+ * @param content User message content
+ * @param attachments Attachment list
+ * @param signal AbortController signal
+ * @param onProgress Preprocessing progress callback
+ * @param t Translation function
+ * @param conversationId Conversation ID
+ * @returns Preprocessed query and processing status
  */
 export const preprocessAttachments = async (
   content: string, 
   attachments: FilePreview[], 
   signal: AbortSignal,
   onProgress: (data: any) => void,
-  t: any
+  t: any,
+  conversationId?: number
 ): Promise<{ 
   finalQuery: string, 
   success: boolean, 
@@ -73,10 +76,11 @@ export const preprocessAttachments = async (
   }
 
   try {
-    // 调用文件预处理接口
+    // Call file preprocessing interface
     const preProcessReader = await conversationService.preprocessFiles(
       content,
       attachments.map(attachment => attachment.file),
+      conversationId,
       signal
     );
 
@@ -104,15 +108,15 @@ export const preprocessAttachments = async (
           try {
             const jsonData = JSON.parse(jsonStr);
             
-            // 回调进度信息
+            // Callback progress information
             onProgress(jsonData);
 
-            // 如果是文件处理信息，保存文件描述
+            // If it is file processing information, save file description
             if (jsonData.type === "file_processed" && jsonData.filename && jsonData.description) {
               fileDescriptions[jsonData.filename] = jsonData.description;
             }
 
-            // 如果是完成消息，记录最终查询
+            // If it is a completion message, record the final query
             if (jsonData.type === "complete") {
               finalQuery = jsonData.final_query;
             }
@@ -135,9 +139,9 @@ export const preprocessAttachments = async (
 };
 
 /**
- * 创建思考中步骤
- * @param message 用于显示的消息
- * @returns 思考中的步骤对象
+ * Create thinking step
+ * @param message Message to display
+ * @returns Thinking step object
  */
 export const createThinkingStep = (t: any, message?: string): AgentStep => {
   const displayMessage = message || t("chatPreprocess.parsingFile");
@@ -155,10 +159,10 @@ export const createThinkingStep = (t: any, message?: string): AgentStep => {
 };
 
 /**
- * 处理文件上传
- * @param file 上传的文件
- * @param setFileUrls 设置文件URL的回调函数
- * @returns 文件ID
+ * Handle file upload
+ * @param file Uploaded file
+ * @param setFileUrls Callback function to set file URL
+ * @returns File ID
  */
 export const handleFileUpload = (
   file: File, 
@@ -167,7 +171,7 @@ export const handleFileUpload = (
 ): string => {
   const fileId = `file-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   
-  // 如果不是图片类型，创建一个文件预览URL
+  // If it is not an image type, create a file preview URL
   if (!file.type.startsWith('image/')) {
     const fileUrl = URL.createObjectURL(file);
     setFileUrls(prev => ({...prev, [fileId]: fileUrl}));
@@ -178,17 +182,17 @@ export const handleFileUpload = (
 };
 
 /**
- * 处理图片上传
- * @param file 上传的图片文件
+ * Handle image upload
+ * @param file Uploaded image file
  */
 export const handleImageUpload = (file: File, t: any): void => {
   console.log(t("chatPreprocess.uploadingImage", { name: file.name, type: file.type, size: file.size }));
 };
 
 /**
- * 上传附件到存储服务
- * @param attachments 附件列表
- * @returns 上传的文件URLs和对象名称
+ * Upload attachments to storage service
+ * @param attachments Attachment list
+ * @returns Uploaded file URLs and object names
  */
 export const uploadAttachments = async (
   attachments: FilePreview[],
@@ -203,12 +207,12 @@ export const uploadAttachments = async (
   }
   
   try {
-    // 上传所有文件到存储服务
+    // Upload all files to storage service
     const uploadResult = await storageService.uploadFiles(
       attachments.map(attachment => attachment.file)
     );
 
-    // 处理上传结果
+    // Handle upload results
     const uploadedFileUrls: Record<string, string> = {};
     const objectNames: Record<string, string> = {};
     
@@ -233,11 +237,11 @@ export const uploadAttachments = async (
 };
 
 /**
- * 从附件列表创建消息附件对象
- * @param attachments 附件列表
- * @param uploadedFileUrls 上传后的文件URLs
- * @param fileUrls 文件URL映射
- * @returns 消息附件对象数组
+ * Create message attachment objects from attachment list
+ * @param attachments Attachment list
+ * @param uploadedFileUrls Uploaded file URLs
+ * @param fileUrls File URL mapping
+ * @returns Message attachment object array
  */
 export const createMessageAttachments = (
   attachments: FilePreview[],
@@ -254,22 +258,22 @@ export const createMessageAttachments = (
 };
 
 /**
- * 清理附件URL
- * @param attachments 附件列表
- * @param fileUrls 文件URL映射
+ * Clean up attachment URLs
+ * @param attachments Attachment list
+ * @param fileUrls File URL mapping
  */
 export const cleanupAttachmentUrls = (
   attachments: FilePreview[],
   fileUrls: Record<string, string>
 ): void => {
-  // 清理附件预览URL
+  // Clean up attachment preview URLs
   attachments.forEach(attachment => {
     if (attachment.previewUrl) {
       URL.revokeObjectURL(attachment.previewUrl);
     }
   });
   
-  // 清理其他文件URL
+  // Clean up other file URLs
   Object.values(fileUrls).forEach(url => {
     URL.revokeObjectURL(url);
   });

@@ -164,7 +164,8 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
             inputs=tool.get("inputs"),
             output_type=tool.get("output_type"),
             params=param_dict,
-            source=tool.get("source")
+            source=tool.get("source"),
+            usage=tool.get("usage")
         )
 
         if tool.get("source") == "langchain":
@@ -251,52 +252,28 @@ async def join_minio_file_description_to_query(minio_files, query):
     return final_query
 
 
-def filter_mcp_servers_and_tools(agent_run_info, default_mcp_url, remote_mcp_list):
+def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)->list:
     """
-    过滤 MCP 服务器和工具，只保留实际用到的 MCP 服务器
-    支持多级 agent，递归检查所有子 agent 的工具
-
-    Args:
-        agent_run_info: AgentRunInfo 对象
-        default_mcp_url: 默认 MCP 服务器 URL
-        remote_mcp_list: 远程 MCP 服务器列表
-
-    Returns:
-        None (直接修改 agent_run_info 对象)
+    Filter mcp servers and tools, only keep the actual used mcp servers
+    Support multi-level agent, recursively check all sub-agent tools
     """
     used_mcp_urls = set()
-    has_mcp_tools = False
 
-    # 递归检查所有 agent 的工具
-    def check_agent_tools(agent_config):
-        nonlocal has_mcp_tools
-        # 检查当前 agent 的工具
-        for tool in getattr(agent_config, "tools", []):
-            if hasattr(tool, "source") and tool.source == "mcp":
-                has_mcp_tools = True
-                # 对于 MCP 工具，从 usage 字段获取 MCP 服务器名称
-                if hasattr(tool, "usage") and tool.usage:
-                    mcp_server_name = tool.usage
-                    # 从远程 MCP 列表中查找对应的 URL
-                    for remote_mcp_info in remote_mcp_list:
-                        if (remote_mcp_info["remote_mcp_server_name"] == mcp_server_name and
-                            remote_mcp_info["status"]):
-                            used_mcp_urls.add(remote_mcp_info["remote_mcp_server"])
-                            break
+    # Recursively check all agent tools
+    def check_agent_tools(agent_config: AgentConfig):
+        # Check current agent tools
+        for tool in agent_config.tools:
+            if tool.source == "mcp" and tool.usage in mcp_info_dict:
+                used_mcp_urls.add(mcp_info_dict[tool.usage]["remote_mcp_server"])
 
-        # 递归检查子 agent
-        for sub_agent_config in getattr(agent_config, "managed_agents", []):
+        # Recursively check sub-agent
+        for sub_agent_config in agent_config.managed_agents:
             check_agent_tools(sub_agent_config)
 
-    # 检查所有 agent 的工具
-    check_agent_tools(agent_run_info.agent_config)
+    # Check all agent tools
+    check_agent_tools(input_agent_config)
 
-    # 如果有 MCP 工具但没有找到对应的服务器，使用默认服务器
-    if has_mcp_tools and not used_mcp_urls:
-        used_mcp_urls.add(default_mcp_url)
-
-    # 直接设置 mcp_host 为找到的 URL 列表
-    agent_run_info.mcp_host = list(used_mcp_urls)
+    return list(used_mcp_urls)
 
 
 async def create_agent_run_info(agent_id, minio_files, query, history, authorization, language: str = 'zh'):
@@ -304,23 +281,29 @@ async def create_agent_run_info(agent_id, minio_files, query, history, authoriza
 
     final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
     model_list = await create_model_config_list(tenant_id)
+    agent_config = await create_agent_config(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
+                              language=language, last_user_query=final_query)
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
     default_mcp_url = urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse")
-    mcp_host = [default_mcp_url]
-    for remote_mcp_info in remote_mcp_list:
-        if remote_mcp_info["status"]:
-            mcp_host.append(remote_mcp_info["remote_mcp_server"])
+    remote_mcp_list.append({
+        "remote_mcp_server_name": "nexent",
+        "remote_mcp_server": default_mcp_url,
+        "status": True
+    })
+    remote_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list if record["status"]}
+
+    # Filter MCP servers and tools
+    mcp_host = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+
 
     agent_run_info = AgentRunInfo(
         query=final_query,
         model_config_list=model_list,
         observer=MessageObserver(lang=language),
-        agent_config=await create_agent_config(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id,
-                                               language=language, last_user_query=final_query),
+        agent_config=agent_config,
         mcp_host=mcp_host,
         history=history,
         stop_event=threading.Event()
     )
-
     return agent_run_info

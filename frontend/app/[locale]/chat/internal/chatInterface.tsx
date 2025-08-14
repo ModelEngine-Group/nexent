@@ -460,7 +460,8 @@ export function ChatInterface() {
               return newMessages;
             });
           },
-          t
+          t,
+          currentConversationId
         );
 
         // Handle preprocessing result
@@ -1178,7 +1179,7 @@ export function ChatInterface() {
     }
 
     try {
-      // Call backend stop API
+      // Call backend stop API - this will stop both agent run and preprocess tasks
       await conversationService.stop(conversationId);
       
       // Manually update messages, clear thinking state
@@ -1188,6 +1189,20 @@ export function ChatInterface() {
         if (lastMsg && lastMsg.role === "assistant") {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
+          
+          // If this was a preprocess step, mark it as stopped
+          if (lastMsg.steps && lastMsg.steps.length > 0) {
+            const preprocessStep = lastMsg.steps.find(step => 
+              step.title === t("chatInterface.filePreprocessing")
+            );
+            if (preprocessStep) {
+              const stoppedMessage = (t("chatInterface.filePreprocessingStopped") as string) || "File preprocessing stopped";
+              preprocessStep.content = stoppedMessage;
+              if (preprocessStep.contents && preprocessStep.contents.length > 0) {
+                preprocessStep.contents[0].content = stoppedMessage;
+              }
+            }
+          }
         }
         return newMessages;
       });

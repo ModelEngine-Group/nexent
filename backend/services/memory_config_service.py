@@ -16,7 +16,7 @@ from database.memory_config_db import (
     update_config_by_id,
 )
 from nexent.core.agents.agent_model import MemoryContext, MemoryUserConfig
-
+from utils.memory_utils import build_memory_config
 
 logger = logging.getLogger("memory_config_service")
 
@@ -178,8 +178,6 @@ def remove_disabled_useragent_id(user_id: str, ua_id: str) -> bool:
 
 
 def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int) -> MemoryContext:
-    from apps.memory_config_app import build_memory_config
-
     memory_user_config = MemoryUserConfig(
         memory_switch=get_memory_switch(user_id),
         agent_share_option=get_agent_share(user_id).value,

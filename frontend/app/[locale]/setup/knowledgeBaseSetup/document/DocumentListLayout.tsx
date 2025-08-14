@@ -237,9 +237,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
 
   // Refactored: Style is embedded within the component
   return (
-    <div className="flex flex-col w-full bg-white border border-gray-200 rounded-md shadow-sm h-full" style={{ height: containerHeight }}>
+    <div className={`flex flex-col w-full bg-white border border-gray-200 rounded-md shadow-sm h-full h-[${containerHeight}]`}>
       {/* Title bar */}
-      <div className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center`} style={{ height: titleBarHeight }}>
+      <div className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center h-[${titleBarHeight}]`}>
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center">
             {isCreatingMode ? (
@@ -260,14 +260,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
                   value={knowledgeBaseName}
                   onChange={(e) => onNameChange && onNameChange(e.target.value)}
                   placeholder={t('document.input.knowledgeBaseName')}
-                  className={`${LAYOUT.KB_TITLE_MARGIN}`}
+                  className={`${LAYOUT.KB_TITLE_MARGIN} w-[320px] font-medium my-[2px]`}
                   size="large"
-                  style={{ 
-                    width: '320px', 
-                    fontWeight: 500,
-                    marginTop: '2px',
-                    marginBottom: '2px'
-                  }}
                   prefix={<span className="text-blue-600">📚</span>}
                   autoFocus
                   disabled={hasDocuments || isUploading || docState.isLoadingDocuments} // Disable editing name if there are documents or uploading
@@ -294,11 +288,17 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
       </div>
 
       {/* Document list */}
-      <div className="p-2 overflow-auto flex-grow" style={{ height: contentHeight }}>
+      <div
+        className="p-2 overflow-auto flex-grow"
+        onDragOver={(e) => { if (!isCreatingMode && knowledgeBaseName) { return; } e.preventDefault(); e.stopPropagation(); }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      >
         {showDetail ? (
-          <div style={{ padding: '16px 32px', height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <span style={{ fontWeight: 700, fontSize: 18 }}>{t('document.summary.title')}</span>
+          <div className="px-8 py-4 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <span className="font-bold text-lg">{t('document.summary.title')}</span>
               <Button
                 type="default"
                 onClick={handleAutoSummary}
@@ -311,17 +311,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
             <Input.TextArea
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              style={{
-                flex: 1,
-                minHeight: 0,
-                marginBottom: 20,
-                resize: 'none',
-                fontSize: 18,
-                lineHeight: 1.7,
-                padding: 20
-              }}
+              className="flex-1 min-h-0 mb-5 resize-none text-lg leading-[1.7] p-5"
             />
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <div className="flex gap-3 justify-end">
               <Button
                 type="primary"
                 size="large"
@@ -345,8 +337,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
           ) : isCreatingMode ? (
             <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
               <div className="text-center p-6">
-                <div className="mb-4">
-                  <InfoCircleFilled style={{ fontSize: 36, color: '#1677ff' }} />
+                <div className="mb-4 text-blue-600 text-[36px]">
+                  <InfoCircleFilled />
                 </div>
                 <h3 className="text-lg font-medium text-gray-800 mb-2">{t('document.title.createNew')}</h3>
                 <p className="text-gray-500 text-sm max-w-md">
@@ -359,19 +351,19 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
               <table className="min-w-full bg-white">
                 <thead className={`${LAYOUT.TABLE_HEADER_BG} sticky top-0 z-10`}>
                   <tr>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.NAME }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.NAME}]`}>
                       {t('document.table.header.name')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.STATUS }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.STATUS}]`}>
                       {t('document.table.header.status')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.SIZE }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.SIZE}]`}>
                       {t('document.table.header.size')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.DATE }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.DATE}]`}>
                       {t('document.table.header.date')}
                     </th>
-                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT}`} style={{ width: COLUMN_WIDTHS.ACTION }}>
+                    <th className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.ACTION}]`}>
                       {t('document.table.header.action')}
                     </th>
                   </tr>
@@ -385,13 +377,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
                             {getFileIcon(doc.type)}
                           </span>
                           <span
-                            className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate`}
-                            style={{
-                              maxWidth: DOCUMENT_NAME_CONFIG.MAX_WIDTH,
-                              textOverflow: DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW,
-                              whiteSpace: DOCUMENT_NAME_CONFIG.WHITE_SPACE,
-                              overflow: DOCUMENT_NAME_CONFIG.OVERFLOW
-                            }}
+                            className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
                             title={doc.name}
                           >
                             {doc.name}

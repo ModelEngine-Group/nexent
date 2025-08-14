@@ -302,6 +302,7 @@ def add_tool_field(tool_info):
         tool_info["source"] = tool.source
         tool_info["class_name"] = tool.class_name
         tool_info["is_available"] = tool.is_available
+        tool_info["usage"] = tool.usage
         tool_info["inputs"] = tool.inputs
         tool_info["output_type"] = tool.output_type
         return tool_info

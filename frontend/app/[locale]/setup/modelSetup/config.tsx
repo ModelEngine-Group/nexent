@@ -17,9 +17,10 @@ const { Title } = Typography
 // 添加接口定义
 interface AppModelConfigProps {
   skipModelVerification?: boolean;
+  onSelectedModelsChange?: (selected: Record<string, Record<string, string>>) => void;
 }
 
-export default function AppModelConfig({ skipModelVerification = false }: AppModelConfigProps) {
+export default function AppModelConfig({ skipModelVerification = false, onSelectedModelsChange }: AppModelConfigProps) {
   const { t } = useTranslation()
   const [isClientSide, setIsClientSide] = useState(false)
   const modelConfigRef = useRef<ModelConfigSectionRef | null>(null)
@@ -27,11 +28,23 @@ export default function AppModelConfig({ skipModelVerification = false }: AppMod
   // 添加useEffect钩子用于初始化加载配置
   useEffect(() => {
     setIsClientSide(true)
-    
+
     return () => {
       setIsClientSide(false)
     }
   }, [skipModelVerification])
+
+  // 将子组件的选中模型上报给父级（若提供回调）
+  useEffect(() => {
+    if (!onSelectedModelsChange) return;
+    const timer = setInterval(() => {
+      const current = modelConfigRef.current?.getSelectedModels?.();
+      if (current) {
+        onSelectedModelsChange(current);
+      }
+    }, 300);
+    return () => clearInterval(timer);
+  }, [onSelectedModelsChange])
 
   return (
     <div className="w-full mx-auto" style={{ 

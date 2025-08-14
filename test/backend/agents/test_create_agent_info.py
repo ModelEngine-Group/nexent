@@ -1,7 +1,7 @@
 import pytest
 import sys
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, mock_open
 from typing import List, Tuple, Any
 
 # Mock external dependencies before imports
@@ -18,6 +18,8 @@ sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.langchain_utils'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
+sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['nexent.memory.memory_service'] = MagicMock()
 
 # Create mock classes that might be imported
 mock_agent_config = MagicMock()
@@ -42,7 +44,9 @@ from backend.agents.create_agent_info import (
     create_agent_config,
     create_model_config_list,
     filter_mcp_servers_and_tools,
-    create_agent_run_info
+    create_agent_run_info,
+    join_minio_file_description_to_query,
+    prepare_prompt_templates
 )
 
 
@@ -210,6 +214,191 @@ class TestCreateToolConfigList:
             mock_tool_config.assert_called()
 
 
+class TestCreateAgentConfig:
+    """测试create_agent_config函数"""
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_basic(self):
+        """测试基本的代理配置创建"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+             patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
+             patch('backend.agents.create_agent_info.get_prompt_template_path') as mock_get_template_path, \
+             patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+             patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+             patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
+             patch('backend.agents.create_agent_info.populate_template') as mock_populate, \
+             patch('builtins.open', mock_open(read_data='system_prompt: "test template"')), \
+             patch('yaml.safe_load') as mock_yaml_load, \
+             patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates:
+            
+            # 设置mock返回值
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_name": "test_model",
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = []
+            mock_create_tools.return_value = []
+            mock_get_template_path.return_value = "template_path"
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1"
+            )
+            mock_yaml_load.return_value = {"system_prompt": "test template"}
+            mock_populate.return_value = "populated_system_prompt"
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            
+            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            
+            # 验证AgentConfig被正确调用
+            mock_agent_config.assert_called_once_with(
+                name="test_agent",
+                description="test description",
+                prompt_templates={"system_prompt": "populated_system_prompt"},
+                tools=[],
+                max_steps=5,
+                model_name="test_model",
+                provide_run_summary=True,
+                managed_agents=[]
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_with_sub_agents(self):
+        """测试包含子代理的代理配置创建"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+             patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
+             patch('backend.agents.create_agent_info.get_prompt_template_path') as mock_get_template_path, \
+             patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+             patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+             patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
+             patch('backend.agents.create_agent_info.populate_template') as mock_populate, \
+             patch('builtins.open', mock_open(read_data='system_prompt: "test template"')), \
+             patch('yaml.safe_load') as mock_yaml_load, \
+             patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates:
+            
+            # 设置mock返回值
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_name": "test_model",
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = ["sub_agent_1"]
+            mock_create_tools.return_value = []
+            mock_get_template_path.return_value = "template_path"
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1"
+            )
+            mock_yaml_load.return_value = {"system_prompt": "test template"}
+            mock_populate.return_value = "populated_system_prompt"
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            
+            # Mock子代理配置
+            mock_sub_agent_config = Mock()
+            mock_sub_agent_config.name = "sub_agent"
+            
+            # 递归调用create_agent_config时返回子代理配置
+            with patch('backend.agents.create_agent_info.create_agent_config', return_value=mock_sub_agent_config):
+                # 重置mock状态，因为之前的测试可能已经调用了AgentConfig
+                mock_agent_config.reset_mock()
+                
+                result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+                
+                # 验证AgentConfig被正确调用，包含子代理
+                mock_agent_config.assert_called_once_with(
+                    name="test_agent",
+                    description="test description",
+                    prompt_templates={"system_prompt": "populated_system_prompt"},
+                    tools=[],
+                    max_steps=5,
+                    model_name="test_model",
+                    provide_run_summary=True,
+                    managed_agents=[mock_sub_agent_config]
+                )
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_with_memory(self):
+        """测试包含记忆功能的代理配置创建"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+             patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
+             patch('backend.agents.create_agent_info.get_prompt_template_path') as mock_get_template_path, \
+             patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+             patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+             patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
+             patch('backend.agents.create_agent_info.populate_template') as mock_populate, \
+             patch('builtins.open', mock_open(read_data='system_prompt: "test template"')), \
+             patch('yaml.safe_load') as mock_yaml_load, \
+             patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates:
+            
+            # 设置mock返回值
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_name": "test_model",
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = []
+            mock_create_tools.return_value = []
+            mock_get_template_path.return_value = "template_path"
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            
+            # 设置记忆功能开启
+            mock_user_config = Mock()
+            mock_user_config.memory_switch = True
+            mock_user_config.agent_share_option = "always"
+            mock_user_config.disable_agent_ids = []
+            mock_user_config.disable_user_agent_ids = []
+            
+            mock_build_memory.return_value = Mock(
+                user_config=mock_user_config,
+                memory_config={"test": "config"},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1"
+            )
+            mock_search_memory.return_value = {"results": [{"memory": "test"}]}
+            mock_yaml_load.return_value = {"system_prompt": "test template"}
+            mock_populate.return_value = "populated_system_prompt"
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            
+            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+            
+            # 验证记忆搜索被调用
+            mock_search_memory.assert_called_once_with(
+                query_text="test query",
+                memory_config={"test": "config"},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+                memory_levels=["tenant", "agent", "user", "user_agent"]
+            )
+
+
 class TestCreateModelConfigList:
     """测试create_model_config_list函数"""
 
@@ -258,22 +447,17 @@ class TestFilterMcpServersAndTools:
         mock_agent_config.tools = [mock_tool]
         mock_agent_config.managed_agents = []
         
-        mock_agent_run_info = Mock()
-        mock_agent_run_info.agent_config = mock_agent_config
-        
-        remote_mcp_list = [
-            {
-                "remote_mcp_server_name": "test_server",
-                "remote_mcp_server": "http://test.server",
-                "status": True
+        mcp_info_dict = {
+            "test_server": {
+                "remote_mcp_server": "http://test.server"
             }
-        ]
+        }
         
         # 执行函数
-        filter_mcp_servers_and_tools(mock_agent_run_info, "http://default.url", remote_mcp_list)
+        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
         
         # 验证结果
-        assert mock_agent_run_info.mcp_host == ["http://test.server"]
+        assert result == ["http://test.server"]
 
     def test_filter_mcp_servers_no_mcp_tools(self):
         """测试不包含MCP工具时的过滤逻辑"""
@@ -284,18 +468,51 @@ class TestFilterMcpServersAndTools:
         mock_agent_config.tools = [mock_tool]
         mock_agent_config.managed_agents = []
         
-        mock_agent_run_info = Mock()
-        mock_agent_run_info.agent_config = mock_agent_config
+        mcp_info_dict = {}
         
-        remote_mcp_list = []
-        
-        filter_mcp_servers_and_tools(mock_agent_run_info, "http://default.url", remote_mcp_list)
+        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
         
         # 没有MCP工具，应该返回空列表
-        assert mock_agent_run_info.mcp_host == []
+        assert result == []
 
-    def test_filter_mcp_servers_fallback_to_default(self):
-        """测试当有MCP工具但找不到对应服务器时使用默认服务器"""
+    def test_filter_mcp_servers_with_sub_agents(self):
+        """测试包含子代理时的过滤逻辑"""
+        # 创建子代理的mock工具
+        mock_sub_tool = Mock()
+        mock_sub_tool.source = "mcp"
+        mock_sub_tool.usage = "sub_server"
+        
+        mock_sub_agent = Mock()
+        mock_sub_agent.tools = [mock_sub_tool]
+        mock_sub_agent.managed_agents = []
+        
+        # 创建主代理的mock工具
+        mock_main_tool = Mock()
+        mock_main_tool.source = "mcp"
+        mock_main_tool.usage = "main_server"
+        
+        mock_agent_config = Mock()
+        mock_agent_config.tools = [mock_main_tool]
+        mock_agent_config.managed_agents = [mock_sub_agent]
+        
+        mcp_info_dict = {
+            "main_server": {
+                "remote_mcp_server": "http://main.server"
+            },
+            "sub_server": {
+                "remote_mcp_server": "http://sub.server"
+            }
+        }
+        
+        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
+        
+        # 应该包含两个服务器的URL
+        assert len(result) == 2
+        assert "http://main.server" in result
+        assert "http://sub.server" in result
+
+    def test_filter_mcp_servers_unknown_server(self):
+        """测试未知MCP服务器的情况"""
         mock_tool = Mock()
         mock_tool.source = "mcp"
         mock_tool.usage = "unknown_server"
@@ -304,21 +521,16 @@ class TestFilterMcpServersAndTools:
         mock_agent_config.tools = [mock_tool]
         mock_agent_config.managed_agents = []
         
-        mock_agent_run_info = Mock()
-        mock_agent_run_info.agent_config = mock_agent_config
-        
-        remote_mcp_list = [
-            {
-                "remote_mcp_server_name": "different_server",
-                "remote_mcp_server": "http://different.server",
-                "status": True
+        mcp_info_dict = {
+            "different_server": {
+                "remote_mcp_server": "http://different.server"
             }
-        ]
+        }
         
-        filter_mcp_servers_and_tools(mock_agent_run_info, "http://default.url", remote_mcp_list)
+        result = filter_mcp_servers_and_tools(mock_agent_config, mcp_info_dict)
         
-        # 应该使用默认URL
-        assert mock_agent_run_info.mcp_host == ["http://default.url"]
+        # 未知服务器不应该被包含
+        assert result == []
 
 
 class TestCreateAgentRunInfo:
@@ -333,7 +545,9 @@ class TestCreateAgentRunInfo:
              patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
              patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
              patch('backend.agents.create_agent_info.config_manager') as mock_config, \
-             patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter:
+             patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+             patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+             patch('backend.agents.create_agent_info.threading') as mock_threading:
             
             # 设置mock返回值
             mock_get_user.return_value = ("user_1", "tenant_1")
@@ -341,12 +555,16 @@ class TestCreateAgentRunInfo:
             mock_create_models.return_value = ["model_config"]
             mock_get_mcp.return_value = [
                 {
-                    "remote_mcp_server": "http://remote.server",
+                    "remote_mcp_server_name": "test_server",
+                    "remote_mcp_server": "http://test.server",
                     "status": True
                 }
             ]
             mock_create_agent.return_value = "agent_config"
             mock_config.get_config.return_value = "http://nexent.mcp"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://test.server"]
+            mock_threading.Event.return_value = "stop_event"
             
             result = await create_agent_run_info(
                 agent_id="agent_1",
@@ -358,10 +576,128 @@ class TestCreateAgentRunInfo:
             )
             
             # 验证AgentRunInfo被正确调用
-            mock_agent_run_info.assert_called_once()
+            mock_agent_run_info.assert_called_once_with(
+                query="processed_query",
+                model_config_list=["model_config"],
+                observer=mock_message_observer.return_value,
+                agent_config="agent_config",
+                mcp_host=["http://test.server"],
+                history=[],
+                stop_event="stop_event"
+            )
             
-            # 验证filter_mcp_servers_and_tools被调用
-            mock_filter.assert_called_once()
+            # 验证其他函数被正确调用
+            mock_get_user.assert_called_once_with("Bearer token")
+            mock_join_query.assert_called_once_with(minio_files=[], query="test query")
+            mock_create_models.assert_called_once_with("tenant_1")
+            mock_create_agent.assert_called_once_with(
+                agent_id="agent_1",
+                tenant_id="tenant_1", 
+                user_id="user_1",
+                language="zh",
+                last_user_query="processed_query"
+            )
+            mock_get_mcp.assert_called_once_with(tenant_id="tenant_1")
+            mock_filter.assert_called_once_with("agent_config", {
+                "test_server": {
+                    "remote_mcp_server_name": "test_server",
+                    "remote_mcp_server": "http://test.server",
+                    "status": True
+                },
+                "nexent": {
+                    "remote_mcp_server_name": "nexent",
+                    "remote_mcp_server": "http://nexent.mcp/sse",
+                    "status": True
+                }
+            })
+
+
+class TestJoinMinioFileDescriptionToQuery:
+    """测试join_minio_file_description_to_query函数"""
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_with_files(self):
+        """测试包含文件描述的情况"""
+        minio_files = [
+            {"description": "File 1 description"},
+            {"description": "File 2 description"},
+            {"no_description": "should be ignored"}
+        ]
+        query = "test query"
+        
+        result = await join_minio_file_description_to_query(minio_files, query)
+        
+        expected = "User provided some reference files:\nFile 1 description\nFile 2 description\n\nUser wants to answer questions based on the above information: test query"
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_no_files(self):
+        """测试没有文件的情况"""
+        minio_files = []
+        query = "test query"
+        
+        result = await join_minio_file_description_to_query(minio_files, query)
+        
+        assert result == "test query"
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_none_files(self):
+        """测试文件为None的情况"""
+        minio_files = None
+        query = "test query"
+        
+        result = await join_minio_file_description_to_query(minio_files, query)
+        
+        assert result == "test query"
+
+    @pytest.mark.asyncio
+    async def test_join_minio_file_description_to_query_no_descriptions(self):
+        """测试文件没有描述的情况"""
+        minio_files = [
+            {"no_description": "should be ignored"},
+            {"another_field": "also ignored"}
+        ]
+        query = "test query"
+        
+        result = await join_minio_file_description_to_query(minio_files, query)
+        
+        assert result == "test query"
+
+
+class TestPreparePromptTemplates:
+    """测试prepare_prompt_templates函数"""
+
+    @pytest.mark.asyncio
+    async def test_prepare_prompt_templates_manager_zh(self):
+        """测试管理器模式中文提示模板"""
+        with patch('backend.agents.create_agent_info.get_prompt_template_path') as mock_get_path, \
+             patch('builtins.open', mock_open(read_data='test: "template"')), \
+             patch('yaml.safe_load') as mock_yaml_load:
+            
+            mock_get_path.return_value = "manager_zh_template.yaml"
+            mock_yaml_load.return_value = {"test": "template"}
+            
+            result = await prepare_prompt_templates(True, "test system prompt", "zh")
+            
+            mock_get_path.assert_called_once_with(True, "zh")
+            assert result["system_prompt"] == "test system prompt"
+            assert result["test"] == "template"
+
+    @pytest.mark.asyncio
+    async def test_prepare_prompt_templates_worker_en(self):
+        """测试工作模式英文提示模板"""
+        with patch('backend.agents.create_agent_info.get_prompt_template_path') as mock_get_path, \
+             patch('builtins.open', mock_open(read_data='test: "template"')), \
+             patch('yaml.safe_load') as mock_yaml_load:
+            
+            mock_get_path.return_value = "worker_en_template.yaml"
+            mock_yaml_load.return_value = {"test": "template"}
+            
+            result = await prepare_prompt_templates(False, "test system prompt", "en")
+            
+            mock_get_path.assert_called_once_with(False, "en")
+            assert result["system_prompt"] == "test system prompt"
+            assert result["test"] == "template"
 
 
 if __name__ == "__main__":

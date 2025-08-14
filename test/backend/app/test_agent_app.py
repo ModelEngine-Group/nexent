@@ -178,7 +178,7 @@ def test_agent_stop_api_not_found(mocker, mock_conversation_id):
     # Assertions
     assert response.status_code == 404
     mock_agent_run_manager.stop_agent_run.assert_called_once_with(mock_conversation_id)
-    assert "no running agent found" in response.json()["detail"]
+    assert "no running agent or preprocess tasks found" in response.json()["detail"]
 
 
 def test_search_agent_info_api_success(mocker, mock_auth_header):
@@ -293,7 +293,7 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
 def test_delete_agent_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
-    mock_delete_agent = mocker.patch("backend.apps.agent_app.delete_agent_impl")
+    mock_delete_agent = mocker.patch("backend.apps.agent_app.delete_agent_impl", new_callable=mocker.AsyncMock)
     mock_delete_agent.return_value = None
     
     # Test the endpoint
@@ -312,7 +312,7 @@ def test_delete_agent_api_success(mocker, mock_auth_header):
 
 def test_delete_agent_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
-    mock_delete_agent = mocker.patch("backend.apps.agent_app.delete_agent_impl")
+    mock_delete_agent = mocker.patch("backend.apps.agent_app.delete_agent_impl", new_callable=mocker.AsyncMock)
     mock_delete_agent.side_effect = Exception("Test error")
     
     # Test the endpoint

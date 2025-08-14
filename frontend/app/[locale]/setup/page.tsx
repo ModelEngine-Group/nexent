@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { theme, Modal, App } from "antd"
-import { ExclamationCircleFilled, ExclamationCircleOutlined } from "@ant-design/icons"
+import { theme, Modal, App, Button } from "antd"
+import { ExclamationCircleOutlined, ExclamationCircleFilled, WarningFilled } from "@ant-design/icons"
 import { motion, AnimatePresence } from "framer-motion"
 import AppModelConfig from "./modelSetup/config"
 import DataConfig from "./knowledgeBaseSetup/KnowledgeBaseManager"
@@ -40,6 +40,7 @@ export default function CreatePage() {
   const { token } = theme.useToken ? theme.useToken() : { token: {} };
   const { resolvedTheme } = typeof useTheme === 'function' ? useTheme() : { resolvedTheme: 'light' };
   const isDark = resolvedTheme === 'dark';
+  const [liveSelectedModels, setLiveSelectedModels] = useState<Record<string, Record<string, string>> | null>(null);
 
 
   // Check login status and permission
@@ -174,7 +175,12 @@ export default function CreatePage() {
 
     switch (selectedKey) {
       case "1":
-        return <AppModelConfig skipModelVerification={isFromSecondPage} />
+        return (
+          <AppModelConfig
+            skipModelVerification={isFromSecondPage}
+            onSelectedModelsChange={(selected) => setLiveSelectedModels(selected)}
+          />
+        )
       case "2":
         return <DataConfig isActive={selectedKey === "2"} />
       case "3":
@@ -242,7 +248,7 @@ export default function CreatePage() {
           setIsSavingConfig(false)
         }
       }
-    } else if (selectedKey === "1") {
+      } else if (selectedKey === "1") {
       // Validate required fields when jumping from the first page to the second page
       try {
         // Get the current configuration
@@ -260,11 +266,9 @@ export default function CreatePage() {
           return
         }
 
-        // check embedding model
-        if (
-          !currentConfig.models.embedding.modelName &&
-          !currentConfig.models.multiEmbedding?.modelName
-        ) {
+        // check embedding model using live selection from current UI, not the stored config
+        const hasEmbeddingLive = !!(liveSelectedModels?.embedding?.embedding) || !!(liveSelectedModels?.embedding?.multi_embedding)
+        if (!hasEmbeddingLive) {
           setEmbeddingModalOpen(true);
           setPendingJump(true);
           // highlight embedding dropdown
@@ -299,6 +303,20 @@ export default function CreatePage() {
       setSelectedKey("1")
       // Set the flag to indicate that the user is returning from the second page to the first page
       setIsFromSecondPage(true)
+    }
+  }
+
+  const handleEmbeddingOk = async () => {
+    setEmbeddingModalOpen(false)
+    if (pendingJump) {
+      setPendingJump(false)
+      const currentConfig = configStore.getConfig()
+      try {
+        await configService.saveConfigToBackend(currentConfig)
+      } catch (e) {
+        message.error(t('setup.page.error.saveConfig'))
+      }
+      setSelectedKey("2")
     }
   }
 
@@ -341,68 +359,29 @@ export default function CreatePage() {
         </motion.div>
       </AnimatePresence>
       <Modal
-        title={
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ExclamationCircleFilled style={{ color: '#faad14', fontSize: 22 }} />
-            <span style={{ fontWeight: 600, fontSize: 18, color: isDark ? '#fffbe6' : '#333' }}>{t('embedding.modal.title')}</span>
-          </span>
-        }
+        title={t('embedding.emptyWarningModal.title')}
         open={embeddingModalOpen}
-        onOk={async () => {
-          setEmbeddingModalOpen(false);
-          if (pendingJump) {
-            setPendingJump(false);
-            // get current config
-            const currentConfig = configStore.getConfig();
-            try {
-              await configService.saveConfigToBackend(currentConfig);
-            } catch (e) {
-              message.error(t('setup.page.error.saveConfig'));
-            }
-            setSelectedKey("2");
-          }
-        }}
         onCancel={() => setEmbeddingModalOpen(false)}
-        okText={t('embedding.modal.ok_continue')}
-        cancelButtonProps={{ style: { display: 'none' } }}
         centered
-        styles={{
-          body: {
-            padding: '32px 24px 24px 24px',
-            background: isDark ? '#23272f' : '#fffbe6',
-            borderRadius: 12,
-            color: isDark ? '#eee' : '#333',
-          }
-        }}
-        style={{
-          borderRadius: 16,
-          maxWidth: 1000,
-          minWidth: 666,
-          background: isDark ? '#23272f' : '#fff',
-        }}
+        footer={
+          <div className="flex justify-end mt-6 gap-4">
+            <Button onClick={handleEmbeddingOk}>
+              {t('embedding.emptyWarningModal.ok_continue')}
+            </Button>
+            <Button type="primary" onClick={() => setEmbeddingModalOpen(false)}>
+              {t('embedding.emptyWarningModal.cancel')}
+            </Button>
+          </div>
+        }
       >
-        <div
-          style={{
-            fontSize: 16,
-            color: isDark ? '#eee' : '#333',
-            textAlign: 'center',
-            marginBottom: 8,
-          }}
-          dangerouslySetInnerHTML={{
-            __html: t('embedding.modal.content').replace(
-              '<b>', `<b style=\"color:${isDark ? '#ffe58f' : '#faad14'}\">`
-            ),
-          }}
-        />
-        <div
-          style={{
-            textAlign: 'center',
-            color: isDark ? '#aaa' : '#999',
-            fontSize: 13,
-            marginTop: 8,
-          }}
-        >
-          {t('embedding.modal.tip')}
+        <div className="py-2">
+          <div className="flex items-center">
+            <WarningFilled className="text-yellow-500 mt-1 mr-2" style={{ fontSize: "48px" }} />
+            <div className="ml-3 mt-2">
+              <div dangerouslySetInnerHTML={{ __html: t('embedding.emptyWarningModal.content') }} />
+              <div className="mt-2 text-xs opacity-70">{t('embedding.emptyWarningModal.tip')}</div>
+            </div>
+          </div>
         </div>
       </Modal>
     </Layout>

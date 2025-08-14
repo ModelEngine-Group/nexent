@@ -179,10 +179,10 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(({
     // 触发文件选择回调, 传递所有文件
     const files = newFileList
       .map(file => file.originFileObj)
-      .filter((file): file is File => !!file);
+      .filter((file): file is RcFile => !!file);
 
     if (files.length > 0) {
-      onFileSelect(files);
+      onFileSelect(files as unknown as File[]);
     }
   }, [indexName, onFileSelect, isCreatingMode, newKnowledgeBaseName, onUpload]);
 

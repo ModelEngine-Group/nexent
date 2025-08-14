@@ -83,7 +83,6 @@ class OpenAILongContextModel(OpenAIModel):
         logger.info(f"Starting text truncation: original_tokens={original_tokens}, max_tokens={max_tokens}, strategy={self.truncation_strategy}, text_length={len(text)}")
         
         if original_tokens <= max_tokens:
-            logger.debug(f"No truncation needed: original_tokens ({original_tokens}) <= max_tokens ({max_tokens})")
             return text
 
         tokenizer = self._get_tokenizer()
@@ -123,7 +122,6 @@ class OpenAILongContextModel(OpenAIModel):
             
             if self.truncation_strategy == "start":
                 # Only keep the beginning part
-                logger.info(f"Truncating with 'start' strategy (char estimation): keeping first {estimated_chars} characters")
                 truncated_text = text[:estimated_chars]
             elif self.truncation_strategy == "middle":
                 # Keep the beginning and end
@@ -133,7 +131,6 @@ class OpenAILongContextModel(OpenAIModel):
                 truncated_text = start_text + "\n\n[Content truncated...]\n\n" + end_text
             else:  # end
                 # Only keep the end part
-                logger.info(f"Truncating with 'end' strategy (char estimation): keeping last {estimated_chars} characters")
                 truncated_text = text[-estimated_chars:]
 
         logger.info(f"Truncation completed: {len(text)} -> {len(truncated_text)}")

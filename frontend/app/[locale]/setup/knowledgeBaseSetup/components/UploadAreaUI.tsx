@@ -60,7 +60,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
     return (
       <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%]">
         <div className="h-full border-2 border-dashed border-gray-200 rounded-md flex flex-col items-center justify-center bg-white">
-          <WarningFilled style={{ fontSize: '32px', color: '#faad14', marginBottom: '16px' }} />
+          <WarningFilled className="text-[32px] text-yellow-500 mb-4" />
           <p className="text-gray-600 text-base mb-2">{t('knowledgeBase.status.notReady')}</p>
           <p className="text-gray-400 text-sm">{t('common.retryLater')}</p>
         </div>
@@ -71,7 +71,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   // 禁用状态UI
   if (disabled) {
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200 opacity-50 cursor-not-allowed" style={{ height: componentHeight }}>
+      <div className={`p-3 bg-gray-50 border-t border-gray-200 opacity-50 cursor-not-allowed h-[${componentHeight}]`}>
         <div className="border-2 border-dashed border-gray-300 bg-white rounded-md p-4 text-center flex flex-col items-center justify-center h-full">
           <div className="mb-0.5 text-blue-500 text-lg">📄</div>
           <p className="mb-0.5 text-gray-700 text-xs font-medium">
@@ -108,10 +108,9 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   // Model mismatch status UI
   if (modelMismatch) {
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center" style={{ minHeight: 120 }}>
+      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center min-h-[120px]">
         <span
-          className="text-base font-medium text-center"
-          style={{ lineHeight: 1.7, color: '#888' }}
+          className="text-base font-medium text-center leading-[1.7] text-gray-500"
         >
           {t('knowledgeBase.upload.modelMismatch.description')}
         </span>
@@ -131,11 +130,15 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
             {/* 上传区域层 */}
             <div 
               className="absolute inset-0 transition-opacity duration-300 ease-in-out"
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
             >
               <Dragger {...uploadProps} className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200" showUploadList={false}>
                 <div className="flex flex-col items-center justify-center h-full">
                   <p className="ant-upload-drag-icon !mb-4">
-                    <InboxOutlined style={{ fontSize: '48px', color: '#1677ff' }} />
+                    <InboxOutlined className="text-[48px] text-blue-600" />
                   </p>
                   <p className="ant-upload-text !mb-2 text-base">
                     {t('knowledgeBase.upload.dragHint')}
@@ -162,7 +165,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                   <h4 className="text-sm font-medium text-gray-700 m-0">{t('knowledgeBase.upload.completed')}</h4>
                   <span className="text-xs text-gray-500">{t('knowledgeBase.upload.fileCount', { count: fileList.length })}</span>
                 </div>
-                <div className="overflow-auto" style={{ height: 'calc(100% - 41px)' }}>
+                <div className="overflow-auto h-[calc(100%_-_41px)]">
                   {fileList.map(file => (
                     <div key={file.uid} className="border-b border-gray-100 last:border-b-0">
                       <div className="flex items-center justify-between py-2 px-3 hover:bg-gray-50 transition-colors">

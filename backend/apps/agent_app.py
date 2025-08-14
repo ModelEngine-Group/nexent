@@ -17,6 +17,7 @@ from services.memory_config_service import build_memory_context
 from utils.config_utils import config_manager
 from utils.thread_utils import submit
 from agents.agent_run_manager import agent_run_manager
+from agents.preprocess_manager import preprocess_manager
 
 
 router = APIRouter(prefix="/agent")
@@ -72,13 +73,25 @@ async def agent_run_api(agent_request: AgentRequest, http_request: Request, auth
 @router.get("/stop/{conversation_id}")
 async def agent_stop_api(conversation_id: int):
     """
-    stop agent run for specified conversation_id
+    stop agent run and preprocess tasks for specified conversation_id
     """
-    success = agent_run_manager.stop_agent_run(conversation_id)
-    if success:
-        return {"status": "success", "message": f"successfully stopped agent run for conversation_id {conversation_id}"}
+    # Stop agent run
+    agent_stopped = agent_run_manager.stop_agent_run(conversation_id)
+    
+    # Stop preprocess tasks
+    preprocess_stopped = preprocess_manager.stop_preprocess_tasks(conversation_id)
+    
+    if agent_stopped or preprocess_stopped:
+        message_parts = []
+        if agent_stopped:
+            message_parts.append("agent run")
+        if preprocess_stopped:
+            message_parts.append("preprocess tasks")
+        
+        message = f"successfully stopped {' and '.join(message_parts)} for conversation_id {conversation_id}"
+        return {"status": "success", "message": message}
     else:
-        raise HTTPException(status_code=404, detail=f"no running agent found for conversation_id {conversation_id}")
+        raise HTTPException(status_code=404, detail=f"no running agent or preprocess tasks found for conversation_id {conversation_id}")
 
 
 @router.post("/search_info")
@@ -122,7 +135,7 @@ async def delete_agent_api(request: AgentIDRequest, authorization: Optional[str]
     Delete an agent
     """
     try:
-        delete_agent_impl(request.agent_id, authorization)
+        await delete_agent_impl(request.agent_id, authorization)
         return {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent delete error: {str(e)}")

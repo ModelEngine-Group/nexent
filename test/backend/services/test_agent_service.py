@@ -1,6 +1,6 @@
 import pytest
 import sys
-from unittest.mock import patch, MagicMock, mock_open, call, Mock
+from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
 
 # Mock boto3 before importing the module under test
 boto3_mock = MagicMock()
@@ -14,6 +14,8 @@ patch('elasticsearch.Elasticsearch', return_value=elasticsearch_client_mock).sta
 # Mock ElasticSearchCore
 elasticsearch_core_mock = MagicMock()
 patch('sdk.nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=elasticsearch_core_mock).start()
+
+# Mock memory-related modules - removed module-level patches to avoid conflicts with test-level patches
 
 # Import the services
 from backend.services.agent_service import (
@@ -29,7 +31,8 @@ from backend.services.agent_service import (
     import_agent_by_agent_id,
     load_default_agents_json_file,
     list_all_agent_info_impl,
-    insert_related_agent_impl
+    insert_related_agent_impl,
+    clear_agent_memory
 )
 from backend.consts.model import AgentInfoRequest, ExportAndImportAgentInfo, ExportAndImportDataFormat, ToolInstanceInfoRequest, ToolConfig
 
@@ -252,7 +255,8 @@ def test_update_agent_info_impl_success(mock_get_current_user_id, mock_update_ag
 @patch('backend.services.agent_service.delete_all_related_agent')
 @patch('backend.services.agent_service.delete_agent_by_id')
 @patch('backend.services.agent_service.get_current_user_id')
-def test_delete_agent_impl_success(mock_get_current_user_id, mock_delete_agent, mock_delete_related):
+@pytest.mark.asyncio
+async def test_delete_agent_impl_success(mock_get_current_user_id, mock_delete_agent, mock_delete_related):
     """
     Test successful deletion of an agent.
     
@@ -265,7 +269,7 @@ def test_delete_agent_impl_success(mock_get_current_user_id, mock_delete_agent, 
     mock_get_current_user_id.return_value = ("test_user", "test_tenant")
     
     # Execute
-    delete_agent_impl(123, authorization="Bearer token")
+    await delete_agent_impl(123, authorization="Bearer token")
     
     # Assert
     mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
@@ -315,7 +319,8 @@ def test_update_agent_info_impl_exception_handling(mock_get_current_user_id, moc
 
 @patch('backend.services.agent_service.delete_agent_by_id')
 @patch('backend.services.agent_service.get_current_user_id')
-def test_delete_agent_impl_exception_handling(mock_get_current_user_id, mock_delete_agent):
+@pytest.mark.asyncio
+async def test_delete_agent_impl_exception_handling(mock_get_current_user_id, mock_delete_agent):
     """
     Test exception handling in delete_agent_impl function.
     
@@ -329,7 +334,7 @@ def test_delete_agent_impl_exception_handling(mock_get_current_user_id, mock_del
     
     # Execute & Assert
     with pytest.raises(ValueError) as context:
-        delete_agent_impl(123, authorization="Bearer token")
+        await delete_agent_impl(123, authorization="Bearer token")
     
     assert "Failed to delete agent" in str(context.value)
 
@@ -953,5 +958,125 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
         mock_listdir.assert_called_once_with("default/path")
 
 
+# clear_agent_memory function tests
+@patch('backend.services.agent_service.clear_memory', new_callable=AsyncMock)
+@patch('backend.services.agent_service.build_memory_config')
+@pytest.mark.asyncio
+async def test_clear_agent_memory_success(mock_build_config, mock_clear_memory):
+    """
+    Test successful clearing of agent memory.
+    
+    This test verifies that:
+    1. The function correctly builds memory configuration
+    2. It clears both agent-level and user_agent-level memory
+    3. It logs the results appropriately
+    """
+    # Setup
+    mock_memory_config = {
+        "llm": {"provider": "openai", "config": {"model": "gpt-4"}},
+        "embedder": {"provider": "openai", "config": {"model": "text-embedding-ada-002"}},
+        "vector_store": {"provider": "elasticsearch", "config": {"host": "localhost"}}
+    }
+    mock_build_config.return_value = mock_memory_config
+    
+    mock_clear_memory.side_effect = [
+        {"deleted_count": 5}, 
+        {"deleted_count": 3}   
+    ]
+    
+    # Execute
+    await clear_agent_memory(
+        agent_id=123,
+        tenant_id="test_tenant",
+        user_id="test_user"
+    )
+    
+    # Assert
+    mock_build_config.assert_called_once_with("test_tenant")
+    assert mock_clear_memory.call_count == 2
+    
+    # Verify agent-level memory cleanup
+    agent_call = mock_clear_memory.call_args_list[0]
+    assert agent_call[1]["memory_level"] == "agent"
+    assert agent_call[1]["memory_config"] == mock_memory_config
+    assert agent_call[1]["tenant_id"] == "test_tenant"
+    assert agent_call[1]["user_id"] == "test_user"
+    assert agent_call[1]["agent_id"] == "123"
+    
+    # Verify user_agent-level memory cleanup
+    user_agent_call = mock_clear_memory.call_args_list[1]
+    assert user_agent_call[1]["memory_level"] == "user_agent"
+    assert user_agent_call[1]["memory_config"] == mock_memory_config
+    assert user_agent_call[1]["tenant_id"] == "test_tenant"
+    assert user_agent_call[1]["user_id"] == "test_user"
+    assert user_agent_call[1]["agent_id"] == "123"
+
+
+@patch('backend.services.agent_service.clear_memory', new_callable=AsyncMock)
+@patch('backend.services.agent_service.build_memory_config')
+@pytest.mark.asyncio
+async def test_clear_agent_memory_build_config_error(mock_build_config, mock_clear_memory):
+    """
+    Test clear_agent_memory when build_memory_config fails.
+    
+    This test verifies that:
+    1. When build_memory_config raises an exception
+    2. The function catches the exception and logs it
+    3. The function does not raise the exception (to avoid affecting agent deletion)
+    """
+    # Setup
+    mock_build_config.side_effect = ValueError("Invalid memory configuration")
+    
+    # Execute - should not raise exception
+    await clear_agent_memory(
+        agent_id=123,
+        tenant_id="test_tenant",
+        user_id="test_user"
+    )
+    
+    # Assert
+    mock_build_config.assert_called_once_with("test_tenant")
+    mock_clear_memory.assert_not_called()
+
+
+@patch('backend.services.agent_service.clear_memory', new_callable=AsyncMock)
+@patch('backend.services.agent_service.build_memory_config')
+@pytest.mark.asyncio
+async def test_clear_agent_memory_clear_memory_error(mock_build_config, mock_clear_memory):
+    """
+    Test clear_agent_memory when clear_memory fails.
+    
+    This test verifies that:
+    1. When clear_memory raises an exception
+    2. The function catches the exception and logs it
+    3. The function continues with the second clear_memory call
+    4. The function does not raise the exception
+    """
+    # Setup
+    mock_memory_config = {
+        "llm": {"provider": "openai", "config": {"model": "gpt-4"}},
+        "embedder": {"provider": "openai", "config": {"model": "text-embedding-ada-002"}},
+        "vector_store": {"provider": "elasticsearch", "config": {"host": "localhost"}}
+    }
+    mock_build_config.return_value = mock_memory_config
+    
+    # First call fails, second call succeeds
+    mock_clear_memory.side_effect = [
+        Exception("Database connection failed"),  # agent-level memory fails
+        {"deleted_count": 3}                      # user_agent-level memory succeeds
+    ]
+    
+    # Execute - should not raise exception
+    await clear_agent_memory(
+        agent_id=123,
+        tenant_id="test_tenant",
+        user_id="test_user"
+    )
+    
+    # Assert
+    mock_build_config.assert_called_once_with("test_tenant")
+    assert mock_clear_memory.call_count == 2
+    
+
 if __name__ == '__main__':
-    pytest.main() 
+    pytest.main()

@@ -14,6 +14,8 @@ from database.agent_db import create_agent, query_all_enabled_tool_instances, \
     query_sub_agents_id_list, insert_related_agent, delete_all_related_agent
 
 from utils.auth_utils import get_current_user_id
+from utils.memory_utils import build_memory_config
+from nexent.memory.memory_service import clear_memory
 
 
 logger = logging.getLogger("agent_service")
@@ -103,15 +105,62 @@ def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Heade
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
 
-def delete_agent_impl(agent_id: int, authorization: str = Header(None)):
+async def delete_agent_impl(agent_id: int, authorization: str = Header(None)):
     user_id, tenant_id = get_current_user_id(authorization)
 
     try:
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_all_related_agent(agent_id, tenant_id)
+        
+        # Clean up all memory data related to the agent
+        await clear_agent_memory(agent_id, tenant_id, user_id)
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
+
+
+async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Purge specified agent's memory data
+    
+    Args:
+        agent_id: Agent ID
+        tenant_id: Tenant ID
+        user_id: User ID
+    """
+    try:
+        # Build memory configuration
+        memory_config = build_memory_config(tenant_id)
+        
+        # Clean up agent-level memory
+        try:
+            agent_memory_result = await clear_memory(
+                memory_level="agent",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=str(agent_id)
+            )
+            logger.info(f"Cleared agent memory for agent {agent_id}: {agent_memory_result}")
+        except Exception as e:
+            logger.error(f"Failed to clear agent-level memory for agent {agent_id}: {str(e)}")
+        
+        # Clean up user_agent-level memory
+        try:
+            user_agent_memory_result = await clear_memory(
+                memory_level="user_agent", 
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=str(agent_id)
+            )
+            logger.info(f"Cleared user_agent memory for agent {agent_id}: {user_agent_memory_result}")
+        except Exception as e:
+            logger.error(f"Failed to clear user_agent-level memory for agent {agent_id}: {str(e)}")
+        
+    except Exception as e:
+        logger.error(f"Failed to build memory config for agent {agent_id}: {str(e)}")
+        # Silently fail to maintain agent deletion process
 
 async def export_agent_impl(agent_id: int, authorization: str = Header(None)) -> str:
     """

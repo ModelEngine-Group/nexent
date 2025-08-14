@@ -686,7 +686,7 @@ export const conversationService = {
   },
 
   // Add file preprocess method
-  async preprocessFiles(query: string, files: File[], signal?: AbortSignal): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  async preprocessFiles(query: string, files: File[], conversationId?: number, signal?: AbortSignal): Promise<ReadableStreamDefaultReader<Uint8Array>> {
     try {
       // Use FormData to handle file upload
       const formData = new FormData();
@@ -699,7 +699,13 @@ export const conversationService = {
         });
       }
 
-      const response = await fetch(API_ENDPOINTS.storage.preprocess, {
+      // Build URL with conversation_id as query parameter
+      let url = API_ENDPOINTS.storage.preprocess;
+      if (conversationId !== undefined && conversationId !== null) {
+        url += `?conversation_id=${conversationId}`;
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
         signal,
