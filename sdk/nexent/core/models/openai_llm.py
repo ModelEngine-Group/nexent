@@ -23,10 +23,6 @@ class OpenAIModel(OpenAIServerModel):
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
             grammar: Optional[str] = None, tools_to_call_from: Optional[List[Tool]] = None, **kwargs, ) -> ChatMessage:
         try:
-            if messages and isinstance(messages[-1], dict) and messages[-1].get("role") == "user":
-                if isinstance(messages[-1]["content"][-1], dict) and messages[-1]["content"][-1].get("text"):
-                    messages[-1]["content"][-1]['text'] += " /no_think"
-
             completion_kwargs = self._prepare_completion_kwargs(messages=messages, stop_sequences=stop_sequences,
                 grammar=grammar, tools_to_call_from=tools_to_call_from, model=self.model_id,
                 custom_role_conversions=self.custom_role_conversions, convert_images_to_image_urls=True,
@@ -41,8 +37,13 @@ class OpenAIModel(OpenAIServerModel):
             self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
             for chunk in current_request:
                 new_token = chunk.choices[0].delta.content
+                reasoning_content = getattr(chunk.choices[0].delta, 'reasoning_content', None)
+
+                # Handle reasoning_content if it exists and is not null
+                if reasoning_content is not None:
+                    self.observer.add_model_reasoning_content(reasoning_content)
+
                 if new_token is not None:
-                    new_token = new_token.replace("<think>", "").replace("</think>", "")
                     self.observer.add_model_new_token(new_token)
                     token_join.append(new_token)
                     role = chunk.choices[0].delta.role
