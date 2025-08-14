@@ -13,6 +13,7 @@ MODE_CHOICE=""
 IS_MAINLAND=""
 ENABLE_TERMINAL=""
 VERSION_CHOICE=""
+ROOT_DIR_PARAM=""
 
 # Suppress the orphan warning
 export COMPOSE_IGNORE_ORPHANS=True
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --version)
       VERSION_CHOICE="$2"
+      shift 2
+      ;;
+    --root-dir)
+      ROOT_DIR_PARAM="$2"
       shift 2
       ;;
     *)
@@ -414,10 +419,16 @@ select_deployment_mode() {
     ROOT_DIR="$env_root_dir"
     echo "   📁 Use existing ROOT_DIR path: $env_root_dir"
   else
-    # Get ROOT_DIR from user input with default value
-    default_root_dir="$HOME/nexent-data"
-    read -p "   📁 Enter ROOT_DIR path (default: $default_root_dir): " user_root_dir
-    ROOT_DIR="${user_root_dir:-$default_root_dir}"
+    # Check if root-dir parameter is provided
+    if [ -n "$ROOT_DIR_PARAM" ]; then
+      ROOT_DIR="$ROOT_DIR_PARAM"
+      echo "   📁 Using ROOT_DIR from parameter: $ROOT_DIR"
+    else
+      # Get ROOT_DIR from user input with default value
+      default_root_dir="$HOME/nexent-data"
+      read -p "   📁 Enter ROOT_DIR path (default: $default_root_dir): " user_root_dir
+      ROOT_DIR="${user_root_dir:-$default_root_dir}"
+    fi
     
     echo "# Root dir" >> .env
     echo "ROOT_DIR=\"$ROOT_DIR\"" >> .env
