@@ -23,6 +23,10 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 # 📚 为多个架构构建文档
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
+
+# 💻 为多个架构构建 Ubuntu Terminal
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
 ```
 
 ## 💻 本地开发构建
@@ -39,6 +43,9 @@ docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
 
 # 📚 构建文档镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+
+# 💻 构建 OpenSSH Server 镜像（仅当前架构）
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
 ```
 
 ## 🔧 镜像说明
@@ -63,6 +70,23 @@ docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
 - 基于 `make/docs/Dockerfile` 构建
 - 提供项目文档和 API 参考
 
+### OpenSSH Server 镜像 (nexent/nexent-ubuntu-terminal)
+- 基于 Ubuntu 24.04 的 SSH 服务器容器
+- 基于 `make/terminal/Dockerfile` 构建
+- 预装 Conda、Python、Git 等开发工具
+- 支持 SSH 密钥认证，用户名为 `linuxserver.io`
+- 提供完整的开发环境
+
+#### 预装工具和特性
+- **Python 环境**: Python 3 + pip + virtualenv
+- **Conda 管理**: Miniconda3 环境管理
+- **开发工具**: Git、Vim、Nano、Curl、Wget
+- **构建工具**: build-essential、Make
+- **SSH 服务**: 端口 2222，禁用 root 登录和密码认证
+- **用户权限**: `linuxserver.io` 用户具有 sudo 权限（无需密码）
+- **时区设置**: Asia/Shanghai
+- **安全配置**: SSH 密钥认证，会话超时 60 分钟
+
 ## 🏷️ 标签策略
 
 每个镜像都会推送到两个仓库：
@@ -74,6 +98,7 @@ docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
 - `nexent/nexent-data-process` - 数据处理服务  
 - `nexent/nexent-web` - Next.js 前端应用
 - `nexent/nexent-docs` - Vitepress 文档站点
+- `nexent/nexent-ubuntu-terminal` - OpenSSH 开发服务器容器
 
 ## 📚 文档镜像独立部署
 
@@ -113,6 +138,6 @@ docker stop nexent-docs
 docker rm nexent-docs
 ```
 
-## 🚀 部署建议
+##  部署建议
 
 构建完成后，可以使用 `docker/deploy.sh` 脚本进行部署，或者直接使用 `docker-compose` 启动服务。
