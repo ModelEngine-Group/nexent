@@ -202,18 +202,11 @@ services:
     container_name: nexent-openssh-server
     hostname: nexent-openssh-server
     environment:
-      PUID: 1000
-      PGID: 1000
-      TZ: "Asia/Shanghai"
-      PUBLIC_KEY_FILE: /config/authorized_keys
-      SUDO_ACCESS: "true"
-      PASSWORD_ACCESS: "false"
-      LOG_STDOUT: "true"
-      DOCKER_MODS: linuxserver/mods:universal-package-install
-      INSTALL_PACKAGES: git|make|curl|vim|wget
+      - TZ=Asia/Shanghai
+      - DEV_USER=linuxserver.io
     volumes:
-      - ${ROOT_DIR}/openssh-server/config:/config
-      - ${ROOT_DIR}/openssh-server/config/custom-cont-init.d:/custom-cont-init.d:ro
+      - ${TERMINAL_MOUNT_DIR:-./workspace}:/opt/terminal
+      - ${ROOT_DIR}/openssh-server/config:/tmp/ssh_keys:ro  # 只读挂载SSH公钥
     networks:
       - nexent
     restart: always

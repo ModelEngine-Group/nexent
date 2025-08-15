@@ -19,6 +19,10 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 # 📚 build documentation for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
+
+# 💻 build Ubuntu Terminal for multiple architectures
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
 ```
 
 ### 💻 Local Development Build
@@ -35,6 +39,9 @@ docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
 
 # 📚 Build documentation image (current architecture only)
 docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+
+# 💻 Build OpenSSH Server image (current architecture only)
+docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
 ```
 
 ### 🧹 Clean up Docker resources
@@ -66,6 +73,23 @@ docker builder prune -f && docker system prune -f
 - Built from `make/docs/Dockerfile`
 - Provides project documentation and API reference
 
+#### OpenSSH Server Image (nexent/nexent-ubuntu-terminal)
+- Ubuntu 24.04-based SSH server container
+- Built from `make/terminal/Dockerfile`
+- Pre-installed with Conda, Python, Git and other development tools
+- Supports SSH key authentication with username `linuxserver.io`
+- Provides complete development environment
+
+##### Pre-installed Tools and Features
+- **Python Environment**: Python 3 + pip + virtualenv
+- **Conda Management**: Miniconda3 environment management
+- **Development Tools**: Git, Vim, Nano, Curl, Wget
+- **Build Tools**: build-essential, Make
+- **SSH Service**: Port 2222, root login and password authentication disabled
+- **User Permissions**: `linuxserver.io` user has sudo privileges (no password required)
+- **Timezone Setting**: Asia/Shanghai
+- **Security Configuration**: SSH key authentication, 60-minute session timeout
+
 ### 🏷️ Tagging Strategy
 
 Each image is pushed to two repositories:
@@ -77,6 +101,7 @@ All images include:
 - `nexent/nexent-data-process` - Data processing service
 - `nexent/nexent-web` - Next.js frontend application
 - `nexent/nexent-docs` - Vitepress documentation site
+- `nexent/nexent-ubuntu-terminal` - OpenSSH development server container
 
 ## 📚 Documentation Image Standalone Deployment
 

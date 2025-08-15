@@ -156,9 +156,6 @@ generate_ssh_keys() {
           cp "openssh-server/ssh-keys/openssh_server_key.pub" "openssh-server/config/authorized_keys"
           chmod 644 "openssh-server/config/authorized_keys"
 
-          # Setup package installation script
-          setup_package_install_script
-
           # Set SSH key path in environment
           SSH_PRIVATE_KEY_PATH="$(pwd)/openssh-server/ssh-keys/openssh_server_key"
           export SSH_PRIVATE_KEY_PATH
@@ -185,7 +182,7 @@ generate_ssh_keys() {
       TEMP_OUTPUT="/tmp/ssh_keygen_output_$$.txt"
 
       # Generate ed25519 key pair using the openssh-server container
-      if docker run --rm -i --entrypoint //keygen.sh "$OPENSSH_SERVER_IMAGE" <<< "1" > "$TEMP_OUTPUT" 2>&1; then
+      if docker run --rm -i "$OPENSSH_SERVER_IMAGE" bash -c "ssh-keygen -t ed25519 -f /tmp/id_ed25519 -N '' && cat /tmp/id_ed25519 && echo '---' && cat /tmp/id_ed25519.pub" > "$TEMP_OUTPUT" 2>&1; then
           echo "   🔍 SSH key generation completed, extracting keys..."
 
           # Extract private key (everything between -----BEGIN and -----END)
@@ -225,9 +222,6 @@ generate_ssh_keys() {
               # Copy public key to authorized_keys with correct permissions (ensure ONLY our key)
               cp "openssh-server/ssh-keys/openssh_server_key.pub" "openssh-server/config/authorized_keys"
               chmod 644 "openssh-server/config/authorized_keys"
-
-              # Setup package installation script
-              setup_package_install_script
 
               # Set SSH key path in environment
               SSH_PRIVATE_KEY_PATH="$(pwd)/openssh-server/ssh-keys/openssh_server_key"
@@ -643,16 +637,16 @@ select_deployment_version() {
   echo ""
 }
 
-pull_openssh_images() {
-  # Function to pull openssh images
+build_ubuntu_terminal_image() {
+  # Function to build openssh-server image
 
-  echo "🐳 Pulling openssh-server image for Terminal tool..."
-  if ! docker pull "$OPENSSH_SERVER_IMAGE"; then
-    echo "   ❌ ERROR Failed to pull openssh-server image: $OPENSSH_SERVER_IMAGE"
+  echo "🐳 Building openssh-server image for Terminal tool..."
+  if ! docker build -t "$OPENSSH_SERVER_IMAGE" -f ../make/terminal/Dockerfile ..; then
+    echo "   ❌ ERROR Failed to build openssh-server image"
     ERROR_OCCURRED=1
     return 1
   fi
-  echo "   ✅ Successfully pulled openssh-server image"
+  echo "   ✅ Successfully built openssh-server image"
   echo ""
   echo "--------------------------------"
   echo ""
@@ -714,6 +708,31 @@ select_terminal_tool() {
         export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}terminal"
         echo "✅ Terminal tool enabled 🔧"
         echo "   🔧 Deploying an openssh-server container for secure command execution"
+        
+        # Ask user to specify directory mapping
+        default_terminal_dir="/opt/terminal"
+        echo "   📁 Terminal directory configuration:"
+        echo "      • Container path: /opt/terminal (fixed)"
+        echo "      • Host path: You can specify any directory on your host machine"
+        echo "      • Default host path: /opt/terminal (recommended)"
+        echo ""
+        read -p "   📁 Enter host directory to mount (default: /opt/terminal): " terminal_mount_dir
+        terminal_mount_dir=$(sanitize_input "$terminal_mount_dir")
+        TERMINAL_MOUNT_DIR="${terminal_mount_dir:-$default_terminal_dir}"
+        
+        # Save to environment variables
+        export TERMINAL_MOUNT_DIR
+        
+        # Add to .env file
+        if grep -q "^TERMINAL_MOUNT_DIR=" .env; then
+            sed -i.bak "s~^TERMINAL_MOUNT_DIR=.*~TERMINAL_MOUNT_DIR=$TERMINAL_MOUNT_DIR~" .env
+        else
+            echo "TERMINAL_MOUNT_DIR=$TERMINAL_MOUNT_DIR" >> .env
+        fi
+        
+        echo "   📁 Terminal mount configuration:"
+        echo "      • Host: $TERMINAL_MOUNT_DIR"
+        echo "      • Container: /opt/terminal"
     else
         export ENABLE_TERMINAL_TOOL="false"
         echo "🚫 Terminal tool disabled"
@@ -797,7 +816,7 @@ main_deploy() {
   generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
 
   if [ "$ENABLE_TERMINAL_TOOL" = "true" ]; then
-    pull_openssh_images || { echo "❌ Openssh image pull failed"; exit 1; }
+    build_ubuntu_terminal_image || { echo "❌ Ubuntu terminal image build failed"; exit 1; }
     generate_ssh_keys || { echo "❌ SSH key generation failed"; exit 1; }
   fi
 
