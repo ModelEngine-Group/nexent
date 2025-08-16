@@ -20,8 +20,6 @@ export interface AgentConfigurationSectionProps {
   agentDescription?: string;
   onAgentNameChange?: (name: string) => void;
   onAgentDescriptionChange?: (description: string) => void;
-  agentDisplayName?: string;
-  onAgentDisplayNameChange?: (displayName: string) => void;
   isEditingMode?: boolean;
   mainAgentModel?: string;
   mainAgentMaxStep?: number;
@@ -55,8 +53,6 @@ export default function AgentConfigurationSection({
   agentDescription = '',
   onAgentNameChange,
   onAgentDescriptionChange,
-  agentDisplayName = '',
-  onAgentDisplayNameChange,
   isEditingMode = false,
   mainAgentModel = '',
   mainAgentMaxStep = 5,
@@ -188,21 +184,6 @@ export default function AgentConfigurationSection({
   // Render individual content sections
   const renderAgentInfo = () => (
     <div className="p-4 agent-info-content">
-      {/* Agent Display Name */}
-      <div className="mb-2">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {t('agent.displayName')}:
-        </label>
-        <input
-          type="text"
-          value={agentDisplayName}
-          onChange={(e) => onAgentDisplayNameChange?.(e.target.value)}
-          placeholder={t('agent.displayNamePlaceholder')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 box-border"
-          disabled={!isEditingMode}
-        />
-      </div>
-      
       {/* Agent Name */}
       <div className="mb-2">
         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -566,6 +547,26 @@ export default function AgentConfigurationSection({
             margin-top: 8px;
             font-size: 14px;
             color: #666;
+          }
+
+          /* Fix Ant Design button hover border color issues - ensure consistent color scheme */
+          .responsive-button.ant-btn:hover {
+            border-color: inherit !important;
+          }
+          
+          /* Blue button: hover background blue-600, border should also be blue-600 */
+          .bg-blue-500.hover\\:bg-blue-600.border-blue-500.hover\\:border-blue-600.ant-btn:hover {
+            border-color: #2563eb !important; /* blue-600 */
+          }
+          
+          /* Green button: hover background green-600, border should also be green-600 */
+          .bg-green-500.hover\\:bg-green-600.border-green-500.hover\\:border-green-600.ant-btn:hover {
+            border-color: #16a34a !important; /* green-600 */
+          }
+          
+          /* Red button: hover background red-600, border should also be red-600 */
+          .bg-red-500.hover\\:bg-red-600.border-red-500.hover\\:border-red-600.ant-btn:hover {
+            border-color: #dc2626 !important; /* red-600 */
           }
         `}</style>
         
