@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Typography, Row, Col } from "antd"
-import { AppConfigSection } from './appConfig'
-import { ModelConfigSection, ModelConfigSectionRef } from './modelConfig'
+import { AppConfigSection } from './components/appConfig'
+import { ModelConfigSection, ModelConfigSectionRef } from './components/modelConfig'
 import { useTranslation } from 'react-i18next'
 import { 
   SETUP_PAGE_CONTAINER, 

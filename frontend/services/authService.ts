@@ -140,7 +140,7 @@ export const authService = {
           console.warn("会话未正确保存，重试...");
           saveSessionToStorage(session);
         } else {
-          console.log("会话已成功保存到本地存储");
+          console.debug("会话已成功保存到本地存储");
         }
       }, 100);
       

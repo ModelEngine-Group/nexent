@@ -74,7 +74,7 @@ async def check_me_connectivity(timeout: int = Query(default=2, description="Tim
 
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=timeout),
-            connector=aiohttp.TCPConnector(verify_ssl=False)
+            connector=aiohttp.TCPConnector(ssl=False)
         ) as session:
             try:
                 async with session.get(

@@ -12,7 +12,7 @@ import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 import { updateAgent } from '@/services/agentConfigService'
 import AgentConfigurationSection from './AgentConfigurationSection'
 import NonEditingOverlay from './NonEditingOverlay'
-import './milkdown-nord.css'
+import '@/styles/milkdown-nord.css'
 
 // Simplified editor component
 export interface SimplePromptEditorProps {
@@ -250,15 +250,13 @@ export default function PromptManager({
   const [expandIndex, setExpandIndex] = useState(0)
 
   // Handle expand edit
-  const handleExpandCard = (title: string, content: string, index: number) => {
-    console.log('handleExpandCard called:', { title, content, index })
+  const handleExpandCard = (index: number) => {
     setExpandIndex(index)
     setExpandModalOpen(true)
   }
 
   // Handle expand edit save
   const handleExpandSave = (newContent: string) => {
-    console.log('handleExpandSave called:', { newContent, expandIndex })
     switch (expandIndex) {
       case 2:
         onDutyContentChange?.(newContent)

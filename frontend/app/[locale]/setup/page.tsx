@@ -1,20 +1,199 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { Modal, App, Button } from "antd"
-import { WarningFilled } from "@ant-design/icons"
+import { Modal, App, Button, Badge, Dropdown } from "antd"
+import { WarningFilled, DownOutlined } from "@ant-design/icons"
 import { motion, AnimatePresence } from "framer-motion"
+import { FiRefreshCw, FiArrowLeft } from "react-icons/fi"
+import { Globe } from "lucide-react"
 import AppModelConfig from "./modelSetup/config"
-import DataConfig from "./knowledgeBaseSetup/KnowledgeBaseManager"
-import AgentConfig from "./agentSetup/AgentConfig"
+import DataConfig from "./knowledgeSetup/config"
+import AgentConfig from "./agentSetup/config"
 import { configStore } from "@/lib/config"
 import { configService } from "@/services/configService"
 import modelEngineService, { ConnectionStatus } from "@/services/modelEngineService"
 import { useAuth } from "@/hooks/useAuth"
-import Layout from "./layout"
 import { useTranslation } from 'react-i18next'
+import { languageOptions } from '@/lib/constants'
+import { useLanguageSwitch } from '@/lib/languageUtils'
+import { HEADER_CONFIG } from '@/lib/layoutConstants'
 
+
+// ================ Header ================
+interface HeaderProps {
+  connectionStatus: "success" | "error" | "processing";
+  isCheckingConnection: boolean;
+  onCheckConnection: () => void;
+}
+
+function Header({
+  connectionStatus,
+  isCheckingConnection,
+  onCheckConnection
+}: HeaderProps) {
+  const router = useRouter()
+  const { t } = useTranslation()
+  const { currentLanguage, handleLanguageChange } = useLanguageSwitch()
+
+  // Get status text
+  const getStatusText = () => {
+    switch (connectionStatus) {
+      case "success":
+        return t("setup.header.status.connected")
+      case "error":
+        return t("setup.header.status.disconnected")
+      case "processing":
+        return t("setup.header.status.checking")
+      default:
+        return t("setup.header.status.unknown")
+    }
+  }
+
+  return (
+    <header className="w-full py-4 px-6 flex items-center justify-between border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm" style={{ height: HEADER_CONFIG.HEIGHT }}>
+      <div className="flex items-center">
+        <button
+          onClick={() => router.push("/")}
+          className="mr-3 p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+          aria-label={t("setup.header.button.back")}
+        >
+          <FiArrowLeft className="text-slate-600 dark:text-slate-300 text-xl" />
+        </button>
+        <h1 className="text-xl font-bold text-blue-600 dark:text-blue-500">{t("setup.header.title")}</h1>
+        <div className="mx-2 h-6 border-l border-slate-300 dark:border-slate-600"></div>
+        <span className="text-slate-600 dark:text-slate-400 text-sm">{t("setup.header.description")}</span>
+      </div>
+      {/* 语言切换 */}
+      <div className="flex items-center gap-3">
+        <Dropdown
+          menu={{
+            items: languageOptions.map(opt => ({ key: opt.value, label: opt.label })),
+            onClick: ({ key }) => handleLanguageChange(key as string),
+          }}
+        >
+          <a
+            className="ant-dropdown-link text-sm !font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2 cursor-pointer w-[110px] border-0 shadow-none bg-transparent text-left"
+          >
+            <Globe className="h-4 w-4" />
+            {languageOptions.find(o => o.value === currentLanguage)?.label || currentLanguage}
+            <DownOutlined className="text-[10px]" />
+          </a>
+        </Dropdown>
+        {/* ModelEngine连通性状态 */}
+        <div className="flex items-center px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700">
+          <Badge
+            status={connectionStatus}
+            text={getStatusText()}
+            className="[&>.ant-badge-status-dot]:w-[8px] [&>.ant-badge-status-dot]:h-[8px] [&>.ant-badge-status-text]:text-base [&>.ant-badge-status-text]:ml-2 [&>.ant-badge-status-text]:font-medium"
+          />
+          <Button
+            icon={<FiRefreshCw className={isCheckingConnection ? "animate-spin" : ""} />}
+            size="small"
+            type="text"
+            onClick={onCheckConnection}
+            disabled={isCheckingConnection}
+            className="ml-2"
+          />
+        </div>
+      </div>
+    </header>
+  )
+}
+
+// ================ Navigation ================
+interface NavigationProps {
+  selectedKey: string;
+  onBackToFirstPage: () => void;
+  onCompleteConfig: () => void;
+  isSavingConfig: boolean;
+  userRole?: "user" | "admin";
+}
+
+function Navigation({
+  selectedKey,
+  onBackToFirstPage,
+  onCompleteConfig,
+  isSavingConfig,
+  userRole,
+}: NavigationProps) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="mt-3 flex justify-between px-6">
+      <div className="flex gap-2">
+        {selectedKey != "1" && userRole === "admin" && (
+          <button
+            onClick={onBackToFirstPage}
+            className={"px-6 py-2.5 rounded-md flex items-center text-sm font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer transition-colors"}
+          >
+            {t("setup.navigation.button.previous")}
+          </button>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={onCompleteConfig}
+          disabled={isSavingConfig}
+          className={"px-6 py-2.5 rounded-md flex items-center text-sm font-medium bg-blue-600 dark:bg-blue-600 text-white hover:bg-blue-700 dark:hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"}
+          style={{ border: "none", marginLeft: selectedKey === "1" || userRole !== "admin" ? "auto" : undefined }}
+        >
+          {selectedKey === "3" ? (isSavingConfig ? t("setup.navigation.button.saving") : t("setup.navigation.button.complete")) :
+           selectedKey === "2" && userRole !== "admin" ? (isSavingConfig ? t("setup.navigation.button.saving") : t("setup.navigation.button.complete")) :
+           t("setup.navigation.button.next")}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ================ Layout ================
+interface LayoutProps {
+  children: ReactNode;
+  connectionStatus: "success" | "error" | "processing";
+  isCheckingConnection: boolean;
+  onCheckConnection: () => void;
+  selectedKey: string;
+  onBackToFirstPage: () => void;
+  onCompleteConfig: () => void;
+  isSavingConfig: boolean;
+  userRole?: "user" | "admin";
+}
+
+function Layout({
+  children,
+  connectionStatus,
+  isCheckingConnection,
+  onCheckConnection,
+  selectedKey,
+  onBackToFirstPage,
+  onCompleteConfig,
+  isSavingConfig,
+  userRole,
+}: LayoutProps) {
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans">
+      <Header
+        connectionStatus={connectionStatus}
+        isCheckingConnection={isCheckingConnection}
+        onCheckConnection={onCheckConnection}
+      />
+
+      {/* Main content */}
+      <div className="max-w-[1800px] mx-auto px-8 pb-4 mt-6 bg-transparent">
+          {children}
+          <Navigation
+            selectedKey={selectedKey}
+            onBackToFirstPage={onBackToFirstPage}
+            onCompleteConfig={onCompleteConfig}
+            isSavingConfig={isSavingConfig}
+            userRole={userRole}
+          />
+      </div>
+    </div>
+  )
+}
 
 export default function CreatePage() {
   const { message } = App.useApp();
@@ -22,7 +201,6 @@ export default function CreatePage() {
   const router = useRouter()
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("processing")
   const [isCheckingConnection, setIsCheckingConnection] = useState(false)
-  const [lastChecked, setLastChecked] = useState<string | null>(null)
   const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [isFromSecondPage, setIsFromSecondPage] = useState(false)
   const { user, isLoading: userLoading, openLoginModal } = useAuth()
@@ -91,7 +269,7 @@ export default function CreatePage() {
       localStorage.removeItem('preloaded_kb_data');
       localStorage.removeItem('kb_cache');
       // When entering the second page, get the latest knowledge base data
-      // 使用 setTimeout 确保组件完全挂载后再触发事件
+      // Use setTimeout to ensure the component is fully mounted before triggering the event
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('knowledgeBaseDataUpdated', {
           detail: { forceRefresh: true }
@@ -108,7 +286,6 @@ export default function CreatePage() {
     try {
       const result = await modelEngineService.checkConnection()
       setConnectionStatus(result.status)
-      setLastChecked(result.lastChecked)
     } catch (error) {
       console.error(t('setup.page.error.checkConnection'), error)
       setConnectionStatus("error")
@@ -292,7 +469,6 @@ export default function CreatePage() {
   return (
     <Layout
       connectionStatus={connectionStatus}
-      lastChecked={lastChecked}
       isCheckingConnection={isCheckingConnection}
       onCheckConnection={checkModelEngineConnection}
       selectedKey={getEffectiveSelectedKey()}

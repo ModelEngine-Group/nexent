@@ -31,33 +31,27 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
   const { t } = useTranslation('common')
   const buttonRef = useRef<HTMLDivElement>(null)
 
-  // 可自定义的下拉框宽度（单位：px）
-  // 你可以根据需要修改这个数值来调整选择框的宽度
+  // Customizable dropdown width (unit: px)
+  // You can modify this value to adjust the width of the selector as needed
   const dropdownWidth = 550
 
   const selectedAgent = agents.find(agent => agent.agent_id === selectedAgentId)
 
   /**
-   * 处理URL参数自动选择Agent的逻辑
+   * Handle URL parameter auto-selection logic for Agent
    */
   const handleAutoSelectAgent = () => {
     if (agents.length === 0 || isAutoSelectInit) return
 
-    // 获取URL中的agent_id参数
+    // Get agent_id parameter from URL
     const agentId = getUrlParam('agent_id', null as number | null, str => str ? Number(str) : null)
-    
     if (agentId === null) return
 
-    // 检查agentId是否为有效的agent
+    // Check if agentId is a valid agent
     const agent = agents.find(a => a.agent_id === agentId)
     if (agent && agent.is_available) {
-      console.log('自动选择agent:', agent.name, 'ID:', agentId)
       handleAgentSelect(agentId)
       setIsAutoSelectInit(true)
-    } else if (agent && !agent.is_available) {
-      console.log('Agent不可用，跳过自动选择:', agent.name, 'ID:', agentId)
-    } else {
-      console.log('未找到对应的agent，ID:', agentId)
     }
   }
 
@@ -65,35 +59,35 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
     loadAgents()
   }, [])
 
-  // 当agents加载完成后执行自动选择逻辑
+  // Execute auto-selection logic when agents are loaded
   useEffect(() => {
     handleAutoSelectAgent()
   }, [agents])
 
-  // 计算下拉框位置
+  // Calculate dropdown position
   useEffect(() => {
     if (isOpen && buttonRef.current) {
       const buttonRect = buttonRef.current.getBoundingClientRect()
       const viewportHeight = window.innerHeight
-      const dropdownHeight = 320 // 估算下拉框高度 (max-h-80)，可根据agent数量调整
+      const dropdownHeight = 320 // Estimated dropdown height (max-h-80), can be adjusted based on agent count
       
-      // 检查是否有足够空间向下显示
+      // Check if there's enough space to display below
       const hasSpaceBelow = buttonRect.bottom + dropdownHeight + 10 < viewportHeight
-      // 检查是否有足够空间向上显示
+      // Check if there's enough space to display above
       const hasSpaceAbove = buttonRect.top - dropdownHeight - 10 > 0
       
       let direction = 'down'
       let top = buttonRect.bottom + 4
       
-      // 决定方向：优先使用建议方向，但如果空间不足则调整
+      // Decide direction: prioritize suggested direction, but adjust if space is insufficient
       if (isInitialMode) {
-        // 初始模式优先向下
+        // Initial mode prioritizes downward
         if (!hasSpaceBelow && hasSpaceAbove) {
           direction = 'up'
           top = buttonRect.top - 4
         }
       } else {
-        // 非初始模式优先向上
+        // Non-initial mode prioritizes upward
         direction = 'up'
         top = buttonRect.top - 4
         if (!hasSpaceAbove && hasSpaceBelow) {
@@ -110,19 +104,19 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
     }
   }, [isOpen, isInitialMode])
 
-  // 监听窗口滚动和尺寸变化，关闭下拉框
+  // Listen for window scroll and resize events, close dropdown
   useEffect(() => {
     if (!isOpen) return
 
     const handleScroll = (e: Event) => {
-      // 如果滚动发生在下拉框内部，不关闭下拉框
+      // If scrolling occurs inside the dropdown, don't close it
       const target = e.target as Node
       const dropdownElement = document.querySelector('.agent-selector-dropdown')
       if (dropdownElement && (dropdownElement === target || dropdownElement.contains(target))) {
         return
       }
       
-      // 如果是页面滚动或其他容器的滚动，则关闭下拉框
+      // If it's page scrolling or other container scrolling, close the dropdown
       setIsOpen(false)
     }
 
@@ -130,7 +124,7 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
       setIsOpen(false)
     }
 
-    // 使用事件捕获阶段
+    // Use event capture phase
     window.addEventListener('scroll', handleScroll, true)
     window.addEventListener('resize', handleResize)
 
@@ -148,25 +142,25 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
         setAgents(result.data)
       }
     } catch (error) {
-      console.error('加载Agent列表失败:', error)
+      console.error('Failed to load Agent list:', error)
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleAgentSelect = (agentId: number | null) => {
-    // 只有可用的Agent才能被选择
+    // Only available agents can be selected
     if (agentId !== null) {
       const agent = agents.find(a => a.agent_id === agentId)
       if (agent && !agent.is_available) {
-        return // 不可用的Agent不能被选择
+        return // Unavailable agents cannot be selected
       }
     }
     
     onAgentSelect(agentId)
     setIsOpen(false)
     
-    // 如果是iframe嵌入页面，发送postMessage给父页面
+    // If it's an iframe embedded page, send postMessage to the parent page
     if (window.self !== window.top) {
       try {
         const selectedAgent = agents.find(agent => agent.agent_id === agentId)
@@ -178,15 +172,15 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
           source: 'agent_selector'
         }
         
-        // 发送postMessage给父页面
+        // Send postMessage to the parent page
         window.parent.postMessage(message, '*')
       } catch (error) {
-        console.error('发送postMessage失败:', error)
+        console.error('Failed to send postMessage:', error)
       }
     }
   }
 
-  // 显示所有agents，包括不可用的
+  // Show all agents, including unavailable ones
   const allAgents = agents
 
   return (
@@ -228,15 +222,15 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
         />
       </div>
 
-      {/* Portal渲染下拉框到body，避免被父容器遮挡 */}
+      {/* Portal renders dropdown to body to avoid being blocked by parent container */}
       {isOpen && typeof window !== 'undefined' && createPortal(
         <>
-          {/* 覆盖层 */}
+          {/* Overlay */}
           <div
             className="fixed inset-0 z-[9998]"
             onClick={() => setIsOpen(false)}
             onWheel={(e) => {
-              // 如果滚动发生在下拉框内部，不关闭下拉框
+              // If scrolling occurs inside the dropdown, don't close it
               const target = e.target as Node
               const dropdownElement = document.querySelector('.agent-selector-dropdown')
               if (dropdownElement && (dropdownElement === target || dropdownElement.contains(target))) {
@@ -246,7 +240,7 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
             }}
           />
           
-          {/* 下拉框 */}
+          {/* Dropdown */}
           <div 
             className="agent-selector-dropdown fixed bg-white border border-slate-200 rounded-md shadow-lg z-[9999] max-h-80 overflow-y-auto"
             style={{
@@ -258,7 +252,7 @@ export function AgentSelector({ selectedAgentId, onAgentSelect, disabled = false
               transform: dropdownPosition.direction === 'up' ? 'translateY(-100%)' : 'none'
             }}
             onWheel={(e) => {
-              // 阻止滚动事件冒泡，但允许正常滚动
+              // Prevent scroll event bubbling, but allow normal scrolling
               e.stopPropagation()
             }}
           >

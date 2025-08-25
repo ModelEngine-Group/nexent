@@ -63,11 +63,6 @@ const FileViewer = ({ url, name, contentType, isOpen, onClose }: {
   if (!isOpen) return null;
   const { t } = useTranslation('common');
   
-  const extension = getFileExtension(name);
-  const isPdf = contentType === 'application/pdf' || extension === 'pdf';
-  const isText = ['txt', 'md', 'csv', 'json', 'html', 'htm', 'css', 'js', 'ts', 'jsx', 'tsx'].includes(extension) || 
-                (contentType && (contentType.startsWith('text/') || contentType === 'application/json'));
-  
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl p-4 overflow-hidden">

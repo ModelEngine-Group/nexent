@@ -1,14 +1,14 @@
 import logging
 from typing import Optional, List
 
-from fastapi import Query, APIRouter, Header, Body
+from fastapi import Query, APIRouter, Header
 
 from consts.model import ModelConnectStatusEnum, ModelResponse, ModelRequest, ProviderModelRequest, \
     BatchCreateModelsRequest
 from consts.provider import SILICON_BASE_URL, ProviderEnum
 from database.model_management_db import create_model_record, delete_model_record, \
     get_model_records, get_model_by_display_name, get_models_by_tenant_factory_type
-from database.model_management_db import update_model_record, get_model_by_name
+from database.model_management_db import update_model_record
 from services.model_health_service import check_model_connectivity, embedding_dimension_check
 from services.model_provider_service import SiliconModelProvider, prepare_model_dict
 from utils.auth_utils import get_current_user_id

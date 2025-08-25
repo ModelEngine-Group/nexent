@@ -143,24 +143,6 @@ export function ChatHeader({
               <Button variant="ghost" className="h-8 w-12 rounded-full" onClick={() => setMemoryModalVisible(true)}>
                 <BrainCircuit className="size-5" stroke="url(#brainCogGradient)" />
               </Button>
-              {/* Dropdown Menu */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="h-8 w-12 rounded-full">
-                    <MoreHorizontal className="size-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem className="cursor-pointer">
-                    <Bookmark className="mr-2 h-4 w-4" />
-                    <span>{t("chatHeader.bookmark")}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer" onClick={onShare}>
-                    <Share className="mr-2 h-4 w-4" />
-                    <span>{t("chatHeader.share")}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
           </div>
         </div>

@@ -39,7 +39,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
   const currentUserId = "user1"
   const currentTenantId = "tenant1"
 
-  const memory = useMemory({ visible, role, currentUserId, currentTenantId, message })
+  const memory = useMemory({ visible, currentUserId, currentTenantId, message })
   const { t } = useTranslation('common')
 
   // ====================== 清空记忆确认弹框 ======================
@@ -158,7 +158,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
   }
 
   // 渲染空状态
-  const renderEmptyState = (groupKey: string, groupTitle: string) => {
+  const renderEmptyState = (groupKey: string) => {
     const groups = memory.getGroupsForTab(memory.activeTabKey)
     const currentGroup = groups.find(g => g.key === groupKey)
     
@@ -242,7 +242,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
                   dataSource={g.items}
                   style={{ maxHeight: "35vh", overflowY: "auto", scrollbarGutter: "stable" }}
                   size="small"
-                  locale={{ emptyText: renderEmptyState(g.key, g.title) }}
+                  locale={{ emptyText: renderEmptyState(g.key) }}
                   renderItem={(item) => (
                     <List.Item
                       actions={[
@@ -348,7 +348,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
                   dataSource={g.items}
                   style={{ maxHeight: "35vh", overflowY: "auto", scrollbarGutter: "stable" }}
                   size="small"
-                  locale={{ emptyText: renderEmptyState(g.key, g.title) }}
+                  locale={{ emptyText: renderEmptyState(g.key) }}
                   renderItem={(item) => (
                     <List.Item
                       actions={[

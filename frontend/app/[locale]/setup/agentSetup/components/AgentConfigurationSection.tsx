@@ -4,7 +4,7 @@ import { Button, Modal, Spin } from 'antd'
 import { ExpandAltOutlined, SaveOutlined, LoadingOutlined, BugOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { OpenAIModel } from '../ConstInterface'
+import { OpenAIModel } from '@/types/agent'
 import { SimplePromptEditor } from './PromptManager'
 import { checkAgentName, checkAgentDisplayName } from '@/services/agentConfigService'
 
@@ -29,7 +29,7 @@ export interface AgentConfigurationSectionProps {
   onModelChange?: (value: string) => void;
   onMaxStepChange?: (value: number | null) => void;
   onSavePrompt?: () => void;
-  onExpandCard?: (title: string, content: string, index: number) => void;
+  onExpandCard?: (index: number) => void;
   isGeneratingAgent?: boolean;
   // Add new props for action buttons
   onDebug?: () => void;
@@ -443,89 +443,47 @@ export default function AgentConfigurationSection({
   );
 
   const renderDutyContent = () => (
-    <div className="relative p-4">
-      <button
-              onClick={() => {
-        // Use the latest content, prioritize content from props, if not available use local state
-        const currentContent = dutyContent !== undefined ? dutyContent : localDutyContent;
-        onExpandCard?.(t('systemPrompt.card.duty.title'), currentContent, 2);
-      }}
-        className="absolute top-2 right-4 z-10 p-1.5 rounded-full bg-white/90 hover:bg-white text-gray-500 hover:text-gray-700 transition-all duration-200 shadow-sm hover:shadow-md"
-        style={{ border: "none" }}
-        title={t('systemPrompt.button.expand')}
-      >
-        <ExpandAltOutlined className="text-xs" />
-      </button>
-      <div className="pr-4">
-        <SimplePromptEditor
-          value={localDutyContent}
-          onChange={(value: string) => {
-            setLocalDutyContent(value);
-            // Immediate update to parent component
-            if (onDutyContentChange) {
-              onDutyContentChange(value);
-            }
-          }}
-        />
-      </div>
+    <div className="p-1">
+      <SimplePromptEditor
+        value={localDutyContent}
+        onChange={(value: string) => {
+          setLocalDutyContent(value);
+          // Immediate update to parent component
+          if (onDutyContentChange) {
+            onDutyContentChange(value);
+          }
+        }}
+      />
     </div>
   );
 
   const renderConstraintContent = () => (
-    <div className="relative p-4">
-      <button
-              onClick={() => {
-        // Use the latest content, prioritize content from props, if not available use local state
-        const currentContent = constraintContent !== undefined ? constraintContent : localConstraintContent;
-        onExpandCard?.(t('systemPrompt.card.constraint.title'), currentContent, 3);
-      }}
-        className="absolute top-2 right-4 z-10 p-1.5 rounded-full bg-white/90 hover:bg-white text-gray-500 hover:text-gray-700 transition-all duration-200 shadow-sm hover:shadow-md"
-        style={{ border: "none" }}
-        title={t('systemPrompt.button.expand')}
-      >
-        <ExpandAltOutlined className="text-xs" />
-      </button>
-      <div className="pr-4">
-        <SimplePromptEditor
-          value={localConstraintContent}
-          onChange={(value: string) => {
-            setLocalConstraintContent(value);
-            // Immediate update to parent component
-            if (onConstraintContentChange) {
-              onConstraintContentChange(value);
-            }
-          }}
-        />
-      </div>
+    <div className="p-1">
+      <SimplePromptEditor
+        value={localConstraintContent}
+        onChange={(value: string) => {
+          setLocalConstraintContent(value);
+          // Immediate update to parent component
+          if (onConstraintContentChange) {
+            onConstraintContentChange(value);
+          }
+        }}
+      />
     </div>
   );
 
   const renderFewShotsContent = () => (
-    <div className="relative p-4">
-      <button
-              onClick={() => {
-        // Use the latest content, prioritize content from props, if not available use local state
-        const currentContent = fewShotsContent !== undefined ? fewShotsContent : localFewShotsContent;
-        onExpandCard?.(t('systemPrompt.card.fewShots.title'), currentContent, 4);
-      }}
-        className="absolute top-2 right-4 z-10 p-1.5 rounded-full bg-white/90 hover:bg-white text-gray-500 hover:text-gray-700 transition-all duration-200 shadow-sm hover:shadow-md"
-        style={{ border: "none" }}
-        title={t('systemPrompt.button.expand')}
-      >
-        <ExpandAltOutlined className="text-xs" />
-      </button>
-      <div className="pr-4">
-        <SimplePromptEditor
-          value={localFewShotsContent}
-          onChange={(value: string) => {
-            setLocalFewShotsContent(value);
-            // Immediate update to parent component
-                        if (onFewShotsContentChange) {
-              onFewShotsContentChange(value);
-            }
-          }}
-        />
-      </div>
+    <div className="p-1">
+      <SimplePromptEditor
+        value={localFewShotsContent}
+        onChange={(value: string) => {
+          setLocalFewShotsContent(value);
+          // Immediate update to parent component
+          if (onFewShotsContentChange) {
+            onFewShotsContentChange(value);
+          }
+        }}
+      />
     </div>
   );
 
@@ -604,7 +562,23 @@ export default function AgentConfigurationSection({
       </div>
       
       {/* Content area - flexible height */}
-      <div className="flex-1 bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden w-full max-w-4xl mx-auto min-h-0">
+      <div className="flex-1 bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden w-full max-w-4xl mx-auto min-h-0 relative">
+        {/* Floating expand buttons - positioned outside scrollable content */}
+        {(activeSegment === 'duty' || activeSegment === 'constraint' || activeSegment === 'few-shots') && (
+          <button 
+            onClick={() => {
+              if (activeSegment === 'duty') onExpandCard?.(2);
+              else if (activeSegment === 'constraint') onExpandCard?.(3);
+              else if (activeSegment === 'few-shots') onExpandCard?.(4);
+            }}
+            className="absolute top-2 right-4 z-20 p-1.5 rounded-full bg-white/90 hover:bg-white text-gray-500 hover:text-gray-700 transition-all duration-200 shadow-sm hover:shadow-md"
+            style={{ border: "none" }}
+            title={t('systemPrompt.button.expand')}
+          >
+            <ExpandAltOutlined className="text-xs" />
+          </button>
+        )}
+        
         <style jsx global>{`
           /* Custom scrollbar styles for better UX */
           .milkdown-editor-container .milkdown {
@@ -751,7 +725,7 @@ export default function AgentConfigurationSection({
           }
         `}</style>
         
-        <div className="content-scroll h-full overflow-y-auto agent-config-content">
+        <div className="content-scroll h-full w-full overflow-y-auto agent-config-content">
           {/* Agent Info */}
           {activeSegment === 'agent-info' && (
             <div>
@@ -784,7 +758,7 @@ export default function AgentConfigurationSection({
       
       {/* Action Buttons - Fixed at bottom - Only show in editing mode */}
       {isEditingMode && (
-        <div className="flex justify-center mt-4 flex-shrink-0 border-t border-gray-200 bg-white agent-config-buttons">
+        <div className="flex justify-center mb-4 flex-shrink-0 agent-config-buttons">
           {/* <div className="flex gap-2 lg:gap-3 flex-wrap justify-center"> */}
           <div className="flex gap-1 sm:gap-2 lg:gap-3 flex-nowrap justify-center w-full">
             {/* Debug Button - Always show in editing mode */}

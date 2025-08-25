@@ -23,13 +23,10 @@ class DummyOpenAIServerModel:
         # In tests we will patch this method on the instance directly, so default impl is fine
         return {}
 
-    def postprocess_message(self, message, tools_to_call_from=None):
-        # Default implementation for testing
-        return message
-
 
 mock_models_module.OpenAIServerModel = DummyOpenAIServerModel
 mock_models_module.ChatMessage = MagicMock()
+mock_models_module.MessageRole = MagicMock()
 mock_smolagents.models = mock_models_module
 
 # Assemble smolagents.* paths
@@ -78,6 +75,7 @@ with patch.dict("sys.modules", module_mocks):
         """Create a mock ChatMessage for testing"""
         mock_message = MagicMock()
         mock_message.raw = MagicMock()
+        mock_message.role = MagicMock()
         return mock_message
 
 
@@ -127,7 +125,7 @@ async def test_check_connectivity_failure(openai_model_instance):
 # Tests for __call__ method
 # ---------------------------------------------------------------------------
 
-def test_call_normal_operation(openai_model_instance, mock_chat_message):
+def test_call_normal_operation(openai_model_instance):
     """Test __call__ method with normal operation flow"""
 
     # Setup test messages with correct format
@@ -157,9 +155,13 @@ def test_call_normal_operation(openai_model_instance, mock_chat_message):
 
     mock_stream = [mock_chunk1, mock_chunk2, mock_chunk3]
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = mock_stream
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}) as mock_prepare, \
-            patch.object(openai_model_instance, "postprocess_message",
-                         return_value=mock_chat_message) as mock_postprocess:
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         # Mock the client response
         openai_model_instance.client.chat.completions.create.return_value = mock_stream
 
@@ -167,9 +169,8 @@ def test_call_normal_operation(openai_model_instance, mock_chat_message):
         result = openai_model_instance.__call__(messages)
 
         # Verify the result
-        assert result == mock_chat_message
+        assert result == mock_result_message
         mock_prepare.assert_called_once()
-        mock_postprocess.assert_called_once()
 
         # Verify observer calls
         openai_model_instance.observer.add_model_new_token.assert_any_call("Hello")
@@ -181,7 +182,7 @@ def test_call_normal_operation(openai_model_instance, mock_chat_message):
         assert openai_model_instance.last_output_token_count == 15
 
 
-def test_call_with_no_think_token_addition(openai_model_instance, mock_chat_message):
+def test_call_with_no_think_token_addition(openai_model_instance):
     """Test __call__ method adds /no_think token to user messages"""
 
     # Setup test messages with user as last message
@@ -199,8 +200,13 @@ def test_call_with_no_think_token_addition(openai_model_instance, mock_chat_mess
     mock_chunk.usage.prompt_tokens = 5
     mock_chunk.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
 
         # Call the method
@@ -210,7 +216,7 @@ def test_call_with_no_think_token_addition(openai_model_instance, mock_chat_mess
         assert messages[-1]["content"][-1]["text"] == "Hello"
 
 
-def test_call_without_no_think_token(openai_model_instance, mock_chat_message):
+def test_call_without_no_think_token(openai_model_instance):
     """Test __call__ method doesn't add /no_think when last message is not user"""
 
     # Setup test messages with assistant as last message
@@ -228,8 +234,13 @@ def test_call_without_no_think_token(openai_model_instance, mock_chat_message):
     mock_chunk.usage.prompt_tokens = 5
     mock_chunk.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
 
         # Call the method
@@ -290,7 +301,7 @@ def test_call_general_exception(openai_model_instance):
             openai_model_instance.__call__(messages)
 
 
-def test_call_with_no_usage_info(openai_model_instance, mock_chat_message):
+def test_call_with_no_usage_info(openai_model_instance):
     """Test __call__ method handles case where usage info is None"""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
@@ -302,8 +313,13 @@ def test_call_with_no_usage_info(openai_model_instance, mock_chat_message):
     mock_chunk.choices[0].delta.role = "assistant"
     mock_chunk.usage = None
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
 
         # Call the method
@@ -314,7 +330,7 @@ def test_call_with_no_usage_info(openai_model_instance, mock_chat_message):
         assert openai_model_instance.last_output_token_count == 0
 
 
-def test_call_with_null_tokens(openai_model_instance, mock_chat_message):
+def test_call_with_null_tokens(openai_model_instance):
     """Test __call__ method handles null tokens in stream"""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
@@ -333,8 +349,13 @@ def test_call_with_null_tokens(openai_model_instance, mock_chat_message):
     mock_chunk2.usage.prompt_tokens = 5
     mock_chunk2.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk1, mock_chunk2]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2]
 
         # Call the method
@@ -344,7 +365,7 @@ def test_call_with_null_tokens(openai_model_instance, mock_chat_message):
         openai_model_instance.observer.add_model_new_token.assert_called_once_with("Response")
 
 
-def test_call_with_reasoning_content(openai_model_instance, mock_chat_message):
+def test_call_with_reasoning_content(openai_model_instance):
     """Test __call__ method handles reasoning_content when it is not None"""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
@@ -365,15 +386,20 @@ def test_call_with_reasoning_content(openai_model_instance, mock_chat_message):
     mock_chunk2.usage.prompt_tokens = 5
     mock_chunk2.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk1, mock_chunk2]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2]
 
         # Call the method
         result = openai_model_instance.__call__(messages)
 
         # Verify the result
-        assert result == mock_chat_message
+        assert result == mock_result_message
 
         # Verify that reasoning_content was added to observer
         openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with("This is a reasoning step")
@@ -383,7 +409,7 @@ def test_call_with_reasoning_content(openai_model_instance, mock_chat_message):
         openai_model_instance.observer.add_model_new_token.assert_any_call("Response")
 
 
-def test_call_with_multiple_reasoning_content_chunks(openai_model_instance, mock_chat_message):
+def test_call_with_multiple_reasoning_content_chunks(openai_model_instance):
     """Test __call__ method handles multiple chunks with reasoning_content"""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
@@ -410,15 +436,20 @@ def test_call_with_multiple_reasoning_content_chunks(openai_model_instance, mock
     mock_chunk3.usage.prompt_tokens = 5
     mock_chunk3.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk1, mock_chunk2, mock_chunk3]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2, mock_chunk3]
 
         # Call the method
         result = openai_model_instance.__call__(messages)
 
         # Verify the result
-        assert result == mock_chat_message
+        assert result == mock_result_message
 
         # Verify that all reasoning_content chunks were added to observer
         openai_model_instance.observer.add_model_reasoning_content.assert_any_call("First reasoning step")
@@ -430,7 +461,7 @@ def test_call_with_multiple_reasoning_content_chunks(openai_model_instance, mock
         openai_model_instance.observer.add_model_new_token.assert_any_call(" about this")
 
 
-def test_call_with_reasoning_content_only(openai_model_instance, mock_chat_message):
+def test_call_with_reasoning_content_only(openai_model_instance):
     """Test __call__ method handles chunks with only reasoning_content (no content)"""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
@@ -451,15 +482,20 @@ def test_call_with_reasoning_content_only(openai_model_instance, mock_chat_messa
     mock_chunk2.usage.prompt_tokens = 5
     mock_chunk2.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk1, mock_chunk2]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2]
 
         # Call the method
         result = openai_model_instance.__call__(messages)
 
         # Verify the result
-        assert result == mock_chat_message
+        assert result == mock_result_message
 
         # Verify that reasoning_content was added to observer
         openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with("Pure reasoning content")
@@ -468,7 +504,7 @@ def test_call_with_reasoning_content_only(openai_model_instance, mock_chat_messa
         openai_model_instance.observer.add_model_new_token.assert_called_once_with("Final response")
 
 
-def test_call_with_reasoning_content_and_content_together(openai_model_instance, mock_chat_message):
+def test_call_with_reasoning_content_and_content_together(openai_model_instance):
     """Test __call__ method handles chunks with both reasoning_content and content simultaneously"""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
@@ -483,15 +519,20 @@ def test_call_with_reasoning_content_and_content_together(openai_model_instance,
     mock_chunk.usage.prompt_tokens = 5
     mock_chunk.usage.total_tokens = 8
 
+    # Mock ChatMessage.from_dict to return a mock message
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
-            patch.object(openai_model_instance, "postprocess_message", return_value=mock_chat_message):
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
         openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
 
         # Call the method
         result = openai_model_instance.__call__(messages)
 
         # Verify the result
-        assert result == mock_chat_message
+        assert result == mock_result_message
 
         # Verify that both reasoning_content and content were processed
         openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with(

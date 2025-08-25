@@ -32,8 +32,6 @@ services:
       cluster.routing.allocation.disk.watermark.low: "5gb"
       cluster.routing.allocation.disk.watermark.high: "3gb"
       cluster.routing.allocation.disk.watermark.flood_stage: "2gb"
-      # Timezone setting
-      TZ: "Asia/Shanghai"
     volumes:
       - ${ROOT_DIR}/elasticsearch:/usr/share/elasticsearch/data
     ports:
@@ -60,7 +58,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${NEXENT_POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      TZ: "Asia/Shanghai"
     volumes:
       - ${ROOT_DIR}/postgresql/data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -167,7 +164,7 @@ services:
       - "6379:6379"
     command: redis-server --appendonly yes --appendfsync everysec --save "900 1" --save "300 10" --save "60 10000" --dir /data --maxmemory-policy allkeys-lru
     volumes:
-      - ${ROOT_DIR}/redis_data:/data
+      - ${ROOT_DIR}/redis:/data
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -188,7 +185,6 @@ services:
       <<: [*minio-vars, *proxy-vars]
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      TZ: "Asia/Shanghai"
     volumes:
       - ${ROOT_DIR}/minio/data:/data
     networks:
@@ -217,7 +213,6 @@ services:
     container_name: nexent-openssh-server
     hostname: nexent-openssh-server
     environment:
-      - TZ=Asia/Shanghai
       - DEV_USER=linuxserver.io
     ports:
       - "2222:22"  # SSH port

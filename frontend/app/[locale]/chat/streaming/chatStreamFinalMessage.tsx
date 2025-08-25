@@ -5,7 +5,6 @@ import { Copy, Volume2, ChevronRight, Square, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { FaRegThumbsDown, FaRegThumbsUp } from "react-icons/fa"
-import { useConfig } from "@/hooks/useConfig"
 import { ChatAttachment, AttachmentItem } from '@/app/chat/internal/chatAttachment'
 import { conversationService } from '@/services/conversationService'
 import { useTranslation } from "react-i18next"
@@ -40,8 +39,6 @@ export function ChatStreamFinalMessage({
   currentConversationId,
 }: FinalMessageProps) {
   const { t } = useTranslation('common');
-  const { getAppAvatarUrl } = useConfig();
-  const avatarUrl = getAppAvatarUrl(20); // Message avatar size is 20px
   
   const messageRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);

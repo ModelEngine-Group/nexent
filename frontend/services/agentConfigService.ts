@@ -1,5 +1,6 @@
 import { Tool } from '@/types/agentAndToolConst';
 import { convertParamType } from '@/lib/utils';
+import { convertParamType } from '@/lib/utils';
 import { API_ENDPOINTS } from './api';
 import { getAuthHeaders } from '@/lib/auth';
 
@@ -148,8 +149,6 @@ export const updateToolConfig = async (
   enable: boolean
 ) => {
   try {
-    console.log({"tool_id":toolId, "agent_id":agentId, "params":params, "enabled":enable})
-
     const response = await fetch(API_ENDPOINTS.tool.update, {
       method: 'POST',
       headers: getAuthHeaders(),

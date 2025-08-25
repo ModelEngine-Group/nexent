@@ -138,7 +138,7 @@ class TenantConfigManager:
         configs = get_all_configs_by_tenant_id(tenant_id)
 
         if not configs:
-            logger.warning(f"No configurations found for tenant {tenant_id}")
+            logger.info(f"No configurations found for tenant {tenant_id}")
             return {}
 
         # Update cache with new configurations

@@ -12,8 +12,8 @@ function AppReadyWrapper({ children }: { children: ReactNode }) {
 }
 
 /**
- * 应用根Provider
- * 整合所有需要的Provider
+ * RootProvider Component
+ * Integrates all necessary providers for the application
  */
 export function RootProvider({ children }: { children: ReactNode }) {
   return (

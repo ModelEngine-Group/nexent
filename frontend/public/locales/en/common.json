@@ -302,7 +302,7 @@
 
     "guide.steps.createOrEditAgent.title": "Create/Edit Agent",
     "guide.steps.createOrEditAgent.description": "Used to manage all agent information",
-    "guide.steps.selectCollaborativeAgent.title": "Select Collaborative Agent (optional)",
+    "guide.steps.selectCollaborativeAgent.title": "Select Collaborative Agent",
     "guide.steps.selectCollaborativeAgent.description": "Can help the current agent complete tasks",
     "guide.steps.selectTools.title": "Select Tools",
     "guide.steps.selectTools.description": "Agent can call tools to complete tasks",
@@ -399,7 +399,6 @@
     "agent.action.import": "Import Agent",
     "agent.action.viewCallRelationship": "View Call Relationship",
     "agent.message.saveSuccess": "Agent \"{name}\" {action} successfully",
-    "agent.message.infoLoaded": "Agent information loaded",
     "agent.message.statusUpdated": "Agent \"{name}\" has been {status}",
     "agent.message.modelUpdateSuccess": "Model updated successfully",
     "agent.message.maxStepsUpdateSuccess": "Maximum steps updated successfully",
@@ -592,8 +591,6 @@
     "setup.header.button.back": "Back to Home",
     "setup.header.title": "Quick Setup",
     "setup.header.description": "Smartly build any assistant, accurately solve every challenge",
-    "setup.header.tooltip.lastChecked": "Last checked: {{time}}",
-    "setup.header.tooltip.checkStatus": "Click to check connection status",
     "setup.navigation.button.previous": "Previous",
     "setup.navigation.button.next": "Next",
     "setup.navigation.button.complete": "Complete Setup",
@@ -827,7 +824,6 @@
     "businessLogic.config.modal.button.cancel": "Cancel",
     "businessLogic.config.modal.button.confirm": "Confirm Delete",
     "businessLogic.config.message.agentCreated": "Agent {{name}} {{action}} successfully",
-    "businessLogic.config.message.agentInfoLoaded": "Agent information loaded",
     "businessLogic.config.message.agentStatusUpdated": "Agent {{name}} {{status}}",
     "businessLogic.config.message.modelUpdateSuccess": "Model updated successfully",
     "businessLogic.config.message.maxStepsUpdateSuccess": "Max steps updated successfully",
@@ -1138,7 +1134,7 @@
         "inputPlaceholder": "Please enter memory content"
     },
     "collaborativeAgent": {
-        "title": "Collaborative Agent",
+        "title": "Select Collaborative Agent",
         "button": {
             "add": "Add Collaborative Agent"
         },

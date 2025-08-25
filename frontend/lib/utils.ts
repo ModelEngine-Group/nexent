@@ -8,19 +8,19 @@ export function cn(...inputs: ClassValue[]) {
 // Get status priority
 function getStatusPriority(status: string): number {
   switch (status) {
-    case 'WAIT_FOR_PROCESSING': // 等待解析
+    case 'WAIT_FOR_PROCESSING': // Waiting for processing
       return 1;
-    case 'PROCESSING': // 解析中
+    case 'PROCESSING': // Processing
       return 2;
-    case 'WAIT_FOR_FORWARDING': // 等待入库
+    case 'WAIT_FOR_FORWARDING': // Waiting for forwarding
       return 3;
-    case 'FORWARDING': // 入库中
+    case 'FORWARDING': // Forwarding
       return 4;
-    case 'COMPLETED': // 解析完成
+    case 'COMPLETED': // Processing completed
       return 5;
-    case 'PROCESS_FAILED': // 解析失败
+    case 'PROCESS_FAILED': // Processing failed
       return 6;
-    case 'FORWARD_FAILED': // 入库失败
+    case 'FORWARD_FAILED': // Forwarding failed
       return 7;
     default:
       return 8;
@@ -52,23 +52,6 @@ export function formatFileSize(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
-
-// Format date time
-export function formatDateTime(dateString: string): string {
-  try {
-    const date = new Date(dateString);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  } catch (e) {
-    return dateString;
-  }
 }
 
 // Format date
@@ -113,11 +96,11 @@ export function formatUrl(result: SearchResultUrl): string {
 }
 
 /**
- * URL参数获取工具函数
- * @param paramName 参数名称
- * @param defaultValue 默认值
- * @param transform 转换函数（可选）
- * @returns 参数值
+ * URL parameter retrieval utility function
+ * @param paramName Parameter name
+ * @param defaultValue Default value
+ * @param transform Transform function (optional)
+ * @returns Parameter value
  */
 export function getUrlParam<T>(
   paramName: string, 
@@ -138,7 +121,36 @@ export function getUrlParam<T>(
     
     return paramValue as unknown as T
   } catch (error) {
-    console.warn(`获取URL参数 ${paramName} 失败:`, error)
+    console.warn(`Failed to get URL parameter ${paramName}:`, error)
     return defaultValue
   }
 }
+
+
+  /**
+   * Convert backend type to frontend type
+   * @param backendType Backend type name
+   * @returns Corresponding frontend type
+   */
+  export const convertParamType = (backendType: string): 'string' | 'number' | 'boolean' | 'array' | 'object' | 'OpenAIModel' | 'Optional' => {
+    switch (backendType) {
+      case 'string':
+        return 'string';
+      case 'integer':
+      case 'float':
+        return 'number';
+      case 'boolean':
+        return 'boolean';
+      case 'array':
+        return 'array';
+      case 'object':
+        return 'object';
+      case 'Optional':
+        return 'string'; 
+      case 'OpenAIModel':
+        return 'OpenAIModel';    
+      default:
+        console.warn(`Unknown type: ${backendType}, using string as default type`);
+        return 'string';
+    }
+  };

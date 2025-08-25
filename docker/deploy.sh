@@ -46,13 +46,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Normalize interactive input (fix Windows CR issues)
 sanitize_input() {
   local input="$1"
   printf "%s" "$input" | tr -d '\r'
 }
 
-# Key generation
 generate_minio_ak_sk() {
   echo "🔑 Generating MinIO keys..."
 
@@ -62,10 +60,10 @@ generate_minio_ak_sk() {
     SECRET_KEY=$(powershell -Command '$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $bytes = New-Object byte[] 32; $rng.GetBytes($bytes); [System.Convert]::ToBase64String($bytes)')
   else
     # Linux/Mac
-    # Generate a random AK (12-character alphanumeric) and clean it
+    # Generate a random AK (12-character alphanumeric)
     ACCESS_KEY=$(openssl rand -hex 12 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9]//g')
 
-    # Generate a random SK (32-character high-strength random string) and clean it
+    # Generate a random SK (32-character high-strength random string)
     SECRET_KEY=$(openssl rand -base64 32 | tr -d '\r\n' | sed 's/[^a-zA-Z0-9+/=]//g')
   fi
 
@@ -274,10 +272,11 @@ generate_elasticsearch_api_key() {
 
   # Generate API key
   echo "🔑 Generating ELASTICSEARCH_API_KEY..."
-  API_KEY_JSON=$(${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" exec -T nexent-elasticsearch curl -s -u "elastic:$ELASTIC_PASSWORD" "http://localhost:9200/_security/api_key" -H "Content-Type: application/json" -d '{"name":"my_api_key","role_descriptors":{"my_role":{"cluster":["all"],"index":[{"names":["*"],"privileges":["all"]}]}}}')
+  API_KEY_JSON=$(docker exec nexent-elasticsearch curl -s -u "elastic:$ELASTIC_PASSWORD" "http://localhost:9200/_security/api_key" -H "Content-Type: application/json" -d '{"name":"my_api_key","role_descriptors":{"my_role":{"cluster":["all"],"index":[{"names":["*"],"privileges":["all"]}]}}}')
 
   # Extract API key and add to .env
   ELASTICSEARCH_API_KEY=$(echo "$API_KEY_JSON" | grep -o '"encoded":"[^"]*"' | awk -F'"' '{print $4}')
+  echo "✅ ELASTICSEARCH_API_KEY Generated: $ELASTICSEARCH_API_KEY"
   if [ -n "$ELASTICSEARCH_API_KEY" ]; then
     if grep -q "^ELASTICSEARCH_API_KEY=" .env; then
       # Use ~ as a separator in sed to avoid conflicts with special characters in the API key.
@@ -406,8 +405,9 @@ select_deployment_mode() {
           ;;
   esac
   echo ""
-  # Check if root-dir parameter is provided (highest priority)
+  
   if [ -n "$ROOT_DIR_PARAM" ]; then
+  # Check if root-dir parameter is provided (highest priority)
     ROOT_DIR="$ROOT_DIR_PARAM"
     echo "   📁 Using ROOT_DIR from parameter: $ROOT_DIR"
     # Write to .env file
@@ -419,15 +419,15 @@ select_deployment_mode() {
       echo "# Root dir" >> .env
       echo "ROOT_DIR=\"$ROOT_DIR\"" >> .env
     fi
-  # Check if ROOT_DIR already exists in .env (second priority)
   elif grep -q "^ROOT_DIR=" .env; then
+  # Check if ROOT_DIR already exists in .env (second priority)
     # Extract existing ROOT_DIR value from .env
     env_root_dir=$(grep "^ROOT_DIR=" .env | cut -d'=' -f2 | sed 's/^"//;s/"$//')
     ROOT_DIR="$env_root_dir"
     echo "   📁 Use existing ROOT_DIR path: $env_root_dir"
-  # Use default value and prompt user input (lowest priority)
+  
   else
-    # Get ROOT_DIR from user input with default value
+  # Use default value and prompt user input (lowest priority)
     default_root_dir="$HOME/nexent-data"
     read -p "   📁 Enter ROOT_DIR path (default: $default_root_dir): " user_root_dir
     ROOT_DIR="${user_root_dir:-$default_root_dir}"
@@ -509,16 +509,19 @@ create_dir_with_permission() {
   echo "   📁 Directory $dir_path has been created and permissions set to $permission."
 }
 
-add_permission() {
+prepare_directory_and_data() {
   # Initialize the sql script permission
   chmod 644 "init.sql"
 
   echo "🔧 Creating directory with permission..."
-  create_dir_with_permission "$ROOT_DIR/elasticsearch" 777
-  create_dir_with_permission "$ROOT_DIR/postgresql" 777
-  create_dir_with_permission "$ROOT_DIR/minio" 777
+  create_dir_with_permission "$ROOT_DIR/elasticsearch" 775
+  create_dir_with_permission "$ROOT_DIR/postgresql" 775
+  create_dir_with_permission "$ROOT_DIR/minio" 775
+  create_dir_with_permission "$ROOT_DIR/redis" 775
 
   cp -rn volumes $ROOT_DIR
+  chmod -R 775 $ROOT_DIR/volumes
+  echo "   📁 Directory $ROOT_DIR/volumes has been created and permissions set to 775."
 
   # Create nexent user workspace directory
   NEXENT_USER_DIR="$HOME/nexent"
@@ -636,8 +639,6 @@ select_deployment_version() {
   echo "--------------------------------"
   echo ""
 }
-
-
 
 setup_package_install_script() {
   # Function to setup package installation script
@@ -799,7 +800,7 @@ main_deploy() {
   choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
 
   # Add permission
-  add_permission || { echo "❌ Permission setup failed"; exit 1; }
+  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
   generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
 
   if [ "$ENABLE_TERMINAL_TOOL" = "true" ]; then
@@ -826,7 +827,6 @@ main_deploy() {
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
     echo "💡 Use 'source .env' to load environment variables in your development shell"
-    clean
     return 0
   fi
 
@@ -842,8 +842,6 @@ main_deploy() {
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
     create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 1; }
   fi
-
-  clean
 
   echo "🎉  Deployment completed successfully!"
   echo "🌐  You can now access the application at http://localhost:3000"
@@ -887,3 +885,5 @@ if ! main_deploy; then
   echo "❌ Deployment failed. Please check the error messages above and try again."
   exit 1
 fi
+
+clean

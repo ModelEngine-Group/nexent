@@ -1,5 +1,5 @@
 /**
- * 集中导出认证相关组件
+ * Export all authentication related components
  */
 
 export * from './avatarDropdown';

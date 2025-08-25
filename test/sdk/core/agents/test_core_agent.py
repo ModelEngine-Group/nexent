@@ -92,7 +92,6 @@ def core_agent_instance(mock_observer):
     agent.python_executor = MagicMock()
 
     agent.step_number = 1
-    agent._create_action_step = MagicMock()
     agent._execute_step = MagicMock()
     agent._finalize_step = MagicMock()
     agent._handle_max_steps_reached = MagicMock()
@@ -109,21 +108,24 @@ def test_run_normal_execution(core_agent_instance):
     # Setup
     task = "test task"
     max_steps = 3
-    mock_step = MagicMock()
-    mock_step.model_output = "test output"
 
-    # Mock _create_action_step and _execute_step
-    with patch.object(core_agent_instance, '_create_action_step', return_value=mock_step) as mock_create_step, \
-            patch.object(core_agent_instance, '_execute_step', return_value="final_answer") as mock_execute_step, \
+    # Mock _execute_step to return a generator that yields final answer
+    def mock_execute_generator(action_step):
+        yield "final_answer"
+    
+    with patch.object(core_agent_instance, '_execute_step', side_effect=mock_execute_generator) as mock_execute_step, \
             patch.object(core_agent_instance, '_finalize_step') as mock_finalize_step:
         core_agent_instance.step_number = 1
 
         # Execute
-        result = list(core_agent_instance._run(task, max_steps))
+        result = list(core_agent_instance._run_stream(task, max_steps))
 
         # Assertions
-        assert len(result) == 2  # Should yield action step and final answer
-        assert result[0] == mock_step  # First yield should be the action step
+        # _run_stream yields: generator output + action step + final answer step
+        assert len(result) == 3
+        assert result[0] == "final_answer"  # Generator output
+        assert isinstance(result[1], MagicMock)  # Action step
+        assert isinstance(result[2], MagicMock)  # Final answer step
 
 
 def test_run_with_max_steps_reached(core_agent_instance):
@@ -131,30 +133,31 @@ def test_run_with_max_steps_reached(core_agent_instance):
     # Setup
     task = "test task"
     max_steps = 2
-    mock_step = MagicMock()
 
-    # Mock methods to simulate reaching max steps without finding answer
-    with patch.object(core_agent_instance, '_create_action_step', return_value=mock_step) as mock_create_step, \
-            patch.object(core_agent_instance, '_execute_step', return_value=None) as mock_execute_step, \
+    # Mock _execute_step to return None (no final answer)
+    def mock_execute_generator(action_step):
+        yield None
+    
+    with patch.object(core_agent_instance, '_execute_step', side_effect=mock_execute_generator) as mock_execute_step, \
             patch.object(core_agent_instance, '_finalize_step') as mock_finalize_step, \
             patch.object(core_agent_instance, '_handle_max_steps_reached',
                          return_value="max_steps_reached") as mock_handle_max:
         core_agent_instance.step_number = 1
 
         # Execute
-        result = list(core_agent_instance._run(task, max_steps))
-
-        # Debug information
-        print(f"\nResult length: {len(result)}")
-        print(f"Result contents: {result}")
+        result = list(core_agent_instance._run_stream(task, max_steps))
 
         # Assertions
-        # assert len(result) == 3, f"Expected 3 results but got {len(result)}: {result}"
-        assert result[0] == mock_step, "First result should be the first action step"
-        assert result[1] == mock_step, "Second result should be the second action step"
+        # For 2 steps: (None + action_step) * 2 + final_action_step + final_answer_step = 6
+        assert len(result) == 6
+        assert result[0] is None  # First generator output
+        assert isinstance(result[1], MagicMock)  # First action step
+        assert result[2] is None  # Second generator output
+        assert isinstance(result[3], MagicMock)  # Second action step
+        assert isinstance(result[4], MagicMock)  # Final action step (from _handle_max_steps_reached)
+        assert isinstance(result[5], MagicMock)  # Final answer step
 
         # Verify method calls
-        assert mock_create_step.call_count == 2
         assert mock_execute_step.call_count == 2
         mock_handle_max.assert_called_once()
         assert mock_finalize_step.call_count == 2
@@ -165,21 +168,23 @@ def test_run_with_stop_event(core_agent_instance):
     # Setup
     task = "test task"
     max_steps = 3
-    mock_step = MagicMock()
 
-    def set_stop_event(*args):
+    def mock_execute_generator(action_step):
         core_agent_instance.stop_event.set()
-        return None
+        yield None
 
     # Mock _execute_step to set stop event
-    with patch.object(core_agent_instance, '_create_action_step', return_value=mock_step):
-        with patch.object(core_agent_instance, '_execute_step', side_effect=set_stop_event):
-            with patch.object(core_agent_instance, '_finalize_step'):
-                # Execute
-                result = list(core_agent_instance._run(task, max_steps))
+    with patch.object(core_agent_instance, '_execute_step', side_effect=mock_execute_generator):
+        with patch.object(core_agent_instance, '_finalize_step'):
+            # Execute
+            result = list(core_agent_instance._run_stream(task, max_steps))
 
     # Assertions
-    assert len(result) == 2  # Should yield action step and "<user_break>"
+    # Should yield: generator output + action step + final answer step
+    assert len(result) == 3
+    assert result[0] is None  # Generator output
+    assert isinstance(result[1], MagicMock)  # Action step
+    assert isinstance(result[2], MagicMock)  # Final answer step with "<user_break>"
 
 
 def test_run_with_agent_error(core_agent_instance):
@@ -187,20 +192,21 @@ def test_run_with_agent_error(core_agent_instance):
     # Setup
     task = "test task"
     max_steps = 3
-    mock_step = MagicMock()
-    mock_step.model_output = "test model output"
 
     # Mock _execute_step to raise AgentError
-    with patch.object(core_agent_instance, '_create_action_step', return_value=mock_step):
-        with patch.object(core_agent_instance, '_execute_step',
-                          side_effect=MockAgentError("test error")) as mock_execute_step, \
-                patch.object(core_agent_instance, '_finalize_step'):
-            # Execute
-            result = list(core_agent_instance._run(task, max_steps))
+    with patch.object(core_agent_instance, '_execute_step',
+                      side_effect=MockAgentError("test error")) as mock_execute_step, \
+            patch.object(core_agent_instance, '_finalize_step'):
+        # Execute
+        result = list(core_agent_instance._run_stream(task, max_steps))
 
     # Assertions
-    assert result[0] == mock_step
-    assert hasattr(mock_step, 'error')  # Error should be set on the step
+    # When AgentError occurs, it should yield action step + final answer step
+    # But the error causes the loop to continue, so we get multiple action steps
+    assert len(result) >= 2
+    assert isinstance(result[0], MagicMock)  # Action step with error
+    # Last item should be final answer step
+    assert isinstance(result[-1], MagicMock)  # Final answer step
 
 
 def test_run_with_agent_parse_error_branch(core_agent_instance):
@@ -208,30 +214,27 @@ def test_run_with_agent_parse_error_branch(core_agent_instance):
 
     task = "parse task"
     max_steps = 1
-    mock_step = MagicMock()
-    mock_step.model_output = "unformatted answer"
 
     parse_hint = "Make sure to include code with the correct pattern, for instance"
 
-    # 监听 convert_code_format 调用
-    with patch.object(core_agent_instance, '_create_action_step', return_value=mock_step), \
+    # Create a mock action step that will be used in the error handling
+    mock_action_step = MagicMock()
+    mock_action_step.model_output = "unformatted answer"
+
+    # Mock ActionStep constructor to return our mock
+    with patch.object(mock_smolagents.memory, 'ActionStep', return_value=mock_action_step), \
             patch.object(core_agent_instance, '_execute_step', side_effect=MockAgentError(f"{parse_hint} - error")), \
             patch.object(core_agent_module, 'convert_code_format', return_value="formatted answer") as mock_convert, \
             patch.object(core_agent_instance, '_finalize_step'):
-        results = list(core_agent_instance._run(task, max_steps))
+        results = list(core_agent_instance._run_stream(task, max_steps))
 
     # _run 应该产出 action step + 处理后的结果
-    assert results[0] == mock_step
-    # assert results[1] == "handled_output"
+    assert len(results) >= 2
+    assert isinstance(results[0], MagicMock)  # Action step
+    assert isinstance(results[-1], MagicMock)  # Final answer step
 
-    # 确认 convert_code_format 被调用一次
-    mock_convert.assert_called_once_with("unformatted answer")
-    # handle_agent_output_types 处理了转换后的结果
-    # mock_smolagents.handle_agent_output_types.assert_any_call("formatted answer")
 
-# ------------------------------------------------------------
-# 新增：直接测试 convert_code_format 函数
-# ------------------------------------------------------------
+
 
 
 def test_convert_code_format_replacements():

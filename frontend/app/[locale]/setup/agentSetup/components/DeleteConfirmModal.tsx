@@ -2,7 +2,7 @@
 
 import { Modal, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { Agent } from '../ConstInterface'
+import { Agent } from '@/types/agent'
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;

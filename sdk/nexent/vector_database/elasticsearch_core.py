@@ -477,8 +477,8 @@ class ElasticSearchCore:
 
     def _preprocess_documents(self, documents: List[Dict[str, Any]], content_field: str) -> List[Dict[str, Any]]:
         """Ensure all documents have the required fields and set default values"""
-        current_time = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
-        current_date = time.strftime('%Y-%m-%d', time.localtime())
+        current_time = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+        current_date = time.strftime('%Y-%m-%d', time.gmtime())
 
         processed_docs = []
         for doc in documents:
@@ -491,11 +491,6 @@ class ElasticSearchCore:
 
             if not doc_copy.get("date"):
                 doc_copy["date"] = current_date
-
-            # Convert create_time to ISO string if it's a number
-            if isinstance(doc_copy.get("create_time"), (int, float)):
-                import datetime
-                doc_copy["create_time"] = datetime.datetime.fromtimestamp(doc_copy["create_time"]).isoformat()
 
             # Ensure file_size is present (default to 0 if not provided)
             if not doc_copy.get("file_size"):
@@ -862,8 +857,8 @@ class ElasticSearchCore:
                         "process_source": process_source,
                         "embedding_model": embedding_model,
                         "embedding_dim": embedding_dim or 1024,
-                        "creation_date": format_timestamp(creation_date),
-                        "update_date": format_timestamp(update_time)
+                        "creation_date": creation_date,
+                        "update_date": update_time
                     },
                     "search_performance": {
                         "total_search_count": index_stats["search"]["query_total"],

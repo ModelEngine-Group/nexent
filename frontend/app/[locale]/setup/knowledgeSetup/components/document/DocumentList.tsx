@@ -2,11 +2,11 @@ import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Document } from '@/types/knowledgeBase'
 import DocumentStatus from './DocumentStatus'
 import { InfoCircleFilled } from '@ant-design/icons'
-import UploadArea from '../components/UploadArea'
-import { formatFileSize, formatDateTime, sortByStatusAndDate } from '@/lib/utils'
+import UploadArea from '../upload/UploadArea'
+import { formatFileSize, sortByStatusAndDate } from '@/lib/utils'
 import { Input, Button } from 'antd'
-import { useKnowledgeBaseContext } from '../knowledgeBase/KnowledgeBaseContext'
-import { useDocumentContext } from './DocumentContext'
+import { useKnowledgeBaseContext } from '../../contexts/KnowledgeBaseContext'
+import { useDocumentContext } from '../../contexts/DocumentContext'
 import { App } from 'antd'
 import knowledgeBaseService from '@/services/knowledgeBaseService'
 import { useTranslation } from 'react-i18next'
@@ -60,17 +60,17 @@ export const LAYOUT = {
 interface DocumentListProps {
   documents: Document[]
   onDelete: (id: string) => void
-  knowledgeBaseName?: string // 当前知识库名称，用于显示标题
-  modelMismatch?: boolean // 模型不匹配标志
-  currentModel?: string // 当前使用的模型
-  knowledgeBaseModel?: string // 知识库使用的模型
-  embeddingModelInfo?: string // 嵌入模型信息
-  containerHeight?: string // 容器总高度
-  isCreatingMode?: boolean // 是否处于创建模式
-  onNameChange?: (name: string) => void // 知识库名称变更
-  hasDocuments?: boolean // 是否已经有文档上传
+  knowledgeBaseName?: string
+  modelMismatch?: boolean
+  currentModel?: string
+  knowledgeBaseModel?: string
+  embeddingModelInfo?: string
+  containerHeight?: string
+  isCreatingMode?: boolean
+  onNameChange?: (name: string) => void
+  hasDocuments?: boolean
   
-  // 上传相关的props
+  // Upload related props
   isDragging?: boolean
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: (e: React.DragEvent) => void
@@ -92,12 +92,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
   currentModel = '',
   knowledgeBaseModel = '',
   embeddingModelInfo = '',
-  containerHeight = '57vh', // 默认整体容器高度
+  containerHeight = '57vh',
   isCreatingMode = false,
   onNameChange,
   hasDocuments = false,
   
-  // 上传相关props
+  // Upload related props
   isDragging = false,
   onDragOver,
   onDragLeave,
@@ -110,17 +110,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
   const uploadAreaRef = useRef<any>(null);
   const { state: docState } = useDocumentContext();
   
-  // 使用固定高度而不是百分比
+  // Use fixed height instead of percentage
   const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
   const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
   
-  // 计算文档列表区域高度 = 总高度 - 标题栏高度 - 上传区域高度
-  const contentHeight = `calc(${containerHeight} - ${titleBarHeight} - ${uploadHeight})`;
-
-  // 按状态和日期排序的文档列表
+  // Sort documents by status and date
   const sortedDocuments = sortByStatusAndDate(documents);
 
-  // 获取文件图标
+  // Get file icon
   const getFileIcon = (type: string): string => {
     switch (type.toLowerCase()) {
       case 'pdf':
@@ -136,7 +133,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
     }
   }
 
-  // 构建模型不匹配提示信息
+  // Build model mismatch info
   const getMismatchInfo = (): string => {
     if (embeddingModelInfo) return embeddingModelInfo;
     if (currentModel && knowledgeBaseModel) {
@@ -148,7 +145,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
     return t('document.modelMismatch.general');
   }
 
-  // 暴露 uppy 实例给父组件
+  // Expose uppy instance to parent component
   useImperativeHandle(ref, () => ({
     uppy: uploadAreaRef.current?.uppy
   }));
@@ -278,7 +275,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
               </div>
             )}
           </div>
-          {/* 右侧：详细内容 */}
+          {/* Right: detailed content */}
           {!isCreatingMode && (
             <Button type="primary" onClick={() => setShowDetail(true)}>{t('document.button.details')}</Button>
           )}
@@ -394,7 +391,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(({
                         {formatFileSize(doc.size)}
                       </td>
                       <td className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}>
-                        {formatDateTime(doc.create_time)}
+                        {new Date(doc.create_time).toLocaleString()}
                       </td>
                       <td className={LAYOUT.CELL_PADDING}>
                         <button

@@ -66,9 +66,9 @@ interface ChatSidebarProps {
   onDropdownOpenChange: (open: boolean, id: string | null) => void
   onToggleSidebar: () => void
   expanded: boolean
-  userEmail: string;
-  userAvatarUrl: string;
-  userRole: string;
+  userEmail: string | undefined;
+  userAvatarUrl: string | undefined;
+  userRole: string | undefined;
 }
 
 // Helper function - dialog classification

@@ -12,6 +12,7 @@ import asyncio
 import os
 import time
 import logging
+from datetime import datetime, timezone
 
 from typing import Optional, Generator, List, Dict, Any
 from openai import OpenAI
@@ -449,11 +450,8 @@ class ElasticSearchService:
                 title = metadata.get("title", "")
                 language = metadata.get("languages", ["null"])[0] if metadata.get("languages") else "null"
                 author = metadata.get("author", "null")
-                date = metadata.get("date", time.strftime("%Y-%m-%d", time.localtime()))
-                create_time = metadata.get("creation_date", time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()))
-                if isinstance(create_time, (int, float)):
-                    import datetime
-                    create_time = datetime.datetime.fromtimestamp(create_time).isoformat()
+                date = metadata.get("date", time.strftime("%Y-%m-%d", time.gmtime()))
+                create_time = metadata.get("creation_date", time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()))
 
                 # Set embedding model name from the embedding model
                 embedding_model_name = ""
@@ -541,11 +539,19 @@ class ElasticSearchService:
 
             # For files already stored in ES, add to files list
             for file_info in existing_files:
+                utc_create_time_str = file_info.get('create_time', '')
+                # Try to parse the create_time string, fallback to current timestamp if format is invalid
+                try:
+                    utc_create_timestamp = datetime.strptime(utc_create_time_str, '%Y-%m-%dT%H:%M:%S').replace(
+                        tzinfo=timezone.utc).timestamp()
+                except (ValueError, TypeError):
+                    utc_create_timestamp = time.time()
+
                 file_data = {
                     'path_or_url': file_info.get('path_or_url'),
                     'file': file_info.get('filename', ''),
                     'file_size': file_info.get('file_size', 0),
-                    'create_time': file_info.get('create_time', ''),
+                    'create_time': int(utc_create_timestamp * 1000),
                     'status': "COMPLETED",
                     'latest_task_id': ''
                 }
@@ -576,7 +582,7 @@ class ElasticSearchService:
                         'path_or_url': path_or_url,
                         'file': filename,
                         'file_size': file_size,
-                        'create_time': time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+                        'create_time': int(time.time() * 1000),
                         'status': status_dict.get('state', 'UNKNOWN'),
                         'latest_task_id': status_dict.get('latest_task_id', '')
                     }

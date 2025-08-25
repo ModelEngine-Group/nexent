@@ -4,13 +4,11 @@ import { useTranslation } from 'react-i18next'
 interface DocumentStatusProps {
   status: string
   showIcon?: boolean
-  size?: 'small' | 'medium' | 'large'
 }
 
 export const DocumentStatus: React.FC<DocumentStatusProps> = ({ 
   status, 
   showIcon = false, 
-  size = 'small' 
 }) => {
   const { t } = useTranslation();
 

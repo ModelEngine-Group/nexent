@@ -7,7 +7,7 @@ import {
   checkKnowledgeBaseName,
   fetchKnowledgeBaseInfo,
   validateFileType,
-} from './UploadService';
+} from '@/services/UploadService';
 
 interface UploadAreaProps {
   isDragging?: boolean;
@@ -167,7 +167,6 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(({
 
 
     if (uploadWasInProgress && uploadIsNowFinished) {
-      console.log('[UploadArea] Upload completed, calling onUpload callback');
       // 上传完成后仅调用外部的上传完成回调，由 KnowledgeBaseManager 统一管理轮询
       if (onUpload) {
         onUpload();

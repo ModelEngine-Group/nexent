@@ -1,7 +1,6 @@
 /**
- * 集中导出所有Provider组件
+ * Export all provider components in one place
  */
 
-export * from './authProvider';
 export * from './rootProvider'; 
 export * from './themeProvider';

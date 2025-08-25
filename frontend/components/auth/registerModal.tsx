@@ -178,10 +178,10 @@ export function RegisterModal() {
         message.error(errorMsg)
         setEmailError(errorMsg)
       } else {
-        // 其他未知错误或没有error_type的情况，使用通用错误消息
+        // Other unknown errors or cases without error_type, use generic error message
         const errorMsg = t('auth.unknownError')
         message.error(errorMsg)
-        setEmailError(errorMsg)
+        setPasswordError({ target: '', message: '' })
       }
     }
 
@@ -203,11 +203,11 @@ export function RegisterModal() {
     closeRegisterModal()
   }
 
-  // 处理邮箱输入变化 - 实时验证邮箱格式
+  // Handle email input change - real-time email format validation
   const handleEmailInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     
-    // 实时验证邮箱格式
+    // Real-time email format validation
     if (value && !validateEmail(value)) {
       setEmailError(t('auth.invalidEmailFormat'));
     } else {
@@ -215,11 +215,11 @@ export function RegisterModal() {
     }
   };
 
-  // Handle password input change - 使用新的验证逻辑
+  // Handle password input change - use new validation logic
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     
-    // 使用验证函数检查密码强度
+    // Use validation function to check password strength
     if (value && !validatePassword(value)) {
       setPasswordError({ target: 'password', message: t('auth.passwordMinLength') })
       return // Exit early if password length is invalid
@@ -233,7 +233,7 @@ export function RegisterModal() {
     }
   }
 
-  // Handle confirm password input change - 使用新的验证逻辑
+  // Handle confirm password input change - use new validation logic
   const handleConfirmPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     const password = form.getFieldValue("password")

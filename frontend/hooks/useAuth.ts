@@ -23,7 +23,6 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false)
   const [isFromSessionExpired, setIsFromSessionExpired] = useState(false)
-  const [isCheckingSession, setIsCheckingSession] = useState(false)
   const [shouldCheckSession, setShouldCheckSession] = useState(false)
   const [authServiceUnavailable, setAuthServiceUnavailable] = useState(false)
   const [isSpeedMode, setIsSpeedMode] = useState(false)
@@ -152,8 +151,6 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
       }
 
       try {
-        setIsCheckingSession(true);
-
         const sessionObj = getSessionFromStorage();
         if (!sessionObj || sessionObj.expires_at * 1000 <= now) {
           // 会话不存在或已过期
@@ -166,8 +163,6 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
         localStorage.setItem('lastSessionVerifyTime', now.toString());
       } catch (error) {
         console.error('Session validation failed:', error);
-      } finally {
-        setIsCheckingSession(false);
       }
     };
 

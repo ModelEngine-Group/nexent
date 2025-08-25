@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Modal, Input, Switch, Select, InputNumber, Tag, App } from 'antd'
-import { Tool, ToolParam, OpenAIModel } from '../ConstInterface'
+import { Tool, ToolParam, OpenAIModel } from '@/types/agent'
 import { updateToolConfig, searchToolConfig } from '@/services/agentConfigService'
 import { useTranslation } from 'react-i18next'
 

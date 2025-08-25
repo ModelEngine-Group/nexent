@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Tag, App } from 'antd'
 import { PlusOutlined, CloseOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { Agent } from '../ConstInterface'
+import { Agent } from '@/types/agent'
 import { addRelatedAgent, deleteRelatedAgent } from '@/services/agentConfigService'
 
 interface CollaborativeAgentDisplayProps {

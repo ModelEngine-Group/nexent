@@ -71,7 +71,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const { t } = useTranslation();
 
   // 格式化日期函数，只保留日期部分
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: number) => {
     try {
       const date = new Date(dateString);
       return date.toISOString().split('T')[0]; // 只返回YYYY-MM-DD部分

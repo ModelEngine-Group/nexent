@@ -210,7 +210,7 @@ export function ChatRightPanel({
   };
 
   // Search result item component
-  const SearchResultItem = ({ result, index }: { result: SearchResult, index: number }) => {
+  const SearchResultItem = ({ result }: { result: SearchResult }) => {
     const [isExpanded, setIsExpanded] = useState(false)
     const title = result.title || t('chatRightPanel.unknownTitle');
     const url = result.url || "#";
@@ -420,7 +420,6 @@ export function ChatRightPanel({
                     <SearchResultItem 
                       key={`result-${index}`} 
                       result={result} 
-                      index={index} 
                     />
                   ))}
                 </div>

@@ -1,7 +1,7 @@
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from 'antd'
 import { InfoCircleFilled, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, RightOutlined, DownOutlined } from '@ant-design/icons'
 import { useState, useEffect } from 'react'
-import { ModelType, SingleModelConfig, ModelConnectStatus } from '@/types/config'
+import { ModelType, SingleModelConfig } from '@/types/config'
 import { modelService } from '@/services/modelService'
 import { useConfig } from '@/hooks/useConfig'
 import { useTranslation } from 'react-i18next'

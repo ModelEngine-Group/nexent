@@ -35,8 +35,6 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
 }) => {
   const { t } = useTranslation('common');
 
-  console.log('fileList', fileList);
-  
   // 加载中状态UI
   if (isLoading) {
     return (

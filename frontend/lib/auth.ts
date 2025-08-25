@@ -30,20 +30,6 @@ export function generateAvatarUrl(email: string): string {
     return avatar.toDataUri();
   }
 
-// MD5哈希函数（简化版，实际项目应使用库)
-function md5(input: string): string {
-  // 实际项目应使用专业MD5库
-  // 这里只是一个示例，简单返回一个基于输入字符串的哈希
-  let hash = 0
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // 转换为32位整数
-  }
-  return Math.abs(hash).toString(16).padStart(32, '0')
-}
-
-
 /**
  * 带有授权头的请求
  */

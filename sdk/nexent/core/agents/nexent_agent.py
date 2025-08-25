@@ -1,7 +1,7 @@
 from threading import Event
 from typing import List
 
-from smolagents import ActionStep, AgentText, TaskStep, handle_agent_output_types
+from smolagents import ActionStep, AgentText, TaskStep
 from smolagents.tools import Tool
 
 from ..models.openai_llm import OpenAIModel
@@ -188,13 +188,13 @@ class NexentAgent:
                 if hasattr(step_log, "error") and step_log.error is not None:
                     observer.add_message("", ProcessType.ERROR, str(step_log.error))
 
-            final_answer = step_log  # Last log is the run's final_answer
-            final_answer = handle_agent_output_types(final_answer)
+            final_answer = step_log.final_answer  # Last log is the run's final_answer
 
             if isinstance(final_answer, AgentText):
                 final_answer_str = convert_code_format(final_answer.to_string())
                 observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
             else:
+                # prepare for multi-modal final_answer
                 final_answer_str = convert_code_format(str(final_answer))
                 observer.add_message(self.agent.agent_name, ProcessType.FINAL_ANSWER, final_answer_str)
 

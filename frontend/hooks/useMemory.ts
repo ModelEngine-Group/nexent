@@ -21,13 +21,12 @@ import {
 
 interface UseMemoryOptions {
   visible: boolean
-  role: "admin" | "user"
   currentUserId: string
   currentTenantId: string
   message?: any
 }
 
-export function useMemory({ visible, role, currentUserId, currentTenantId, message }: UseMemoryOptions) {
+export function useMemory({ visible, currentUserId, currentTenantId, message }: UseMemoryOptions) {
   const { t } = useTranslation()
   /* ----------------------- 基础设置状态 ----------------------- */
   const [memoryEnabled, setMemoryEnabledState] = useState<boolean>(true)

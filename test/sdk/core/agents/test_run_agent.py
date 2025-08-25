@@ -54,10 +54,11 @@ for _sub in [
     elif _sub == "local_python_executor":
         setattr(sub_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     elif _sub == "memory":
-        for _name in ["ActionStep", "ToolCall", "TaskStep", "SystemPromptStep"]:
+        for _name in ["ActionStep", "ToolCall", "TaskStep", "SystemPromptStep", "PlanningStep", "FinalAnswerStep"]:
             setattr(sub_mod, _name, MagicMock(name=f"smolagents.memory.{_name}"))
     elif _sub == "models":
         setattr(sub_mod, "ChatMessage", MagicMock(name="smolagents.models.ChatMessage"))
+        setattr(sub_mod, "MessageRole", MagicMock(name="smolagents.models.MessageRole"))
         # Provide a simple base class so that OpenAIModel can inherit from it
         class _DummyOpenAIServerModel:
             def __init__(self, *args, **kwargs):

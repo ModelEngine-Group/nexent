@@ -7,12 +7,11 @@ import { useState, useEffect, useRef, useLayoutEffect } from "react"
 import { App } from 'antd'
 import { InfoCircleFilled } from '@ant-design/icons'
 
-// Import AppProvider and hooks
-import AppProvider from './AppProvider'
-import { useKnowledgeBaseContext } from './knowledgeBase/KnowledgeBaseContext'
+// Import hooks and providers
+import { useKnowledgeBaseContext, KnowledgeBaseProvider } from './contexts/KnowledgeBaseContext'
+import { useDocumentContext, DocumentProvider } from './contexts/DocumentContext'
+import { useUIContext, UIProvider } from './contexts/UIStateContext'
 import { KnowledgeBase } from '@/types/knowledgeBase'
-import { useDocumentContext } from './document/DocumentContext'
-import { useUIContext } from './UIStateManager'
 import knowledgeBaseService from '@/services/knowledgeBaseService'
 import knowledgeBasePollingService from '@/services/knowledgeBasePollingService'
 import { API_ENDPOINTS } from '@/services/api'
@@ -22,10 +21,10 @@ import {
   STANDARD_CARD
 } from '@/lib/layoutConstants'
 
-// Import new components
-import KnowledgeBaseList from './knowledgeBase/KnowledgeBaseList'
-import DocumentList from './document/DocumentListLayout'
-import { useConfirmModal } from './components/ConfirmModal'
+// Import components
+import KnowledgeBaseList from './components/knowledge/KnowledgeBaseList'
+import DocumentList from './components/document/DocumentList'
+import { useConfirmModal } from '@/components/ui/ConfirmModal'
 
 // EmptyState component defined directly in this file
 interface EmptyStateProps {
@@ -63,6 +62,28 @@ const EmptyState: React.FC<EmptyStateProps> = ({
         )}
       </div>
     </div>
+  )
+}
+
+// Combined AppProvider implementation
+interface AppProviderProps {
+  children: React.ReactNode
+}
+
+/**
+ * AppProvider - 为应用提供全局状态管理
+ * 
+ * 将知识库、文档和UI状态管理组合在一起，方便一次引入所有上下文
+ */
+const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
+  return (
+    <KnowledgeBaseProvider>
+      <DocumentProvider>
+        <UIProvider>
+          {children}
+        </UIProvider>
+      </DocumentProvider>
+    </KnowledgeBaseProvider>
   )
 }
 
@@ -436,9 +457,7 @@ const getAuthHeaders = () => {
       message.warning(t('document.message.noFiles'));
       return;
     }
-
     const filesToUpload = uploadFiles;
-    console.log("Uploading files:", filesToUpload);
 
     if (isCreatingMode) {
       if (!newKbName || newKbName.trim() === "") {

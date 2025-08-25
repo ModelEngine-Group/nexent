@@ -2,7 +2,7 @@ import type { UploadFile } from 'antd/es/upload/interface';
 import knowledgeBaseService from '@/services/knowledgeBaseService';
 import knowledgeBasePollingService from '@/services/knowledgeBasePollingService';
 import { useTranslation } from 'react-i18next';
-import '../../../i18n';
+import '../app/[locale]/i18n';
 import { TFunction } from 'i18next';
 
 // 添加类型定义

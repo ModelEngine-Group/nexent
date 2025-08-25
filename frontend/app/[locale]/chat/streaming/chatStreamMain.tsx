@@ -1,8 +1,8 @@
 import { useRef, useEffect, useState } from "react"
 import { ScrollArea } from "@/components/ui/scrollArea"
-import { ChatInput } from "@/app/chat/layout/chatInput"
+import { ChatInput } from "@/app/chat/components/chatInput"
 import { ChatMessageType } from "@/types/chat"
-import { FilePreview } from "@/app/chat/layout/chatInput"
+import { FilePreview } from "@/app/chat/components/chatInput"
 import { Button } from "@/components/ui/button"
 import { ChevronDown } from "lucide-react"
 import { motion, AnimatePresence } from 'framer-motion';

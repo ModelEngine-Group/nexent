@@ -1,8 +1,7 @@
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 export const useLanguageSwitch = () => {
-  const router = useRouter();
   const pathname = usePathname();
   const { i18n } = useTranslation();
 

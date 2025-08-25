@@ -229,7 +229,7 @@ export async function fetchAgentSharedGroups(): Promise<MemoryGroup[]> {
   })
 
   // 后续需要补全“无记忆”的 Agent 分组
-  const agentList: Array<{ agent_id: string; name?: string }> = (agentsRes as any)?.success ? (agentsRes as any).data : []
+  const agentList: Array<{ agent_id: string; name?: string; display_name?: string }> = (agentsRes as any)?.success ? (agentsRes as any).data : []
 
   const groups: MemoryGroup[] = []
 
@@ -238,7 +238,7 @@ export async function fetchAgentSharedGroups(): Promise<MemoryGroup[]> {
     const agentId = agent.agent_id
     const list = groupMap[agentId] || []
     groups.push({
-      title: i18next.t('memoryService.agentSharedGroupTitle', { agentName: agent.name || agentId }),
+      title: i18next.t('memoryService.agentSharedGroupTitle', { agentName: agent.display_name || agent.name || agentId }),
       key: `agent-${agentId}`,
       items: list,
     })
@@ -283,7 +283,7 @@ export async function fetchUserAgentGroups(): Promise<MemoryGroup[]> {
     groupMap[item.agent_id].push(item)
   })
 
-  const agentList: Array<{ agent_id: string | number; name?: string }> = (agentsRes as any)?.success ? (agentsRes as any).data : []
+  const agentList: Array<{ agent_id: string | number; name?: string; display_name?: string }> = (agentsRes as any)?.success ? (agentsRes as any).data : []
 
   const groups: MemoryGroup[] = []
 
@@ -291,7 +291,7 @@ export async function fetchUserAgentGroups(): Promise<MemoryGroup[]> {
     const agentId = String(agent.agent_id)
     const list = groupMap[agentId] || []
     groups.push({
-      title: i18next.t('memoryService.userAgentGroupTitle', { agentName: agent.name || agentId }),
+      title: i18next.t('memoryService.userAgentGroupTitle', { agentName: agent.display_name || agent.name || agentId }),
       key: `user-agent-${agentId}`,
       items: list,
     })

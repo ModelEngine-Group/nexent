@@ -1,11 +1,10 @@
-import { Modal, Input, Select, Button, App } from 'antd'
+import { Modal, Input, Button, App } from 'antd'
 import { useState, useEffect } from 'react'
 import { ModelOption, ModelType } from '@/types/config'
 import { modelService } from '@/services/modelService'
 import { useConfig } from '@/hooks/useConfig'
 import { useTranslation } from 'react-i18next'
 
-const { Option } = Select
 
 interface ModelEditDialogProps {
   isOpen: boolean
@@ -57,13 +56,13 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
     if (!model) return
     setLoading(true)
     try {
-      // 使用更新接口而不是删除+新增
+      // 使用更新接口而不是删除 + 新增
       const modelType = form.type as ModelType
       // Determine max tokens
       let maxTokensValue = parseInt(form.maxTokens)
       if (isEmbeddingModel) maxTokensValue = 0
       
-      const result = await modelService.updateSingleModel({
+      await modelService.updateSingleModel({
         model_id: model.id, // 使用模型名称作为ID
         name: form.name,
         url: form.url,
@@ -219,7 +218,6 @@ export const ProviderConfigEditDialog = ({
     try {
       setSaving(true)
       await onSave({ apiKey: apiKey.trim() === '' ? 'sk-no-api-key' : apiKey, maxTokens: parseInt(maxTokens) })
-      message.success(t('common.success') || '保存成功')
       onClose()
     } finally {
       setSaving(false)

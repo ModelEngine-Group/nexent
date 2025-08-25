@@ -23,7 +23,7 @@ class KnowledgeBasePollingService {
 
   // Start document status polling, only update documents for specified knowledge base
   startDocumentStatusPolling(kbId: string, callback: (documents: Document[]) => void): void {
-    console.log(`Start polling documents status for knowledge base ${kbId}`);
+    console.debug(`Start polling documents status for knowledge base ${kbId}`);
     
     // Clear existing polling first
     this.stopPolling(kbId);
@@ -265,7 +265,6 @@ class KnowledgeBasePollingService {
   triggerDocumentsUpdate(kbId: string, documents: Document[]): void {
     // If there is an active knowledge base and update knowledge base doesn't match active one, ignore this update
     if (this.activeKnowledgeBaseId !== null && this.activeKnowledgeBaseId !== kbId) {
-      console.log(`Knowledge base ${kbId} is not current active knowledge base, ignoring document update`);
       return;
     }
     

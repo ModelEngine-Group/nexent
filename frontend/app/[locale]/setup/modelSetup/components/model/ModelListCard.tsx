@@ -2,7 +2,7 @@
 import { Select, Tooltip, Tag } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 import { ModelConnectStatus, ModelOption, ModelSource, ModelType } from '@/types/config'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 // 统一管理模型连接状态颜色
@@ -239,12 +239,6 @@ export const ModelListCard = ({
     }
     
     return false; // 确保不会继续冒泡
-  };
-
-  // 动态hover效果的样式
-  const getHoverStyle = {
-    transform: 'scale(1.2)', // hover时放大效果
-    boxShadow: '0 0 5px currentColor', // 增加阴影效果
   };
 
   return (

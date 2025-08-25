@@ -2,9 +2,9 @@
 
 import { useAuth } from "@/hooks/useAuth"
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd"
-import { UserOutlined, SettingOutlined, LogoutOutlined, UserSwitchOutlined, LoginOutlined, UserAddOutlined } from "@ant-design/icons"
+import { UserOutlined, LogoutOutlined, LoginOutlined, UserAddOutlined } from "@ant-design/icons"
 import { getRoleColor } from "@/lib/auth"
-import type { ItemType, MenuItemType } from "antd/es/menu/interface"
+import type { ItemType } from "antd/es/menu/interface"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import React from "react"
@@ -97,16 +97,6 @@ export function AvatarDropdown() {
         cursor: 'default'
       }
     },
-    // TODO: Admin settings function is not implemented yet, comment out for now
-    // ...(user.role === "admin"
-    //   ? [
-    //       {
-    //         key: 'admin',
-    //         icon: <SettingOutlined />,
-    //         label: t('auth.adminSettings'),
-    //       } as MenuItemType
-    //     ]
-    //   : []),
     {
       type: 'divider',
     },

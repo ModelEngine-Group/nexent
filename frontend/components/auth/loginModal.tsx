@@ -9,8 +9,16 @@ import { useTranslation } from "react-i18next"
 
 const { Text } = Typography
 
+/**
+ * LoginModal Component
+ * Handles user authentication through a modal interface
+ * Supports both regular login and session expiration scenarios
+ */
 export function LoginModal() {
+  // Authentication state and methods from useAuth hook
   const { isLoginModalOpen, closeLoginModal, openRegisterModal, login, isFromSessionExpired, setIsFromSessionExpired, authServiceUnavailable } = useAuth()
+  
+  // Form state and validation methods from useAuthForm hook
   const {
     form,
     isLoading,
@@ -23,27 +31,40 @@ export function LoginModal() {
     handlePasswordChange,
     resetForm
   } = useAuthForm()
+  
+  // Internationalization hook for multi-language support
   const { t } = useTranslation('common');
 
+  /**
+   * Handles form submission for user login
+   * @param values - Object containing email and password
+   */
   const handleSubmit = async (values: { email: string; password: string }) => {
+    // Clear previous error states
     setEmailError("")
     setPasswordError(false)
     setIsLoading(true)
 
     try {
+      // Attempt to login with provided credentials
       await login(values.email, values.password)
-      // 登录成功后重置会话过期标记
+      
+      // Reset session expired flag after successful login
       setIsFromSessionExpired(false)
-      // 重置弹窗控制状态，阻止登录成功后再次触发会话过期弹窗
+      
+      // Reset modal control state to prevent session expired modal from triggering again
+      // Small delay ensures proper state synchronization
       setTimeout(() => {
         document.dispatchEvent(new CustomEvent('modalClosed'))
       }, 200)
     } catch (error: any) {
+      // Clear email error and set password error flag
       setEmailError("")
       setPasswordError(true)
 
-      // 判断是否为服务器超时错误
+      // Check if error is due to server timeout or auth service unavailability
       if (error?.code === STATUS_CODES.SERVER_ERROR || error?.code === STATUS_CODES.AUTH_SERVICE_UNAVAILABLE) {
+        // Display server error message in password field
         form.setFields([
           {
             name: "password",
@@ -52,6 +73,7 @@ export function LoginModal() {
           }
         ]);
       } else {
+        // Display invalid credentials error in both fields
         form.setFields([
           {
             name: "email",
@@ -66,21 +88,31 @@ export function LoginModal() {
         ]);
       }
     } finally {
+      // Always reset loading state
       setIsLoading(false)
     }
   }
 
+  /**
+   * Handles transition from login to registration modal
+   * Resets form and opens registration modal
+   */
   const handleRegisterClick = () => {
     resetForm()
     closeLoginModal()
     openRegisterModal()
   }
 
+  /**
+   * Handles modal cancellation
+   * Resets form and handles session expiration scenarios
+   */
   const handleCancel = () => {
     resetForm()
     closeLoginModal()
 
-    // 如果是从会话过期弹窗打开的登录框，则再次触发会话过期事件
+    // If login modal was opened due to session expiration, 
+    // re-trigger the session expired event
     if (isFromSessionExpired) {
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent(EVENTS.SESSION_EXPIRED, {
@@ -98,8 +130,9 @@ export function LoginModal() {
       footer={null}
       width={400}
       centered
-      maskClosable={!isFromSessionExpired} // 会话过期场景下不允许点击蒙层关闭
-      closable={!isFromSessionExpired} // 会话过期场景下不显示右上角关闭按钮
+      // Prevent modal from being closed by clicking mask or close button when session is expired
+      maskClosable={!isFromSessionExpired}
+      closable={!isFromSessionExpired}
     >
       <Form 
         id="login-form"
@@ -109,6 +142,7 @@ export function LoginModal() {
         className="mt-6" 
         autoComplete="off"
       >
+        {/* Email input field */}
         <Form.Item
           name="email"
           label={t('auth.emailLabel')}
@@ -126,6 +160,7 @@ export function LoginModal() {
           />
         </Form.Item>
 
+        {/* Password input field */}
         <Form.Item
           name="password"
           label={t('auth.passwordLabel')}
@@ -142,6 +177,7 @@ export function LoginModal() {
           />
         </Form.Item>
 
+        {/* Submit button */}
         <Form.Item>
           <Button 
             type="primary" 
@@ -156,6 +192,7 @@ export function LoginModal() {
           </Button>
         </Form.Item>
 
+        {/* Registration link section */}
         <div className="text-center">
           <Space>
             <Text type="secondary">{t('auth.noAccount')}</Text>

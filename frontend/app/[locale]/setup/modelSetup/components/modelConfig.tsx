@@ -1,19 +1,19 @@
-import {Button, Card, Col, Row, Space, App} from 'antd'
+import { Button, Card, Col, Row, Space, App } from 'antd'
 import {
   PlusOutlined,
   SafetyCertificateOutlined,
   SyncOutlined,
   EditOutlined
 } from '@ant-design/icons'
-import {forwardRef, useEffect, useImperativeHandle, useState, useRef, ReactNode} from 'react'
-import {ModelOption, ModelType} from '@/types/config'
-import {useConfig} from '@/hooks/useConfig'
-import {modelService} from '@/services/modelService'
-import {configService} from '@/services/configService'
-import {configStore} from '@/lib/config'
-import {ModelListCard} from './model/ModelListCard'
-import {ModelAddDialog} from './model/ModelAddDialog'
-import {ModelDeleteDialog} from './model/ModelDeleteDialog'
+import { forwardRef, useEffect, useImperativeHandle, useState, useRef, ReactNode } from 'react'
+import { ModelOption, ModelType } from '@/types/config'
+import { useConfig } from '@/hooks/useConfig'
+import { modelService } from '@/services/modelService'
+import { configService } from '@/services/configService'
+import { configStore } from '@/lib/config'
+import { ModelListCard } from './model/ModelListCard'
+import { ModelAddDialog } from './model/ModelAddDialog'
+import { ModelDeleteDialog } from './model/ModelDeleteDialog'
 import { useTranslation } from 'react-i18next'
 
 // 布局高度常量配置
@@ -580,8 +580,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
         [option]: displayName,
       }
     }))
-
-    console.log(`handleModelChange: ${category}, ${option}, ${displayName}`)
 
     // 如果有值，清除错误状态
     if (displayName) {

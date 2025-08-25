@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
-from smolagents.models import OpenAIServerModel, ChatMessage
+from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from ..utils.observer import MessageObserver, ProcessType
 
@@ -67,7 +67,8 @@ class OpenAIModel(OpenAIServerModel):
                     content=model_output).model_dump(include={"role", "content", "tool_calls"}))
 
             message.raw = current_request
-            return self.postprocess_message(message, tools_to_call_from)
+            message.role = MessageRole.ASSISTANT
+            return message
 
         except Exception as e:
             if "context_length_exceeded" in str(e):

@@ -146,27 +146,6 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
         return [as_dict(record) for record in records]
 
 
-def get_model_by_name(model_name: str, model_repo: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    Get a model record by model name and repository
-
-    Args:
-        model_name: Model name
-        model_repo: Model repository
-
-    Returns:
-        Optional[Dict[str, Any]]: Model record
-    """
-    filters = {'model_name': model_name, 'model_repo': model_repo}
-
-    records = get_model_records(filters,tenant_id)
-    if not records:
-        return None
-
-    model = records[0]
-    return model
-
-
 def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     """
     Get a model record by display name

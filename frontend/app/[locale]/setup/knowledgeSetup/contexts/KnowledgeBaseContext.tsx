@@ -146,7 +146,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
   }, [state.currentEmbeddingModel]);
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
-  const fetchKnowledgeBases = useCallback(async (skipHealthCheck = true, shouldLoadSelected = false) => {
+  const fetchKnowledgeBases = useCallback(async (skipHealthCheck = true) => {
     // If already loading, return directly
     if (state.isLoading) {
       return;
@@ -289,7 +289,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
   const refreshKnowledgeBaseData = useCallback(async () => {
     try {
       // Get latest knowledge base data directly from server
-      await fetchKnowledgeBases(false, true);
+      await fetchKnowledgeBases(false);
 
       // If there is an active knowledge base, also refresh its document information
       if (state.activeKnowledgeBase) {
@@ -363,7 +363,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
       
       // If first time loading data or force refresh, get from server
       if (!initialDataLoaded || forceRefresh) {
-        fetchKnowledgeBases(false, true);
+        fetchKnowledgeBases(false);
         initialDataLoaded = true;
       }
     };

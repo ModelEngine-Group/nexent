@@ -1,28 +1,27 @@
 import React, { useRef, useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { Input, Radio, ColorPicker, Button, Typography, Card, Col, Row, App } from 'antd';
 import { useConfig } from '@/hooks/useConfig';
 import { PlusOutlined } from '@ant-design/icons';
 import { Pencil } from 'lucide-react';
-import 'bootstrap-icons/font/bootstrap-icons.css';
 import { useTranslation } from 'react-i18next';
-
 import { generateAvatarUri } from '@/lib/avatar';
 import { presetIcons, colorOptions } from "@/types/avatar"
 
-import dynamic from 'next/dynamic';
+import 'bootstrap-icons/font/bootstrap-icons.css';
 
 const { TextArea } = Input;
 const { Text } = Typography;
 
-// 动态导入 Modal 组件以避免 SSR 水合错误
+// Dynamically import Modal component to avoid SSR hydration errors
 const DynamicModal = dynamic(() => import('antd/es/modal'), { ssr: false });
 
-// 布局高度常量配置
+// Layout height constant configuration
 const LAYOUT_CONFIG = {
   CARD_BODY_PADDING: "8px 20px",
 }
 
-// 卡片主题
+// Card theme
 const cardTheme = {
   borderColor: "#e6e6e6",
   backgroundColor: "#ffffff",
@@ -33,20 +32,20 @@ export const AppConfigSection: React.FC = () => {
   const { message } = App.useApp();
   const { appConfig, updateAppConfig, getAppAvatarUrl } = useConfig();
   
-  // 添加本地状态管理输入值
+  // Add local state management for input values
   const [localAppName, setLocalAppName] = useState(appConfig.appName);
   const [localAppDescription, setLocalAppDescription] = useState(appConfig.appDescription);
   
-  // 添加错误状态管理
+  // Add error state management
   const [appNameError, setAppNameError] = useState(false);
 
-  // 添加用户输入状态跟踪
+  // Add user input state tracking
   const isUserTypingAppName = useRef(false);
   const isUserTypingDescription = useRef(false);
   const appNameUpdateTimer = useRef<NodeJS.Timeout | null>(null);
   const descriptionUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // 头像相关状态
+  // Avatar-related state
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [selectedIconKey, setSelectedIconKey] = useState<string>(presetIcons[0].key);
   const [tempIconKey, setTempIconKey] = useState<string>(presetIcons[0].key);
@@ -56,17 +55,17 @@ export const AppConfigSection: React.FC = () => {
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | null>(appConfig.customIconUrl);
   const [tempCustomAvatarUrl, setTempCustomAvatarUrl] = useState<string | null>(appConfig.customIconUrl);
   
-  // 获取当前头像URL
+  // Get current avatar URL
   const avatarUrl = getAppAvatarUrl(60);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // 添加配置变化监听，当配置从后端加载后同步更新本地状态
+  // Add configuration change listener, synchronize local state when config is loaded from backend
   useEffect(() => {
     const handleConfigChanged = (event: any) => {
       const { config } = event.detail;
       if (config?.app) {
-        // 只有在用户未正在输入时才更新状态
+        // Only update state when user is not currently typing
         if (!isUserTypingAppName.current) {
           setLocalAppName(config.app.appName || "");
         }
@@ -76,7 +75,7 @@ export const AppConfigSection: React.FC = () => {
         setAvatarType(config.app.iconType || "preset");
         setCustomAvatarUrl(config.app.customIconUrl || null);
         
-        // 重置错误状态
+        // Reset error state
         if (config.app.appName && config.app.appName.trim()) {
           setAppNameError(false);
         }
@@ -89,9 +88,9 @@ export const AppConfigSection: React.FC = () => {
     };
   }, []);
 
-  // 监听appConfig变化，同步更新本地状态
+  // Listen for appConfig changes, synchronize local state
   useEffect(() => {
-    // 只有在用户未正在输入时才更新状态
+    // Only update state when user is not currently typing
     if (!isUserTypingAppName.current) {
       setLocalAppName(appConfig.appName);
     }
@@ -102,13 +101,13 @@ export const AppConfigSection: React.FC = () => {
     setCustomAvatarUrl(appConfig.customIconUrl);
   }, [appConfig.appName, appConfig.appDescription, appConfig.iconType, appConfig.customIconUrl]);
   
-  // 监听高亮缺失字段事件
+  // Listen for highlight missing field events
   useEffect(() => {
     const handleHighlightMissingField = (event: any) => {
       const { field } = event.detail;
       if (field === 'appName') {
         setAppNameError(true);
-        // 滚动到应用名称输入框
+        // Scroll to app name input field
         const appNameInput = document.querySelector('.app-name-input');
         if (appNameInput) {
           appNameInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -122,7 +121,7 @@ export const AppConfigSection: React.FC = () => {
     };
   }, []);
 
-  // 清理定时器
+  // Clean up timers
   useEffect(() => {
     return () => {
       if (appNameUpdateTimer.current) {
@@ -140,17 +139,17 @@ export const AppConfigSection: React.FC = () => {
     isUserTypingAppName.current = true;
     setLocalAppName(newAppName);
     
-    // 如果输入了值，清除错误状态
+    // If value is entered, clear error state
     if (newAppName.trim()) {
       setAppNameError(false);
     }
 
-    // 清除之前的定时器
+    // Clear previous timer
     if (appNameUpdateTimer.current) {
       clearTimeout(appNameUpdateTimer.current);
     }
 
-    // 设置防抖更新
+    // Set debounced update
     appNameUpdateTimer.current = setTimeout(() => {
       updateAppConfig({ appName: newAppName });
       isUserTypingAppName.current = false;
@@ -158,7 +157,7 @@ export const AppConfigSection: React.FC = () => {
   };
 
   const handleAppNameBlur = () => {
-    // 清除定时器，立即更新
+    // Clear timer, update immediately
     if (appNameUpdateTimer.current) {
       clearTimeout(appNameUpdateTimer.current);
     }
@@ -171,12 +170,12 @@ export const AppConfigSection: React.FC = () => {
     isUserTypingDescription.current = true;
     setLocalAppDescription(newDescription);
 
-    // 清除之前的定时器
+    // Clear previous timer
     if (descriptionUpdateTimer.current) {
       clearTimeout(descriptionUpdateTimer.current);
     }
 
-    // 设置防抖更新
+    // Set debounced update
     descriptionUpdateTimer.current = setTimeout(() => {
       updateAppConfig({ appDescription: newDescription });
       isUserTypingDescription.current = false;
@@ -184,7 +183,7 @@ export const AppConfigSection: React.FC = () => {
   };
 
   const handleDescriptionBlur = () => {
-    // 清除定时器，立即更新
+    // Clear timer, update immediately
     if (descriptionUpdateTimer.current) {
       clearTimeout(descriptionUpdateTimer.current);
     }
@@ -192,7 +191,7 @@ export const AppConfigSection: React.FC = () => {
     isUserTypingDescription.current = false;
   };
 
-  // 打开头像选择模态框
+  // Open avatar selection modal
   const handleAvatarClick = () => {
     setTempIconKey(selectedIconKey);
     setTempAvatarType(avatarType);
@@ -200,18 +199,18 @@ export const AppConfigSection: React.FC = () => {
     setIsAvatarModalOpen(true);
   };
 
-  // 处理图标选择
+  // Handle icon selection
   const handleIconSelect = (iconKey: string) => {
     setTempIconKey(iconKey);
     setTempAvatarType("preset");
   };
 
-  // 处理颜色选择
+  // Handle color selection
   const handleColorSelect = (color: string) => {
     setTempColor(color);
   };
 
-  // 处理自定义图片上传
+  // Handle custom image upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -236,12 +235,12 @@ export const AppConfigSection: React.FC = () => {
     }
   };
 
-  // 触发文件选择对话框
+  // Trigger file selection dialog
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
 
-  // 确认头像选择
+  // Confirm avatar selection
   const confirmAvatarSelection = async () => {
     try {
       setSelectedIconKey(tempIconKey);
@@ -250,7 +249,7 @@ export const AppConfigSection: React.FC = () => {
       setIsAvatarModalOpen(false);
 
       if (tempAvatarType === "preset") {
-        // 生成头像 URI 并保存
+        // Generate avatar URI and save
         const avatarUri = generateAvatarUri(tempIconKey, tempColor);
         
         updateAppConfig({
@@ -271,7 +270,7 @@ export const AppConfigSection: React.FC = () => {
     }
   };
 
-  // 取消头像选择
+  // Cancel avatar selection
   const cancelAvatarSelection = () => {
     setIsAvatarModalOpen(false);
     setTempCustomAvatarUrl(customAvatarUrl);
