@@ -1,7 +1,7 @@
 from fastapi import HTTPException, APIRouter
 from fastapi.responses import JSONResponse
 import logging
-from database.agent_db import query_all_tools
+from database.tool_db import query_all_tools
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest
 from services.tool_configuration_service import search_tool_info_impl, update_tool_info_impl, update_tool_list
 from fastapi import Header

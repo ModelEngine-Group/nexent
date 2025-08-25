@@ -8,11 +8,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from consts.model import AgentRequest
 from agents.create_agent_info import create_tool_config_list
 from consts.model import AgentInfoRequest, ExportAndImportAgentInfo, ExportAndImportDataFormat, ToolInstanceInfoRequest, MCPInfo
-from database.agent_db import create_agent, query_all_enabled_tool_instances, \
-     search_blank_sub_agent_by_main_agent_id, \
-    search_tools_for_sub_agent, search_agent_info_by_agent_id, update_agent, delete_agent_by_id, query_all_tools, \
-    create_or_update_tool_by_tool_info, check_tool_is_available, query_all_agent_info_by_tenant_id, \
-    query_sub_agents_id_list, insert_related_agent, delete_all_related_agent, search_agent_id_by_agent_name
+from database.agent_db import create_agent, search_blank_sub_agent_by_main_agent_id, \
+    search_agent_info_by_agent_id, update_agent, delete_agent_by_id, query_all_agent_info_by_tenant_id, \
+    query_sub_agents_id_list, insert_related_agent, delete_agent_relationship, search_agent_id_by_agent_name
+from database.tool_db import create_or_update_tool_by_tool_info, query_all_tools, query_all_enabled_tool_instances, \
+    search_tools_for_sub_agent, check_tool_is_available, delete_tools_by_agent_id
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant, check_mcp_name_exists
 from services.remote_mcp_service import add_remote_mcp_server_list
 from services.tool_configuration_service import update_tool_list
@@ -121,14 +121,14 @@ async def delete_agent_impl(agent_id: int, authorization: str = Header(None)):
 
     try:
         delete_agent_by_id(agent_id, tenant_id, user_id)
-        delete_all_related_agent(agent_id, tenant_id)
-        
+        delete_agent_relationship(agent_id, tenant_id)
+        delete_tools_by_agent_id(agent_id, tenant_id, user_id)
+
         # Clean up all memory data related to the agent
         await clear_agent_memory(agent_id, tenant_id, user_id)
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")
-
 
 async def clear_agent_memory(agent_id: int, tenant_id: str, user_id: str):
     """

@@ -8,7 +8,8 @@ from smolagents import OpenAIServerModel
 
 from consts.model import AgentInfoRequest
 from database.agent_db import update_agent, \
-    query_tools_by_ids, query_sub_agents_id_list, search_agent_info_by_agent_id
+    query_sub_agents_id_list, search_agent_info_by_agent_id
+from database.tool_db import query_tools_by_ids
 from services.agent_service import get_enable_tool_id_by_agent_id
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
