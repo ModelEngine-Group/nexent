@@ -398,7 +398,7 @@
     "agent.action.importing": "导入中...",
     "agent.action.import": "导入Agent",
     "agent.action.viewCallRelationship": "查看调用关系",
-    "agent.message.saveSuccess": "Agent \"{name}\" {action} successfully",
+    "agent.message.saveSuccess": "Agent \"{name}\" {action}成功",
     "agent.message.infoLoaded": "Agent信息已加载",
     "agent.message.statusUpdated": "Agent \"{name}\" {status}",
     "agent.message.modelUpdateSuccess": "模型更新成功",

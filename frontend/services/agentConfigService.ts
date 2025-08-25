@@ -1,6 +1,8 @@
-import { Tool, convertParamType } from '@/types/agentAndToolConst';
+import { Tool } from '@/types/agentAndToolConst';
+import { convertParamType } from '@/lib/utils';
 import { API_ENDPOINTS } from './api';
 import { getAuthHeaders } from '@/lib/auth';
+
 
 /**
  * get tool list from backend
