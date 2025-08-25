@@ -48,6 +48,7 @@ class BatchCreateModelsRequest(BaseModel):
 class ProviderModelRequest(BaseModel):
     provider: str
     api_key: Optional[str] = None
+    model_type: Optional[str] = None
 
 # Create a router and endpoints that mimic the actual ones
 router = APIRouter(prefix="/model")
@@ -235,7 +236,11 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
             if model_name:
                 existing_model_by_display = get_model_by_display_name(request.provider + "/" + model_name, tenant_id)
                 if existing_model_by_display:
-                    continue
+                    # Check if max_tokens has changed
+                    existing_max_tokens = existing_model_by_display.get("max_tokens", 4096)
+                    new_max_tokens = model.get("max_tokens", 4096)
+                    if existing_max_tokens == new_max_tokens:
+                        continue
 
             model_dict = await prepare_model_dict(
                 provider=request.provider,
@@ -263,11 +268,38 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
 @router.post("/create_provider", response_model=ModelResponse)
 async def create_provider_model(request: ProviderModelRequest, authorization: Optional[str] = Header(None)):
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
         model_data = request.model_dump()
         model_list=[]
+        existing_model_list=[]
+        
         if model_data["provider"] == "silicon":
             model_list = await get_models_from_silicon(model_data)
-        return ModelResponse(   
+
+        if request.model_type != "embedding" and request.model_type != "multi_embedding":
+            existing_model_list = get_models_by_tenant_factory_type(tenant_id, request.provider, request.model_type)
+            
+            # 检查existing_model_list中的模型是否在model_list中，如果在，就添加max_tokens属性
+            if model_list and existing_model_list:
+                # 创建existing_model_list的模型ID集合，用于快速查找
+                existing_model_ids = set()
+                for existing_model in existing_model_list:
+                    model_full_name = existing_model["model_repo"] + "/" + existing_model["model_name"]
+                    existing_model_ids.add(model_full_name)
+                
+                # 遍历model_list，如果模型在existing_model_list中，添加max_tokens属性
+                for model in model_list:
+                    if model.get("id") in existing_model_ids:
+                        # 找到对应的existing_model，获取其max_tokens值
+                        for existing_model in existing_model_list:
+                            model_full_name = existing_model["model_repo"] + "/" + existing_model["model_name"]
+                            if model.get("id") == model_full_name:
+                                model["max_tokens"] = existing_model.get("max_tokens")
+                                break
+        # Sort by the first letter of id in ascending order
+        if isinstance(model_list, list):
+            model_list.sort(key=lambda m: str((m.get("id") if isinstance(m, dict) else m) or "")[:1].lower(), reverse=False)
+        return ModelResponse(
             code=200,
             message=f"Provider model {model_data['provider']} created successfully",
             data=model_list
@@ -711,7 +743,10 @@ class TestModelManagementApp(unittest.TestCase):
         self.assertIn("Failed to batch create models: Database connection error", data["message"])
 
     @patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock)
-    def test_create_provider_model_silicon_success(self, mock_get_silicon):
+    @patch("test_model_managment_app.get_current_user_id")
+    def test_create_provider_model_silicon_success(self, mock_get_user, mock_get_silicon):
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
         mock_get_silicon.return_value = [{"id": "silicon/model1"}]
         request_data = {"provider": "silicon", "api_key": "test_key"}
 
@@ -723,10 +758,14 @@ class TestModelManagementApp(unittest.TestCase):
         self.assertIn("Provider model silicon created successfully", data["message"])
         self.assertEqual(len(data["data"]), 1)
         self.assertEqual(data["data"][0]["id"], "silicon/model1")
+        mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
         mock_get_silicon.assert_called_once()
 
     @patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock)
-    def test_create_provider_model_exception(self, mock_get_silicon):
+    @patch("test_model_managment_app.get_current_user_id")
+    def test_create_provider_model_exception(self, mock_get_user, mock_get_silicon):
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
         mock_get_silicon.side_effect = Exception("Silicon API error")
         request_data = {"provider": "silicon", "api_key": "test_key"}
 
@@ -736,29 +775,844 @@ class TestModelManagementApp(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["code"], 500)
         self.assertIn("Failed to create provider model: Silicon API error", data["message"])
+        mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
 
-    def test_create_provider_model_silicon_success_backend_sorted(self):
-        backend_client_local, backend_model_app = _build_backend_client_with_s3_stub()
-        with patch.object(backend_model_app.SiliconModelProvider, "get_models", new=AsyncMock(return_value=[{"id": "b2"}, {"id": "A1"}, {"id": "a0"}, {"id": "c3"}])) as mock_get:
-            request_data = {"provider": "silicon", "api_key": "test_key"}
-            response = backend_client_local.post("/model/create_provider", json=request_data, headers=self.auth_header)
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models(self, mock_get_existing, mock_get_user):
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model1",
+                "max_tokens": 4096
+            },
+            {
+                "model_repo": "silicon", 
+                "model_name": "model2",
+                "max_tokens": 8192
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model1"},
+                {"id": "silicon/model2"},
+                {"id": "silicon/new_model"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"  # Not embedding or multi_embedding
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
             self.assertEqual(response.status_code, 200)
             data = response.json()
             self.assertEqual(data["code"], 200)
             self.assertIn("Provider model silicon created successfully", data["message"])
-            self.assertEqual([m["id"] for m in data["data"]], ["A1", "a0", "b2", "c3"])
-            mock_get.assert_called_once()
+            
+            # Check that max_tokens were merged for existing models
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 3)
+            
+            # Find models with max_tokens (existing models)
+            model1 = next((m for m in result_models if m["id"] == "silicon/model1"), None)
+            model2 = next((m for m in result_models if m["id"] == "silicon/model2"), None)
+            new_model = next((m for m in result_models if m["id"] == "silicon/new_model"), None)
+            
+            self.assertIsNotNone(model1)
+            self.assertEqual(model1.get("max_tokens"), 4096)
+            self.assertIsNotNone(model2)
+            self.assertEqual(model2.get("max_tokens"), 8192)
+            self.assertIsNotNone(new_model)
+            self.assertNotIn("max_tokens", new_model)  # New model shouldn't have max_tokens
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_none_max_tokens(self, mock_get_existing, mock_get_user):
+        """Test when existing model has None max_tokens"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model_with_none_tokens",
+                "max_tokens": None  # None max_tokens
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model_with_none_tokens"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model gets None max_tokens
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "silicon/model_with_none_tokens")
+            self.assertIsNone(model.get("max_tokens"))
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_missing_max_tokens_field(self, mock_get_existing, mock_get_user):
+        """Test when existing model doesn't have max_tokens field"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model_without_tokens_field"
+                # No max_tokens field
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model_without_tokens_field"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model gets None max_tokens (default behavior when field is missing)
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "silicon/model_without_tokens_field")
+            self.assertIsNone(model.get("max_tokens"))
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_missing_model_repo(self, mock_get_existing, mock_get_user):
+        """Test when existing model has missing model_repo field"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_name": "model_without_repo",
+                "max_tokens": 4096
+                # Missing model_repo field
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "model_without_repo"}  # No repo prefix
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 500)  # Should return 500 when model_repo is missing
+            self.assertIn("Failed to create provider model", data["message"])
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_missing_model_name(self, mock_get_existing, mock_get_user):
+        """Test when existing model has missing model_name field"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "max_tokens": 4096
+                # Missing model_name field
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/"}  # Empty model name
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 500)  # Should return 500 when model_name is missing
+            self.assertIn("Failed to create provider model", data["message"])
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_multiple_matches(self, mock_get_existing, mock_get_user):
+        """Test when multiple existing models match the same provider model"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "duplicate_model",
+                "max_tokens": 4096
+            },
+            {
+                "model_repo": "silicon",
+                "model_name": "duplicate_model",  # Duplicate model
+                "max_tokens": 8192  # Different max_tokens
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/duplicate_model"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model gets max_tokens from the first match (4096)
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "silicon/duplicate_model")
+            self.assertEqual(model.get("max_tokens"), 4096)  # First match
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_case_sensitive_matching(self, mock_get_existing, mock_get_user):
+        """Test case sensitivity in model ID matching"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "Silicon",  # Different case
+                "model_name": "Model1",   # Different case
+                "max_tokens": 4096
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model1"}  # Different case
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model doesn't get max_tokens due to case mismatch
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "silicon/model1")
+            self.assertNotIn("max_tokens", model)  # No match due to case difference
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_empty_string_fields(self, mock_get_existing, mock_get_user):
+        """Test when existing model has empty string fields"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "",  # Empty string
+                "model_name": "model1",
+                "max_tokens": 4096
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "/model1"}  # With leading slash when repo is empty
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model gets max_tokens with empty repo
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "/model1")
+            self.assertEqual(model.get("max_tokens"), 4096)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_zero_max_tokens(self, mock_get_existing, mock_get_user):
+        """Test when existing model has zero max_tokens"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model_with_zero_tokens",
+                "max_tokens": 0  # Zero max_tokens
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model_with_zero_tokens"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model gets zero max_tokens
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "silicon/model_with_zero_tokens")
+            self.assertEqual(model.get("max_tokens"), 0)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_negative_max_tokens(self, mock_get_existing, mock_get_user):
+        """Test when existing model has negative max_tokens"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model_with_negative_tokens",
+                "max_tokens": -1  # Negative max_tokens
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model_with_negative_tokens"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that model gets negative max_tokens
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 1)
+            
+            model = result_models[0]
+            self.assertEqual(model["id"], "silicon/model_with_negative_tokens")
+            self.assertEqual(model.get("max_tokens"), -1)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    def test_create_provider_model_embedding_type_skips_existing_check(self, mock_get_user):
+        """Test that embedding type skips existing model check"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/embedding_model"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "embedding"  # This should skip existing model check
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Should not call get_models_by_tenant_factory_type for embedding types
+            # The test verifies this by not mocking get_models_by_tenant_factory_type
+            # and ensuring no error occurs
+
+    @patch("test_model_managment_app.get_current_user_id")
+    def test_create_provider_model_multi_embedding_type_skips_existing_check(self, mock_get_user):
+        """Test that multi_embedding type skips existing model check"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/multi_embedding_model"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "multi_embedding"  # This should skip existing model check
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Should not call get_models_by_tenant_factory_type for multi_embedding types
+            # The test verifies this by not mocking get_models_by_tenant_factory_type
+            # and ensuring no error occurs
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_no_overlap(self, mock_get_existing, mock_get_user):
+        """Test when existing models don't overlap with new models from provider"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "existing_model",
+                "max_tokens": 4096
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/new_model1"},
+                {"id": "silicon/new_model2"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that new models don't have max_tokens since they don't exist in existing models
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 2)
+            
+            for model in result_models:
+                self.assertNotIn("max_tokens", model)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_partial_overlap(self, mock_get_existing, mock_get_user):
+        """Test when some existing models overlap with new models from provider"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "overlapping_model",
+                "max_tokens": 4096
+            },
+            {
+                "model_repo": "silicon",
+                "model_name": "non_overlapping_model", 
+                "max_tokens": 8192
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/overlapping_model"},  # This should get max_tokens
+                {"id": "silicon/new_model"}  # This should not get max_tokens
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that only overlapping model has max_tokens
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 2)
+            
+            overlapping_model = next((m for m in result_models if m["id"] == "silicon/overlapping_model"), None)
+            new_model = next((m for m in result_models if m["id"] == "silicon/new_model"), None)
+            
+            self.assertIsNotNone(overlapping_model)
+            self.assertEqual(overlapping_model.get("max_tokens"), 4096)
+            self.assertIsNotNone(new_model)
+            self.assertNotIn("max_tokens", new_model)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_empty_provider_list(self, mock_get_existing, mock_get_user):
+        """Test when provider returns empty list but there are existing models"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "existing_model",
+                "max_tokens": 4096
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = []  # Empty list from provider
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that empty list is returned
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 0)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_empty_existing_list(self, mock_get_existing, mock_get_user):
+        """Test when there are no existing models but provider returns models"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = []  # No existing models
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/new_model1"},
+                {"id": "silicon/new_model2"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that new models don't have max_tokens since there are no existing models
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 2)
+            
+            for model in result_models:
+                self.assertNotIn("max_tokens", model)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_optimized_lookup(self, mock_get_existing, mock_get_user):
+        """Test the optimized lookup using existing_model_map dictionary"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model1",
+                "max_tokens": 4096
+            },
+            {
+                "model_repo": "silicon",
+                "model_name": "model2", 
+                "max_tokens": 8192
+            },
+            {
+                "model_repo": "silicon",
+                "model_name": "model3",
+                "max_tokens": 16384
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model1"},
+                {"id": "silicon/model2"},
+                {"id": "silicon/model3"},
+                {"id": "silicon/new_model"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that all existing models get their max_tokens properly merged
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 4)
+            
+            # Verify the optimized lookup worked correctly
+            model1 = next((m for m in result_models if m["id"] == "silicon/model1"), None)
+            model2 = next((m for m in result_models if m["id"] == "silicon/model2"), None)
+            model3 = next((m for m in result_models if m["id"] == "silicon/model3"), None)
+            new_model = next((m for m in result_models if m["id"] == "silicon/new_model"), None)
+            
+            self.assertIsNotNone(model1)
+            self.assertEqual(model1.get("max_tokens"), 4096)
+            self.assertIsNotNone(model2)
+            self.assertEqual(model2.get("max_tokens"), 8192)
+            self.assertIsNotNone(model3)
+            self.assertEqual(model3.get("max_tokens"), 16384)
+            self.assertIsNotNone(new_model)
+            self.assertNotIn("max_tokens", new_model)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    @patch("test_model_managment_app.get_current_user_id")
+    @patch("test_model_managment_app.get_models_by_tenant_factory_type")
+    def test_create_provider_model_with_existing_models_edge_cases(self, mock_get_existing, mock_get_user):
+        """Test edge cases in the existing model lookup logic"""
+        # Configure mocks
+        mock_get_user.return_value = (self.user_id, self.tenant_id)
+        mock_get_existing.return_value = [
+            {
+                "model_repo": "silicon",
+                "model_name": "model_with_special_chars",
+                "max_tokens": 4096
+            },
+            {
+                "model_repo": "silicon",
+                "model_name": "model_with_numbers_123",
+                "max_tokens": 8192
+            },
+            {
+                "model_repo": "silicon",
+                "model_name": "MODEL_WITH_UPPERCASE",
+                "max_tokens": 16384
+            }
+        ]
+        
+        # Mock the get_models_from_silicon function
+        with patch("test_model_managment_app.get_models_from_silicon", new_callable=AsyncMock) as mock_get_silicon:
+            mock_get_silicon.return_value = [
+                {"id": "silicon/model_with_special_chars"},
+                {"id": "silicon/model_with_numbers_123"},
+                {"id": "silicon/MODEL_WITH_UPPERCASE"},
+                {"id": "silicon/unknown_model"}
+            ]
+            
+            request_data = {
+                "provider": "silicon", 
+                "api_key": "test_key",
+                "model_type": "llm"
+            }
+            
+            response = client.post("/model/create_provider", json=request_data, headers=self.auth_header)
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["code"], 200)
+            self.assertIn("Provider model silicon created successfully", data["message"])
+            
+            # Check that edge cases are handled correctly
+            result_models = data["data"]
+            self.assertEqual(len(result_models), 4)
+            
+            # Verify special characters, numbers, and case sensitivity
+            special_model = next((m for m in result_models if m["id"] == "silicon/model_with_special_chars"), None)
+            number_model = next((m for m in result_models if m["id"] == "silicon/model_with_numbers_123"), None)
+            uppercase_model = next((m for m in result_models if m["id"] == "silicon/MODEL_WITH_UPPERCASE"), None)
+            unknown_model = next((m for m in result_models if m["id"] == "silicon/unknown_model"), None)
+            
+            self.assertIsNotNone(special_model)
+            self.assertEqual(special_model.get("max_tokens"), 4096)
+            self.assertIsNotNone(number_model)
+            self.assertEqual(number_model.get("max_tokens"), 8192)
+            self.assertIsNotNone(uppercase_model)
+            self.assertEqual(uppercase_model.get("max_tokens"), 16384)
+            self.assertIsNotNone(unknown_model)
+            self.assertNotIn("max_tokens", unknown_model)
+            
+            mock_get_user.assert_called_once_with(self.auth_header["Authorization"])
+            mock_get_existing.assert_called_once_with(self.tenant_id, "silicon", "llm")
+
+    def test_create_provider_model_silicon_success_backend(self):
+        backend_client_local, backend_model_app = _build_backend_client_with_s3_stub()
+        with patch.object(backend_model_app, "get_current_user_id", return_value=(self.user_id, self.tenant_id)):
+            with patch.object(backend_model_app.SiliconModelProvider, "get_models", new=AsyncMock(return_value=[{"id": "b2"}, {"id": "A1"}, {"id": "a0"}, {"id": "c3"}])) as mock_get:
+                request_data = {"provider": "silicon", "api_key": "test_key"}
+                response = backend_client_local.post("/model/create_provider", json=request_data, headers=self.auth_header)
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertEqual(data["code"], 200)
+                self.assertIn("Provider model silicon created successfully", data["message"])
+                # Check that models are sorted by first letter in ascending order
+                self.assertEqual([m["id"] for m in data["data"]], ["A1", "a0", "b2", "c3"])
+                mock_get.assert_called_once()
 
     def test_create_provider_model_exception_backend(self):
         backend_client_local, backend_model_app = _build_backend_client_with_s3_stub()
-        with patch.object(backend_model_app.SiliconModelProvider, "get_models", new=AsyncMock(side_effect=Exception("Silicon API error"))) as mock_get:
-            request_data = {"provider": "silicon", "api_key": "test_key"}
-            response = backend_client_local.post("/model/create_provider", json=request_data, headers=self.auth_header)
-            self.assertEqual(response.status_code, 200)
-            data = response.json()
-            self.assertEqual(data["code"], 500)
-            self.assertIn("Failed to create provider model: Silicon API error", data["message"])
-            mock_get.assert_called_once()
+        with patch.object(backend_model_app, "get_current_user_id", return_value=(self.user_id, self.tenant_id)):
+            with patch.object(backend_model_app.SiliconModelProvider, "get_models", new=AsyncMock(side_effect=Exception("Silicon API error"))) as mock_get:
+                request_data = {"provider": "silicon", "api_key": "test_key"}
+                response = backend_client_local.post("/model/create_provider", json=request_data, headers=self.auth_header)
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertEqual(data["code"], 500)
+                self.assertIn("Failed to create provider model: Silicon API error", data["message"])
+                mock_get.assert_called_once()
 
     @patch("test_model_managment_app.get_current_user_id")
     @patch("test_model_managment_app.get_model_by_display_name")

@@ -48,6 +48,7 @@ class SiliconModelProvider(AbstractModelProvider):
                 for item in model_list:
                     item["model_tag"] = "chat"
                     item["model_type"] = model_type
+                    item["max_tokens"] = 4096
             elif model_type in ("embedding", "multi_embedding"):
                 for item in model_list:
                     item["model_tag"] = "embedding"
@@ -60,7 +61,7 @@ class SiliconModelProvider(AbstractModelProvider):
 
 
 
-async def prepare_model_dict(provider: str, model: dict, model_url: str, model_api_key: str, max_tokens: int) -> dict:
+async def prepare_model_dict(provider: str, model: dict, model_url: str, model_api_key: str) -> dict:
     """
     Construct a model configuration dictionary that is ready to be stored in the
     database. This utility centralises the logic that was previously embedded in
@@ -90,7 +91,7 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         model_name=model_name,
         model_type=model["model_type"],
         api_key=model_api_key,
-        max_tokens=max_tokens,
+        max_tokens=model["max_tokens"],
         display_name=f"{provider}/{model_display_name}"
     )
 
