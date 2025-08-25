@@ -589,7 +589,7 @@ def test_get_agent_call_relationship_api_success(mocker, mock_auth_header):
     """Test successful call to get_agent_call_relationship_api endpoint"""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_agent_call_relationship = mocker.patch(
-        "apps.agent_app.agent_service.get_agent_call_relationship_impl"
+        "services.agent_service.get_agent_call_relationship_impl"
     )
 
     mock_get_user_id.return_value = ("user_id", "test_tenant")
@@ -616,7 +616,7 @@ def test_get_agent_call_relationship_api_with_sub_agents(mocker, mock_auth_heade
     """Test get_agent_call_relationship_api with sub-agents"""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_agent_call_relationship = mocker.patch(
-        "apps.agent_app.agent_service.get_agent_call_relationship_impl"
+        "services.agent_service.get_agent_call_relationship_impl"
     )
 
     mock_get_user_id.return_value = ("user_id", "test_tenant")
@@ -650,7 +650,7 @@ def test_get_agent_call_relationship_api_service_error(mocker, mock_auth_header)
     """Test get_agent_call_relationship_api handles service errors"""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_agent_call_relationship = mocker.patch(
-        "apps.agent_app.agent_service.get_agent_call_relationship_impl"
+        "services.agent_service.get_agent_call_relationship_impl"
     )
 
     mock_get_user_id.return_value = ("user_id", "test_tenant")
@@ -681,7 +681,7 @@ def test_get_agent_call_relationship_api_complex_structure(mocker, mock_auth_hea
     """Test get_agent_call_relationship_api with complex nested structure"""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_get_agent_call_relationship = mocker.patch(
-        "apps.agent_app.agent_service.get_agent_call_relationship_impl"
+        "services.agent_service.get_agent_call_relationship_impl"
     )
 
     mock_get_user_id.return_value = ("user_id", "test_tenant")
