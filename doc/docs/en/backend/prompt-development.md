@@ -106,7 +106,9 @@ Located in the `utils/` directory:
    Templates for fine-tuning and optimizing existing prompts.
 
 3. **Title Generation Templates**
-   - `generate_title.yaml` - For generating titles and summaries
+   - `generate_title.yaml` - Chinese version
+   - `generate_title_en.yaml` - English version
+   Templates for generating titles for dialogs. 
 
 ## Execution Flow
 
@@ -121,8 +123,8 @@ The standard agent execution flow follows this pattern:
 
 When writing Python code in prompts:
 
-1. Use the format `代码：\n```py\n` for executable code
-2. Use the format `代码：\n```code:language_type\n` for display-only code
+1. Use the format `Code: \n```py\n` for executable code
+2. Use the format `Code: \n```code:language_type\n` for display-only code
 3. Use only defined variables that persist across calls
 4. Use `print()` function to make variable information visible
 5. Use keyword parameters for tool and agent calls
@@ -136,19 +138,3 @@ When writing Python code in prompts:
 3. **Information Integration**: Integrate outputs from different agents
 4. **Efficiency Optimization**: Avoid redundant work
 5. **Result Evaluation**: Assess agent return results and provide additional guidance when needed
-
-## Example Usage
-
-Here's an example of how a manager agent might coordinate with specialized agents:
-
-```yaml
-# Example task assignment
-managed_agent:
-  task: |
-    Please analyze the provided document and extract key insights.
-    
-  report: |
-    {{final_answer}}
-```
-
-This system allows for flexible and powerful agent coordination while maintaining clear standards and best practices for prompt development. 

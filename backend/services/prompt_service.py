@@ -190,20 +190,17 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
             last_results[tag] = latest[tag]
 
 
-def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list,
-                                         app_name=None, app_description=None):
+def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list):
     tool_description = "\n".join(
         [f"- {tool['name']}: {tool['description']} \n 接受输入: {tool['inputs']}\n 返回输出类型: {tool['output_type']}"
          for tool in tool_info_list])
-    agent_description = "\n".join(
+    assistant_description = "\n".join(
         [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list])
     # Generate content using template
     content = Template(prompt_for_generate["USER_PROMPT"], undefined=StrictUndefined).render({
-        "tool_description": tool_description,
-        "agent_description": agent_description,
         "task_description": task_description,
-        "APP_NAME": app_name,
-        "APP_DESCRIPTION": app_description
+        "tool_description": tool_description,
+        "assistant_description": assistant_description
     })
     return content
 
