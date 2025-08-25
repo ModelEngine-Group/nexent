@@ -1262,6 +1262,20 @@ export function ChatInterface() {
       await conversationService.updateOpinion({ message_id: messageId, opinion });
       setSessionMessages((prev) => {
         const newMessages = { ...prev };
+        // Update the opinion_flag for the specific message in all conversations
+        Object.keys(newMessages).forEach(conversationId => {
+          const messages = newMessages[parseInt(conversationId)];
+          if (messages) {
+            const messageIndex = messages.findIndex(msg => msg.message_id === messageId);
+            if (messageIndex !== -1) {
+              newMessages[parseInt(conversationId)] = [...messages];
+              newMessages[parseInt(conversationId)][messageIndex] = {
+                ...newMessages[parseInt(conversationId)][messageIndex],
+                opinion_flag: opinion || undefined
+              };
+            }
+          }
+        });
         return newMessages;
       });
     } catch (error) {
