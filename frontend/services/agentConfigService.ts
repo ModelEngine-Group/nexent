@@ -1,6 +1,9 @@
+import { Tool } from '@/types/agentAndToolConst';
+import { convertParamType } from '@/lib/utils';
 import { convertParamType } from '@/lib/utils';
 import { API_ENDPOINTS } from './api';
 import { getAuthHeaders } from '@/lib/auth';
+
 
 /**
  * get tool list from backend
@@ -582,6 +585,38 @@ export const deleteRelatedAgent = async (parentAgentId: number, childAgentId: nu
 };
 
 /**
+ * Get agent call relationship tree including tools and sub-agents
+ * @param agentId agent id
+ * @returns agent call relationship tree structure
+ */
+export const fetchAgentCallRelationship = async (agentId: number) => {
+  try {
+    const response = await fetch(`${API_ENDPOINTS.agent.callRelationship}/${agentId}`, {
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`请求失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      data: data,
+      message: ''
+    };
+  } catch (error) {
+    console.error('获取Agent调用关系失败:', error);
+    return {
+      success: false,
+      data: null,
+      message: '获取Agent调用关系失败，请稍后重试'
+    };
+  }
+};
+
+/**
  * Check if agent field value exists in the current tenant
  * @param fieldValue value to check
  * @param fieldName field name to check
@@ -589,8 +624,8 @@ export const deleteRelatedAgent = async (parentAgentId: number, childAgentId: nu
  * @returns check result with status
  */
 const checkAgentField = async (
-  fieldValue: string, 
-  fieldName: string, 
+  fieldValue: string,
+  fieldName: string,
   excludeAgentId?: number
 ): Promise<{status: string, action?: string}> => {
   try {
@@ -602,13 +637,13 @@ const checkAgentField = async (
       throw new Error(`request failed: ${response.status}`);
     }
     const data = await response.json();
-    
+
     // Check if agent field value already exists, excluding the specified agent if provided
-    const existingAgent = data.find((agent: any) => 
-      agent[fieldName] === fieldValue && 
+    const existingAgent = data.find((agent: any) =>
+      agent[fieldName] === fieldValue &&
       (!excludeAgentId || agent.agent_id !== excludeAgentId)
     );
-    
+
     if (existingAgent) {
       return { status: 'exists_in_tenant' };
     }

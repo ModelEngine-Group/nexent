@@ -393,10 +393,11 @@
     "common.enabled": "已启用",
     "common.disabled": "已禁用",
     "common.unknownError": "未知错误",
-    "agent.action.create": "新建Agent",
-    "agent.action.modify": "修改",
+    "agent.action.create": "创建Agent",
+    "agent.action.modify": "modify",
     "agent.action.importing": "导入中...",
     "agent.action.import": "导入Agent",
+    "agent.action.viewCallRelationship": "查看调用关系",
     "agent.message.saveSuccess": "Agent \"{name}\" {action}成功",
     "agent.message.statusUpdated": "Agent \"{name}\" {status}",
     "agent.message.modelUpdateSuccess": "模型更新成功",
@@ -1158,5 +1159,16 @@
     "common.button.editConfig": "修改配置",
     "common.message.refreshSuccess": "刷新成功",
     "common.message.refreshFailed": "刷新失败",
-    "model.dialog.success.updateSuccess": "更新成功"
+    "model.dialog.success.updateSuccess": "更新成功",
+    "agentCallRelationship": {
+        "title": "查看调用关系",
+        "loading": "正在加载调用关系...",
+        "description": "此流程图显示了 {{name}} 及其所有工具和协作Agent的调用关系",
+        "noData": "暂无调用关系数据",
+        "nodeType": {
+            "main": "主代理",
+            "sub": "子代理",
+            "tool": "工具"
+        }
+    }
 }

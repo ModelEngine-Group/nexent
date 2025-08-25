@@ -397,6 +397,7 @@
     "agent.action.modify": "modify",
     "agent.action.importing": "Importing...",
     "agent.action.import": "Import Agent",
+    "agent.action.viewCallRelationship": "View Call Relationship",
     "agent.message.saveSuccess": "Agent \"{name}\" {action} successfully",
     "agent.message.statusUpdated": "Agent \"{name}\" has been {status}",
     "agent.message.modelUpdateSuccess": "Model updated successfully",
@@ -1158,5 +1159,16 @@
         }
     },
     "model.dialog.success.addBatchModel": "Batch add models succeeded!",
-    "model.dialog.error.addBatchModel": "Batch add models failed: {{message}}"
+    "model.dialog.error.addBatchModel": "Batch add models failed: {{message}}",
+    "agentCallRelationship": {
+        "title": "View Call Relationship",
+        "loading": "Loading call relationship...",
+        "description": "This flowchart shows the call relationship of {{name}} and all its tools and collaborative agents",
+        "noData": "No call relationship data available",
+        "nodeType": {
+            "main": "Main Agent",
+            "sub": "Sub Agent", 
+            "tool": "Tool"
+        }
+    }
 }

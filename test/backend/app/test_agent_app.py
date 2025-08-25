@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -584,3 +584,151 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
     assert response_data["code"] == 0
     assert response_data["message"] == "success"
     assert response_data["data"] == {}
+
+def test_get_agent_call_relationship_api_success(mocker, mock_auth_header):
+    """Test successful call to get_agent_call_relationship_api endpoint"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_call_relationship = mocker.patch(
+        "apps.agent_app.get_agent_call_relationship_impl"
+    )
+
+    mock_get_user_id.return_value = ("user_id", "test_tenant")
+    mock_get_agent_call_relationship.return_value = {
+        "agent_id": "123",
+        "name": "Test Agent",
+        "tools": [{"tool_id": 1, "name": "Test Tool", "type": "MCP"}],
+        "sub_agents": []
+    }
+
+    response = client.get("/agent/call_relationship/123", headers=mock_auth_header)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["agent_id"] == "123"
+    assert data["name"] == "Test Agent"
+    assert len(data["tools"]) == 1
+    assert data["tools"][0]["type"] == "MCP"
+
+    mock_get_user_id.assert_called_once_with("Bearer test_token")
+    mock_get_agent_call_relationship.assert_called_once_with(123, "test_tenant")
+
+
+def test_get_agent_call_relationship_api_with_sub_agents(mocker, mock_auth_header):
+    """Test get_agent_call_relationship_api with sub-agents"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_call_relationship = mocker.patch(
+        "apps.agent_app.get_agent_call_relationship_impl"
+    )
+
+    mock_get_user_id.return_value = ("user_id", "test_tenant")
+    mock_get_agent_call_relationship.return_value = {
+        "agent_id": "123",
+        "name": "Main Agent",
+        "tools": [],
+        "sub_agents": [
+            {
+                "agent_id": "456",
+                "name": "Sub Agent 1",
+                "tools": [{"tool_id": 2, "name": "Sub Tool", "type": "Local"}],
+                "sub_agents": [],
+                "depth": 1
+            }
+        ]
+    }
+
+    response = client.get("/agent/call_relationship/123", headers=mock_auth_header)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["sub_agents"]) == 1
+    sub_agent = data["sub_agents"][0]
+    assert sub_agent["agent_id"] == "456"
+    assert sub_agent["depth"] == 1
+    assert len(sub_agent["tools"]) == 1
+    assert sub_agent["tools"][0]["type"] == "Local"
+
+
+def test_get_agent_call_relationship_api_service_error(mocker, mock_auth_header):
+    """Test get_agent_call_relationship_api handles service errors"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_call_relationship = mocker.patch(
+        "apps.agent_app.get_agent_call_relationship_impl"
+    )
+
+    mock_get_user_id.return_value = ("user_id", "test_tenant")
+    mock_get_agent_call_relationship.side_effect = ValueError("Agent not found")
+
+    response = client.get("/agent/call_relationship/999", headers=mock_auth_header)
+    assert response.status_code == 500
+    data = response.json()
+    assert "Failed to get agent call relationship" in data["detail"]
+
+
+def test_get_agent_call_relationship_api_auth_error(mocker, mock_auth_header):
+    """Test get_agent_call_relationship_api handles authentication errors"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id.side_effect = Exception("Auth error")
+
+    response = client.get("/agent/call_relationship/123", headers=mock_auth_header)
+    assert response.status_code == 500
+    data = response.json()
+    # 兼容两种文案：日志里是 "Agent call relationship error"，返回 detail 是 "Failed to get agent call relationship: ..."
+    assert any(s in data["detail"] for s in (
+        "Agent call relationship error",
+        "Failed to get agent call relationship",
+    ))
+
+
+def test_get_agent_call_relationship_api_complex_structure(mocker, mock_auth_header):
+    """Test get_agent_call_relationship_api with complex nested structure"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_call_relationship = mocker.patch(
+        "apps.agent_app.get_agent_call_relationship_impl"
+    )
+
+    mock_get_user_id.return_value = ("user_id", "test_tenant")
+    mock_get_agent_call_relationship.return_value = {
+        "agent_id": "123",
+        "name": "Complex Agent",
+        "tools": [
+            {"tool_id": 1, "name": "Main Tool 1", "type": "MCP"},
+            {"tool_id": 2, "name": "Main Tool 2", "type": "LangChain"},
+        ],
+        "sub_agents": [
+            {
+                "agent_id": "456",
+                "name": "Sub Agent 1",
+                "tools": [{"tool_id": 3, "name": "Sub Tool 1", "type": "Local"}],
+                "sub_agents": [
+                    {
+                        "agent_id": "789",
+                        "name": "Deep Sub Agent",
+                        "tools": [{"tool_id": 4, "name": "Deep Tool", "type": "MCP"}],
+                        "sub_agents": [],
+                        "depth": 2
+                    }
+                ],
+                "depth": 1
+            }
+        ]
+    }
+
+    response = client.get("/agent/call_relationship/123", headers=mock_auth_header)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["agent_id"] == "123"
+    assert len(data["tools"]) == 2
+    assert data["tools"][0]["type"] == "MCP"
+    assert data["tools"][1]["type"] == "LangChain"
+
+    assert len(data["sub_agents"]) == 1
+    sub_agent = data["sub_agents"][0]
+    assert sub_agent["agent_id"] == "456"
+    assert sub_agent["depth"] == 1
+    assert len(sub_agent["tools"]) == 1
+    assert sub_agent["tools"][0]["type"] == "Local"
+
+    assert len(sub_agent["sub_agents"]) == 1
+    deep_sub_agent = sub_agent["sub_agents"][0]
+    assert deep_sub_agent["agent_id"] == "789"
+    assert deep_sub_agent["depth"] == 2
+    assert deep_sub_agent["tools"][0]["type"] == "MCP"

@@ -1,10 +1,13 @@
 "use client"
 
-import { App } from 'antd'
-import { UploadOutlined } from '@ant-design/icons'
+import { useState } from 'react'
+import { App, Button, Tooltip } from 'antd'
+import { SettingOutlined, UploadOutlined, LinkOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { ScrollArea } from '@/components/ui/scrollArea'
 import { Agent } from '@/types/agent'
+import AgentCallRelationshipModal from './AgentCallRelationshipModal'
+
 
 interface SubAgentPoolProps {
   onEditAgent: (agent: Agent) => void;
@@ -37,6 +40,21 @@ export default function SubAgentPool({
   const { t } = useTranslation('common');
   const { message } = App.useApp();
 
+  // 查看调用关系相关状态
+  const [callRelationshipModalVisible, setCallRelationshipModalVisible] = useState(false);
+  const [selectedAgentForRelationship, setSelectedAgentForRelationship] = useState<Agent | null>(null);
+
+  // 打开查看调用关系弹窗
+  const handleViewCallRelationship = (agent: Agent) => {
+    setSelectedAgentForRelationship(agent);
+    setCallRelationshipModalVisible(true);
+  };
+
+  // 关闭查看调用关系弹窗
+  const handleCloseCallRelationshipModal = () => {
+    setCallRelationshipModalVisible(false);
+    setSelectedAgentForRelationship(null);
+  };
 
 
   return (
@@ -189,6 +207,27 @@ export default function SubAgentPool({
                       {agent.description}
                     </div>
                   </div>
+
+                  {/* 操作按钮区域 */}
+                  <div className="flex items-center gap-1 ml-2">
+                    {/* 查看调用关系按钮 */}
+                    <Tooltip title={t('agent.action.viewCallRelationship')}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<LinkOutlined />}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (isAvailable) {
+                            handleViewCallRelationship(agent);
+                          }
+                        }}
+                        disabled={!isAvailable}
+                        className="text-blue-500 hover:text-blue-600 hover:bg-blue-50"
+                      />
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
               );
@@ -197,6 +236,16 @@ export default function SubAgentPool({
           </div>
         </div>
       </ScrollArea>
+
+      {/* Agent调用关系弹窗 */}
+      {selectedAgentForRelationship && (
+        <AgentCallRelationshipModal
+          visible={callRelationshipModalVisible}
+          onClose={handleCloseCallRelationshipModal}
+          agentId={Number(selectedAgentForRelationship.id)}
+          agentName={selectedAgentForRelationship.display_name || selectedAgentForRelationship.name}
+        />
+      )}
     </div>
   )
 } 
