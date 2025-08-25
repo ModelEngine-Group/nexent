@@ -341,8 +341,8 @@ export const ModelDeleteDialog = ({
         <Button key="close" onClick={handleClose}>
           {t('common.button.close')}
         </Button>,
-        // Only show confirm button for silicon and openai sources, not for OpenAI-API-Compatible
-        (selectedSource !== "OpenAI-API-Compatible") && (
+        // Only show confirm button when displaying model details (silicon and openai sources)
+        (selectedSource && selectedSource !== "OpenAI-API-Compatible" && deletingModelType) && (
           <Button key="confirm" type="primary" loading={isConfirmLoading} onClick={async () => {
             setIsConfirmLoading(true)
             try {
