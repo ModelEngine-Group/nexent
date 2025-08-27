@@ -8,7 +8,11 @@ import I18nProviderWrapper from "@/components/providers/I18nProviderWrapper"
 
 import "@/styles/globals.css"
 
-const inter = Inter({ subsets: ["latin"] })
+const inter = Inter({ 
+  subsets: ['latin'],
+  display: 'swap',
+  adjustFontFallback: false
+})
 
 export async function generateMetadata(props: {
   params: Promise<{ locale: string }>;
