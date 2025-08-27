@@ -1,6 +1,5 @@
 import os
 import sys
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -100,7 +99,7 @@ def test_agent_stop_api_not_found(mocker, mock_conversation_id):
     response = client.get(f"/agent/stop/{mock_conversation_id}")
 
     # The app should raise HTTPException for non-success status
-    assert response.status_code == 404
+    assert response.status_code == 400
     mock_stop_tasks.assert_called_once_with(mock_conversation_id)
     assert "no running agent or preprocess tasks found" in response.json()["detail"]
 
@@ -471,7 +470,7 @@ def test_related_agent_api_exception(mocker, mock_auth_header):
     )
 
     # The exception handling returns a JSONResponse with status 400
-    assert response.status_code == 400
+    assert response.status_code == 500
     assert response.json()["message"] == "Failed to insert relation"
     assert response.json()["status"] == "error"
 
@@ -479,8 +478,8 @@ def test_related_agent_api_exception(mocker, mock_auth_header):
 def test_delete_related_agent_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_delete_related_agent = mocker.patch("apps.agent_app.delete_related_agent")
-
+    mock_delete_related_agent = mocker.patch("apps.agent_app.delete_related_agent_impl")
+    
     mock_get_user_id.return_value = ("user_id", "tenant_id")
     mock_delete_related_agent.return_value = {"status": "success"}
 
@@ -504,8 +503,8 @@ def test_delete_related_agent_api_success(mocker, mock_auth_header):
 def test_delete_related_agent_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_delete_related_agent = mocker.patch("apps.agent_app.delete_related_agent")
-
+    mock_delete_related_agent = mocker.patch("apps.agent_app.delete_related_agent_impl")
+    
     mock_get_user_id.return_value = ("user_id", "tenant_id")
     mock_delete_related_agent.side_effect = Exception("Test error")
 
@@ -584,7 +583,7 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
     assert response_data["code"] == 0
     assert response_data["message"] == "success"
     assert response_data["data"] == {}
-    
+
 
 def _alias_services_for_tests():
     """
