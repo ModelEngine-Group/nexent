@@ -31,10 +31,10 @@ async def agent_run_api(agent_request: AgentRequest, http_request: Request, auth
             authorization=authorization
         )
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail="Agent run error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent run error.")
 
 
 @router.get("/stop/{conversation_id}")
@@ -45,7 +45,7 @@ async def agent_stop_api(conversation_id: int):
     if stop_agent_tasks(conversation_id).get("status") == "success":
         return {"status": "success", "message": "agent run and preprocess tasks stopped successfully"}
     else:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST.value,
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail=f"no running agent or preprocess tasks found for conversation_id {conversation_id}")
 
 
@@ -56,12 +56,12 @@ async def search_agent_info_api(agent_id: int = Body(...), authorization: Option
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        return get_agent_info_impl(agent_id, tenant_id)
+        return await get_agent_info_impl(agent_id, tenant_id)
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent search info error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent search info error.")
 
 
 @router.get("/get_creating_sub_agent_id")
@@ -70,12 +70,12 @@ async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(
     Create a new sub agent, return agent_ID
     """
     try:
-        return get_creating_sub_agent_info_impl(authorization)
+        return await get_creating_sub_agent_info_impl(authorization)
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent create error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent create error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent create error.")
 
 
 @router.post("/update")
@@ -84,13 +84,13 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
     Update an existing agent
     """
     try:
-        update_agent_info_impl(request, authorization)
+        await update_agent_info_impl(request, authorization)
         return {}
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent update error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent update error.")
 
 
 @router.delete("")
@@ -102,10 +102,10 @@ async def delete_agent_api(request: AgentIDRequest, authorization: Optional[str]
         await delete_agent_impl(request.agent_id, authorization)
         return {}
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent delete error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent delete error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent delete error.")
 
 
 @router.post("/export")
@@ -118,7 +118,7 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
         return ConversationResponse(code=0, message="success", data=agent_info_str)
     except Exception as e:
         logger.error(f"Agent export error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent export error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent export error.")
 
 
 @router.post("/import")
@@ -130,10 +130,10 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
         await import_agent_impl(request.agent_info, authorization)
         return {}
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent import error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent import error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent import error.")
 
 
 @router.get("/list")
@@ -142,13 +142,13 @@ async def list_all_agent_info_api(authorization: Optional[str] = Header(None), r
     list all agent info
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, request)
-        return list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+        _, tenant_id, _ = get_current_user_info(authorization, request)
+        return await list_all_agent_info_impl(tenant_id=tenant_id)
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent list error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent list error.")
 
 
 @router.post("/related_agent")
@@ -166,7 +166,7 @@ async def related_agent_api(parent_agent_id: int = Body(...),
     except Exception as e:
         logger.error(f"Agent related info error: {str(e)}")
         return JSONResponse(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             content={"message": "Failed to insert relation", "status": "error"}
         )
 
@@ -182,10 +182,10 @@ async def delete_related_agent_api(parent_agent_id: int = Body(...),
         _, tenant_id = get_current_user_id(authorization)
         return delete_related_agent_impl(parent_agent_id, child_agent_id, tenant_id)
     except BusinessException as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=e.message)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e.message)
     except Exception as e:
         logger.error(f"Agent related info error: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value, detail=f"Agent related info error.")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Agent related info error.")
 
 
 @router.get("/call_relationship/{agent_id}")

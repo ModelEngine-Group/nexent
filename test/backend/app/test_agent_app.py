@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +13,17 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
 # Mock external dependencies before importing the modules that use them
+# Stub nexent.core.agents.agent_model.ToolConfig to satisfy type imports in consts.model
+agent_model_stub = types.ModuleType("agent_model")
+class ToolConfig:  # minimal stub for type reference
+    pass
+agent_model_stub.ToolConfig = ToolConfig
+
+# Ensure module hierarchy exists in sys.modules
+sys.modules['nexent'] = types.ModuleType('nexent')
+sys.modules['nexent.core'] = types.ModuleType('nexent.core')
+sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
+sys.modules['nexent.core.agents.agent_model'] = agent_model_stub
 sys.modules['database.client'] = pytest.importorskip("unittest.mock").MagicMock()
 sys.modules['database.agent_db'] = pytest.importorskip("unittest.mock").MagicMock()
 sys.modules['agents.create_agent_info'] = pytest.importorskip("unittest.mock").MagicMock()
@@ -107,8 +119,7 @@ def test_agent_stop_api_not_found(mocker, mock_conversation_id):
 def test_search_agent_info_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_agent_info = mocker.patch("apps.agent_app.get_agent_info_impl")
-
+    mock_get_agent_info = mocker.patch("apps.agent_app.get_agent_info_impl", new_callable=mocker.AsyncMock)
     mock_get_user_id.return_value = ("user_id", "tenant_id")
     mock_get_agent_info.return_value = {"agent_id": 123, "name": "Test Agent"}
 
@@ -129,8 +140,7 @@ def test_search_agent_info_api_success(mocker, mock_auth_header):
 def test_search_agent_info_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_agent_info = mocker.patch("apps.agent_app.get_agent_info_impl")
-
+    mock_get_agent_info = mocker.patch("apps.agent_app.get_agent_info_impl", new_callable=mocker.AsyncMock)
     mock_get_user_id.return_value = ("user_id", "tenant_id")
     mock_get_agent_info.side_effect = Exception("Test error")
 
@@ -148,7 +158,7 @@ def test_search_agent_info_api_exception(mocker, mock_auth_header):
 
 def test_get_creating_sub_agent_info_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
-    mock_get_creating_agent = mocker.patch("apps.agent_app.get_creating_sub_agent_info_impl")
+    mock_get_creating_agent = mocker.patch("apps.agent_app.get_creating_sub_agent_info_impl", new_callable=mocker.AsyncMock)
     mock_get_creating_agent.return_value = {"agent_id": 456}
 
     # Test the endpoint - this is a GET request
@@ -165,7 +175,7 @@ def test_get_creating_sub_agent_info_api_success(mocker, mock_auth_header):
 
 def test_get_creating_sub_agent_info_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
-    mock_get_creating_agent = mocker.patch("apps.agent_app.get_creating_sub_agent_info_impl")
+    mock_get_creating_agent = mocker.patch("apps.agent_app.get_creating_sub_agent_info_impl", new_callable=mocker.AsyncMock)
     mock_get_creating_agent.side_effect = Exception("Test error")
 
     # Test the endpoint - this is a GET request
@@ -181,7 +191,7 @@ def test_get_creating_sub_agent_info_api_exception(mocker, mock_auth_header):
 
 def test_update_agent_info_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
-    mock_update_agent = mocker.patch("apps.agent_app.update_agent_info_impl")
+    mock_update_agent = mocker.patch("apps.agent_app.update_agent_info_impl", new_callable=mocker.AsyncMock)
     mock_update_agent.return_value = None
 
     # Test the endpoint
@@ -199,7 +209,7 @@ def test_update_agent_info_api_success(mocker, mock_auth_header):
 
 def test_update_agent_info_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
-    mock_update_agent = mocker.patch("apps.agent_app.update_agent_info_impl")
+    mock_update_agent = mocker.patch("apps.agent_app.update_agent_info_impl", new_callable=mocker.AsyncMock)
     mock_update_agent.side_effect = Exception("Test error")
 
     # Test the endpoint
@@ -374,8 +384,7 @@ def test_import_agent_api_exception(mocker, mock_auth_header):
 def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
-    mock_list_all_agent = mocker.patch("apps.agent_app.list_all_agent_info_impl")
-
+    mock_list_all_agent = mocker.patch("apps.agent_app.list_all_agent_info_impl", new_callable=mocker.AsyncMock)
     # Mock return values
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.return_value = [
@@ -392,7 +401,7 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 200
     mock_get_user_info.assert_called_once()
-    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
+    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant")
     assert len(response.json()) == 2
     assert response.json()[0]["agent_id"] == 1
     assert response.json()[0]["display_name"] == "Display Agent 1"
@@ -403,8 +412,7 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
-    mock_list_all_agent = mocker.patch("apps.agent_app.list_all_agent_info_impl")
-
+    mock_list_all_agent = mocker.patch("apps.agent_app.list_all_agent_info_impl", new_callable=mocker.AsyncMock)
     # Mock return values and exception
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.side_effect = Exception("Test error")
@@ -418,7 +426,7 @@ def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 500
     mock_get_user_info.assert_called_once()
-    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
+    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant")
     assert "Agent list error" in response.json()["detail"]
 
 
@@ -479,7 +487,7 @@ def test_delete_related_agent_api_success(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_delete_related_agent = mocker.patch("apps.agent_app.delete_related_agent_impl")
-    
+
     mock_get_user_id.return_value = ("user_id", "tenant_id")
     mock_delete_related_agent.return_value = {"status": "success"}
 
@@ -504,7 +512,7 @@ def test_delete_related_agent_api_exception(mocker, mock_auth_header):
     # Setup mocks using pytest-mock
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
     mock_delete_related_agent = mocker.patch("apps.agent_app.delete_related_agent_impl")
-    
+
     mock_get_user_id.return_value = ("user_id", "tenant_id")
     mock_delete_related_agent.side_effect = Exception("Test error")
 
