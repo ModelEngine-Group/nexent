@@ -16,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'backend/') ||
-      contains(toJSON(github.event.head_commit), 'sdk/') ||
-      contains(toJSON(github.event.head_commit), 'make/main/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'backend/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'sdk/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/main/'))
     steps:
       - name: Set up Docker Buildx
         run: |
@@ -37,9 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'backend/') ||
-      contains(toJSON(github.event.head_commit), 'sdk/') ||
-      contains(toJSON(github.event.head_commit), 'make/main/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'backend/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'sdk/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/main/'))
     steps:
       - name: Set up Docker Buildx
         run: |
@@ -58,9 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'backend/') ||
-      contains(toJSON(github.event.head_commit), 'sdk/') ||
-      contains(toJSON(github.event.head_commit), 'make/data_process/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'backend/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'sdk/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/data_process/'))
     steps:
       - name: Free up disk space on GitHub runner
         run: |
@@ -88,9 +88,9 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'backend/') ||
-      contains(toJSON(github.event.head_commit), 'sdk/') ||
-      contains(toJSON(github.event.head_commit), 'make/data_process/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'backend/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'sdk/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/data_process/'))
     steps:
       - name: Free up disk space on GitHub runner
         run: |
@@ -118,8 +118,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'frontend/') ||
-      contains(toJSON(github.event.head_commit), 'make/web/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'frontend/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/web/'))
     steps:
       - name: Set up Docker Buildx
         run: |
@@ -138,8 +138,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'frontend/') ||
-      contains(toJSON(github.event.head_commit), 'make/web/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'frontend/')) ||
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/web/'))
     steps:
       - name: Set up Docker Buildx
         run: |
@@ -158,7 +158,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'make/terminal/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/terminal/'))
     steps:
       - name: Set up Docker Buildx
         run: |
@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(toJSON(github.event.head_commit), 'make/terminal/')
+      (github.event_name == 'pull_request' && contains(toJSON(github.event.pull_request.changed_files), 'make/terminal/'))
     steps:
       - name: Set up Docker Buildx
         run: |
