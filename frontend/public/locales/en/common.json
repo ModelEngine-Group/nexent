@@ -1,4 +1,5 @@
 {
+    "chatInput.unsupportedFileTypeSimple": "Unsupported file type",
     "assistant.name": "Nexent",
 
     "chatAttachment.imagePreview": "Image Preview",
