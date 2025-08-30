@@ -10,6 +10,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
+# Patch boto3 and other dependencies before importing anything from backend
+boto3_mock = MagicMock()
+sys.modules['boto3'] = boto3_mock
+
 # Mock environment variables before any imports
 os.environ.update({
     "MINIO_DEFAULT_BUCKET": "test-bucket",
