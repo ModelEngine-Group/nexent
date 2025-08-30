@@ -247,3 +247,189 @@ def test_convert_code_format_replacements():
     transformed = core_agent_module.convert_code_format(original_text)
 
     assert transformed == expected_text, "convert_code_format did not perform expected replacements"
+
+# ----------------------------------------------------------------------------
+# Tests for parse_code_blobs function
+# ----------------------------------------------------------------------------
+
+def test_parse_code_blobs_python_match():
+    """Test parse_code_blobs with ```python\ncontent\n``` pattern."""
+    text = """Here is some code:
+```python
+print("Hello World")
+x = 42
+```
+And some more text."""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "print(\"Hello World\")\nx = 42"
+    assert result == expected
+
+
+def test_parse_code_blobs_py_match():
+    """Test parse_code_blobs with ```py\ncontent\n``` pattern."""
+    text = """Here is some code:
+```py
+def hello():
+    return "Hello"
+```
+And some more text."""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "def hello():\n    return \"Hello\""
+    assert result == expected
+
+
+def test_parse_code_blobs_multiple_matches():
+    """Test parse_code_blobs with multiple code blocks."""
+    text = """First code block:
+```python
+print("First")
+```
+
+Second code block:
+```py
+print("Second")
+```"""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "print(\"First\")\n\nprint(\"Second\")"
+    assert result == expected
+
+
+def test_parse_code_blobs_with_whitespace():
+    """Test parse_code_blobs with whitespace around language identifier."""
+    text = """Code with whitespace:
+```python  
+print("Hello")
+```
+More code:
+```py
+print("World")
+```"""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "print(\"Hello\")\n\nprint(\"World\")"
+    assert result == expected
+
+
+def test_parse_code_blobs_no_match():
+    """Test parse_code_blobs with ```\ncontent\n``` (no language specified)."""
+    text = """Here is some code:
+```
+print("Hello World")
+```
+But no language specified."""
+    
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    
+    assert "regex pattern" in str(exc_info.value)
+
+
+def test_parse_code_blobs_javascript_no_match():
+    """Test parse_code_blobs with ```javascript\ncontent\n``` (other language)."""
+    text = """Here is some JavaScript code:
+```javascript
+console.log("Hello World");
+```
+But this should not match."""
+    
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    
+    assert "regex pattern" in str(exc_info.value)
+
+
+def test_parse_code_blobs_java_no_match():
+    """Test parse_code_blobs with ```java\ncontent\n``` (other language)."""
+    text = """Here is some Java code:
+```java
+System.out.println("Hello World");
+```
+But this should not match."""
+    
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    
+    assert "regex pattern" in str(exc_info.value)
+
+
+def test_parse_code_blobs_direct_python_code():
+    """Test parse_code_blobs with direct Python code (no code blocks)."""
+    text = """print("Hello World")
+x = 42
+def hello():
+    return "Hello\""""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    assert result == text
+
+
+def test_parse_code_blobs_invalid_python_syntax():
+    """Test parse_code_blobs with invalid Python syntax (should raise ValueError)."""
+    text = """print("Hello World"
+x = 42
+def hello(:
+    return "Hello\""""
+    
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    
+    assert "regex pattern" in str(exc_info.value)
+
+
+def test_parse_code_blobs_final_answer_error():
+    """Test parse_code_blobs with 'final' and 'answer' in text (special error case)."""
+    text = """This is a final answer to the question.
+The user wants to know the final answer.
+But there's no code block here."""
+    
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    
+    error_msg = str(exc_info.value)
+    assert "final answer" in error_msg
+    assert "final_answer(" in error_msg
+
+
+def test_parse_code_blobs_generic_error():
+    """Test parse_code_blobs with generic case that should raise ValueError."""
+    text = """This is just some random text.
+Just plain text that should fail."""
+    
+    with pytest.raises(ValueError) as exc_info:
+        core_agent_module.parse_code_blobs(text)
+    
+    error_msg = str(exc_info.value)
+    assert "regex pattern" in error_msg
+    assert "Make sure to include code with the correct pattern" in error_msg
+
+
+def test_parse_code_blobs_single_line_content():
+    """Test parse_code_blobs with single line content."""
+    text = """Single line:
+```python
+print("Hello")
+```"""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "print(\"Hello\")"
+    assert result == expected
+
+
+def test_parse_code_blobs_mixed_content():
+    """Test parse_code_blobs with mixed content including non-code text."""
+    text = """Thoughts: I need to calculate the sum
+Code:
+```python
+def sum_numbers(a, b):
+    return a + b
+
+result = sum_numbers(5, 3)
+```
+The result is 8."""
+    
+    result = core_agent_module.parse_code_blobs(text)
+    expected = "def sum_numbers(a, b):\n    return a + b\n\nresult = sum_numbers(5, 3)"
+    assert result == expected
