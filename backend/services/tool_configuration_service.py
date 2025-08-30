@@ -13,13 +13,13 @@ from mcpadapt.smolagents_adapter import _sanitize_function_name
 from database.tool_db import create_or_update_tool_by_tool_info, query_tool_instances_by_id, \
     update_tool_table_from_scan_tool_list
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum
+from consts.const import LOCAL_MCP_SERVER
 from database.remote_mcp_db import get_mcp_records_by_tenant
 from utils.auth_utils import get_current_user_id
 from fastapi import Header
 
-from utils.config_utils import config_manager
-
 logger = logging.getLogger("tool_configuration_service")
+
 
 def python_type_to_json_schema(annotation: Any) -> str:
     """
@@ -56,6 +56,7 @@ def python_type_to_json_schema(annotation: Any) -> str:
     # Return mapped type, or original type name if no mapping exists
     return type_mapping.get(type_name, type_name)
 
+
 def get_local_tools() -> List[ToolInfo]:
     """
     Get metadata for all locally available tools
@@ -91,13 +92,15 @@ def get_local_tools() -> List[ToolInfo]:
             description=getattr(tool_class, 'description'),
             params=init_params_list,
             source=ToolSourceEnum.LOCAL.value,
-            inputs=json.dumps(getattr(tool_class, 'inputs'), ensure_ascii=False),
+            inputs=json.dumps(getattr(tool_class, 'inputs'),
+                              ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
             class_name=tool_class.__name__,
             usage=None
         )
         tools_info.append(tool_info)
     return tools_info
+
 
 def get_local_tools_classes() -> List[type]:
     """
@@ -131,7 +134,7 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
     inputs = getattr(obj, "args", {})
 
     if inputs:
-        for key,value in inputs.items():
+        for key, value in inputs.items():
             if "description" not in value:
                 value["description"] = "see the description"
 
@@ -147,7 +150,7 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         description=getattr(obj, "description", ""),
         params=[],
         source=ToolSourceEnum.LANGCHAIN.value,
-        inputs=json.dumps(inputs,ensure_ascii=False),
+        inputs=json.dumps(inputs, ensure_ascii=False),
         output_type=output_type,
         class_name=getattr(obj, "name", target_callable.__name__),
         usage=None,
@@ -167,16 +170,18 @@ def get_langchain_tools() -> List[ToolInfo]:
     tools_info: List[ToolInfo] = []
     # Discover all objects that look like LangChain tools
     discovered_tools = discover_langchain_modules()
-    
+
     # Process discovered tools
     for obj, filename in discovered_tools:
         try:
             tool_info = _build_tool_info_from_langchain(obj)
             tools_info.append(tool_info)
         except Exception as e:
-            logger.warning(f"Error processing LangChain tool in {filename}: {e}")
-    
+            logger.warning(
+                f"Error processing LangChain tool in {filename}: {e}")
+
     return tools_info
+
 
 async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     """
@@ -192,14 +197,15 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
         if record["status"]:
             try:
                 tools_info.extend(await get_tool_from_remote_mcp_server(mcp_server_name=record["mcp_name"],
-                                                                    remote_mcp_server=record["mcp_server"]))
+                                                                        remote_mcp_server=record["mcp_server"]))
             except Exception as e:
                 logger.error(f"mcp connection error: {str(e)}")
 
-    default_mcp_url = urljoin(config_manager.get_config("NEXENT_MCP_SERVER"), "sse")
+    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     tools_info.extend(await get_tool_from_remote_mcp_server(mcp_server_name="nexent",
                                                             remote_mcp_server=default_mcp_url))
     return tools_info
+
 
 def search_tool_info_impl(agent_id: int, tool_id: int, authorization: str = Header(None)):
     """
@@ -219,10 +225,13 @@ def search_tool_info_impl(agent_id: int, tool_id: int, authorization: str = Head
     _, tenant_id = get_current_user_id(authorization)
     try:
         # now only admin can modify the tool, user_id is not used
-        tool_instance = query_tool_instances_by_id(agent_id, tool_id, tenant_id)
+        tool_instance = query_tool_instances_by_id(
+            agent_id, tool_id, tenant_id)
     except Exception as e:
-        logger.error(f"search_tool_info_impl error in query_tool_instances_by_id, detail: {e}")
-        raise ValueError(f"search_tool_info_impl error in query_tool_instances_by_id, detail: {e}")
+        logger.error(
+            f"search_tool_info_impl error in query_tool_instances_by_id, detail: {e}")
+        raise ValueError(
+            f"search_tool_info_impl error in query_tool_instances_by_id, detail: {e}")
 
     if tool_instance:
         return {
@@ -251,10 +260,13 @@ def update_tool_info_impl(request: ToolInstanceInfoRequest, authorization: str =
     """
     user_id, tenant_id = get_current_user_id(authorization)
     try:
-        tool_instance = create_or_update_tool_by_tool_info(request, tenant_id, user_id)
+        tool_instance = create_or_update_tool_by_tool_info(
+            request, tenant_id, user_id)
     except Exception as e:
-        logger.error(f"update_tool_info_impl error in create_or_update_tool, detail: {e}")
-        raise ValueError(f"update_tool_info_impl error in create_or_update_tool, detail: {e}")
+        logger.error(
+            f"update_tool_info_impl error in create_or_update_tool, detail: {e}")
+        raise ValueError(
+            f"update_tool_info_impl error in create_or_update_tool, detail: {e}")
 
     return {
         "tool_instance": tool_instance
@@ -284,15 +296,16 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
 
             sanitized_tool_name = _sanitize_function_name(tool.name)
             tool_info = ToolInfo(name=sanitized_tool_name,
-                                description=tool.description,
-                                params=[],
-                                source=ToolSourceEnum.MCP.value,
-                                inputs=str(input_schema["properties"]),
-                                output_type="string",
-                                class_name=sanitized_tool_name,
-                                usage=mcp_server_name)
+                                 description=tool.description,
+                                 params=[],
+                                 source=ToolSourceEnum.MCP.value,
+                                 inputs=str(input_schema["properties"]),
+                                 output_type="string",
+                                 class_name=sanitized_tool_name,
+                                 usage=mcp_server_name)
             tools_info.append(tool_info)
         return tools_info
+
 
 async def update_tool_list(tenant_id: str, user_id: str):
     """
@@ -310,7 +323,6 @@ async def update_tool_list(tenant_id: str, user_id: str):
     # Discover LangChain tools (decorated functions) and include them in the
     # unified tool list.
     langchain_tools = get_langchain_tools()
-
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)

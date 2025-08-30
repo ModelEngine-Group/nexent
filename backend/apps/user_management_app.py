@@ -5,25 +5,20 @@ from typing import Any, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 from fastapi import APIRouter, Header, HTTPException, Request
-from supabase import Client, create_client
+from supabase import Client
 
-from consts.const import SUPABASE_KEY, SUPABASE_URL
 from consts.model import ServiceResponse, STATUS_CODES, UserSignInRequest, UserSignUpRequest
 from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant
-from utils.auth_utils import calculate_expires_at, get_current_user_id, get_jwt_expiry_seconds
-from utils.config_utils import config_manager
+from utils.auth_utils import calculate_expires_at, get_current_user_id, get_jwt_expiry_seconds, get_supabase_client
+from consts.const import INVITE_CODE
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
 router = APIRouter(prefix="/user", tags=["user"])
 
 
-def get_supabase_client() -> Client:
-    """Create base supabase client"""
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
+# Set token to client
 def set_auth_token_to_client(client: Client, token: str) -> None:
     """Set token to client"""
     jwt_token = token.replace(
@@ -149,22 +144,13 @@ async def signup(request: UserSignUpRequest):
     if request.is_admin:
         logging.info("检测到管理员注册请求，开始验证邀请码")
 
-        # Try to get the invite code configuration from different sources
-        invite_code = config_manager.get_config("INVITE_CODE")
-        logging.info(f"从config_manager获取的INVITE_CODE: {invite_code}")
+        # Get the invite code from consts.const (which reads from environment variable)
+        logging.info(f"从consts.const获取的INVITE_CODE: {INVITE_CODE}")
 
-        # If config_manager does not get the invite code, try to get it directly from the environment variable
-        if not invite_code:
-            invite_code = os.getenv("INVITE_CODE")
-            logging.info(
-                f"INVITE_CODE from environment variable: {invite_code}")
-
-        if not invite_code:
+        if not INVITE_CODE:
             logging.error(
-                "Admin invite code not found in any configuration source")
-            logging.error("Please check the following configuration sources:")
-            logging.error("1. INVITE_CODE configuration in config_manager")
-            logging.error("2. INVITE_CODE environment variable")
+                "Admin invite code not found in configuration")
+            logging.error("Please check the INVITE_CODE environment variable")
             return ServiceResponse(
                 code=STATUS_CODES["SERVER_ERROR"],
                 message="Admin registration feature is not available, please contact the system administrator to configure the invite code",
@@ -187,9 +173,9 @@ async def signup(request: UserSignUpRequest):
                 }
             )
 
-        if request.invite_code != invite_code:
+        if request.invite_code != INVITE_CODE:
             logging.warning(
-                f"Admin invite code verification failed: user provided='{request.invite_code}', system configured='{invite_code}'")
+                f"Admin invite code verification failed: user provided='{request.invite_code}', system configured='{INVITE_CODE}'")
             return ServiceResponse(
                 code=STATUS_CODES["INVALID_INPUT"],
                 message="Admin invite code error, please check and re-enter",

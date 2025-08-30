@@ -16,8 +16,9 @@ from services.memory_config_service import build_memory_context
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
 from database.tool_db import search_tools_for_sub_agent
 from utils.prompt_template_utils import get_agent_prompt_template
-from utils.config_utils import config_manager, tenant_config_manager, get_model_name_from_config
+from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.auth_utils import get_current_user_id
+from consts.const import LOCAL_MCP_SERVER
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.DEBUG)
@@ -311,8 +312,7 @@ async def create_agent_run_info(agent_id, minio_files, query, history, authoriza
     )
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
-    default_mcp_url = urljoin(
-        config_manager.get_config("NEXENT_MCP_SERVER"), "sse")
+    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     remote_mcp_list.append({
         "remote_mcp_server_name": "nexent",
         "remote_mcp_server": default_mcp_url,

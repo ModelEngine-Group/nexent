@@ -15,7 +15,6 @@ from consts.model import GlobalConfig
 from database.model_management_db import get_model_id_by_display_name
 from utils.auth_utils import get_current_user_id, get_current_user_info
 from utils.config_utils import (
-    config_manager,
     get_env_key,
     safe_value,
     tenant_config_manager,
@@ -119,10 +118,6 @@ async def save_config(config: GlobalConfig, authorization: Optional[str] = Heade
                     embedding_api_config = model_config.get("apiConfig", {})
                     env_config[f"{model_prefix}_API_KEY"] = safe_value(
                         embedding_api_config.get("apiKey"))
-
-        # Batch update environment variables
-        for key, value in env_config.items():
-            config_manager.set_config(key, value)
 
         logger.info("Configuration saved successfully")
         return JSONResponse(

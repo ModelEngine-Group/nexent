@@ -1,4 +1,3 @@
-import yaml
 from typing import Union, BinaryIO
 
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
