@@ -10,10 +10,14 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-# Mock dependencies before importing
-with patch('backend.database.client.MinioClient') as minio_mock:
-    minio_mock.return_value = MagicMock()
+# Mock environment variables before any imports
+os.environ.update({
+    "MINIO_DEFAULT_BUCKET": "test-bucket",
+})
 
+# Mock dependencies before importing
+minio_client_mock = MagicMock()
+with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
     from backend.services.config_sync_service import (
         handle_model_config,
         save_config_impl,
