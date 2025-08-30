@@ -1,4 +1,5 @@
 import logging
+from typing import List
 
 def split_repo_name(full_name: str):
     """
@@ -44,3 +45,21 @@ def split_display_name(full_name: str):
     else:
         # For names like "Pro/Qwen/Qwen2-7B-Instruct", return "Pro/Qwen2-7B-Instruct"
         return f"{parts[0]}/{parts[-1]}"
+
+
+def sort_models_by_id(model_list: List[dict]) -> List[dict]:
+    """
+    Sort model list by the first letter of id
+    
+    Args:
+        model_list: List of models
+        
+    Returns:
+        List[dict]: Sorted model list
+    """
+    if isinstance(model_list, list):
+        model_list.sort(
+            key=lambda m: str((m.get("id") if isinstance(m, dict) else m) or "")[:1].lower(), 
+            reverse=False
+        )
+    return model_list

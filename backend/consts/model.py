@@ -98,7 +98,6 @@ class BatchCreateModelsRequest(BaseModel):
     models: List[Dict]
     provider: str
     type: str
-    max_tokens: int
 
 
 # Configuration models

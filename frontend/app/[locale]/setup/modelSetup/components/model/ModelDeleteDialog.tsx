@@ -1,5 +1,5 @@
-import { Modal, Button,Switch, App } from 'antd'
-import { DeleteOutlined, ExclamationCircleFilled, RightOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Modal, Button,Switch, App, Tooltip, Input } from 'antd'
+import { DeleteOutlined, ExclamationCircleFilled, RightOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { ModelOption, ModelType, ModelSource } from '@/types/config'
 import { modelService } from '@/services/modelService'
@@ -33,6 +33,11 @@ export const ModelDeleteDialog = ({
   const [isProviderConfigOpen, setIsProviderConfigOpen] = useState<boolean>(false)
   const [isConfirmLoading, setIsConfirmLoading] = useState<boolean>(false)
   const [maxTokens, setMaxTokens] = useState<number>(0)
+
+  // Settings modal state
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false)
+  const [selectedModelForSettings, setSelectedModelForSettings] = useState<any>(null)
+  const [modelMaxTokens, setModelMaxTokens] = useState("4096")
 
   // 获取模型的颜色方案
   const getModelColorScheme = (type: ModelType): { bg: string; text: string; border: string } => {
@@ -331,6 +336,27 @@ export const ModelDeleteDialog = ({
     setIsProviderConfigOpen(false)
   }
 
+  // Handle settings button click
+  const handleSettingsClick = (model: any) => {
+    setSelectedModelForSettings(model)
+    setModelMaxTokens(model.max_tokens?.toString() || "4096")
+    setSettingsModalVisible(true)
+  }
+
+  // Handle settings save
+  const handleSettingsSave = () => {
+    if (selectedModelForSettings) {
+      // Update the model in the list with new max_tokens
+      setProviderModels(prev => prev.map(model => 
+        model.id === selectedModelForSettings.id 
+          ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+          : model
+      ))
+    }
+    setSettingsModalVisible(false)
+    setSelectedModelForSettings(null)
+  }
+
   return (
     // Refactor: Styles are embedded within the component
     <Modal
@@ -356,13 +382,15 @@ export const ModelDeleteDialog = ({
 
                   if (allEnabledModels) {
                     const apiKey = getApiKeyByType(deletingModelType)
-                    // Pass all currently enabled models
+                    // Pass all currently enabled models with their max_tokens values
                     await modelService.addBatchCustomModel({
                       api_key: apiKey && apiKey.trim() !== '' ? apiKey : 'sk-no-api-key',
                       provider: 'silicon',
                       type: deletingModelType,
-                      max_tokens: maxTokens > 0 ? maxTokens : 4096, // Use default value if maxTokens is 0
-                      models: allEnabledModels
+                      models: allEnabledModels.map(model => ({
+                        ...model,
+                        max_tokens: model.max_tokens || 4096 // Ensure max_tokens is always present
+                      }))
                     })
                   }
 
@@ -590,21 +618,34 @@ export const ModelDeleteDialog = ({
                         </span>
                       )}
                     </div>
-                    <Switch
-                      size="small"
-                      checked={checked}
-                      onChange={(value) => {
-                        setPendingSelectedProviderIds(prev => {
-                          const next = new Set(prev)
-                          if (value) {
-                            next.add(providerModel.id)
-                          } else {
-                            next.delete(providerModel.id)
-                          }
-                          return next
-                        })
-                      }}
-                    />
+                    <div className="flex items-center space-x-2">
+                      <Tooltip title={t('model.dialog.modelList.tooltip.settings')}>
+                        <Button
+                          type="text"
+                          icon={<SettingOutlined />}
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent switch toggle
+                            handleSettingsClick(providerModel);
+                          }}
+                        />
+                      </Tooltip>
+                      <Switch
+                        size="small"
+                        checked={checked}
+                        onChange={(value) => {
+                          setPendingSelectedProviderIds(prev => {
+                            const next = new Set(prev)
+                            if (value) {
+                              next.add(providerModel.id)
+                            } else {
+                              next.delete(providerModel.id)
+                            }
+                            return next
+                          })
+                        }}
+                      />
+                    </div>
                   </div>
                 )
               })}
@@ -710,6 +751,29 @@ export const ModelDeleteDialog = ({
         modelType={deletingModelType || undefined}
         onSave={handleProviderConfigSave}
       />
+
+      {/* Settings Modal */}
+      <Modal
+        title={t('model.dialog.settings.title')}
+        open={settingsModalVisible}
+        onCancel={() => setSettingsModalVisible(false)}
+        onOk={handleSettingsSave}
+        destroyOnClose
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t('model.dialog.settings.label.maxTokens')}
+            </label>
+            <Input
+              type="number"
+              value={modelMaxTokens}
+              onChange={(e) => setModelMaxTokens(e.target.value)}
+              placeholder={t('model.dialog.placeholder.maxTokens')}
+            />
+          </div>
+        </div>
+      </Modal>
     </Modal>
   )
 }
