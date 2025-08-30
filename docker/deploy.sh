@@ -141,21 +141,21 @@ generate_ssh_keys() {
   
   if [ "$ENABLE_TERMINAL_TOOL" = "true" ]; then
       # Create ssh-keys directory
-      create_dir_with_permission "openssh-server/ssh-keys" 700
-      create_dir_with_permission "openssh-server/config" 755
+      create_dir_with_permission "$ROOT_DIR/openssh-server/ssh-keys" 700
+      create_dir_with_permission "$ROOT_DIR/openssh-server/config" 755
 
       # Check if SSH keys already exist
-      if [ -f "openssh-server/ssh-keys/openssh_server_key" ] && [ -f "openssh-server/ssh-keys/openssh_server_key.pub" ]; then
+      if [ -f "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key" ] && [ -f "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub" ]; then
           echo "🚧 SSH key pair already exists, skipping generation..."
-          echo "🔑 Private key: openssh-server/ssh-keys/openssh_server_key"
-          echo "🗝️  Public key: openssh-server/ssh-keys/openssh_server_key.pub"
+          echo "🔑 Private key: $ROOT_DIR/openssh-server/ssh-keys/openssh_server_key"
+          echo "🗝️  Public key: $ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub"
 
           # Ensure authorized_keys is set up correctly with ONLY our public key
-          cp "openssh-server/ssh-keys/openssh_server_key.pub" "openssh-server/config/authorized_keys"
-          chmod 644 "openssh-server/config/authorized_keys"
+          cp "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub" "$ROOT_DIR/openssh-server/config/authorized_keys"
+          chmod 644 "$ROOT_DIR/openssh-server/config/authorized_keys"
 
           # Set SSH key path in environment
-          SSH_PRIVATE_KEY_PATH="$(pwd)/openssh-server/ssh-keys/openssh_server_key"
+          SSH_PRIVATE_KEY_PATH="$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key"
           export SSH_PRIVATE_KEY_PATH
 
           # Add to .env file
@@ -210,19 +210,19 @@ generate_ssh_keys() {
 
           if [ -n "$PRIVATE_KEY" ] && [ -n "$PUBLIC_KEY" ]; then
               # Save private key
-              echo "$PRIVATE_KEY" > "openssh-server/ssh-keys/openssh_server_key"
-              chmod 600 "openssh-server/ssh-keys/openssh_server_key"
+              echo "$PRIVATE_KEY" > "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key"
+              chmod 600 "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key"
 
               # Save public key
-              echo "$PUBLIC_KEY" > "openssh-server/ssh-keys/openssh_server_key.pub"
-              chmod 644 "openssh-server/ssh-keys/openssh_server_key.pub"
+              echo "$PUBLIC_KEY" > "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub"
+              chmod 644 "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub"
 
               # Copy public key to authorized_keys with correct permissions (ensure ONLY our key)
-              cp "openssh-server/ssh-keys/openssh_server_key.pub" "openssh-server/config/authorized_keys"
-              chmod 644 "openssh-server/config/authorized_keys"
+              cp "$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub" "$ROOT_DIR/openssh-server/config/authorized_keys"
+              chmod 644 "$ROOT_DIR/openssh-server/config/authorized_keys"
 
               # Set SSH key path in environment
-              SSH_PRIVATE_KEY_PATH="$(pwd)/openssh-server/ssh-keys/openssh_server_key"
+              SSH_PRIVATE_KEY_PATH="$ROOT_DIR/openssh-server/ssh-keys/openssh_server_key"
               export SSH_PRIVATE_KEY_PATH
 
               # Add to .env file
@@ -233,12 +233,12 @@ generate_ssh_keys() {
               fi
 
               # Fix SSH host key permissions (must be 600)
-              find "openssh-server/config" -name "*_key" -type f -exec chmod 600 {} \; 2>/dev/null || true
+              find "$ROOT_DIR/openssh-server/config" -name "*_key" -type f -exec chmod 600 {} \; 2>/dev/null || true
 
               echo "   ✅ SSH key pair generated successfully!"
-              echo "      🔑 Private key: openssh-server/ssh-keys/openssh_server_key"
-              echo "      🗝️  Public key: openssh-server/ssh-keys/openssh_server_key.pub"
-              echo "      ⚙️  SSH config: openssh-server/config/sshd_config (60min session timeout)"
+              echo "      🔑 Private key: $ROOT_DIR/openssh-server/ssh-keys/openssh_server_key"
+              echo "      🗝️  Public key: $ROOT_DIR/openssh-server/ssh-keys/openssh_server_key.pub"
+              echo "      ⚙️  SSH config: $ROOT_DIR/openssh-server/config/sshd_config (60min session timeout)"
           else
               echo "   ❌ ERROR Failed to extract SSH keys from Docker output"
               echo "   📋 Full output saved to: $TEMP_OUTPUT for debugging"
