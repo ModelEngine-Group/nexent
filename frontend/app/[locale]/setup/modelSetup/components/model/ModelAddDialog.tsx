@@ -392,11 +392,11 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
   const isEmbeddingModel = form.type === "embedding"
 
   useEffect(() => {
-    if (form.isBatchImport && modelList.length !=0) {
+    if (form.isBatchImport && form.apiKey.trim() !== "") {
       getModelList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.type]);
+  }, [form.type, form.isBatchImport]);
 
   return (
     <Modal
