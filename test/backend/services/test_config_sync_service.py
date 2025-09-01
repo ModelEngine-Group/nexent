@@ -1,6 +1,7 @@
 import os
 import sys
 from unittest.mock import patch, MagicMock
+from backend.services.config_sync_service import build_models_config
 
 import pytest
 
@@ -237,7 +238,141 @@ class TestSaveConfigImpl:
             "Configuration saved successfully")
 
     @pytest.mark.asyncio
-    async def test_save_config_impl_empty_model_config(self, service_mocks):
+    async def test_save_config_impl_success_model(self, service_mocks):
+        """Test successful configuration saving"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {
+                "name": "Test App",
+                "description": "Test Description"
+            },
+            "models": {
+                "llm": {
+                    "modelName": "gpt-4",
+                    "displayName": "GPT-4",
+                    "apiConfig": {
+                        "apiKey": "test-api-key",
+                        "baseUrl": "https://api.openai.com"
+                    }
+                },
+                "embedding": {
+                    "modelName": "text-embedding-ada-002",
+                    "displayName": "Ada Embeddings",
+                    "dimension": 1536
+                }
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {
+            "APP_NAME": "Old App Name"
+        }
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Mock get_model_id_by_display_name
+        service_mocks['get_model_id'].side_effect = [
+            "llm-model-id", "embedding-model-id"]
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        # save_config_impl returns None, JSONResponse is created in the endpoint
+        assert result is None
+
+        # Verify tenant_config_manager calls
+        service_mocks['tenant_config_manager'].load_config.assert_called_once_with(
+            tenant_id)
+
+        # Verify config_manager calls
+        assert service_mocks['config_manager'].set_config.called
+
+        # Verify logger
+        service_mocks['logger'].info.assert_called_once_with(
+            "Configuration saved successfully")
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_success_embedding_model(self, service_mocks):
+        """Test successful configuration saving"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {
+                "name": "Test App",
+                "description": "Test Description"
+            },
+            "models": {
+                "llm": {
+                    "modelName": "gpt-4",
+                    "displayName": "GPT-4",
+                    "apiConfig": {
+                        "apiKey": "test-api-key",
+                        "baseUrl": "https://api.openai.com"
+                    }
+                },
+                "embedding": {
+                    "modelName": "text-embedding-ada-002",
+                    "displayName": "Ada Embeddings",
+                    "dimension": 1536,
+                    "apiConfig": {
+                        "apiKey": "test-api-key",
+                        "baseUrl": "https://api.openai.com"
+                    }
+                }
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {
+            "APP_NAME": "Old App Name"
+        }
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Mock get_model_id_by_display_name
+        service_mocks['get_model_id'].side_effect = [
+            "llm-model-id", "embedding-model-id"]
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        # save_config_impl returns None, JSONResponse is created in the endpoint
+        assert result is None
+
+        # Verify tenant_config_manager calls
+        service_mocks['tenant_config_manager'].load_config.assert_called_once_with(
+            tenant_id)
+
+        # Verify config_manager calls
+        assert service_mocks['config_manager'].set_config.called
+
+        # Verify logger
+        service_mocks['logger'].info.assert_called_once_with(
+            "Configuration saved successfully")
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_model_config(self, service_mocks):
         """Test saving configuration with empty model config"""
         # Setup
         config = MagicMock()
@@ -256,7 +391,154 @@ class TestSaveConfigImpl:
         user_id = "test_user_id"
 
         # Mock tenant config
-        service_mocks['tenant_config_manager'].load_config.return_value = {}
+        service_mocks['tenant_config_manager'].load_config.return_value = {
+            "NAME": "Test App"
+        }
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        assert result is None
+
+        # Verify that no model config handling was done for None model
+        service_mocks['get_model_id'].assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_success_no_model(self, service_mocks):
+        """Test successful configuration saving"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {
+                "name": "Test App",
+                "description": "Test Description"
+            },
+            "models": {
+                "llm": {
+                    "modelName": "",
+                    "displayName": "GPT-4",
+                    "apiConfig": {
+                        "apiKey": "test-api-key",
+                        "baseUrl": "https://api.openai.com"
+                    }
+                },
+                "embedding": {
+                    "modelName": "text-embedding-ada-002",
+                    "displayName": "Ada Embeddings",
+                    "dimension": 1536
+                }
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {
+            "APP_NAME": "Old App Name"
+        }
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Mock get_model_id_by_display_name
+        service_mocks['get_model_id'].side_effect = [
+            "llm-model-id", "embedding-model-id"]
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        # save_config_impl returns None, JSONResponse is created in the endpoint
+        assert result is None
+
+        # Verify tenant_config_manager calls
+        service_mocks['tenant_config_manager'].load_config.assert_called_once_with(
+            tenant_id)
+
+        # Verify config_manager calls
+        assert service_mocks['config_manager'].set_config.called
+
+        # Verify logger
+        service_mocks['logger'].info.assert_called_once_with(
+            "Configuration saved successfully")
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_non_model_config(self, service_mocks):
+        """Test saving configuration with empty model config"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {
+                "name": ""
+            },
+            "models": {
+                "llm": None,
+                "embedding": {}
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {
+            "NAME": "Test APP"
+        }
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        assert result is None
+
+        # Verify that no model config handling was done for None model
+        service_mocks['get_model_id'].assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_in_model_config(self, service_mocks):
+        """Test saving configuration with empty model config"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {
+                "name": "Test app"
+            },
+            "models": {
+                "llm": None,
+                "embedding": {}
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {
+            "NAME": "Test APP"
+        }
 
         # Mock get_env_key
         service_mocks['get_env_key'].side_effect = lambda key: key.upper()
@@ -568,3 +850,78 @@ class TestLoadConfigImpl:
         # Check that models have empty values
         assert result["models"]["llm"]["name"] == ""
         assert result["models"]["embedding"]["name"] == ""
+
+    @pytest.mark.asyncio
+    async def test_load_config_impl_exception(self, service_mocks):
+        """Test loading configuration when build_app_config throws an exception"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock build_app_config to raise an exception
+        with patch('backend.services.config_sync_service.build_app_config') as mock_build_app_config:
+            mock_build_app_config.side_effect = Exception("Database connection failed")
+
+            # Execute and assert that exception is raised
+            with pytest.raises(Exception) as exc_info:
+                await load_config_impl(language, tenant_id)
+
+            # Verify the exception message
+            assert f"Failed to load config for tenant {tenant_id}." in str(exc_info.value)
+
+            # Verify that logger.error was called
+            service_mocks['logger'].error.assert_called_once_with(
+                f"Failed to load config for tenant {tenant_id}: Database connection failed"
+            )
+
+    @pytest.mark.asyncio
+    def test_build_models_config_partial_success(self, service_mocks):
+        """Test build_models_config with some successful and some failed configs"""
+        # Setup
+        tenant_id = "test_tenant_id"
+
+        # Mock get_model_config to succeed for some configs and fail for others
+        def side_effect(config_key, tenant_id=None):
+            if config_key == "LLM_ID":
+                return {
+                    "display_name": "Test LLM",
+                    "api_key": "test-api-key",
+                    "base_url": "https://test-url.com"
+                }
+            elif config_key == "EMBEDDING_ID":
+                raise Exception("Database timeout")
+            else:
+                return {}
+
+        service_mocks['tenant_config_manager'].get_model_config.side_effect = side_effect
+
+        # Mock model name conversion
+        service_mocks['get_model_name'].side_effect = [
+            "gpt-4",  # LLM_ID - successful
+            "",  # LLM_SECONDARY_ID
+            "",  # EMBEDDING_ID - will be empty due to exception
+            "",  # MULTI_EMBEDDING_ID
+            "",  # RERANK_ID
+            "",  # VLM_ID
+            "",  # STT_ID
+            ""  # TTS_ID
+        ]
+
+        # Execute
+        result = build_models_config(tenant_id)
+
+        # Assert
+        assert isinstance(result, dict)
+
+        # Verify successful config
+        assert result["llm"]["displayName"] == "Test LLM"
+        assert result["llm"]["apiConfig"]["apiKey"] == "test-api-key"
+
+        # Verify failed config was handled gracefully
+        assert result["embedding"]["name"] == ""
+        assert result["embedding"]["displayName"] == ""
+
+        # Verify that logger.warning was called for the failed config
+        service_mocks['logger'].warning.assert_called_with(
+            "Failed to get config for EMBEDDING_ID: Database timeout"
+        )
