@@ -1,23 +1,12 @@
-import os
 import sys
 from unittest.mock import patch, MagicMock
-from backend.services.config_sync_service import build_models_config
 
 import pytest
-
-# Dynamically determine the backend path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
-sys.path.append(backend_dir)
 
 # Patch boto3 and other dependencies before importing anything from backend
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Mock environment variables before any imports
-os.environ.update({
-    "MINIO_DEFAULT_BUCKET": "test-bucket",
-})
 
 # Mock dependencies before importing
 minio_client_mock = MagicMock()
@@ -25,7 +14,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
     from backend.services.config_sync_service import (
         handle_model_config,
         save_config_impl,
-        load_config_impl
+        load_config_impl,
+        build_models_config
     )
 
 
