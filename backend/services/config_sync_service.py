@@ -146,7 +146,8 @@ def build_models_config(tenant_id: str) -> dict:
 
     for model_key, config_key in MODEL_CONFIG_MAPPING.items():
         try:
-            model_config = tenant_config_manager.get_model_config(config_key, tenant_id=tenant_id)
+            model_config = tenant_config_manager.get_model_config(
+                config_key, tenant_id=tenant_id)
             models_config[model_key] = build_model_config(model_config)
         except Exception as e:
             logger.warning(f"Failed to get config for {config_key}: {e}")
