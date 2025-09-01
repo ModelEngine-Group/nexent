@@ -1,7 +1,5 @@
 import logging
 
-from fastapi.responses import JSONResponse
-
 from consts.const import DEFAULT_APP_NAME_ZH, DEFAULT_APP_NAME_EN, DEFAULT_APP_DESCRIPTION_ZH, \
     DEFAULT_APP_DESCRIPTION_EN, DEFAULT_APP_ICON_URL
 from database.model_management_db import get_model_id_by_display_name
@@ -20,6 +18,7 @@ MODEL_CONFIG_MAPPING = {
     "stt": "STT_ID",
     "tts": "TTS_ID"
 }
+
 
 def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id: int, tenant_config_dict: dict) -> None:
     """
@@ -111,29 +110,52 @@ async def save_config_impl(config, tenant_id, user_id):
     for key, value in env_config.items():
         config_manager.set_config(key, value)
     logger.info("Configuration saved successfully")
-    return JSONResponse(
-        status_code=200,
-        content={"message": "Configuration saved successfully",
-                 "status": "saved"}
-    )
 
 
 async def load_config_impl(language: str, tenant_id: str):
     try:
         config = {
-            "app": _build_app_config(language, tenant_id),
-            "models": _build_models_config(tenant_id)
+            "app": build_app_config(language, tenant_id),
+            "models": build_models_config(tenant_id)
         }
-        return JSONResponse(
-            status_code=200,
-            content={"config": config}
-        )
+        return config
     except Exception as e:
         logger.error(f"Failed to load config for tenant {tenant_id}: {e}")
         raise Exception(f"Failed to load config for tenant {tenant_id}.")
 
 
-def _build_model_config(model_config: dict) -> dict:
+def build_app_config(language: str, tenant_id: str) -> dict:
+    default_app_name = DEFAULT_APP_NAME_ZH if language == "zh" else DEFAULT_APP_NAME_EN
+    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
+
+    return {
+        "name": tenant_config_manager.get_app_config("APP_NAME", tenant_id=tenant_id) or default_app_name,
+        "description": tenant_config_manager.get_app_config("APP_DESCRIPTION",
+                                                            tenant_id=tenant_id) or default_app_description,
+        "icon": {
+            "type": tenant_config_manager.get_app_config("ICON_TYPE", tenant_id=tenant_id) or "preset",
+            "avatarUri": tenant_config_manager.get_app_config("AVATAR_URI",
+                                                              tenant_id=tenant_id) or DEFAULT_APP_ICON_URL,
+            "customUrl": tenant_config_manager.get_app_config("CUSTOM_ICON_URL", tenant_id=tenant_id) or ""
+        }
+    }
+
+
+def build_models_config(tenant_id: str) -> dict:
+    models_config = {}
+
+    for model_key, config_key in MODEL_CONFIG_MAPPING.items():
+        try:
+            model_config = tenant_config_manager.get_model_config(config_key, tenant_id=tenant_id)
+            models_config[model_key] = build_model_config(model_config)
+        except Exception as e:
+            logger.warning(f"Failed to get config for {config_key}: {e}")
+            models_config[model_key] = build_model_config({})
+
+    return models_config
+
+
+def build_model_config(model_config: dict) -> dict:
     if not model_config:
         return {
             "name": "",
@@ -157,34 +179,3 @@ def _build_model_config(model_config: dict) -> dict:
         config["dimension"] = model_config.get("max_tokens", 0)
 
     return config
-
-
-def _build_app_config(language: str, tenant_id: str) -> dict:
-    default_app_name = DEFAULT_APP_NAME_ZH if language == "zh" else DEFAULT_APP_NAME_EN
-    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
-
-    return {
-        "name": tenant_config_manager.get_app_config("APP_NAME", tenant_id=tenant_id) or default_app_name,
-        "description": tenant_config_manager.get_app_config("APP_DESCRIPTION",
-                                                            tenant_id=tenant_id) or default_app_description,
-        "icon": {
-            "type": tenant_config_manager.get_app_config("ICON_TYPE", tenant_id=tenant_id) or "preset",
-            "avatarUri": tenant_config_manager.get_app_config("AVATAR_URI",
-                                                              tenant_id=tenant_id) or DEFAULT_APP_ICON_URL,
-            "customUrl": tenant_config_manager.get_app_config("CUSTOM_ICON_URL", tenant_id=tenant_id) or ""
-        }
-    }
-
-
-def _build_models_config(tenant_id: str) -> dict:
-    models_config = {}
-
-    for model_key, config_key in MODEL_CONFIG_MAPPING.items():
-        try:
-            model_config = tenant_config_manager.get_model_config(config_key, tenant_id=tenant_id)
-            models_config[model_key] = _build_model_config(model_config)
-        except Exception as e:
-            logger.warning(f"Failed to get config for {config_key}: {e}")
-            models_config[model_key] = _build_model_config({})
-
-    return models_config
