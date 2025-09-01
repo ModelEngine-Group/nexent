@@ -14,7 +14,7 @@ import {
 
 const { Title } = Typography
 
-// 添加接口定义
+// Add interface definition
 interface AppModelConfigProps {
   skipModelVerification?: boolean;
   onSelectedModelsChange?: (selected: Record<string, Record<string, string>>) => void;
@@ -25,7 +25,7 @@ export default function AppModelConfig({ skipModelVerification = false, onSelect
   const [isClientSide, setIsClientSide] = useState(false)
   const modelConfigRef = useRef<ModelConfigSectionRef | null>(null)
 
-  // 添加useEffect钩子用于初始化加载配置
+  // Add useEffect hook for initialization and loading configuration
   useEffect(() => {
     setIsClientSide(true)
 
@@ -34,7 +34,7 @@ export default function AppModelConfig({ skipModelVerification = false, onSelect
     }
   }, [skipModelVerification])
 
-  // 将子组件的选中模型上报给父级（若提供回调）
+  // Report selected models from child component to parent (if callback provided)
   useEffect(() => {
     if (!onSelectedModelsChange) return;
     const timer = setInterval(() => {

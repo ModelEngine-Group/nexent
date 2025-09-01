@@ -26,23 +26,23 @@ interface MemoryManageModalProps {
 }
 
 /**
- * 记忆管理弹窗，仅负责 UI 渲染。
- * 复杂状态逻辑由 hooks/useMemory.ts 管理。
+ * Memory management modal, only responsible for UI rendering.
+ * Complex state logic is managed by hooks/useMemory.ts.
  */
 const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose, userRole }) => {
-  // 获取认证上下文中的用户角色
+  // Get user role from authentication context
   const { user } = useAuth()
   const { message } = App.useApp()
   const role: "admin" | "user" = (userRole ?? (user?.role === "admin" ? "admin" : "user")) as "admin" | "user"
 
-  // 真实业务场景可从其他 hooks / context 中获取
+  // Real business scenarios can be obtained from other hooks / context
   const currentUserId = "user1"
   const currentTenantId = "tenant1"
 
   const memory = useMemory({ visible, currentUserId, currentTenantId, message })
   const { t } = useTranslation('common')
 
-  // ====================== 清空记忆确认弹框 ======================
+  // ====================== Clear memory confirmation modal ======================
   const [clearConfirmVisible, setClearConfirmVisible] = React.useState(false)
   const [clearTarget, setClearTarget] = React.useState<{ key: string; title: string } | null>(null)
 
@@ -64,7 +64,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
     setClearTarget(null)
   }
 
-  // ====================== UI 渲染函数 ======================
+  // ====================== UI rendering functions ======================
   const renderBaseSettings = () => {
     const shareOptionLabels: Record<"always" | "ask" | "never", string> = {
       always: t('memoryManageModal.shareOption.always'),
@@ -109,7 +109,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
     )
   }
 
-  // 渲染新增记忆输入框
+  // Render add memory input box
   const renderAddMemoryInput = (groupKey: string) => {
     if (memory.addingMemoryKey !== groupKey) return null
 
@@ -157,7 +157,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
     )
   }
 
-  // 渲染空状态
+  // Render empty state
   const renderEmptyState = (groupKey: string) => {
     const groups = memory.getGroupsForTab(memory.activeTabKey)
     const currentGroup = groups.find(g => g.key === groupKey)
@@ -183,7 +183,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
     const startIdx = (currentPage - 1) * memory.pageSize
     const sliceGroups = paginated ? groups.slice(startIdx, startIdx + memory.pageSize) : groups
 
-    // 若尚未加载到任何分组（如接口仍在请求中），直接渲染空状态，避免出现白屏
+    // If no groups have been loaded yet (e.g., API is still requesting), render empty state directly to avoid white screen
     if (sliceGroups.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-8 text-gray-500">
@@ -193,7 +193,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
       )
     }
 
-    // 单分组场景，不可折叠（租户共享、用户个性化页签）
+    // Single group scenario, not collapsible (tenant shared, user personalization tabs)
     const isFixedSingle = sliceGroups.length === 1 && (tabKey === "tenant" || tabKey === "userPersonal")
 
     if (isFixedSingle) {
@@ -305,7 +305,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
                         onChange={(val) => memory.toggleGroup(g.key, val)}
                       />
                     )}
-                    {/* 如果分组无数据，则隐藏“清空记忆”按钮，保持界面简洁 */}
+                    {/* If group has no data, hide "Clear Memory" button to keep interface clean */}
                     <Button
                       type="primary"
                       variant="outlined"
@@ -449,7 +449,7 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({ visible, onClose,
         <Tabs size="large" items={tabItems} activeKey={memory.activeTabKey} onChange={(key) => memory.setActiveTabKey(key)} />
       </Modal>
 
-      {/* 清空记忆确认弹框 */}
+      {/* Clear memory confirmation modal */}
       <MemoryDeleteModal
         visible={clearConfirmVisible}
         targetTitle={clearTarget?.title ?? ""}

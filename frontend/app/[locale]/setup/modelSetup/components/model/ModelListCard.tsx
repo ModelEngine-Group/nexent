@@ -5,7 +5,7 @@ import { ModelConnectStatus, ModelOption, ModelSource, ModelType } from '@/types
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-// 统一管理模型连接状态颜色
+// Unified management of model connection status colors
 const CONNECT_STATUS_COLORS: Record<ModelConnectStatus | 'default', string> = {
   "available": "#52c41a",
   "unavailable": "#ff4d4f",
@@ -14,7 +14,7 @@ const CONNECT_STATUS_COLORS: Record<ModelConnectStatus | 'default', string> = {
   default: "#17202a"
 };
 
-// 动画定义不再包含颜色，由样式传递
+// Animation definition no longer contains colors, passed through styles
 const PULSE_ANIMATION = `
   @keyframes pulse {
     0% {
@@ -34,7 +34,7 @@ const PULSE_ANIMATION = `
   }
 `;
 
-// 只拼接样式，颜色和动画通过参数传递
+// Only concatenate styles, colors and animations passed through parameters
 const getStatusStyle = (status?: ModelConnectStatus): React.CSSProperties => {
   const color = (status && CONNECT_STATUS_COLORS[status]) || CONNECT_STATUS_COLORS.default;
   const baseStyle: React.CSSProperties = {
@@ -56,14 +56,14 @@ const getStatusStyle = (status?: ModelConnectStatus): React.CSSProperties => {
     return {
       ...baseStyle,
       animation: 'pulse 1.5s infinite',
-      // 用CSS变量传递动画色
+      // Use CSS variables to pass animation colors
       ['--pulse-color' as any]: color
     };
   }
   return baseStyle;
 };
 
-// 获取模型来源对应的标签样式
+// Get tag styles corresponding to model source
 const getSourceTagStyle = (source: string): React.CSSProperties => {
   const baseStyle: React.CSSProperties = {
     marginRight: '4px',

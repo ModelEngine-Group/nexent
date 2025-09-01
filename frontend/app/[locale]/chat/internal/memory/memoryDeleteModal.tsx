@@ -11,8 +11,8 @@ interface MemoryDeleteModalProps {
 }
 
 /**
- * 承载“清空记忆”二次确认弹窗，仅负责 UI 展示。
- * 上层组件负责控制 visible 及回调逻辑。
+ * Carries the "Clear Memory" secondary confirmation modal, only responsible for UI display.
+ * The upper component is responsible for controlling visible and callback logic.
  */
 const MemoryDeleteModal: React.FC<MemoryDeleteModalProps> = ({ visible, targetTitle, onOk, onCancel }) => {
   const { t } = useTranslation()

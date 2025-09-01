@@ -2,7 +2,7 @@ import { TFunction } from 'i18next'
 import { Tool } from '@/types/agent'
 import { updateToolConfig, searchToolConfig } from '@/services/agentConfigService'
 
-// 提取公共的 handleToolSelect 逻辑
+// Extract common handleToolSelect logic
 export const handleToolSelectCommon = async (
   tool: Tool,
   isSelected: boolean,

@@ -130,7 +130,7 @@ export function ChatStreamMessage({
                   <ChatAttachment 
                     attachments={message.attachments as AttachmentItem[]} 
                     onImageClick={onImageClick}
-                    className="justify-end" // 靠右对齐
+                    className="justify-end" // Right align
                   />
                 </div>
               </div>

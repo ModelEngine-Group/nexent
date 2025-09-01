@@ -209,11 +209,11 @@ export default function AgentCallRelationshipModal({
       if (result.success) {
         setRelationshipData(result.data)
       } else {
-        message.error(result.message || '获取调用关系失败')
+        message.error(result.message || 'Failed to get call relationship')
       }
     } catch (error) {
-      console.error('获取Agent调用关系失败:', error)
-      message.error('获取Agent调用关系失败，请稍后重试')
+      console.error('Failed to get Agent call relationship:', error)
+      message.error('Failed to get Agent call relationship, please try again later')
     } finally {
       setLoading(false)
     }

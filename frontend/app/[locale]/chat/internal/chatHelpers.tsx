@@ -1,5 +1,5 @@
 
- // 对搜索结果进行去重处理
+ // Deduplicate search results
  export const deduplicateSearchResults = (
      existingResults: any[],
      newResults: any[]
@@ -17,7 +17,7 @@
    return uniqueResults;
  };
 
- // 对图片进行去重处理
+ // Deduplicate images
  export const deduplicateImages = (
      existingImages: string[],
      newImages: string[]

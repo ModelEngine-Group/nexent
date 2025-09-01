@@ -56,7 +56,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(({
     prevFileListRef.current = fileList;
   }, [fileList]);
   
-  // 重置所有状态的函数
+  // Function to reset all states
   const resetAllStates = useCallback(() => {
     setFileList([]);
     setNameStatus('available');
@@ -64,7 +64,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(({
     setIsKnowledgeBaseReady(false);
   }, []);
 
-  // 监听知识库变化，重置文件列表并获取知识库信息
+  // Listen for knowledge base changes, reset file list and get knowledge base information
   useEffect(() => {
     // 如果知识库名称没有变化，不进行重置
     if (indexName === currentKnowledgeBaseRef.current) {

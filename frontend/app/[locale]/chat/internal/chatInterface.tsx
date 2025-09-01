@@ -38,9 +38,9 @@ const stepIdCounter = {current: 0};
 
 export function ChatInterface() {
   const router = useRouter()
-  const { user } = useAuth() // 获取用户信息
+  const { user } = useAuth() // Get user information
   const [input, setInput] = useState("")
-  // 替换原有的 messages 状态
+  // Replace original messages state
   const [sessionMessages, setSessionMessages] = useState<{ [conversationId: number]: ChatMessageType[] }>({});
   const [isSwitchedConversation, setIsSwitchedConversation] = useState(false) // Add conversation switching tracking state
   const [isLoading, setIsLoading] = useState(false)
@@ -53,17 +53,17 @@ export function ChatInterface() {
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null)
   const { appConfig } = useConfig()
 
-  // 为每个对话维护独立的 SSE 连接和状态
+  // Maintain independent SSE connections and states for each conversation
   const [streamingConversations, setStreamingConversations] = useState<Set<number>>(new Set())
   const conversationControllersRef = useRef<Map<number, AbortController>>(new Map())
   const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(new Map())
 
-  // 将 currentMessages 的声明放在 selectedConversationId 定义之后
-  // 如果正在加载历史会话且没有缓存的消息，返回空数组避免显示错误内容
+  // Place currentMessages declaration after selectedConversationId definition
+  // If loading historical conversation and no cached messages, return empty array to avoid displaying error content
   const currentMessages = selectedConversationId ? (sessionMessages[selectedConversationId] || []) : [];
 
-  // 监控 currentMessages 变化
-  // 计算当前对话是否正在流式传输
+  // Monitor currentMessages changes
+  // Calculate whether current conversation is streaming
   const isCurrentConversationStreaming = conversationId && conversationId !== -1 ? streamingConversations.has(conversationId) : false;
 
 
@@ -176,7 +176,7 @@ export function ChatInterface() {
     setShowRightPanel(false);
   }, [conversationId]);
 
-  // 确保 currentSelectedConversationRef 与 selectedConversationId 保持同步
+  // Ensure currentSelectedConversationRef stays synchronized with selectedConversationId
   useEffect(() => {
     currentSelectedConversationRef.current = selectedConversationId;
   }, [selectedConversationId]);
@@ -219,10 +219,10 @@ export function ChatInterface() {
     // Get current conversation ID
     let currentConversationId = conversationId;
 
-    // 确保 ref 反映当前对话状态
-    if (currentConversationId && currentConversationId !== -1) {
-      currentSelectedConversationRef.current = currentConversationId;
-    }
+       // Ensure ref reflects current conversation state
+  if (currentConversationId && currentConversationId !== -1) {
+    currentSelectedConversationRef.current = currentConversationId;
+  }
 
     // Prepare attachment information
     // Handle file upload
@@ -822,7 +822,7 @@ export function ChatInterface() {
 
           // Don't process result if request was canceled
           if (controller.signal.aborted) {
-            console.warn('强制重新加载请求被取消');
+            console.warn('Force reload request was canceled');
             return;
           }
 
@@ -876,9 +876,9 @@ export function ChatInterface() {
             // No longer empty cache, only prompt no history messages
             setConversationLoadError(prev => ({
               ...prev,
-              [dialog.conversation_id]: t('chatStreamMain.noHistory') || '该会话无历史消息'
+              [dialog.conve  rsation_id]: t('chatStreamMain.noHistory') || 'This conversation has no history messages'
             }));
-            console.warn('强制重新加载 data.code 非0或无消息', { data });
+            console.warn('Force reload data.code is not 0 or no messages', { data });
           }
         } catch (error) {
           console.error(t("chatInterface.errorFetchingConversationDetailsError"), error);
@@ -897,7 +897,7 @@ export function ChatInterface() {
       } else {
         // Cache has content, display normally
         setIsLoadingHistoricalConversation(false);
-        setIsLoading(false); // 确保 isLoading 状态也被重置
+                  setIsLoading(false); // Ensure isLoading state is also reset
         
         // For cases where there are cached messages, also trigger scrolling to the bottom.
         setShouldScrollToBottom(true);
@@ -943,7 +943,7 @@ export function ChatInterface() {
 
         // Don't process result if request was canceled
         if (controller.signal.aborted) {
-          console.warn('请求被取消');
+          console.warn('Request was canceled');
           return;
         }
 
@@ -997,9 +997,9 @@ export function ChatInterface() {
           // No longer empty cache, only prompt no history messages
           setConversationLoadError(prev => ({
             ...prev,
-            [dialog.conversation_id]: t('chatStreamMain.noHistory') || '该会话无历史消息'
+                          [dialog.conversation_id]: t('chatStreamMain.noHistory') || 'This conversation has no history messages'
           }));
-          console.warn('data.code 非0或无消息', { data });
+          console.warn('data.code is not 0 or no messages', { data });
         }
       } catch (error) {
         console.error(t("chatInterface.errorFetchingConversationDetailsError"), error);

@@ -220,12 +220,12 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         message.error(t('model.dialog.error.noModelsFetched'))
       }
       const selectedModels = await getProviderSelectedModalList() || []
-      // 关键逻辑
+      // Key logic
       if (!selectedModels.length) {
-        // 全部不选
+        // Select none
         setSelectedModelIds(new Set())
       } else {
-        // 只选中 selectedModels
+        // Only select selectedModels
         setSelectedModelIds(new Set(selectedModels.map((m: any) => m.id)))
       }
     } catch (error) {
@@ -255,7 +255,7 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         onSuccess()
       }
     } catch (error: any) {
-      message.error(error?.message || '添加模型失败');
+      message.error(error?.message || 'Failed to add model');
     }
 
     setForm(prev => ({
@@ -629,10 +629,10 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
               {loadingModelList ? (
                 <div className="flex flex-col items-center justify-center py-4 text-xs text-gray-500">
                   <LoadingOutlined spin style={{ fontSize: 18, color: '#1890ff', marginBottom: 4 }} />
-                  <span>{t('common.loading') || '获取中...'}</span>
+                  <span>{t('common.loading') || 'Loading...'}</span>
                 </div>
               ) : modelList.length === 0 ? (
-                <div className="text-xs text-gray-500 text-center">{t('model.dialog.message.noModels') || '请先获取模型'}</div>
+                <div className="text-xs text-gray-500 text-center">{t('model.dialog.message.noModels') || 'Please fetch models first'}</div>
               ) : (
                 
                 modelList.map((model: any) => {

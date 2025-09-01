@@ -97,7 +97,7 @@ export function ChatStreamMain({
   const lastUserMessageIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // 处理消息分类
+  // Process message classification
   useEffect(() => {
     const finalMsgs: ChatMessageType[] = [];
     const taskMsgs: any[] = [];
@@ -271,7 +271,7 @@ export function ChatStreamMain({
         setShowScrollButton(false);
       }
 
-      // 显示顶部渐变效果
+      // Show top gradient effect
       if (scrollTop > 10) {
         setShowTopFade(true);
       } else {

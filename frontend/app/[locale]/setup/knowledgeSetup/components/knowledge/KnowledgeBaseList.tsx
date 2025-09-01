@@ -4,30 +4,30 @@ import { SyncOutlined, PlusOutlined } from '@ant-design/icons'
 import { KnowledgeBase } from '@/types/knowledgeBase'
 import { useTranslation } from 'react-i18next'
 
-// 知识库布局常量配置
+// Knowledge base layout constants configuration
 const KB_LAYOUT = {
-  // 知识库行高配置
-  ROW_PADDING: 'py-4', // 行垂直内边距
-  HEADER_PADDING: 'p-3', // 列表头部内边距
-  BUTTON_PADDING: 'p-2', // 创建按钮区域内边距
-  TAG_SPACING: 'gap-0.5', // 标签之间的间距
-  TAG_MARGIN: 'mt-2.5', // 标签容器上边距
-  // 标签相关配置
-  TAG_PADDING: 'px-1.5 py-0.5', // 标签内边距
-  TAG_TEXT: 'text-xs font-medium', // 标签文字样式
-  TAG_ROUNDED: 'rounded-md', // 标签圆角
-  // 换行相关配置
-  TAG_BREAK_HEIGHT: 'h-0.5', // 换行间隔高度
-  SECOND_ROW_TAG_MARGIN: 'mt-0.5', // 第二行标签上边距
-  // 其他布局配置
-  TITLE_MARGIN: 'ml-2', // 标题左边距
-  EMPTY_STATE_PADDING: 'py-4', // 空状态内边距
-  // 标题相关配置
-  TITLE_TEXT: 'text-xl font-bold', // 标题文字样式
-  KB_NAME_TEXT: 'text-lg font-medium', // 知识库名称文字样式
-  // 知识库名称配置
-  KB_NAME_MAX_WIDTH: '220px', // 知识库名称最大宽度
-  KB_NAME_OVERFLOW: {        // 知识库名称溢出样式
+  // Knowledge base row height configuration
+  ROW_PADDING: 'py-4', // Row vertical padding
+  HEADER_PADDING: 'p-3', // List header padding
+  BUTTON_PADDING: 'p-2', // Create button area padding
+  TAG_SPACING: 'gap-0.5', // Spacing between tags
+  TAG_MARGIN: 'mt-2.5', // Tag container top margin
+  // Tag related configuration
+  TAG_PADDING: 'px-1.5 py-0.5', // Tag padding
+  TAG_TEXT: 'text-xs font-medium', // Tag text style
+  TAG_ROUNDED: 'rounded-md', // Tag border radius
+  // Line break related configuration
+  TAG_BREAK_HEIGHT: 'h-0.5', // Line break interval height
+  SECOND_ROW_TAG_MARGIN: 'mt-0.5', // Second row tag top margin
+  // Other layout configuration
+  TITLE_MARGIN: 'ml-2', // Title left margin
+  EMPTY_STATE_PADDING: 'py-4', // Empty state padding
+  // Title related configuration
+  TITLE_TEXT: 'text-xl font-bold', // Title text style
+  KB_NAME_TEXT: 'text-lg font-medium', // Knowledge base name text style
+  // Knowledge base name configuration
+  KB_NAME_MAX_WIDTH: '220px', // Knowledge base name maximum width
+  KB_NAME_OVERFLOW: {        // Knowledge base name overflow style
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -48,8 +48,8 @@ interface KnowledgeBaseListProps {
   onCreateNew: () => void
   isSelectable: (kb: KnowledgeBase) => boolean
   getModelDisplayName: (modelId: string) => string
-  containerHeight?: string // 容器总高度，与DocumentList保持一致
-  onKnowledgeBaseChange?: () => void // 新增：知识库切换时的回调函数
+  containerHeight?: string // Container total height, consistent with DocumentList
+  onKnowledgeBaseChange?: () => void // New: Callback function when knowledge base changes
 }
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
@@ -65,25 +65,25 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   onCreateNew,
   isSelectable,
   getModelDisplayName,
-  containerHeight = '70vh', // 默认与DocumentList一致的容器高度
-  onKnowledgeBaseChange // 新增：知识库切换时的回调函数
+  containerHeight = '70vh', // Default container height consistent with DocumentList
+  onKnowledgeBaseChange // New: Callback function when knowledge base changes
 }) => {
   const { t } = useTranslation();
 
-  // 格式化日期函数，只保留日期部分
+  // Format date function, keep only the date part
   const formatDate = (dateString: number) => {
     try {
       const date = new Date(dateString);
-      return date.toISOString().split('T')[0]; // 只返回YYYY-MM-DD部分
+      return date.toISOString().split('T')[0]; // Only return YYYY-MM-DD part
     } catch (e) {
-      return dateString; // 如果解析失败，返回原始字符串
+      return dateString; // If parsing fails, return original string
     }
   };
 
 
   return (
     <div className="w-full bg-white border border-gray-200 rounded-md flex flex-col" style={{ height: containerHeight }}>
-      {/* 固定的头部区域 */}
+      {/* Fixed header area */}
       <div className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}>
         <div className="flex items-center justify-between">
           <div>
@@ -140,7 +140,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         </div>
       </div>
 
-      {/* 固定的选择状态区域 */}
+      {/* Fixed selection status area */}
       <div className="border-b border-gray-200 shrink-0 relative z-10 shadow-md">
         <div className="px-5 py-2 bg-blue-50">
           <div className="flex items-center">
@@ -184,7 +184,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         </div>
       </div>
 
-      {/* 可滚动的知识库列表区域 */}
+      {/* Scrollable knowledge base list area */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {knowledgeBases.length > 0 ? (
           <div className="divide-y-0">
@@ -270,30 +270,30 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         </button>
                       </div>
                       <div className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}>
-                        {/* 文档数量标签 */}
+                        {/* Document count tag */}
                         <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
                           {t('knowledgeBase.tag.documents', { count: kb.documentCount || 0 })}
                         </span>
 
-                        {/* 分块数量标签 */}
+                        {/* Chunk count tag */}
                         <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
                           {t('knowledgeBase.tag.chunks', { count: kb.chunkCount || 0 })}
                         </span>
 
-                        {/* 知识库来源标签 */}
+                        {/* Knowledge base source tag */}
                         <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
                           {t('knowledgeBase.tag.source', { source: kb.source })}
                         </span>
 
-                        {/* 创建日期标签 - 只显示日期 */}
+                        {/* Creation date tag - only show date */}
                         <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
                           {t('knowledgeBase.tag.createdAt', { date: formatDate(kb.createdAt) })}
                         </span>
 
-                        {/* 强制换行 */}
+                        {/* Force line break */}
                         <div className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}></div>
 
-                        {/* 模型标签 - 显示正常或不匹配 */}
+                        {/* Model tag - show normal or mismatch */}
                         <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}>
                           {t('knowledgeBase.tag.model', { model: getModelDisplayName(kb.embeddingModel) })}
                         </span>

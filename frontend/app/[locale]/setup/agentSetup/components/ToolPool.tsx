@@ -21,11 +21,11 @@ interface ToolPoolProps {
   mainAgentId?: string | null;
   localIsGenerating?: boolean;
   onToolsRefresh?: () => void;
-  isEditingMode?: boolean; // 新增：控制是否处于编辑模式
-  isGeneratingAgent?: boolean; // 新增：生成智能体状态
+  isEditingMode?: boolean; // New: Control whether in editing mode
+  isGeneratingAgent?: boolean; // New: Agent generation state
 }
 
-// 工具分组接口
+// Tool grouping interface
 interface ToolGroup {
   key: string;
   label: string;
@@ -43,8 +43,8 @@ function ToolPool({
   mainAgentId,
   localIsGenerating = false,
   onToolsRefresh,
-  isEditingMode = false, // 新增：默认不处于编辑模式
-  isGeneratingAgent = false // 新增：默认不在生成状态
+  isEditingMode = false, // New: Default not in editing mode
+  isGeneratingAgent = false // New: Default not in generation state
 }: ToolPoolProps) {
   const { t } = useTranslation('common');
   const { message } = App.useApp();
@@ -56,18 +56,18 @@ function ToolPool({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState<string>('');
   
-  // 使用 useMemo 缓存工具分组
+  // Use useMemo to cache tool grouping
   const toolGroups = useMemo(() => {
     const groups: ToolGroup[] = [];
     const groupMap = new Map<string, Tool[]>();
     
-    // 按 source 和 usage 分组
+    // Group by source and usage
     tools.forEach(tool => {
       let groupKey: string;
       let groupLabel: string;
       
       if (tool.source === 'mcp') {
-        // MCP 工具按 usage 分组
+        // MCP tools grouped by usage
         const usage = tool.usage || 'other';
         groupKey = `mcp-${usage}`;
         groupLabel = usage;
@@ -78,7 +78,7 @@ function ToolPool({
         groupKey = 'langchain';
         groupLabel = t('toolPool.group.langchain');
       } else {
-        // 其他类型
+        // Other types
         groupKey = tool.source || 'other';
         groupLabel = tool.source || t('toolPool.group.other');
       }
@@ -89,10 +89,10 @@ function ToolPool({
       groupMap.get(groupKey)!.push(tool);
     });
     
-    // 转换为数组并排序
+    // Convert to array and sort
     groupMap.forEach((tools, key) => {
       const sortedTools = tools.sort((a, b) => {
-        // 按创建时间排序
+        // Sort by creation time
         if (!a.create_time && !b.create_time) return 0;
         if (!a.create_time) return 1;
         if (!b.create_time) return -1;
@@ -110,7 +110,7 @@ function ToolPool({
       });
     });
     
-    // 按优先级排序：local > langchain > mcp groups
+    // Sort by priority: local > langchain > mcp groups
     return groups.sort((a, b) => {
       const getPriority = (key: string) => {
         if (key === 'local') return 1;
@@ -122,7 +122,7 @@ function ToolPool({
     });
   }, [tools, t]);
 
-  // 设置默认激活的标签
+  // Set default active tab
   useEffect(() => {
     if (toolGroups.length > 0 && !activeTabKey) {
       setActiveTabKey(toolGroups[0].key);
@@ -138,7 +138,7 @@ function ToolPool({
   const handleToolSelect = useCallback(async (tool: Tool, isSelected: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // 在生成过程中禁止选择工具
+    // Disable tool selection during generation
     if (isGeneratingAgent) {
       return;
     }
@@ -169,7 +169,7 @@ function ToolPool({
   const handleConfigClick = useCallback((tool: Tool, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // 在生成过程中禁止配置工具
+    // Disable tool configuration during generation
     if (isGeneratingAgent) {
       return;
     }
@@ -213,22 +213,22 @@ function ToolPool({
     setPendingToolSelection(null);
   }, []);
 
-  // 刷新工具列表的处理函数
+  // Handle refresh tools list function
   const handleRefreshTools = useCallback(async () => {
     if (isRefreshing || localIsGenerating) return;
 
     setIsRefreshing(true);
     try {
-      // 第一步：更新后端工具状态，重新扫描MCP和本地工具
+      // Step 1: Update backend tool status, rescan MCP and local tools
       const updateResult = await updateToolList();
       if (!updateResult.success) {
         message.warning(t('toolManagement.message.updateStatusFailed'));
       }
 
-      // 第二步：获取最新的工具列表
+      // Step 2: Get latest tools list
       const fetchResult = await fetchTools();
       if (fetchResult.success) {
-        // 调用父组件的刷新回调，更新工具列表状态
+        // Call parent component's refresh callback to update tools list state
         if (onToolsRefresh) {
           onToolsRefresh();
         }
@@ -243,22 +243,22 @@ function ToolPool({
     }
   }, [isRefreshing, localIsGenerating, onToolsRefresh, t]);
 
-  // 监听工具更新事件
+  // Listen for tools update events
   useEffect(() => {
     const handleToolsUpdate = async () => {
       try {
-        // 重新获取最新的工具列表，确保包含新添加的MCP工具
+        // Re-fetch latest tools list to ensure it includes newly added MCP tools
         const fetchResult = await fetchTools();
         if (fetchResult.success) {
-          // 调用父组件的刷新回调，更新工具列表状态
+          // Call parent component's refresh callback to update tools list state
           if (onToolsRefresh) {
             onToolsRefresh();
           }
         } else {
-          console.error('MCP配置后自动刷新工具列表失败:', fetchResult.message);
+          console.error('Failed to auto-refresh tools list after MCP configuration:', fetchResult.message);
         }
       } catch (error) {
-        console.error('MCP配置后自动刷新工具列表出错:', error);
+        console.error('Error auto-refreshing tools list after MCP configuration:', error);
       }
     };
 
@@ -271,8 +271,8 @@ function ToolPool({
   // Use memo to optimize the rendering of tool items
   const ToolItem = memo(({ tool }: { tool: Tool }) => {
     const isSelected = selectedToolIds.has(tool.id);
-    const isAvailable = tool.is_available !== false; // 默认为true，只有明确为false时才不可用
-    const isDisabled = localIsGenerating || !isEditingMode || isGeneratingAgent; // 在非编辑模式或生成过程中禁用选择
+    const isAvailable = tool.is_available !== false; // Default is true, only unavailable when explicitly false
+    const isDisabled = localIsGenerating || !isEditingMode || isGeneratingAgent; // Disable selection in non-editing mode or during generation
     
     return (
       <div 
@@ -324,12 +324,12 @@ function ToolPool({
             </TooltipContent>
           </CustomTooltip>
         </div>
-        {/* Settings button right - 移除了Tag标签 */}
+        {/* Settings button right - Removed Tag component */}
         <div className="flex items-center gap-2 ml-2">
           <button 
             type="button"
             onClick={(e) => {
-              e.stopPropagation();  // 防止触发父元素的点击事件
+              e.stopPropagation();  // Prevent triggering parent element's click event
               if (localIsGenerating || isGeneratingAgent) return;
               if (!isAvailable) {
                 if (isSelected && isEditingMode) {
@@ -357,9 +357,9 @@ function ToolPool({
     );
   });
 
-  // 生成 Tabs 配置
+  // Generate Tabs configuration
   const tabItems = toolGroups.map(group => {
-    // 限制标签显示最多7个字符
+    // Limit tab display to maximum 7 characters
     const displayLabel = group.label.length > 7 ? `${group.label.substring(0, 7)}...` : group.label;
     
     return {

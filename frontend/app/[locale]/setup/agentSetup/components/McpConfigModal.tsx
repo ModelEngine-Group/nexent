@@ -29,7 +29,7 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
   const [updatingTools, setUpdatingTools] = useState(false)
   const [healthCheckLoading, setHealthCheckLoading] = useState<{ [key: string]: boolean }>({})
 
-  // 加载MCP服务器列表
+  // Load MCP server list
   const loadServerList = async () => {
     setLoading(true)
     try {
@@ -46,14 +46,14 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
     }
   }
 
-  // 添加MCP服务器
+  // Add MCP server
   const handleAddServer = async () => {
     if (!newServerName.trim() || !newServerUrl.trim()) {
       message.error(t('mcpConfig.message.completeServerInfo'))
       return
     }
 
-    // 验证服务器名称格式
+    // Validate server name format
     const serverName = newServerName.trim()
     const nameRegex = /^[a-zA-Z0-9]+$/
     
@@ -67,7 +67,7 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
       return
     }
 
-    // 检查是否已存在相同的服务器
+    // Check if server with same name already exists
     const exists = serverList.some(
       server => server.service_name === serverName || server.mcp_url === newServerUrl.trim()
     )
@@ -82,14 +82,14 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
       if (result.success) {
         setNewServerName('')
         setNewServerUrl('')
-        await loadServerList() // 重新加载列表
+        await loadServerList() // Reload list
         
-        // 设置工具更新状态并自动刷新工具列表
+        // Set tool update status and automatically refresh tool list
         setUpdatingTools(true)
         try {
           const updateResult = await updateToolList()
           if (updateResult.success) {
-            // 通知父组件更新工具列表
+            // Notify parent component to update tool list
             window.dispatchEvent(new CustomEvent('toolsUpdated'))
           }
         } catch (updateError) {
@@ -108,7 +108,7 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
     }
   }
 
-  // 删除MCP服务器
+  // Delete MCP server
   const handleDeleteServer = async (server: McpServer) => {
     modal.confirm({
       title: t('mcpConfig.delete.confirmTitle'),
@@ -120,9 +120,9 @@ export default function McpConfigModal({ visible, onCancel }: McpConfigModalProp
         try {
           const result = await deleteMcpServer(server.mcp_url, server.service_name)
           if (result.success) {
-            await loadServerList() // 重新加载列表
+            await loadServerList() // Reload list
             
-            // 删除成功后立即关闭确认弹窗，然后异步更新工具列表
+            // Close confirmation modal immediately after successful deletion, then asynchronously update tool list
             setTimeout(async () => {
               setUpdatingTools(true)
               try {

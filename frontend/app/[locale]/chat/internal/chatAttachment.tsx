@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTranslation } from 'react-i18next';
 
-// 附件类型接口
+// Attachment type interface
 export interface AttachmentItem {
   type: string;
   name: string;
@@ -26,14 +26,14 @@ export interface AttachmentItem {
   contentType?: string;
 }
 
-// 附件预览组件接口
+// Attachment preview component interface
 interface ChatAttachmentProps {
   attachments: AttachmentItem[];
   onImageClick?: (url: string) => void;
   className?: string;
 }
 
-// 图片查看器组件
+// Image viewer component
 const ImageViewer = ({ url, isOpen, onClose }: { url: string, isOpen: boolean, onClose: () => void }) => {
   if (!isOpen) return null;
   const { t } = useTranslation('common');
@@ -52,7 +52,7 @@ const ImageViewer = ({ url, isOpen, onClose }: { url: string, isOpen: boolean, o
   );
 };
 
-// 文件查看器组件
+// File viewer component
 const FileViewer = ({ url, name, contentType, isOpen, onClose }: { 
   url: string, 
   name: string, 
@@ -90,25 +90,25 @@ const FileViewer = ({ url, name, contentType, isOpen, onClose }: {
   );
 };
 
-// 获取文件扩展名
+// Get file extension
 const getFileExtension = (filename: string): string => {
   return filename.slice(((filename.lastIndexOf(".") - 1) >>> 0) + 2).toLowerCase();
 };
 
-// 获取文件图标函数 - 与输入框组件保持一致
+// Get file icon function - consistent with input component
 const getFileIcon = (name: string, contentType?: string) => {
   const extension = getFileExtension(name);
   const fileType = contentType || '';
   const iconSize = 32;
   
-  // 图片文件
+  // Image files
   if (fileType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension)) {
     return <AiFillFileImage size={iconSize} color="#8e44ad" />;
   }
   
-  // 根据扩展名识别
+  // Identify by extension
   switch (extension) {
-    // 文档文件
+    // Document files
     case 'pdf':
       return <AiFillFilePdf size={iconSize} color="#e74c3c" />;
     case 'doc':
@@ -119,18 +119,18 @@ const getFileIcon = (name: string, contentType?: string) => {
     case 'md':
       return <AiFillFileMarkdown size={iconSize} color="#34495e" />;
       
-    // 表格文件
+    // Spreadsheet files
     case 'xls':
     case 'xlsx':
     case 'csv':
       return <AiFillFileExcel size={iconSize} color="#27ae60" />;
       
-    // 演示文件
+    // Presentation files
     case 'ppt':
     case 'pptx':
       return <AiFillFilePpt size={iconSize} color="#e67e22" />;
       
-    // 代码文件
+    // Code files
     case 'html':
     case 'htm':
       return <AiFillHtml5 size={iconSize} color="#e67e22" />;
@@ -149,7 +149,7 @@ const getFileIcon = (name: string, contentType?: string) => {
     case 'json':
       return <AiFillCode size={iconSize} color="#f1c40f" />;
       
-    // 压缩文件
+    // Compressed files
     case 'zip':
     case 'rar':
     case '7z':
@@ -157,13 +157,13 @@ const getFileIcon = (name: string, contentType?: string) => {
     case 'gz':
       return <AiFillFileZip size={iconSize} color="#f39c12" />;
       
-    // 默认文件图标
+    // Default file icon
     default:
       return <AiFillFileUnknown size={iconSize} color="#95a5a6" />;
   }
 };
 
-// 格式化文件大小
+// Format file size
 const formatFileSize = (size: number): string => {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -177,18 +177,18 @@ export function ChatAttachment({ attachments, onImageClick, className = "" }: Ch
 
   if (!attachments || attachments.length === 0) return null;
 
-  // 处理图片点击
+  // Handle image click
   const handleImageClick = (url: string) => {
     if (onImageClick) {
-      // 调用外部回调
+      // Call external callback
       onImageClick(url);
     } else {
-      // 没有外部回调时使用内部预览
+      // Use internal preview when no external callback
       setSelectedImage(url);
     }
   };
 
-  // 处理文件点击
+  // Handle file click
   const handleFileClick = (attachment: AttachmentItem) => {
     if (attachment.url) {
       const extension = getFileExtension(attachment.name);
@@ -197,10 +197,10 @@ export function ChatAttachment({ attachments, onImageClick, className = "" }: Ch
                     ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension);
       
       if (isImage) {
-        // 对于图片，使用图片处理逻辑
+        // For images, use image processing logic
         handleImageClick(attachment.url);
       } else {
-        // 对于文件，直接使用内部预览
+        // For files, use internal preview directly
         setSelectedFile({
           url: attachment.url,
           name: attachment.name,
@@ -270,7 +270,7 @@ export function ChatAttachment({ attachments, onImageClick, className = "" }: Ch
         );
       })}
       
-      {/* 图片查看器 */}
+      {/* Image viewer */}
       {selectedImage && (
         <ImageViewer 
           url={selectedImage} 
@@ -279,7 +279,7 @@ export function ChatAttachment({ attachments, onImageClick, className = "" }: Ch
         />
       )}
       
-      {/* 文件查看器 */}
+      {/* File viewer */}
       {selectedFile && (
         <FileViewer 
           url={selectedFile.url} 

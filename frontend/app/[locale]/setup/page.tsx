@@ -64,7 +64,7 @@ function Header({
         <div className="mx-2 h-6 border-l border-slate-300 dark:border-slate-600"></div>
         <span className="text-slate-600 dark:text-slate-400 text-sm">{t("setup.header.description")}</span>
       </div>
-      {/* 语言切换 */}
+      {/* Language switch */}
       <div className="flex items-center gap-3">
         <Dropdown
           menu={{
@@ -80,7 +80,7 @@ function Header({
             <DownOutlined className="text-[10px]" />
           </a>
         </Dropdown>
-        {/* ModelEngine连通性状态 */}
+        {/* ModelEngine connectivity status */}
         <div className="flex items-center px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700">
           <Badge
             status={connectionStatus}
@@ -245,7 +245,7 @@ export default function CreatePage() {
           await configService.loadConfigToFrontend()
           configStore.reloadFromStorage()
         } catch (error) {
-          console.error("加载配置失败:", error)
+          console.error("Failed to load configuration:", error)
         }
       }
     }
@@ -381,15 +381,15 @@ export default function CreatePage() {
 
           // Check if the main model is configured
           if (!currentConfig.models.llm.modelName) {
-            message.error("未找到模型配置，请联系管理员先完成模型配置")
+            message.error("Model configuration not found, please contact administrator to complete model configuration first")
             return
           }
 
           router.push("/chat")
 
         } catch (error) {
-          console.error("保存配置异常:", error)
-          message.error("系统异常，请稍后重试")
+          console.error("Configuration save error:", error)
+          message.error("System error, please try again later")
         } finally {
           setIsSavingConfig(false)
         }
