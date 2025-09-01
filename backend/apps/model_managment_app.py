@@ -240,7 +240,7 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
     If the model is an embedding or multi_embedding type, both types will be deleted
 
     Args:
-        display_name: Display name of the model to delete (唯一键)
+        display_name: Display name of the model to delete (unique key)
         authorization: Authorization header
     """
     try:
@@ -254,10 +254,10 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
                 message=f"Model not found: {display_name}",
                 data=None
             )
-        # 支持 embedding/multi_embedding 互删
+        # Support mutual deletion of embedding/multi_embedding
         deleted_types = []
         if model["model_type"] in ["embedding", "multi_embedding"]:
-            # 查找所有 embedding/multi_embedding 且 display_name 相同的模型
+            # Find all embedding/multi_embedding models with the same display_name
             for t in ["embedding", "multi_embedding"]:
                 m = get_model_by_display_name(display_name, tenant_id)
                 if m and m["model_type"] == t:

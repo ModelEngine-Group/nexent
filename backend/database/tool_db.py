@@ -171,7 +171,7 @@ def add_tool_field(tool_info):
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
         
-        # 合并tool_info和tool_dict
+        # Merge tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info
 

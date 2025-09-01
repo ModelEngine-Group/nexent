@@ -31,7 +31,7 @@ def set_auth_token_to_client(client: Client, token: str) -> None:
         # Only set access_token
         client.auth.access_token = jwt_token
     except Exception as e:
-        logging.error(f"设置访问令牌失败: {str(e)}")
+        logging.error(f"Failed to set access token: {str(e)}")
 
 
 # Get token from authorization header and create authorized supabase client
@@ -51,7 +51,7 @@ def get_current_user_from_client(client: Client) -> Optional[Any]:
             return user_response.user
         return None
     except Exception as e:
-        logging.error(f"获取当前用户失败: {str(e)}")
+        logging.error(f"Failed to get current user: {str(e)}")
         return None
 
 
@@ -65,7 +65,7 @@ def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
             return True, user
         return False, None
     except Exception as e:
-        logging.error(f"令牌验证失败: {str(e)}")
+        logging.error(f"Token validation failed: {str(e)}")
         return False, None
 
 
@@ -73,11 +73,11 @@ def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
 async def get_current_user(request: Request) -> Any:
     authorization = request.headers.get("Authorization")
     if not authorization:
-        raise HTTPException(status_code=401, detail="未提供授权令牌")
+        raise HTTPException(status_code=401, detail="Authorization token not provided")
 
     is_valid, user = validate_token(authorization)
     if not is_valid or not user:
-        raise HTTPException(status_code=401, detail="无效的用户会话")
+        raise HTTPException(status_code=401, detail="Invalid user session")
 
     return user
 
@@ -95,7 +95,7 @@ def extend_session(client: Client, refresh_token: str) -> Optional[dict]:
             }
         return None
     except Exception as e:
-        logging.error(f"延长会话失败: {str(e)}")
+        logging.error(f"Failed to extend session: {str(e)}")
         return None
 
 
@@ -109,11 +109,11 @@ async def service_health():
         })
         
         if not response.ok:
-            return ServiceResponse(
-                code=STATUS_CODES["AUTH_SERVICE_UNAVAILABLE"],
-                message="认证服务不可用",
-                data=False
-            )
+                    return ServiceResponse(
+            code=STATUS_CODES["AUTH_SERVICE_UNAVAILABLE"],
+            message="Authentication service unavailable",
+            data=False
+        )
         
         data = response.json()
         # Check if the service is available by checking if the response contains the name field and its value is "GoTrue"
@@ -121,15 +121,15 @@ async def service_health():
         
         return ServiceResponse(
             code=STATUS_CODES["SUCCESS"] if is_available else STATUS_CODES["AUTH_SERVICE_UNAVAILABLE"],
-            message="认证服务正常" if is_available else "认证服务不可用",
+            message="Authentication service normal" if is_available else "Authentication service unavailable",
             data=is_available
         )
         
     except Exception as e:
-        logging.error(f"认证服务连通性检查失败: {str(e)}")
+        logging.error(f"Authentication service connectivity check failed: {str(e)}")
         return ServiceResponse(
             code=STATUS_CODES["SERVER_ERROR"],
-            message=f"认证服务连通性检查失败: {str(e)}",
+            message=f"Authentication service connectivity check failed: {str(e)}",
             data=False
         )
 
@@ -139,15 +139,15 @@ async def signup(request: UserSignUpRequest):
     client = get_supabase_client()
     
     # Record basic information of the registration request
-    logging.info(f"收到注册请求: email={request.email}, is_admin={request.is_admin}")
+    logging.info(f"Received registration request: email={request.email}, is_admin={request.is_admin}")
     
     # If it is an admin registration, verify the invite code
     if request.is_admin:
-        logging.info("检测到管理员注册请求，开始验证邀请码")
+        logging.info("Detected admin registration request, starting invite code verification")
         
         # Try to get the invite code configuration from different sources
         invite_code = config_manager.get_config("INVITE_CODE")
-        logging.info(f"从config_manager获取的INVITE_CODE: {invite_code}")
+        logging.info(f"INVITE_CODE from config_manager: {invite_code}")
         
         # If config_manager does not get the invite code, try to get it directly from the environment variable
         if not invite_code:

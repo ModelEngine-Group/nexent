@@ -1,17 +1,17 @@
 from typing import Dict, Any
 
 
-# 全局追踪字段管理方法
+# Global tracking field management methods
 def add_creation_tracking(data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    添加创建追踪字段（created_by和updated_by）
+    Add creation tracking fields (created_by and updated_by)
 
     Args:
-        data: 要添加字段的数据字典
-        user_id: 当前用户ID
+        data: Data dictionary to add fields to
+        user_id: Current user ID
 
     Returns:
-        Dict[str, Any]: 添加追踪字段后的数据字典
+        Dict[str, Any]: Data dictionary with tracking fields added
     """
     data_copy = data.copy()
     data_copy["created_by"] = user_id
@@ -21,14 +21,14 @@ def add_creation_tracking(data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 def add_update_tracking(data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
-    添加更新追踪字段（updated_by）
+    Add update tracking field (updated_by)
 
     Args:
-        data: 要添加字段的数据字典
-        user_id: 当前用户ID
+        data: Data dictionary to add fields to
+        user_id: Current user ID
 
     Returns:
-        Dict[str, Any]: 添加追踪字段后的数据字典
+        Dict[str, Any]: Data dictionary with tracking fields added
     """
     data_copy = data.copy()
     data_copy["updated_by"] = user_id
