@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -52,15 +53,23 @@ async def test_load_config_success(config_mocks):
     config_mocks['get_user_info'].return_value = (
         "test_user", "test_tenant", "en")
 
-    # Mock service response
-    mock_response = MagicMock()
-    config_mocks['load_config_impl'].return_value = mock_response
+    # Mock service response - use JSON-serializable data instead of MagicMock
+    mock_config = {"app": {"name": "Test App"},
+                   "models": {"model1": {"enabled": True}}}
+    config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
-    assert result == mock_response
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 200
+
+    # Parse the JSON response body to verify content
+    import json
+    response_body = json.loads(result.body.decode())
+    assert response_body["config"] == mock_config
+
     config_mocks['get_user_info'].assert_called_once_with(
         mock_auth_header, mock_request)
     config_mocks['load_config_impl'].assert_called_once_with(
@@ -78,15 +87,22 @@ async def test_load_config_chinese_language(config_mocks):
     config_mocks['get_user_info'].return_value = (
         "test_user", "test_tenant", "zh")
 
-    # Mock service response
-    mock_response = MagicMock()
-    config_mocks['load_config_impl'].return_value = mock_response
+    # Mock service response - use JSON-serializable data
+    mock_config = {"app": {"language": "zh"}, "settings": {"theme": "dark"}}
+    config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
-    assert result == mock_response
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 200
+
+    # Parse the JSON response body to verify content
+    import json
+    response_body = json.loads(result.body.decode())
+    assert response_body["config"] == mock_config
+
     config_mocks['get_user_info'].assert_called_once_with(
         mock_auth_header, mock_request)
     config_mocks['load_config_impl'].assert_called_once_with(
@@ -123,15 +139,22 @@ async def test_save_config_success(config_mocks):
     config_mocks['get_current_user_id'].return_value = (
         "test_user_id", "test_tenant_id")
 
-    # Mock service response
-    mock_response = MagicMock()
-    config_mocks['save_config_impl'].return_value = mock_response
+    # Mock service response (save_config_impl doesn't need to return anything specific)
+    config_mocks['save_config_impl'].return_value = None
 
     # Execute
     result = await save_config(global_config, mock_auth_header)
 
     # Assert
-    assert result == mock_response
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 200
+
+    # Parse the JSON response body to verify content
+    import json
+    response_body = json.loads(result.body.decode())
+    assert response_body["status"] == "saved"
+    assert "Configuration saved successfully" in response_body["message"]
+
     config_mocks['get_current_user_id'].assert_called_once_with(
         mock_auth_header)
     config_mocks['save_config_impl'].assert_called_once_with(

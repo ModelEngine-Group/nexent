@@ -3,7 +3,6 @@ import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
-from fastapi.responses import JSONResponse
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -223,10 +222,8 @@ class TestSaveConfigImpl:
         result = await save_config_impl(config, tenant_id, user_id)
 
         # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
-        assert result.body.decode(
-        ) == '{"message":"Configuration saved successfully","status":"saved"}'
+        # save_config_impl returns None, JSONResponse is created in the endpoint
+        assert result is None
 
         # Verify tenant_config_manager calls
         service_mocks['tenant_config_manager'].load_config.assert_called_once_with(
@@ -272,8 +269,7 @@ class TestSaveConfigImpl:
         result = await save_config_impl(config, tenant_id, user_id)
 
         # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
+        assert result is None
 
         # Verify that no model config handling was done for None model
         service_mocks['get_model_id'].assert_not_called()
@@ -313,8 +309,7 @@ class TestSaveConfigImpl:
         result = await save_config_impl(config, tenant_id, user_id)
 
         # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_save_config_impl_app_config_same_values(self, service_mocks):
@@ -349,8 +344,7 @@ class TestSaveConfigImpl:
         result = await save_config_impl(config, tenant_id, user_id)
 
         # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_save_config_impl_app_config_empty_values(self, service_mocks):
@@ -385,8 +379,7 @@ class TestSaveConfigImpl:
         result = await save_config_impl(config, tenant_id, user_id)
 
         # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_save_config_impl_app_config_new_keys(self, service_mocks):
@@ -418,8 +411,7 @@ class TestSaveConfigImpl:
         result = await save_config_impl(config, tenant_id, user_id)
 
         # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
+        assert result is None
 
         # Verify that set_single_config is called for new keys
         assert service_mocks['tenant_config_manager'].set_single_config.call_count == 2
@@ -478,18 +470,8 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
-
-        # Parse response content
-        import json
-        content = json.loads(result.body.decode())
-        assert "config" in content
-
-        config = content["config"]
-        assert config["app"]["name"] == "Custom App Name"
-        assert config["models"]["llm"]["displayName"] == "Test LLM"
+        assert result["app"]["name"] == "Custom App Name"
+        assert result["models"]["llm"]["displayName"] == "Test LLM"
 
     @pytest.mark.asyncio
     async def test_load_config_impl_chinese(self, service_mocks):
@@ -510,18 +492,9 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
-
-        # Parse response content
-        import json
-        content = json.loads(result.body.decode())
-        config = content["config"]
-
         # Check Chinese default values
-        assert config["app"]["name"] == "Nexent 智能体"
-        assert "Nexent 是一个开源智能体SDK和平台" in config["app"]["description"]
+        assert result["app"]["name"] == "Nexent 智能体"
+        assert "Nexent 是一个开源智能体SDK和平台" in result["app"]["description"]
 
     @pytest.mark.asyncio
     async def test_load_config_impl_with_embedding_dimension(self, service_mocks):
@@ -569,18 +542,9 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
-
-        # Parse response content
-        import json
-        content = json.loads(result.body.decode())
-        config = content["config"]
-
         # Check dimension values
-        assert config["models"]["embedding"]["dimension"] == 1536
-        assert config["models"]["multiEmbedding"]["dimension"] == 768
+        assert result["models"]["embedding"]["dimension"] == 1536
+        assert result["models"]["multiEmbedding"]["dimension"] == 768
 
     @pytest.mark.asyncio
     async def test_load_config_impl_empty_models(self, service_mocks):
@@ -601,15 +565,6 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Assert
-        assert isinstance(result, JSONResponse)
-        assert result.status_code == 200
-
-        # Parse response content
-        import json
-        content = json.loads(result.body.decode())
-        config = content["config"]
-
         # Check that models have empty values
-        assert config["models"]["llm"]["name"] == ""
-        assert config["models"]["embedding"]["name"] == ""
+        assert result["models"]["llm"]["name"] == ""
+        assert result["models"]["embedding"]["name"] == ""
