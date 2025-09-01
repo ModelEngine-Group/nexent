@@ -10,6 +10,16 @@ from utils.config_utils import tenant_config_manager, get_env_key, safe_value, c
 
 logger = logging.getLogger("config_sync_service")
 
+MODEL_CONFIG_MAPPING = {
+    "llm": "LLM_ID",
+    "llmSecondary": "LLM_SECONDARY_ID",
+    "embedding": "EMBEDDING_ID",
+    "multiEmbedding": "MULTI_EMBEDDING_ID",
+    "rerank": "RERANK_ID",
+    "vlm": "VLM_ID",
+    "stt": "STT_ID",
+    "tts": "TTS_ID"
+}
 
 def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id: int, tenant_config_dict: dict) -> None:
     """
@@ -108,108 +118,73 @@ async def save_config_impl(config, tenant_id, user_id):
     )
 
 
-async def load_config_impl(language, tenant_id):
-    llm_model_name = tenant_config_manager.get_model_config(
-        "LLM_ID", tenant_id=tenant_id)
-    llm_secondary_model_name = tenant_config_manager.get_model_config(
-        "LLM_SECONDARY_ID", tenant_id=tenant_id)
-    embedding_model_name = tenant_config_manager.get_model_config(
-        "EMBEDDING_ID", tenant_id=tenant_id)
-    multi_embedding_model_name = tenant_config_manager.get_model_config(
-        "MULTI_EMBEDDING_ID", tenant_id=tenant_id)
-    rerank_model_name = tenant_config_manager.get_model_config(
-        "RERANK_ID", tenant_id=tenant_id)
-    vlm_model_name = tenant_config_manager.get_model_config(
-        "VLM_ID", tenant_id=tenant_id)
-    stt_model_name = tenant_config_manager.get_model_config(
-        "STT_ID", tenant_id=tenant_id)
-    tts_model_name = tenant_config_manager.get_model_config(
-        "TTS_ID", tenant_id=tenant_id)
-    default_app_name = DEFAULT_APP_NAME_ZH if language == "zh" else DEFAULT_APP_NAME_EN
-    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
-    config = {
-        "app": {
-            "name": tenant_config_manager.get_app_config("APP_NAME", tenant_id=tenant_id) or default_app_name,
-            "description": tenant_config_manager.get_app_config("APP_DESCRIPTION",
-                                                                tenant_id=tenant_id) or default_app_description,
-            "icon": {
-                "type": tenant_config_manager.get_app_config("ICON_TYPE", tenant_id=tenant_id) or "preset",
-                "avatarUri": tenant_config_manager.get_app_config("AVATAR_URI",
-                                                                  tenant_id=tenant_id) or DEFAULT_APP_ICON_URL,
-                "customUrl": tenant_config_manager.get_app_config("CUSTOM_ICON_URL", tenant_id=tenant_id) or ""
-            }
-        },
-        "models": {
-            "llm": {
-                "name": get_model_name_from_config(llm_model_name) if llm_model_name else "",
-                "displayName": llm_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": llm_model_name.get("api_key", ""),
-                    "modelUrl": llm_model_name.get("base_url", "")
-                }
-            },
-            "llmSecondary": {
-                "name": get_model_name_from_config(llm_secondary_model_name) if llm_secondary_model_name else "",
-                "displayName": llm_secondary_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": llm_secondary_model_name.get("api_key", ""),
-                    "modelUrl": llm_secondary_model_name.get("base_url", "")
-                }
-            },
-            "embedding": {
-                "name": get_model_name_from_config(embedding_model_name) if embedding_model_name else "",
-                "displayName": embedding_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": embedding_model_name.get("api_key", ""),
-                    "modelUrl": embedding_model_name.get("base_url", "")
-                },
-                "dimension": embedding_model_name.get("max_tokens", 0)
-            },
-            "multiEmbedding": {
-                "name": get_model_name_from_config(
-                    multi_embedding_model_name) if multi_embedding_model_name else "",
-                "displayName": multi_embedding_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": multi_embedding_model_name.get("api_key", ""),
-                    "modelUrl": multi_embedding_model_name.get("base_url", "")
-                },
-                "dimension": multi_embedding_model_name.get("max_tokens", 0)
-            },
-            "rerank": {
-                "name": get_model_name_from_config(rerank_model_name) if rerank_model_name else "",
-                "displayName": rerank_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": rerank_model_name.get("api_key", ""),
-                    "modelUrl": rerank_model_name.get("base_url", "")
-                }
-            },
-            "vlm": {
-                "name": get_model_name_from_config(vlm_model_name) if vlm_model_name else "",
-                "displayName": vlm_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": vlm_model_name.get("api_key", ""),
-                    "modelUrl": vlm_model_name.get("base_url", "")
-                }
-            },
-            "stt": {
-                "name": get_model_name_from_config(stt_model_name) if stt_model_name else "",
-                "displayName": stt_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": stt_model_name.get("api_key", ""),
-                    "modelUrl": stt_model_name.get("base_url", "")
-                }
-            },
-            "tts": {
-                "name": get_model_name_from_config(tts_model_name) if tts_model_name else "",
-                "displayName": tts_model_name.get("display_name", ""),
-                "apiConfig": {
-                    "apiKey": tts_model_name.get("api_key", ""),
-                    "modelUrl": tts_model_name.get("base_url", "")
-                }
+async def load_config_impl(language: str, tenant_id: str):
+    try:
+        config = {
+            "app": _build_app_config(language, tenant_id),
+            "models": _build_models_config(tenant_id)
+        }
+        return JSONResponse(
+            status_code=200,
+            content={"config": config}
+        )
+    except Exception as e:
+        logger.error(f"Failed to load config for tenant {tenant_id}: {e}")
+        raise Exception(f"Failed to load config for tenant {tenant_id}.")
+
+
+def _build_model_config(model_config: dict) -> dict:
+    if not model_config:
+        return {
+            "name": "",
+            "displayName": "",
+            "apiConfig": {
+                "apiKey": "",
+                "modelUrl": ""
             }
         }
+
+    config = {
+        "name": get_model_name_from_config(model_config) if model_config else "",
+        "displayName": model_config.get("display_name", ""),
+        "apiConfig": {
+            "apiKey": model_config.get("api_key", ""),
+            "modelUrl": model_config.get("base_url", "")
+        }
     }
-    return JSONResponse(
-        status_code=200,
-        content={"config": config}
-    )
+
+    if "embedding" in model_config.get("model_type", ""):
+        config["dimension"] = model_config.get("max_tokens", 0)
+
+    return config
+
+
+def _build_app_config(language: str, tenant_id: str) -> dict:
+    default_app_name = DEFAULT_APP_NAME_ZH if language == "zh" else DEFAULT_APP_NAME_EN
+    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
+
+    return {
+        "name": tenant_config_manager.get_app_config("APP_NAME", tenant_id=tenant_id) or default_app_name,
+        "description": tenant_config_manager.get_app_config("APP_DESCRIPTION",
+                                                            tenant_id=tenant_id) or default_app_description,
+        "icon": {
+            "type": tenant_config_manager.get_app_config("ICON_TYPE", tenant_id=tenant_id) or "preset",
+            "avatarUri": tenant_config_manager.get_app_config("AVATAR_URI",
+                                                              tenant_id=tenant_id) or DEFAULT_APP_ICON_URL,
+            "customUrl": tenant_config_manager.get_app_config("CUSTOM_ICON_URL", tenant_id=tenant_id) or ""
+        }
+    }
+
+
+def _build_models_config(tenant_id: str) -> dict:
+    models_config = {}
+
+    for model_key, config_key in MODEL_CONFIG_MAPPING.items():
+        try:
+            model_config = tenant_config_manager.get_model_config(config_key, tenant_id=tenant_id)
+            models_config[model_key] = _build_model_config(model_config)
+        except Exception as e:
+            logger.warning(f"Failed to get config for {config_key}: {e}")
+            models_config[model_key] = _build_model_config({})
+
+    return models_config

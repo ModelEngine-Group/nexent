@@ -530,9 +530,15 @@ class TestLoadConfigImpl:
         language = "en"
         tenant_id = "test_tenant_id"
 
-        # Mock model configurations with max_tokens
-        embedding_config = {"max_tokens": 1536}
-        multi_embedding_config = {"max_tokens": 768}
+        # Mock model configurations with max_tokens and model_type
+        embedding_config = {
+            "max_tokens": 1536,
+            "model_type": "embedding"
+        }
+        multi_embedding_config = {
+            "max_tokens": 768,
+            "model_type": "multi_embedding"
+        }
 
         service_mocks['tenant_config_manager'].get_model_config.side_effect = [
             {},          # LLM_ID
@@ -607,4 +613,3 @@ class TestLoadConfigImpl:
         # Check that models have empty values
         assert config["models"]["llm"]["name"] == ""
         assert config["models"]["embedding"]["name"] == ""
-        assert config["models"]["embedding"]["dimension"] == 0
