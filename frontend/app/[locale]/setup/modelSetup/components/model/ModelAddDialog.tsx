@@ -1,5 +1,5 @@
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from 'antd'
-import { InfoCircleFilled, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, RightOutlined, DownOutlined } from '@ant-design/icons'
+import { InfoCircleFilled, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, RightOutlined, DownOutlined, SettingOutlined } from '@ant-design/icons'
 import { useState, useEffect } from 'react'
 import { ModelType, SingleModelConfig } from '@/types/config'
 import { modelService } from '@/services/modelService'
@@ -54,6 +54,11 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set())
   const [showModelList, setShowModelList] = useState(false)
   const [loadingModelList, setLoadingModelList] = useState(false)
+
+  // Settings modal state
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false)
+  const [selectedModelForSettings, setSelectedModelForSettings] = useState<any>(null)
+  const [modelMaxTokens, setModelMaxTokens] = useState("4096")
 
   // Debug: log model list when it updates
   // useEffect(() => {
@@ -215,7 +220,12 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         type: modelType,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey
       })
-      setModelList(result)
+      // Ensure each model has a default max_tokens value
+      const modelsWithDefaults = result.map((model: any) => ({
+        ...model,
+        max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096
+      }))
+      setModelList(modelsWithDefaults)
       if (!result || result.length === 0) {
         message.error(t('model.dialog.error.noModelsFetched'))
       }
@@ -248,8 +258,10 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
         provider: form.provider,
         type: modelType,
-        max_tokens: parseInt(form.maxTokens) || 0,
-        models: enabledModels
+        models: enabledModels.map((model: any) => ({
+          ...model,
+          max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096
+        }))
       })
       if (result === 200) {
         onSuccess()
@@ -276,6 +288,27 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
       api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey
     })
     return result
+  }
+
+  // Handle settings button click
+  const handleSettingsClick = (model: any) => {
+    setSelectedModelForSettings(model)
+    setModelMaxTokens(model.max_tokens?.toString() || "4096")
+    setSettingsModalVisible(true)
+  }
+
+  // Handle settings save
+  const handleSettingsSave = () => {
+    if (selectedModelForSettings) {
+      // Update the model in the list with new max_tokens
+      setModelList(prev => prev.map(model => 
+        model.id === selectedModelForSettings.id 
+          ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+          : model
+      ))
+    }
+    setSettingsModalVisible(false)
+    setSelectedModelForSettings(null)
   }
 
   // Handle adding a model
@@ -547,7 +580,7 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         )}
 
         {/* Max Tokens */}
-        {!isEmbeddingModel && (
+        {!isEmbeddingModel && !form.isBatchImport && (
           <div>
             <label htmlFor="maxTokens" className="block mb-1 text-sm font-medium text-gray-700">
               {t('model.dialog.label.maxTokens')}
@@ -660,7 +693,20 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
                           </span>
                         )}
                       </div>
-                      <Switch size="small" checked={checked} onChange={toggleSelect} />
+                      <div className="flex items-center space-x-2">
+                        <Tooltip title={t('model.dialog.modelList.tooltip.settings')}>
+                          <Button
+                            type="text"
+                            icon={<SettingOutlined />}
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent switch toggle
+                              handleSettingsClick(model);
+                            }}
+                          />
+                        </Tooltip>
+                        <Switch size="small" checked={checked} onChange={toggleSelect} />
+                      </div>
                     </div>
                   )
                 })
@@ -756,6 +802,29 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
           </Button>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      <Modal
+        title={t('model.dialog.settings.title')}
+        open={settingsModalVisible}
+        onCancel={() => setSettingsModalVisible(false)}
+        onOk={handleSettingsSave}
+        destroyOnClose
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t('model.dialog.settings.label.maxTokens')}
+            </label>
+            <Input
+              type="number"
+              value={modelMaxTokens}
+              onChange={(e) => setModelMaxTokens(e.target.value)}
+              placeholder={t('model.dialog.placeholder.maxTokens')}
+            />
+          </div>
+        </div>
+      </Modal>
     </Modal>
   )
 } 

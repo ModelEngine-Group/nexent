@@ -1,31 +1,30 @@
 import logging
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from .agent_app import router as agent_router
-from .config_sync_app import router as config_sync_router
-from .conversation_management_app import router as conversation_management_router
-from .elasticsearch_app import router as elasticsearch_router
-from .memory_config_app import router as memory_router
-from .me_model_managment_app import router as me_model_manager_router
-from .model_managment_app import router as model_manager_router
-from .image_app import router as proxy_router
-from .file_management_app import router as file_manager_router
-from .voice_app import router as voice_router
-from .tool_config_app import router as tool_config_router
-from .user_management_app import router as user_management_router
-from .mock_user_management_app import router as mock_user_management_router
-from .prompt_app import router as prompt_router
-from .knowledge_summary_app import router as summary_router
-from .tenant_config_app import router as tenant_config_router
-from .remote_mcp_app import router as remote_mcp_router
+from apps.agent_app import router as agent_router
+from apps.config_sync_app import router as config_sync_router
+from apps.conversation_management_app import router as conversation_management_router
+from apps.elasticsearch_app import router as elasticsearch_router
+from apps.file_management_app import router as file_manager_router
+from apps.image_app import router as proxy_router
+from apps.knowledge_summary_app import router as summary_router
+from apps.memory_config_app import router as memory_router
+from apps.me_model_managment_app import router as me_model_manager_router
+from apps.mock_user_management_app import router as mock_user_management_router
+from apps.model_managment_app import router as model_manager_router
+from apps.prompt_app import router as prompt_router
+from apps.remote_mcp_app import router as remote_mcp_router
+from apps.tenant_config_app import router as tenant_config_router
+from apps.tool_config_app import router as tool_config_router
+from apps.user_management_app import router as user_management_router
+from apps.voice_app import router as voice_router
 from consts.const import IS_SPEED_MODE
 
 # Create logger instance
 logger = logging.getLogger("base_app")
-
 app = FastAPI(root_path="/api")
 
 # Add CORS middleware

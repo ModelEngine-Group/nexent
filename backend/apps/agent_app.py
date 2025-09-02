@@ -1,19 +1,30 @@
 import logging
+from http import HTTPStatus
 from typing import Optional
 
-from fastapi import HTTPException, APIRouter, Header, Request, Body
+from fastapi import APIRouter, Body, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+
 from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest
-from services.agent_service import get_agent_info_impl, \
-    get_creating_sub_agent_info_impl, update_agent_info_impl, delete_agent_impl, export_agent_impl, import_agent_impl, \
-    list_all_agent_info_impl, insert_related_agent_impl, run_agent_stream, stop_agent_tasks, get_agent_call_relationship_impl
-from database.agent_db import delete_related_agent
+from services.agent_service import (
+    get_agent_info_impl,
+    get_creating_sub_agent_info_impl,
+    update_agent_info_impl,
+    delete_agent_impl,
+    export_agent_impl,
+    import_agent_impl,
+    list_all_agent_info_impl,
+    insert_related_agent_impl,
+    run_agent_stream,
+    stop_agent_tasks,
+    get_agent_call_relationship_impl,
+    delete_related_agent_impl
+)
 from utils.auth_utils import get_current_user_info, get_current_user_id
 
-
 router = APIRouter(prefix="/agent")
-# Configure logging
 logger = logging.getLogger("agent_app")
+
 
 # Define API route
 @router.post("/run")
@@ -21,11 +32,16 @@ async def agent_run_api(agent_request: AgentRequest, http_request: Request, auth
     """
     Agent execution API endpoint
     """
-    return await run_agent_stream(
-        agent_request=agent_request,
-        http_request=http_request,
-        authorization=authorization
-    )
+    try:
+        return await run_agent_stream(
+            agent_request=agent_request,
+            http_request=http_request,
+            authorization=authorization
+        )
+    except Exception as e:
+        logger.error(f"Agent run error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent run error.")
 
 
 @router.get("/stop/{conversation_id}")
@@ -36,7 +52,8 @@ async def agent_stop_api(conversation_id: int):
     if stop_agent_tasks(conversation_id).get("status") == "success":
         return {"status": "success", "message": "agent run and preprocess tasks stopped successfully"}
     else:
-        raise HTTPException(status_code=404, detail=f"no running agent or preprocess tasks found for conversation_id {conversation_id}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                            detail=f"no running agent or preprocess tasks found for conversation_id {conversation_id}")
 
 
 @router.post("/search_info")
@@ -48,7 +65,9 @@ async def search_agent_info_api(agent_id: int = Body(...), authorization: Option
         _, tenant_id = get_current_user_id(authorization)
         return await get_agent_info_impl(agent_id, tenant_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent search info error: {str(e)}")
+        logger.error(f"Agent search info error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent search info error.")
 
 
 @router.get("/get_creating_sub_agent_id")
@@ -59,7 +78,9 @@ async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(
     try:
         return await get_creating_sub_agent_info_impl(authorization)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent create error: {str(e)}")
+        logger.error(f"Agent create error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent create error.")
 
 
 @router.post("/update")
@@ -71,7 +92,9 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
         await update_agent_info_impl(request, authorization)
         return {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent update error: {str(e)}")
+        logger.error(f"Agent update error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent update error.")
 
 
 @router.delete("")
@@ -83,7 +106,9 @@ async def delete_agent_api(request: AgentIDRequest, authorization: Optional[str]
         await delete_agent_impl(request.agent_id, authorization)
         return {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent delete error: {str(e)}")
+        logger.error(f"Agent delete error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent delete error.")
 
 
 @router.post("/export")
@@ -95,7 +120,9 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
         agent_info_str = await export_agent_impl(request.agent_id, authorization)
         return ConversationResponse(code=0, message="success", data=agent_info_str)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent export error: {str(e)}")
+        logger.error(f"Agent export error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent export error.")
 
 
 @router.post("/import")
@@ -107,7 +134,10 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
         await import_agent_impl(request.agent_info, authorization)
         return {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent import error: {str(e)}")
+        logger.error(f"Agent import error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent import error.")
+
 
 @router.get("/list")
 async def list_all_agent_info_api(authorization: Optional[str] = Header(None), request: Request = None):
@@ -118,7 +148,9 @@ async def list_all_agent_info_api(authorization: Optional[str] = Header(None), r
         _, tenant_id, _ = get_current_user_info(authorization, request)
         return await list_all_agent_info_impl(tenant_id=tenant_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent list error: {str(e)}")
+        logger.error(f"Agent list error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent list error.")
 
 
 @router.post("/related_agent")
@@ -136,9 +168,10 @@ async def related_agent_api(parent_agent_id: int = Body(...),
     except Exception as e:
         logger.error(f"Agent related info error: {str(e)}")
         return JSONResponse(
-            status_code=400,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             content={"message": "Failed to insert relation", "status": "error"}
         )
+
 
 @router.post("/delete_related_agent")
 async def delete_related_agent_api(parent_agent_id: int = Body(...),
@@ -149,9 +182,11 @@ async def delete_related_agent_api(parent_agent_id: int = Body(...),
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
-        return delete_related_agent(parent_agent_id, child_agent_id, tenant_id)
+        return delete_related_agent_impl(parent_agent_id, child_agent_id, tenant_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent related info error: {str(e)}")
+        logger.error(f"Agent related info error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent related info error.")
 
 
 @router.get("/call_relationship/{agent_id}")
@@ -164,4 +199,5 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
         return get_agent_call_relationship_impl(agent_id, tenant_id)
     except Exception as e:
         logger.error(f"Agent call relationship error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get agent call relationship: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Failed to get agent call relationship.")

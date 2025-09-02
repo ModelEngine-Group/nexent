@@ -1,14 +1,15 @@
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 from sqlalchemy.exc import SQLAlchemyError
 
-from .client import get_db_session, as_dict, filter_property
+from .client import as_dict, filter_property, get_db_session
 from .db_models import McpRecord
 
 
 def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str) -> bool:
     """
     Create a new MCP record
-    
+
     :param mcp_data: Dictionary containing MCP information
     :param tenant_id: Tenant ID
     :param user_id: User ID
@@ -24,20 +25,21 @@ def create_mcp_record(mcp_data: Dict[str, Any], tenant_id: str, user_id: str) ->
                 "updated_by": user_id,
                 "delete_flag": "N"
             })
-            
+
             new_mcp = McpRecord(**filter_property(mcp_data, McpRecord))
             session.add(new_mcp)
             session.flush()
-            
+
             return True
         except SQLAlchemyError:
             session.rollback()
     return False
 
+
 def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str) -> bool:
     """
     Delete a MCP record by name and URL
-    
+
     :param mcp_name: MCP name
     :param mcp_server: MCP server URL
     :param tenant_id: Tenant ID
@@ -57,6 +59,7 @@ def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id:
         except SQLAlchemyError:
             session.rollback()
     return False
+
 
 def update_mcp_status_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str, status: bool) -> bool:
     """
@@ -82,10 +85,11 @@ def update_mcp_status_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id:
             session.rollback()
     return False
 
+
 def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get all MCP records for a tenant
-    
+
     :param tenant_id: Tenant ID
     :return: List of MCP records
     """
@@ -95,13 +99,13 @@ def get_mcp_records_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
             McpRecord.delete_flag != 'Y'
         ).order_by(McpRecord.create_time.desc()).all()
 
-        
         return [as_dict(record) for record in mcp_records]
+
 
 def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
     """
     Get MCP server address by name and tenant ID
-    
+
     :param mcp_name: MCP name
     :param tenant_id: Tenant ID
     :return: MCP server address, empty string if not found
@@ -113,7 +117,7 @@ def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
                 McpRecord.tenant_id == tenant_id,
                 McpRecord.delete_flag != 'Y'
             ).first()
-            
+
             return mcp_record.mcp_server if mcp_record else ""
         except SQLAlchemyError:
             return ""
@@ -122,7 +126,7 @@ def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
 def check_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
     """
     Check if MCP name already exists for a tenant
-    
+
     :param mcp_name: MCP name
     :param tenant_id: Tenant ID
     :return: True if name exists, False otherwise
@@ -134,7 +138,7 @@ def check_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
                 McpRecord.tenant_id == tenant_id,
                 McpRecord.delete_flag != 'Y'
             ).first()
-            
+
             return mcp_record is not None
         except SQLAlchemyError:
             return False

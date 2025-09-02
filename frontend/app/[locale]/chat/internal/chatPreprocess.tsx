@@ -1,15 +1,19 @@
-import { AgentStep } from '@/types/chat'
-import { conversationService } from '@/services/conversationService';
-import { storageService } from '@/services/storageService';
-import { FilePreview } from "@/app/chat/components/chatInput"
+import { AgentStep } from "@/types/chat";
+import { conversationService } from "@/services/conversationService";
+import { storageService } from "@/services/storageService";
+import { FilePreview } from "@/app/chat/components/chatInput";
 
 // Step ID Counter
-const stepIdCounter = {current: 0};
+const stepIdCounter = { current: 0 };
 
 /**
  * Parse agent steps, convert text content to structured steps
  */
-export const parseAgentSteps = (content: string, defaultExpanded: boolean = false, t: any): AgentStep[] => {
+export const parseAgentSteps = (
+  content: string,
+  defaultExpanded: boolean = false,
+  t: any
+): AgentStep[] => {
   const steps: AgentStep[] = [];
   const stepRegex = /<step[^>]*>([\s\S]*?)<\/step>/g;
   let match;
@@ -28,17 +32,21 @@ export const parseAgentSteps = (content: string, defaultExpanded: boolean = fals
       code: { content: "", expanded: false },
       output: { content: "", expanded: false },
       metrics: "",
-      contents: []
+      contents: [],
     };
 
     if (contentMatch) {
-      step.contents = [{
-        id: `content-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        type: "model_output",
-        content: contentMatch[1],
-        expanded: false,
-        timestamp: Date.now()
-      }];
+      step.contents = [
+        {
+          id: `content-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 7)}`,
+          type: "model_output",
+          content: contentMatch[1],
+          expanded: false,
+          timestamp: Date.now(),
+        },
+      ];
     }
 
     steps.push(step);
@@ -58,17 +66,17 @@ export const parseAgentSteps = (content: string, defaultExpanded: boolean = fals
  * @returns Preprocessed query and processing status
  */
 export const preprocessAttachments = async (
-  content: string, 
-  attachments: FilePreview[], 
+  content: string,
+  attachments: FilePreview[],
   signal: AbortSignal,
   onProgress: (data: any) => void,
   t: any,
   conversationId?: number
-): Promise<{ 
-  finalQuery: string, 
-  success: boolean, 
-  error?: string,
-  fileDescriptions?: Record<string, string>
+): Promise<{
+  finalQuery: string;
+  success: boolean;
+  error?: string;
+  fileDescriptions?: Record<string, string>;
 }> => {
   if (attachments.length === 0) {
     return { finalQuery: content, success: true };
@@ -78,12 +86,13 @@ export const preprocessAttachments = async (
     // Call file preprocessing interface
     const preProcessReader = await conversationService.preprocessFiles(
       content,
-      attachments.map(attachment => attachment.file),
+      attachments.map((attachment) => attachment.file),
       conversationId,
       signal
     );
 
-    if (!preProcessReader) throw new Error(t("chatPreprocess.preprocessResponseEmpty"));
+    if (!preProcessReader)
+      throw new Error(t("chatPreprocess.preprocessResponseEmpty"));
 
     const preProcessDecoder = new TextDecoder();
     let preProcessBuffer = "";
@@ -106,12 +115,16 @@ export const preprocessAttachments = async (
           const jsonStr = line.substring(5).trim();
           try {
             const jsonData = JSON.parse(jsonStr);
-            
+
             // Callback progress information
             onProgress(jsonData);
 
             // If it is file processing information, save file description
-            if (jsonData.type === "file_processed" && jsonData.filename && jsonData.description) {
+            if (
+              jsonData.type === "file_processed" &&
+              jsonData.filename &&
+              jsonData.description
+            ) {
               fileDescriptions[jsonData.filename] = jsonData.description;
             }
 
@@ -120,7 +133,11 @@ export const preprocessAttachments = async (
               finalQuery = jsonData.final_query;
             }
           } catch (e) {
-            console.error(t("chatPreprocess.parsingPreprocessDataFailed"), e, jsonStr);
+            console.error(
+              t("chatPreprocess.parsingPreprocessDataFailed"),
+              e,
+              jsonStr
+            );
           }
         }
       }
@@ -129,10 +146,10 @@ export const preprocessAttachments = async (
     return { finalQuery, success: true, fileDescriptions };
   } catch (error) {
     console.error(t("chatPreprocess.filePreprocessingFailed"), error);
-    return { 
-      finalQuery: content, 
-      success: false, 
-      error: error instanceof Error ? (error as Error).message : String(error)
+    return {
+      finalQuery: content,
+      success: false,
+      error: error instanceof Error ? (error as Error).message : String(error),
     };
   }
 };
@@ -153,7 +170,7 @@ export const createThinkingStep = (t: any, message?: string): AgentStep => {
     code: { content: "", expanded: false },
     output: { content: "", expanded: false },
     metrics: "",
-    contents: []
+    contents: [],
   };
 };
 
@@ -164,19 +181,20 @@ export const createThinkingStep = (t: any, message?: string): AgentStep => {
  * @returns File ID
  */
 export const handleFileUpload = (
-  file: File, 
+  file: File,
   setFileUrls: React.Dispatch<React.SetStateAction<Record<string, string>>>,
   t: any
 ): string => {
-  const fileId = `file-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-  
+  const fileId = `file-${Date.now()}-${Math.random()
+    .toString(36)
+    .substring(7)}`;
+
   // If it is not an image type, create a file preview URL
-  if (!file.type.startsWith('image/')) {
+  if (!file.type.startsWith("image/")) {
     const fileUrl = URL.createObjectURL(file);
-    setFileUrls(prev => ({...prev, [fileId]: fileUrl}));
+    setFileUrls((prev) => ({ ...prev, [fileId]: fileUrl }));
   }
-  
-  console.log(t("chatPreprocess.uploadingFile", { name: file.name, type: file.type, size: file.size }));
+
   return fileId;
 };
 
@@ -184,9 +202,7 @@ export const handleFileUpload = (
  * Handle image upload
  * @param file Uploaded image file
  */
-export const handleImageUpload = (file: File, t: any): void => {
-  console.log(t("chatPreprocess.uploadingImage", { name: file.name, type: file.type, size: file.size }));
-};
+export const handleImageUpload = (file: File, t: any): void => {};
 
 /**
  * Upload attachments to storage service
@@ -204,19 +220,19 @@ export const uploadAttachments = async (
   if (attachments.length === 0) {
     return { uploadedFileUrls: {}, objectNames: {} };
   }
-  
+
   try {
     // Upload all files to storage service
     const uploadResult = await storageService.uploadFiles(
-      attachments.map(attachment => attachment.file)
+      attachments.map((attachment) => attachment.file)
     );
 
     // Handle upload results
     const uploadedFileUrls: Record<string, string> = {};
     const objectNames: Record<string, string> = {};
-    
+
     if (uploadResult.success_count > 0) {
-      uploadResult.results.forEach(result => {
+      uploadResult.results.forEach((result) => {
         if (result.success) {
           uploadedFileUrls[result.file_name] = result.url;
           objectNames[result.file_name] = result.object_name;
@@ -227,10 +243,10 @@ export const uploadAttachments = async (
     return { uploadedFileUrls, objectNames };
   } catch (error) {
     console.error(t("chatPreprocess.fileUploadFailed"), error);
-    return { 
+    return {
       uploadedFileUrls: {},
       objectNames: {},
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 };
@@ -247,12 +263,15 @@ export const createMessageAttachments = (
   uploadedFileUrls: Record<string, string>,
   fileUrls: Record<string, string>
 ): { type: string; name: string; size: number; url?: string }[] => {
-  return attachments.map(attachment => ({
+  return attachments.map((attachment) => ({
     type: attachment.type,
     name: attachment.file.name,
     size: attachment.file.size,
-    url: uploadedFileUrls[attachment.file.name] ||
-         (attachment.type === 'image' ? attachment.previewUrl : fileUrls[attachment.id])
+    url:
+      uploadedFileUrls[attachment.file.name] ||
+      (attachment.type === "image"
+        ? attachment.previewUrl
+        : fileUrls[attachment.id]),
   }));
 };
 
@@ -266,14 +285,14 @@ export const cleanupAttachmentUrls = (
   fileUrls: Record<string, string>
 ): void => {
   // Clean up attachment preview URLs
-  attachments.forEach(attachment => {
+  attachments.forEach((attachment) => {
     if (attachment.previewUrl) {
       URL.revokeObjectURL(attachment.previewUrl);
     }
   });
-  
+
   // Clean up other file URLs
-  Object.values(fileUrls).forEach(url => {
+  Object.values(fileUrls).forEach((url) => {
     URL.revokeObjectURL(url);
   });
-}; 
+};

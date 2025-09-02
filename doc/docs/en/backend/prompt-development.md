@@ -99,13 +99,7 @@ Located in the `utils/` directory:
    
    These templates help generate efficient and clear prompts for different agent types.
 
-2. **Prompt Fine-tuning Templates**
-   - `prompt_fine_tune.yaml` - Chinese version
-   - `prompt_fine_tune_en.yaml` - English version
-   
-   Templates for fine-tuning and optimizing existing prompts.
-
-3. **Title Generation Templates**
+2. **Title Generation Templates**
    - `generate_title.yaml` - Chinese version
    - `generate_title_en.yaml` - English version
    Templates for generating titles for dialogs. 

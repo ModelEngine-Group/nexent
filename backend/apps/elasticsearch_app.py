@@ -1,14 +1,14 @@
-from typing import Dict, List, Any, Optional
 import logging
+from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, Query, Body, Path, Depends, APIRouter, Header
-from consts.model import IndexingResponse
-
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
-from services.elasticsearch_service import ElasticSearchService, get_es_core, get_embedding_model
+
+from consts.model import IndexingResponse
+from database.knowledge_db import delete_knowledge_record, get_knowledge_record
+from services.elasticsearch_service import ElasticSearchService, get_embedding_model, get_es_core
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
-from database.knowledge_db import get_knowledge_record, delete_knowledge_record
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -31,34 +31,42 @@ async def check_knowledge_base_exist(
 
         # Case A: Orphan in ES only (exists in ES, missing in PG)
         if es_exists and not pg_record:
-            logger.warning(f"Detected orphan knowledge base '{index_name}' – present in ES, absent in PG. Deleting ES index only.")
+            logger.warning(
+                f"Detected orphan knowledge base '{index_name}' – present in ES, absent in PG. Deleting ES index only.")
             try:
                 es_core.delete_index(index_name)
                 # Clean up Redis records related to this index to avoid stale tasks
                 try:
                     from services.redis_service import get_redis_service
                     redis_service = get_redis_service()
-                    redis_cleanup = redis_service.delete_knowledgebase_records(index_name)
-                    logger.debug(f"Redis cleanup for orphan index '{index_name}': {redis_cleanup['total_deleted']} records removed")
+                    redis_cleanup = redis_service.delete_knowledgebase_records(
+                        index_name)
+                    logger.debug(
+                        f"Redis cleanup for orphan index '{index_name}': {redis_cleanup['total_deleted']} records removed")
                 except Exception as redis_error:
-                    logger.warning(f"Redis cleanup failed for orphan index '{index_name}': {str(redis_error)}")
+                    logger.warning(
+                        f"Redis cleanup failed for orphan index '{index_name}': {str(redis_error)}")
                 return {
                     "status": "error_cleaning_orphans",
                     "action": "cleaned_es"
                 }
             except Exception as e:
-                logger.error(f"Failed to delete orphan ES index '{index_name}': {str(e)}")
+                logger.error(
+                    f"Failed to delete orphan ES index '{index_name}': {str(e)}")
                 # Still return orphan status so frontend knows it requires attention
                 return {"status": "error_cleaning_orphans", "error": True}
 
         # Case B: Orphan in PG only (missing in ES, present in PG)
         if not es_exists and pg_record:
-            logger.warning(f"Detected orphan knowledge base '{index_name}' – present in PG, absent in ES. Deleting PG record only.")
+            logger.warning(
+                f"Detected orphan knowledge base '{index_name}' – present in PG, absent in ES. Deleting PG record only.")
             try:
-                delete_knowledge_record({"index_name": index_name, "user_id": user_id})
+                delete_knowledge_record(
+                    {"index_name": index_name, "user_id": user_id})
                 return {"status": "error_cleaning_orphans", "action": "cleaned_pg"}
             except Exception as e:
-                logger.error(f"Failed to delete orphan PG record for '{index_name}': {str(e)}")
+                logger.error(
+                    f"Failed to delete orphan PG record for '{index_name}': {str(e)}")
                 return {"status": "error_cleaning_orphans", "error": True}
 
         # Case C: Index/record both absent -> name is available
@@ -73,14 +81,17 @@ async def check_knowledge_base_exist(
             return {"status": "exists_in_other_tenant"}
 
     except Exception as e:
-        logger.error(f"Error checking knowledge base existence for '{index_name}': {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error checking existence for index: {str(e)}")
+        logger.error(
+            f"Error checking knowledge base existence for '{index_name}': {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error checking existence for index: {str(e)}")
 
 
 @router.post("/{index_name}")
 def create_new_index(
         index_name: str = Path(..., description="Name of the index to create"),
-        embedding_dim: Optional[int] = Query(None, description="Dimension of the embedding vectors"),
+        embedding_dim: Optional[int] = Query(
+            None, description="Dimension of the embedding vectors"),
         es_core: ElasticSearchCore = Depends(get_es_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -89,7 +100,8 @@ def create_new_index(
         user_id, tenant_id = get_current_user_id(authorization)
         return ElasticSearchService.create_index(index_name, embedding_dim, es_core, user_id, tenant_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating index: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error creating index: {str(e)}")
 
 
 @router.delete("/{index_name}")
@@ -103,33 +115,38 @@ async def delete_index(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         # Call the centralized full deletion service
-        result = await ElasticSearchService.full_delete_knowledge_base(index_name, es_core, user_id, tenant_id)
+        result = await ElasticSearchService.full_delete_knowledge_base(index_name, es_core, user_id)
         return result
     except Exception as e:
-        logger.error(f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error deleting index: {str(e)}")
+        logger.error(
+            f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error deleting index: {str(e)}")
 
 
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
-        include_stats: bool = Query(False, description="Whether to include index stats"),
+        include_stats: bool = Query(
+            False, description="Whether to include index stats"),
         es_core: ElasticSearchCore = Depends(get_es_core),
         authorization: Optional[str] = Header(None),
 ):
     """List all user indices with optional stats"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        return ElasticSearchService.list_indices(pattern, include_stats, user_id, tenant_id, es_core)
+        return ElasticSearchService.list_indices(pattern, include_stats, tenant_id, es_core)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error get index: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error get index: {str(e)}")
 
 
 # Document Operations
 @router.post("/{index_name}/documents", response_model=IndexingResponse)
 def create_index_documents(
         index_name: str = Path(..., description="Name of the index"),
-        data: List[Dict[str, Any]] = Body(..., description="Document List to process"),
+        data: List[Dict[str, Any]
+                   ] = Body(..., description="Document List to process"),
         es_core: ElasticSearchCore = Depends(get_es_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -144,7 +161,8 @@ def create_index_documents(
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
-        raise HTTPException(status_code=500, detail=f"Error indexing documents: {error_msg}")
+        raise HTTPException(
+            status_code=500, detail=f"Error indexing documents: {error_msg}")
 
 
 @router.get("/{index_name}/files")
@@ -163,54 +181,59 @@ async def get_index_files(
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
-        raise HTTPException(status_code=500, detail=f"Error indexing documents: {error_msg}")
+        raise HTTPException(
+            status_code=500, detail=f"Error indexing documents: {error_msg}")
 
 
 @router.delete("/{index_name}/documents")
 def delete_documents(
         index_name: str = Path(..., description="Name of the index"),
-        path_or_url: str = Query(..., description="Path or URL of documents to delete"),
+        path_or_url: str = Query(...,
+                                 description="Path or URL of documents to delete"),
         es_core: ElasticSearchCore = Depends(get_es_core)
 ):
     """Delete documents by path or URL and clean up related Redis records"""
     try:
         # First delete the documents using existing service
-        result = ElasticSearchService.delete_documents(index_name, path_or_url, es_core)
+        result = ElasticSearchService.delete_documents(
+            index_name, path_or_url, es_core)
 
         # Then clean up Redis records related to this specific document
         try:
             redis_service = get_redis_service()
-            redis_cleanup_result = redis_service.delete_document_records(index_name, path_or_url)
+            redis_cleanup_result = redis_service.delete_document_records(
+                index_name, path_or_url)
 
             # Add Redis cleanup info to the result
             result["redis_cleanup"] = redis_cleanup_result
 
             # Update the message to include Redis cleanup info
-            original_message = result.get("message", "Documents deleted successfully")
-            result["message"] = (f"{original_message}. "
-                               f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                               f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                               f"{redis_cleanup_result['cache_keys_deleted']} cache keys).")
+            original_message = result.get(
+                "message", "Documents deleted successfully")
+            result["message"] = (
+                f"{original_message}. "
+                f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
+                f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
+                f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
+            )
 
             if redis_cleanup_result.get("errors"):
                 result["redis_warnings"] = redis_cleanup_result["errors"]
 
         except Exception as redis_error:
-            # Don't fail the whole operation if Redis cleanup fails
-            # Just log the error and add a warning to the response
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Redis cleanup failed for document {path_or_url} in index {index_name}: {str(redis_error)}")
-
+            logger.warning(
+                f"Redis cleanup failed for document {path_or_url} in index {index_name}: {str(redis_error)}")
             result["redis_cleanup_error"] = str(redis_error)
-            original_message = result.get("message", "Documents deleted successfully")
-            result["message"] = (f"{original_message}, "
-                               f"but Redis cleanup encountered an error: {str(redis_error)}")
+            original_message = result.get(
+                "message", "Documents deleted successfully")
+            result[
+                "message"] = f"{original_message}, but Redis cleanup encountered an error: {str(redis_error)}"
 
         return result
 
     except HTTPException as e:
-        raise HTTPException(status_code=500, detail=f"Error delete indexing documents: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error delete indexing documents: {e}")
 
 
 # Health check

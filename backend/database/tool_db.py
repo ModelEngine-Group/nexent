@@ -15,7 +15,8 @@ def create_tool(tool_info):
     """
     with get_db_session() as session:
         # Create a new ToolInstance
-        new_tool_instance = ToolInstance(**filter_property(tool_info, ToolInstance))
+        new_tool_instance = ToolInstance(
+            **filter_property(tool_info, ToolInstance))
         session.add(new_tool_instance)
 
 
@@ -29,7 +30,8 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str):
     :return: Created or updated ToolInstance object
     """
 
-    tool_info_dict = tool_info.__dict__ | {"tenant_id": tenant_id, "user_id": user_id}
+    tool_info_dict = tool_info.__dict__ | {
+        "tenant_id": tenant_id, "user_id": user_id}
 
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
@@ -98,7 +100,8 @@ def query_tools_by_ids(tool_id_list: List[int]):
     :return: List of ToolInfo objects
     """
     with get_db_session() as session:
-        tools = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(tool_id_list)).filter(ToolInfo.delete_flag != 'Y').all()
+        tools = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(
+            tool_id_list)).filter(ToolInfo.delete_flag != 'Y').all()
         return [as_dict(tool) for tool in tools]
 
 
@@ -128,7 +131,8 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
             # get all existing tools (including complete information)
             existing_tools = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y',
                                                             ToolInfo.author == tenant_id).all()
-            existing_tool_dict = {f"{tool.name}&{tool.source}": tool for tool in existing_tools}
+            existing_tool_dict = {
+                f"{tool.name}&{tool.source}": tool for tool in existing_tools}
             # set all tools to unavailable
             for tool in existing_tools:
                 tool.is_available = False
@@ -137,7 +141,8 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                 filtered_tool_data = filter_property(tool.__dict__, ToolInfo)
 
                 # check if the tool name is valid
-                is_available = True if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
+                is_available = True if re.match(
+                    r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
 
                 if f"{tool.name}&{tool.source}" in existing_tool_dict:
                     # by tool name and source to update the existing tool
@@ -148,7 +153,8 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
                     existing_tool.is_available = is_available
                 else:
                     # create new tool
-                    filtered_tool_data.update({"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
+                    filtered_tool_data.update(
+                        {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                     new_tool = ToolInfo(**filtered_tool_data)
                     session.add(new_tool)
             session.flush()
@@ -160,7 +166,8 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
 def add_tool_field(tool_info):
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
-        query = session.query(ToolInfo).filter(ToolInfo.tool_id == tool_info["tool_id"])
+        query = session.query(ToolInfo).filter(
+            ToolInfo.tool_id == tool_info["tool_id"])
         tool = query.first()
 
         # add tool params
@@ -170,7 +177,7 @@ def add_tool_field(tool_info):
 
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-        
+
         # 合并tool_info和tool_dict
         tool_info.update(tool_dict)
         return tool_info
@@ -179,10 +186,12 @@ def add_tool_field(tool_info):
 def search_tools_for_sub_agent(agent_id, tenant_id):
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
-        query = session.query(ToolInstance).filter(ToolInstance.agent_id == agent_id,
-                                                   ToolInstance.tenant_id == tenant_id,
-                                                   ToolInstance.delete_flag != 'Y',
-                                                   ToolInstance.enabled == True)
+        query = session.query(ToolInstance).filter(
+            ToolInstance.agent_id == agent_id,
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.delete_flag != 'Y',
+            ToolInstance.enabled == True
+        )
 
         tool_instances = query.all()
         tools_list = []
@@ -199,13 +208,17 @@ def check_tool_is_available(tool_id_list: List[int]):
     Check if the tool is available
     """
     with get_db_session() as session:
-        tools = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(tool_id_list), ToolInfo.delete_flag != 'Y').all()
+        tools = session.query(ToolInfo).filter(ToolInfo.tool_id.in_(
+            tool_id_list), ToolInfo.delete_flag != 'Y').all()
         return [tool.is_available for tool in tools]
 
 
 def delete_tools_by_agent_id(agent_id, tenant_id, user_id):
     with get_db_session() as session:
-        session.query(ToolInstance).filter(ToolInstance.agent_id == agent_id,
-                                            ToolInstance.tenant_id == tenant_id).update(
-            {ToolInstance.delete_flag: 'Y', 'updated_by': user_id})
+        session.query(ToolInstance).filter(
+            ToolInstance.agent_id == agent_id,
+            ToolInstance.tenant_id == tenant_id
+        ).update({
+            ToolInstance.delete_flag: 'Y', 'updated_by': user_id
+        })
         session.commit()

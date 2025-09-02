@@ -85,4 +85,3 @@ def get_external_id_by_internal(
             return str(record.external_id) if record and record.external_id is not None else None
     except Exception as e:
         raise e
-

@@ -1,9 +1,7 @@
 import os
 import logging
-import inspect
 import importlib.util
-from typing import Callable, Dict, List, Any, Tuple, Optional
-from consts.model import ToolInfo
+from typing import Callable, List, Any, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +11,7 @@ LANGCHAIN_TOOLS_DIR = os.path.abspath(os.path.join(
     "tool_collection",
     "langchain"
 ))
+
 
 def _is_langchain_tool(obj) -> bool:
     from langchain_core.tools import BaseTool
@@ -25,22 +24,22 @@ def discover_langchain_modules(
 ) -> List[Tuple[Any, str]]:
     """
     Discover and import Python modules that may contain LangChain tools from a directory.
-    
+
     Args:
         directory: Path to directory containing Python modules to scan
                   Defaults to the standard LangChain tools directory
         filter_func: Optional function to filter discovered objects
                      If provided, only objects where filter_func(obj) is True are returned
-    
+
     Returns:
         List of tuples (discovered_object, source_filename) that pass the filter function
     """
     discovered_objects = []
-    
+
     if not os.path.isdir(directory):
         logger.warning(f"Directory not found: {directory}")
         return discovered_objects
-    
+
     for filename in os.listdir(directory):
         # Skip non-python files and dunder modules
         if not filename.endswith(".py") or filename.startswith("__"):
@@ -50,7 +49,8 @@ def discover_langchain_modules(
         module_name = f"langchain_tool_{filename[:-3]}"  # unique name
 
         try:
-            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            spec = importlib.util.spec_from_file_location(
+                module_name, module_path)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
@@ -64,12 +64,12 @@ def discover_langchain_modules(
                     continue
 
                 obj = getattr(module, attr_name)
-                
+
                 # Apply filter if provided, otherwise include all objects
                 if filter_func(obj):
                     discovered_objects.append((obj, filename))
-                    
+
         except Exception as e:
             logger.error(f"Error processing module {filename}: {e}")
-    
+
     return discovered_objects

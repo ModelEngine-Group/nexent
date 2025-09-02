@@ -5,6 +5,7 @@ from database.db_models import AgentInfo, ToolInstance, AgentRelation
 
 logger = logging.getLogger("agent_db")
 
+
 def search_agent_info_by_agent_id(agent_id: int, tenant_id: str):
     """
     Search agent info by agent_id
@@ -22,6 +23,7 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str):
         agent_dict = as_dict(agent)
 
         return agent_dict
+
 
 def search_agent_id_by_agent_name(agent_name: str, tenant_id: str):
     """
@@ -65,7 +67,7 @@ def query_sub_agents_id_list(main_agent_id: int, tenant_id: str):
         return [relation.selected_agent_id for relation in relations]
 
 
-def create_agent(agent_info, tenant_id: str, user_id:str):
+def create_agent(agent_info, tenant_id: str, user_id: str):
     """
     Create a new agent in the database.
     :param agent_info: Dictionary containing agent information
@@ -73,11 +75,13 @@ def create_agent(agent_info, tenant_id: str, user_id:str):
     :param user_id:
     :return: Created agent object
     """
-    agent_info.update({"tenant_id": tenant_id,
-                        "created_by": user_id,
-                        "updated_by": user_id,
-                        "model_name": "main_model",
-                        "max_steps": 5})
+    agent_info.update({
+        "tenant_id": tenant_id,
+        "created_by": user_id,
+        "updated_by": user_id,
+        "model_name": "main_model",
+        "max_steps": 5
+    })
     with get_db_session() as session:
         new_agent = AgentInfo(**filter_property(agent_info, AgentInfo))
         new_agent.delete_flag = 'N'
@@ -85,6 +89,7 @@ def create_agent(agent_info, tenant_id: str, user_id:str):
         session.flush()
 
         return as_dict(new_agent)
+
 
 def update_agent(agent_id, agent_info, tenant_id, user_id):
     """
@@ -110,6 +115,7 @@ def update_agent(agent_id, agent_info, tenant_id, user_id):
             setattr(agent, key, value)
         agent.updated_by = user_id
 
+
 def delete_agent_by_id(agent_id, tenant_id: str, user_id: str):
     """
     Delete an agent in the database.
@@ -127,24 +133,29 @@ def delete_agent_by_id(agent_id, tenant_id: str, user_id: str):
             {ToolInstance.delete_flag: 'Y', 'updated_by': user_id})
         session.commit()
 
+
 def query_all_agent_info_by_tenant_id(tenant_id: str):
     """
     Query all agent info by tenant id
     """
     with get_db_session() as session:
-        agents = session.query(AgentInfo).filter(AgentInfo.tenant_id == tenant_id, 
+        agents = session.query(AgentInfo).filter(AgentInfo.tenant_id == tenant_id,
                                                  AgentInfo.delete_flag != 'Y').order_by(AgentInfo.create_time.desc()).all()
         return [as_dict(agent) for agent in agents]
 
-def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str)->bool:
+
+def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str) -> bool:
     try:
-        relation_info = {"parent_agent_id": parent_agent_id,
-                        "selected_agent_id": child_agent_id,
-                        "tenant_id": tenant_id,
-                        "created_by": tenant_id,
-                        "updated_by": tenant_id}
+        relation_info = {
+            "parent_agent_id": parent_agent_id,
+            "selected_agent_id": child_agent_id,
+            "tenant_id": tenant_id,
+            "created_by": tenant_id,
+            "updated_by": tenant_id
+        }
         with get_db_session() as session:
-            new_relation = AgentRelation(**filter_property(relation_info, AgentRelation))
+            new_relation = AgentRelation(
+                **filter_property(relation_info, AgentRelation))
             session.add(new_relation)
             session.flush()
             return True
@@ -152,7 +163,8 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         logger.error(f"Failed to insert related agent: {str(e)}")
         return False
 
-def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str)->bool:
+
+def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str) -> bool:
     try:
         with get_db_session() as session:
             session.query(AgentRelation).filter(AgentRelation.parent_agent_id == parent_agent_id,
@@ -163,6 +175,7 @@ def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
     except Exception as e:
         logger.error(f"Failed to delete related agent: {str(e)}")
         return False
+
 
 def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str):
     with get_db_session() as session:

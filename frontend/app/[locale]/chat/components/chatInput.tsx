@@ -1,18 +1,16 @@
-import { useState, useRef, useEffect } from "react"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useState, useRef, useEffect } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
-  Paperclip,
-  Mic,
-  MicOff,
-  Square,
-  X,
-  AlertCircle,
-} from "lucide-react"
-import { conversationService } from '@/services/conversationService'
-import { Textarea } from "@/components/ui/textarea"
-import { useConfig } from "@/hooks/useConfig"
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Paperclip, Mic, MicOff, Square, X, AlertCircle } from "lucide-react";
+import { conversationService } from "@/services/conversationService";
+import { Textarea } from "@/components/ui/textarea";
+import { useConfig } from "@/hooks/useConfig";
 import {
   AiFillFileImage,
   AiFillFilePdf,
@@ -24,21 +22,32 @@ import {
   AiFillHtml5,
   AiFillCode,
   AiFillFileUnknown,
-  AiOutlineUpload
-} from "react-icons/ai"
-import { extractColorsFromUri } from "@/lib/avatar"
-import { useTranslation } from "react-i18next"
-import { AgentSelector } from "@/components/ui/agentSelector"
+  AiOutlineUpload,
+} from "react-icons/ai";
+import { extractColorsFromUri } from "@/lib/avatar";
+import { useTranslation } from "react-i18next";
+import { AgentSelector } from "@/components/ui/agentSelector";
 
 // Image viewer component
-function ImageViewer({ src, alt, onClose }: { src: string, alt: string, onClose: () => void }) {
-  const { t } = useTranslation('common');
+function ImageViewer({
+  src,
+  alt,
+  onClose,
+}: {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("common");
   return (
     <div
       className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
       onClick={onClose}
     >
-      <div className="relative max-w-[90%] max-h-[90%]" onClick={e => e.stopPropagation()}>
+      <div
+        className="relative max-w-[90%] max-h-[90%]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <img
           src={src}
           alt={alt}
@@ -49,7 +58,10 @@ function ImageViewer({ src, alt, onClose }: { src: string, alt: string, onClose:
           className="absolute -top-4 -right-4 bg-white p-1 rounded-full shadow-md hover:bg-white transition-colors"
           title={t("chatInput.close")}
         >
-          <X size={16} className="text-gray-600 hover:text-red-500 transition-colors" />
+          <X
+            size={16}
+            className="text-gray-600 hover:text-red-500 transition-colors"
+          />
         </button>
       </div>
     </div>
@@ -57,13 +69,13 @@ function ImageViewer({ src, alt, onClose }: { src: string, alt: string, onClose:
 }
 
 // File preview component
-function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
+function FileViewer({ file, onClose }: { file: File; onClose: () => void }) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fileType = file.type;
   const extension = getFileExtension(file.name);
-  const { t } = useTranslation('common');
+  const { t } = useTranslation("common");
 
   // Read file content
   useEffect(() => {
@@ -109,13 +121,29 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
   // Determine if it is a text file
   const isTextFile = (type: string, ext: string) => {
     const textTypes = [
-      'text/plain', 'text/html', 'text/css', 'text/javascript',
-      'application/json', 'application/xml', 'text/markdown'
+      "text/plain",
+      "text/html",
+      "text/css",
+      "text/javascript",
+      "application/json",
+      "application/xml",
+      "text/markdown",
     ];
 
     const textExtensions = [
-      'txt', 'html', 'htm', 'css', 'js', 'ts', 'jsx', 'tsx',
-      'json', 'xml', 'md', 'markdown', 'csv'
+      "txt",
+      "html",
+      "htm",
+      "css",
+      "js",
+      "ts",
+      "jsx",
+      "tsx",
+      "json",
+      "xml",
+      "md",
+      "markdown",
+      "csv",
     ];
 
     return textTypes.includes(type) || textExtensions.includes(ext);
@@ -124,7 +152,11 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
   // Render file content
   const renderFileContent = () => {
     if (loading) {
-      return <div className="text-center py-8">{t("chatInput.loadingFileContent")}</div>;
+      return (
+        <div className="text-center py-8">
+          {t("chatInput.loadingFileContent")}
+        </div>
+      );
     }
 
     if (error) {
@@ -132,24 +164,28 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
     }
 
     if (content === null) {
-      return <div className="text-center py-8">{t("chatInput.cannotPreviewFileType")}</div>;
-    }
-
-    if (fileType.startsWith('image/')) {
       return (
-        <div className="flex justify-center">
-          <img src={content} alt={file.name} className="max-w-full max-h-[70vh] object-contain" />
+        <div className="text-center py-8">
+          {t("chatInput.cannotPreviewFileType")}
         </div>
       );
     }
 
-    if (fileType === 'application/pdf' || extension === 'pdf') {
+    if (fileType.startsWith("image/")) {
       return (
-        <iframe
-          src={content}
-          className="w-full h-[70vh]"
-          title={file.name}
-        />
+        <div className="flex justify-center">
+          <img
+            src={content}
+            alt={file.name}
+            className="max-w-full max-h-[70vh] object-contain"
+          />
+        </div>
+      );
+    }
+
+    if (fileType === "application/pdf" || extension === "pdf") {
+      return (
+        <iframe src={content} className="w-full h-[70vh]" title={file.name} />
       );
     }
 
@@ -165,10 +201,10 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
     // Files that cannot be previewed
     return (
       <div className="text-center py-16">
-        <div className="flex justify-center mb-4">
-          {getFileIcon(file)}
-        </div>
-        <p className="text-gray-600">{t("chatInput.thisFileTypeCannotBePreviewed")}</p>
+        <div className="flex justify-center mb-4">{getFileIcon(file)}</div>
+        <p className="text-gray-600">
+          {t("chatInput.thisFileTypeCannotBePreviewed")}
+        </p>
       </div>
     );
   };
@@ -180,7 +216,7 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
     >
       <div
         className="relative bg-white rounded-lg p-6 max-w-[90%] max-h-[90%] w-[800px]"
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-medium text-lg flex items-center gap-2">
@@ -196,9 +232,7 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
           </button>
         </div>
 
-        <div className="border rounded-md">
-          {renderFileContent()}
-        </div>
+        <div className="border rounded-md">{renderFileContent()}</div>
       </div>
     </div>
   );
@@ -208,7 +242,7 @@ function FileViewer({ file, onClose }: { file: File, onClose: () => void }) {
 export interface FilePreview {
   id: string;
   file: File;
-  type: 'image' | 'file';
+  type: "image" | "file";
   fileType?: string;
   extension?: string;
   previewUrl?: string;
@@ -216,7 +250,9 @@ export interface FilePreview {
 
 // Get file extension
 const getFileExtension = (filename: string): string => {
-  return filename.slice(((filename.lastIndexOf(".") - 1) >>> 0) + 2).toLowerCase();
+  return filename
+    .slice(((filename.lastIndexOf(".") - 1) >>> 0) + 2)
+    .toLowerCase();
 };
 
 // Format file size
@@ -237,51 +273,51 @@ const getFileIcon = (file: File) => {
   const iconSize = 32;
 
   // Image file
-  if (fileType.startsWith('image/')) {
+  if (fileType.startsWith("image/")) {
     return <AiFillFileImage size={iconSize} color="#8e44ad" />;
   }
 
   // Identify by extension
   switch (extension) {
     // Document files
-    case 'pdf':
+    case "pdf":
       return <AiFillFilePdf size={iconSize} color="#e74c3c" />;
-    case 'doc':
-    case 'docx':
+    case "doc":
+    case "docx":
       return <AiFillFileWord size={iconSize} color="#3498db" />;
-    case 'txt':
+    case "txt":
       return <AiFillFileText size={iconSize} color="#7f8c8d" />;
-    case 'md':
+    case "md":
       return <AiFillFileMarkdown size={iconSize} color="#34495e" />;
 
     // Table files
-    case 'xls':
-    case 'xlsx':
-    case 'csv':
+    case "xls":
+    case "xlsx":
+    case "csv":
       return <AiFillFileExcel size={iconSize} color="#27ae60" />;
 
     // Demo files
-    case 'ppt':
-    case 'pptx':
+    case "ppt":
+    case "pptx":
       return <AiFillFilePpt size={iconSize} color="#e67e22" />;
 
     // Code files
-    case 'html':
-    case 'htm':
+    case "html":
+    case "htm":
       return <AiFillHtml5 size={iconSize} color="#e67e22" />;
-    case 'css':
-    case 'js':
-    case 'ts':
-    case 'jsx':
-    case 'tsx':
-    case 'php':
-    case 'py':
-    case 'java':
-    case 'c':
-    case 'cpp':
-    case 'cs':
+    case "css":
+    case "js":
+    case "ts":
+    case "jsx":
+    case "tsx":
+    case "php":
+    case "py":
+    case "java":
+    case "c":
+    case "cpp":
+    case "cs":
       return <AiFillCode size={iconSize} color="#f39c12" />;
-    case 'json':
+    case "json":
       return <AiFillCode size={iconSize} color="#f1c40f" />;
 
     // Default file icon
@@ -295,21 +331,23 @@ const MAX_FILE_COUNT = 50;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // Single file maximum 5MB
 
 interface ChatInputProps {
-  input: string
-  isLoading: boolean
-  isStreaming?: boolean
-  isInitialMode?: boolean
-  onInputChange: (value: string) => void
-  onSend: () => void
-  onStop: () => void
-  onKeyDown: (e: React.KeyboardEvent) => void
-  onRecordingStatusChange?: (status: "idle" | "recording" | "connecting" | "error") => void
-  onFileUpload?: (file: File) => void
-  onImageUpload?: (file: File) => void
-  attachments?: FilePreview[]
-  onAttachmentsChange?: (attachments: FilePreview[]) => void
-  selectedAgentId?: number | null
-  onAgentSelect?: (agentId: number | null) => void
+  input: string;
+  isLoading: boolean;
+  isStreaming?: boolean;
+  isInitialMode?: boolean;
+  onInputChange: (value: string) => void;
+  onSend: () => void;
+  onStop: () => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  onRecordingStatusChange?: (
+    status: "idle" | "recording" | "connecting" | "error"
+  ) => void;
+  onFileUpload?: (file: File) => void;
+  onImageUpload?: (file: File) => void;
+  attachments?: FilePreview[];
+  onAttachmentsChange?: (attachments: FilePreview[]) => void;
+  selectedAgentId?: number | null;
+  onAgentSelect?: (agentId: number | null) => void;
 }
 
 export function ChatInput({
@@ -327,20 +365,25 @@ export function ChatInput({
   attachments = [],
   onAttachmentsChange,
   selectedAgentId = null,
-  onAgentSelect
+  onAgentSelect,
 }: ChatInputProps) {
-  const [isRecording, setIsRecording] = useState(false)
-  const [recordingStatus, setRecordingStatus] = useState<"idle" | "recording" | "connecting" | "error">("idle")
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const socketRef = useRef<WebSocket | null>(null)
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingStatus, setRecordingStatus] = useState<
+    "idle" | "recording" | "connecting" | "error"
+  >("idle");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [viewingImage, setViewingImage] = useState<{ src: string, alt: string } | null>(null);
+  const [viewingImage, setViewingImage] = useState<{
+    src: string;
+    alt: string;
+  } | null>(null);
   const [viewingFile, setViewingFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dropAreaRef = useRef<HTMLDivElement>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showStopTooltip, setShowStopTooltip] = useState(false);
-  const { t } = useTranslation('common');
+  const { t } = useTranslation("common");
 
   // Use the configuration hook to get the application avatar
   const { appConfig, getAppAvatarUrl } = useConfig();
@@ -364,7 +407,10 @@ export function ChatInput({
       e.stopPropagation();
 
       // Check if it really left the drop area
-      if (dropAreaRef.current && !dropAreaRef.current.contains(e.relatedTarget as Node)) {
+      if (
+        dropAreaRef.current &&
+        !dropAreaRef.current.contains(e.relatedTarget as Node)
+      ) {
         setIsDragging(false);
       }
     };
@@ -392,17 +438,26 @@ export function ChatInput({
 
     if (dropArea) {
       // Add event listeners
-      dropArea.addEventListener('dragover', handleDragOver as EventListener);
-      dropArea.addEventListener('dragleave', handleDragLeave as EventListener);
-      dropArea.addEventListener('dragexit', handleDragExit as EventListener);
-      dropArea.addEventListener('drop', handleDrop as EventListener);
+      dropArea.addEventListener("dragover", handleDragOver as EventListener);
+      dropArea.addEventListener("dragleave", handleDragLeave as EventListener);
+      dropArea.addEventListener("dragexit", handleDragExit as EventListener);
+      dropArea.addEventListener("drop", handleDrop as EventListener);
 
       // Cleanup function
       return () => {
-        dropArea.removeEventListener('dragover', handleDragOver as EventListener);
-        dropArea.removeEventListener('dragleave', handleDragLeave as EventListener);
-        dropArea.removeEventListener('dragexit', handleDragExit as EventListener);
-        dropArea.removeEventListener('drop', handleDrop as EventListener);
+        dropArea.removeEventListener(
+          "dragover",
+          handleDragOver as EventListener
+        );
+        dropArea.removeEventListener(
+          "dragleave",
+          handleDragLeave as EventListener
+        );
+        dropArea.removeEventListener(
+          "dragexit",
+          handleDragExit as EventListener
+        );
+        dropArea.removeEventListener("drop", handleDrop as EventListener);
       };
     }
   }, []);
@@ -422,7 +477,7 @@ export function ChatInput({
 
         for (let i = 0; i < items.length; i++) {
           // Process all file types, not just images
-          if (items[i].kind === 'file') {
+          if (items[i].kind === "file") {
             hasFiles = true;
 
             // Get the file object from the clipboard
@@ -430,8 +485,8 @@ export function ChatInput({
             if (file) {
               // Generate a file name for the pasted file (if there is no name)
               let fileName = file.name;
-              if (!fileName || fileName === '') {
-                const fileExt = file.type.split('/').pop() || '';
+              if (!fileName || fileName === "") {
+                const fileExt = file.type.split("/").pop() || "";
                 fileName = `pasted-file-${Date.now()}.${fileExt}`;
               }
 
@@ -450,17 +505,17 @@ export function ChatInput({
     };
 
     // Only listen to the paste event of the textarea
-    textarea.addEventListener('paste', handlePaste);
+    textarea.addEventListener("paste", handlePaste);
 
     // Cleanup function
     return () => {
-      textarea.removeEventListener('paste', handlePaste);
+      textarea.removeEventListener("paste", handlePaste);
     };
   }, [onImageUpload, onFileUpload]);
-  
+
   // Modify keyboard event handling
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
 
       // Check if there is input content, if there is no content, do not send
@@ -470,7 +525,7 @@ export function ChatInput({
 
       // Check if agent is selected
       if (!selectedAgentId) {
-        setErrorMessage(t('agentSelector.pleaseSelectAgent'));
+        setErrorMessage(t("agentSelector.pleaseSelectAgent"));
         setTimeout(() => setErrorMessage(null), 3000);
         return;
       }
@@ -478,7 +533,10 @@ export function ChatInput({
       // If recording, stop recording first and then send the message
       if (isRecording && mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        if (
+          socketRef.current &&
+          socketRef.current.readyState === WebSocket.OPEN
+        ) {
           socketRef.current.close();
         }
         setIsRecording(false);
@@ -499,7 +557,7 @@ export function ChatInput({
     if (!textarea) return;
 
     // Reset height
-    textarea.style.height = '60px';
+    textarea.style.height = "60px";
 
     // Get the scroll height as the new height
     const scrollHeight = textarea.scrollHeight;
@@ -522,210 +580,198 @@ export function ChatInput({
   const toggleRecording = async () => {
     if (isRecording) {
       // Stop recording
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.stop()
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state === "recording"
+      ) {
+        mediaRecorderRef.current.stop();
       }
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.close()
+      if (
+        socketRef.current &&
+        socketRef.current.readyState === WebSocket.OPEN
+      ) {
+        socketRef.current.close();
       }
-      setIsRecording(false)
-      setRecordingStatus("idle")
+      setIsRecording(false);
+      setRecordingStatus("idle");
     } else {
       let stream: MediaStream | null = null;
       let audioContext: AudioContext | null = null;
       let audioSource: MediaStreamAudioSourceNode | null = null;
       let processor: ScriptProcessorNode | null = null;
-      
+
       try {
-        setRecordingStatus("connecting")
-        console.log('🎤 Starting voice recording...')
+        setRecordingStatus("connecting");
 
         // 1. Request microphone permission
-        const audioConstraints = conversationService.stt.getAudioConstraints()
-        console.log('📋 Audio constraints:', audioConstraints)
-        
-        stream = await navigator.mediaDevices.getUserMedia(audioConstraints)
-        console.log('✅ Microphone access granted')
+        const audioConstraints = conversationService.stt.getAudioConstraints();
+
+        stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
 
         // 2. Create audio processing chain
-        audioContext = new AudioContext(conversationService.stt.getAudioContextOptions())
-        console.log('🔊 AudioContext created, state:', audioContext.state)
-        
+        audioContext = new AudioContext(
+          conversationService.stt.getAudioContextOptions()
+        );
+
         // Resume AudioContext if suspended (browser policy)
-        if (audioContext.state === 'suspended') {
-          await audioContext.resume()
-          console.log('▶️ AudioContext resumed')
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
         }
 
-        audioSource = audioContext.createMediaStreamSource(stream)
-        processor = audioContext.createScriptProcessor(4096, 1, 1)
+        audioSource = audioContext.createMediaStreamSource(stream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        audioSource.connect(processor)
-        processor.connect(audioContext.destination)
-        console.log('🔗 Audio processing chain connected')
+        audioSource.connect(processor);
+        processor.connect(audioContext.destination);
 
         // 3. Create MediaRecorder
-        const mediaRecorder = new MediaRecorder(stream)
-        mediaRecorderRef.current = mediaRecorder
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
 
         // 4. Create WebSocket connection
-        const ws = conversationService.stt.createWebSocket()
-        socketRef.current = ws
-        console.log('🌐 WebSocket connection initiated')
+        const ws = conversationService.stt.createWebSocket();
+        socketRef.current = ws;
 
         ws.onopen = () => {
-          console.log('✅ WebSocket connected:', t("chatInput.wsConnectionEstablished"))
-          setIsRecording(true)
-          setRecordingStatus("recording")
+          setIsRecording(true);
+          setRecordingStatus("recording");
           try {
-            mediaRecorder.start(250)
-            console.log('🎬 Recording started successfully')
+            mediaRecorder.start(250);
           } catch (error) {
-            console.error('❌ Failed to start MediaRecorder:', error)
-            setRecordingStatus("error")
-            setIsRecording(false)
-            cleanup()
+            console.error("❌ Failed to start MediaRecorder:", error);
+            setRecordingStatus("error");
+            setIsRecording(false);
+            cleanup();
           }
-        }
+        };
 
         ws.onmessage = (event) => {
           try {
-            const response = JSON.parse(event.data)
+            const response = JSON.parse(event.data);
 
             if (response.result && response.result.text) {
-              onInputChange(response.result.text)
+              onInputChange(response.result.text);
             } else if (response.text) {
-              onInputChange(response.text)
-            } else if (response.status === 'ready') {
-              console.log('🎯 STT service ready')
+              onInputChange(response.text);
+            } else if (response.status === "ready") {
             } else if (response.error) {
-              console.error('❌ STT service error:', response.error)
-              setRecordingStatus("error")
-              setIsRecording(false)
-              cleanup()
+              console.error("❌ STT service error:", response.error);
+              setRecordingStatus("error");
+              setIsRecording(false);
+              cleanup();
             }
           } catch (error) {
-            console.error('⚠️ Failed to parse STT response:', error)
+            console.error("⚠️ Failed to parse STT response:", error);
           }
-        }
+        };
 
         ws.onerror = (error) => {
-          console.error('❌ WebSocket error:', error)
-          setRecordingStatus("error")
-          setIsRecording(false)
-          cleanup()
-        }
+          console.error("❌ WebSocket error:", error);
+          setRecordingStatus("error");
+          setIsRecording(false);
+          cleanup();
+        };
 
         ws.onclose = (event) => {
-          console.log('🔌 WebSocket closed:', event.code, event.reason)
-          setIsRecording(false)
-          setRecordingStatus("idle")
-          cleanup()
-        }
+          setIsRecording(false);
+          setRecordingStatus("idle");
+          cleanup();
+        };
 
         processor.onaudioprocess = (e) => {
           try {
             if (ws.readyState === WebSocket.OPEN) {
-              const inputData = e.inputBuffer.getChannelData(0)
-              const pcmData = conversationService.stt.processAudioData(inputData)
+              const inputData = e.inputBuffer.getChannelData(0);
+              const pcmData =
+                conversationService.stt.processAudioData(inputData);
 
               if (pcmData.length > 0) {
-                ws.send(pcmData.buffer)
+                ws.send(pcmData.buffer);
               }
-            } else {
-              console.warn(`⚠️ WebSocket not ready, state: ${ws.readyState}`)
             }
           } catch (error) {
-            console.error('❌ Error in audio processing:', error)
-            setRecordingStatus("error")
-            setIsRecording(false)
-            cleanup()
+            console.error("❌ Error in audio processing:", error);
+            setRecordingStatus("error");
+            setIsRecording(false);
+            cleanup();
           }
-        }
+        };
 
         mediaRecorder.onstop = () => {
-          console.log('⏹️ Recording stopped')
-          cleanup()
-          setIsRecording(false)
-          setRecordingStatus("idle")
-        }
+          cleanup();
+          setIsRecording(false);
+          setRecordingStatus("idle");
+        };
 
         function cleanup() {
-          console.log('🧹 Cleaning up audio resources...')
-          console.trace('📍 Cleanup called from:')
-          
           if (stream) {
-            stream.getTracks().forEach(track => {
-              track.stop()
-              console.log('🛑 Audio track stopped')
-            })
+            stream.getTracks().forEach((track) => {
+              track.stop();
+            });
           }
-          
+
           if (audioSource) {
             try {
-              audioSource.disconnect()
-              console.log('🔌 Audio source disconnected')
-            } catch (e) {
-              console.warn('⚠️ Error disconnecting audio source:', e)
-            }
+              audioSource.disconnect();
+            } catch (e) {}
           }
-          
+
           if (processor) {
             try {
-              processor.disconnect()
-              console.log('🔌 Processor disconnected')
-            } catch (e) {
-              console.warn('⚠️ Error disconnecting processor:', e)
-            }
+              processor.disconnect();
+            } catch (e) {}
           }
-          
-          if (audioContext && audioContext.state !== 'closed') {
+
+          if (audioContext && audioContext.state !== "closed") {
             try {
-              audioContext.close()
-              console.log('🔌 AudioContext closed')
-            } catch (e) {
-              console.warn('⚠️ Error closing AudioContext:', e)
-            }
+              audioContext.close();
+            } catch (e) {}
           }
 
           if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.close()
-            console.log('🔌 WebSocket closed by cleanup')
+            ws.close();
           }
         }
-
       } catch (error) {
-        console.error('❌ Failed to start recording:', error)
-        setRecordingStatus("error")
-        
+        console.error("❌ Failed to start recording:", error);
+        setRecordingStatus("error");
+
         // Manual cleanup in case of initialization failure
         if (stream) {
-          stream.getTracks().forEach(track => track.stop())
+          stream.getTracks().forEach((track) => track.stop());
         }
-        if (audioContext && audioContext.state !== 'closed') {
-          audioContext.close()
+        if (audioContext && audioContext.state !== "closed") {
+          audioContext.close();
         }
       }
     }
-  }
+  };
 
   // Clean up resources when the component is unloaded
   useEffect(() => {
     return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.stop()
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state === "recording"
+      ) {
+        mediaRecorderRef.current.stop();
       }
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.close()
+      if (
+        socketRef.current &&
+        socketRef.current.readyState === WebSocket.OPEN
+      ) {
+        socketRef.current.close();
       }
-    }
-  }, [])
+    };
+  }, []);
 
   // Handle multiple file uploads
   const handleFilesUpload = (files: File[]) => {
     // Check file number limit
     if (attachments.length + files.length > MAX_FILE_COUNT) {
-      setErrorMessage(t("chatInput.fileCountExceedsLimit", { count: MAX_FILE_COUNT }));
+      setErrorMessage(
+        t("chatInput.fileCountExceedsLimit", { count: MAX_FILE_COUNT })
+      );
       setTimeout(() => setErrorMessage(null), 3000);
       return;
     }
@@ -737,7 +783,9 @@ export function ChatInput({
     for (const file of files) {
       // Check the single file size limit
       if (file.size > MAX_FILE_SIZE) {
-        setErrorMessage(t("chatInput.fileSizeExceedsLimit", { name: file.name }));
+        setErrorMessage(
+          t("chatInput.fileSizeExceedsLimit", { name: file.name })
+        );
         setTimeout(() => setErrorMessage(null), 3000);
         return;
       }
@@ -746,17 +794,23 @@ export function ChatInput({
       const extension = getFileExtension(file.name);
 
       // Supported image file types
-      const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension);
+      const isImage =
+        file.type.startsWith("image/") ||
+        ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension);
 
       // Supported document file types
-      const isDocument = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(extension) ||
-                        file.type === 'application/pdf' ||
-                        file.type.includes('officedocument');
+      const isDocument =
+        ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(
+          extension
+        ) ||
+        file.type === "application/pdf" ||
+        file.type.includes("officedocument");
 
       // Supported text file types
-      const isSupportedTextFile = ['md', 'markdown', 'txt'].includes(extension) ||
-                                 file.type === 'text/csv' ||
-                                 file.type === 'text/plain';
+      const isSupportedTextFile =
+        ["md", "markdown", "txt"].includes(extension) ||
+        file.type === "text/csv" ||
+        file.type === "text/plain";
 
       if (isImage || isDocument || isSupportedTextFile) {
         // Create a preview URL for images
@@ -765,10 +819,10 @@ export function ChatInput({
         newAttachments.push({
           id: fileId,
           file,
-          type: isImage ? 'image' : 'file',
+          type: isImage ? "image" : "file",
           fileType: file.type,
           extension,
-          previewUrl
+          previewUrl,
         });
 
         // Call specific upload callback based on file type
@@ -779,7 +833,9 @@ export function ChatInput({
         }
       } else {
         // Show error information
-        setErrorMessage(t("chatInput.unsupportedFileType", { name: file.name }));
+        setErrorMessage(
+          t("chatInput.unsupportedFileType", { name: file.name })
+        );
         setTimeout(() => setErrorMessage(null), 3000);
         return;
       }
@@ -800,13 +856,13 @@ export function ChatInput({
     handleFilesUpload(Array.from(files));
 
     // Clear the value of the input
-    e.target.value = '';
+    e.target.value = "";
   };
 
   // Clean up preview URLs
   useEffect(() => {
     return () => {
-      attachments.forEach(attachment => {
+      attachments.forEach((attachment) => {
         if (attachment.previewUrl) {
           URL.revokeObjectURL(attachment.previewUrl);
         }
@@ -818,19 +874,19 @@ export function ChatInput({
   const handleRemoveAttachment = (id: string) => {
     if (onAttachmentsChange) {
       // Find the attachment to delete, for cleaning up URLs
-      const attachment = attachments.find(a => a.id === id);
+      const attachment = attachments.find((a) => a.id === id);
       if (attachment?.previewUrl) {
         URL.revokeObjectURL(attachment.previewUrl);
       }
 
       // Filter out the deleted attachment
-      onAttachmentsChange(attachments.filter(a => a.id !== id));
+      onAttachmentsChange(attachments.filter((a) => a.id !== id));
     }
   };
 
   // Handle viewing images
   const handleViewImage = (attachment: FilePreview) => {
-    if (attachment.type === 'image' && attachment.file) {
+    if (attachment.type === "image" && attachment.file) {
       // To ensure the preview URL is valid, create a new blob URL
       // This avoids using a cached URL that may have expired
       const fileReader = new FileReader();
@@ -839,7 +895,7 @@ export function ChatInput({
           const dataUrl = e.target.result.toString();
           setViewingImage({
             src: dataUrl,
-            alt: attachment.file.name || t("chatInput.image")
+            alt: attachment.file.name || t("chatInput.image"),
           });
         }
       };
@@ -858,10 +914,11 @@ export function ChatInput({
 
     return (
       <div className="px-5 pb-2 pt-3">
-        <div className="max-h-[156px] overflow-y-auto pr-1"
+        <div
+          className="max-h-[156px] overflow-y-auto pr-1"
           style={{
-            scrollbarWidth: 'thin' as 'thin',
-            scrollbarColor: '#d1d5db transparent'
+            scrollbarWidth: "thin" as "thin",
+            scrollbarColor: "#d1d5db transparent",
           }}
         >
           <div className="flex flex-wrap gap-2 items-start">
@@ -871,7 +928,7 @@ export function ChatInput({
                 className="relative group rounded-md border border-slate-200 bg-white shadow-sm hover:shadow transition-all duration-200 w-[190px] mb-1"
               >
                 <div className="relative p-2 h-[52px] flex items-center">
-                  {attachment.type === 'image' ? (
+                  {attachment.type === "image" ? (
                     <div className="flex items-center gap-3 w-full">
                       <div
                         className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md cursor-pointer"
@@ -887,7 +944,10 @@ export function ChatInput({
                         )}
                       </div>
                       <div className="flex-1 overflow-hidden">
-                        <span className="text-sm truncate block max-w-[110px] font-medium" title={attachment.file.name}>
+                        <span
+                          className="text-sm truncate block max-w-[110px] font-medium"
+                          title={attachment.file.name}
+                        >
                           {attachment.file.name || t("chatInput.image")}
                         </span>
                         <span className="text-xs text-gray-500">
@@ -907,7 +967,10 @@ export function ChatInput({
                         className="flex-1 overflow-hidden cursor-pointer"
                         onClick={() => handleViewFile(attachment.file)}
                       >
-                        <span className="text-sm truncate block max-w-[110px] font-medium" title={attachment.file.name}>
+                        <span
+                          className="text-sm truncate block max-w-[110px] font-medium"
+                          title={attachment.file.name}
+                        >
                           {attachment.file.name}
                         </span>
                         <span className="text-xs text-gray-500">
@@ -944,7 +1007,9 @@ export function ChatInput({
               <AiOutlineUpload className="h-5 w-5 text-blue-500" />
             </div>
           </div>
-          <h3 className="text-base font-medium mb-1 text-blue-700">{t("chatInput.dragAndDropFilesHere")}</h3>
+          <h3 className="text-base font-medium mb-1 text-blue-700">
+            {t("chatInput.dragAndDropFilesHere")}
+          </h3>
           <p className="text-xs text-blue-600">
             {t("chatInput.supportedFileFormats")}
           </p>
@@ -965,139 +1030,193 @@ export function ChatInput({
     );
   };
 
-  const renderInputArea = () => <>
-    {renderDragOverlay()}
-    {renderAttachments()}
-    <div className="max-h-[300px] overflow-y-auto pt-3" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
-      <Textarea
-        ref={textareaRef}
-        value={input}
-        onChange={(e) => onInputChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={t("chatInput.sendMessageTo", { appName: appConfig.appName })}
-        className="px-5 pb-3 pt-0 text-xl resize-none bg-slate-100 border-0 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 w-full"
-        rows={1}
+  const renderInputArea = () => (
+    <>
+      {renderDragOverlay()}
+      {renderAttachments()}
+      <div
+        className="max-h-[300px] overflow-y-auto pt-3"
         style={{
-          minHeight: '60px',
-          overflow: 'auto',
-          fontSize: '18px'
+          scrollbarWidth: "thin",
+          scrollbarColor: "#d1d5db transparent",
         }}
-      />
-    </div>
-    <div className="h-12 bg-slate-100 relative">
-      {/* Agent selector on the left */}
-      <div className="absolute left-5 top-[40%] -translate-y-1/2">
-        <AgentSelector
-          selectedAgentId={selectedAgentId}
-          onAgentSelect={onAgentSelect || (() => {})}
-          disabled={isLoading || isStreaming}
-          isInitialMode={isInitialMode}
+      >
+        <Textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => onInputChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={t("chatInput.sendMessageTo", {
+            appName: appConfig.appName,
+          })}
+          className="px-5 pb-3 pt-0 text-xl resize-none bg-slate-100 border-0 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 w-full"
+          rows={1}
+          style={{
+            minHeight: "60px",
+            overflow: "auto",
+            fontSize: "18px",
+          }}
         />
       </div>
-      
-      <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
-        {/* Voice to text button */}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                onClick={toggleRecording}
-                disabled={recordingStatus === 'connecting' || isStreaming}
-              >
-                {isRecording ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {isRecording ? t("chatInput.stopRecording") : t("chatInput.startRecording")}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+      <div className="h-12 bg-slate-100 relative">
+        {/* Agent selector on the left */}
+        <div className="absolute left-5 top-[40%] -translate-y-1/2">
+          <AgentSelector
+            selectedAgentId={selectedAgentId}
+            onAgentSelect={onAgentSelect || (() => {})}
+            disabled={isLoading || isStreaming}
+            isInitialMode={isInitialMode}
+          />
+        </div>
 
-        {/* Upload file button */}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                onClick={() => document.getElementById('file-upload-regular')?.click()}
-              >
-                <Paperclip className="h-5 w-5" />
-                <Input
-                  type="file"
-                  id="file-upload-regular"
-                  className="hidden"
-                  onChange={handleFileUpload}
-                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.tsv,.md,.markdown,.txt"
-                  multiple
-                />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {t("chatInput.uploadFiles")}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
-        {isStreaming ? (
+        <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
+          {/* Voice to text button */}
           <TooltipProvider>
-            <Tooltip open={showStopTooltip} onOpenChange={setShowStopTooltip}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={onStop}
+                  variant="ghost"
                   size="icon"
-                  className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
+                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+                  onClick={toggleRecording}
+                  disabled={recordingStatus === "connecting" || isStreaming}
                 >
-                  <Square className="h-5 w-5" />
+                  {isRecording ? (
+                    <MicOff className="h-5 w-5" />
+                  ) : (
+                    <Mic className="h-5 w-5" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {t("chatInput.stopGenerating")}
+                {isRecording
+                  ? t("chatInput.stopRecording")
+                  : t("chatInput.startRecording")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-        ) : (
-          <Button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading || !selectedAgentId}
-            size="icon"
-            className={`h-10 w-10 ${hasUnsupportedFiles || !selectedAgentId ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600'} text-white rounded-full flex items-center justify-center`}
-            title={hasUnsupportedFiles ? t("chatInput.unsupportedFileTypeSimple") : !selectedAgentId ? t('agentSelector.pleaseSelectAgent') : t("chatInput.send")}
-          >
-            <svg width="14" height="16" viewBox="0 0 14 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" clipRule="evenodd" d="M7 16c-.595 0-1.077-.462-1.077-1.032V1.032C5.923.462 6.405 0 7 0s1.077.462 1.077 1.032v13.936C8.077 15.538 7.595 16 7 16z" fill="currentColor"></path><path fillRule="evenodd" clipRule="evenodd" d="M.315 7.44a1.002 1.002 0 0 1 0-1.46L6.238.302a1.11 1.11 0 0 1 1.523 0c.421.403.421 1.057 0 1.46L1.838 7.44a1.11 1.11 0 0 1-1.523 0z" fill="currentColor"></path><path fillRule="evenodd" clipRule="evenodd" d="M13.685 7.44a1.11 1.11 0 0 1-1.523 0L6.238 1.762a1.002 1.002 0 0 1 0-1.46 1.11 1.11 0 0 1 1.523 0l5.924 5.678c.42.403.42 1.056 0 1.46z" fill="currentColor"></path></svg>
-          </Button>
-        )}
+
+          {/* Upload file button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+                  onClick={() =>
+                    document.getElementById("file-upload-regular")?.click()
+                  }
+                >
+                  <Paperclip className="h-5 w-5" />
+                  <Input
+                    type="file"
+                    id="file-upload-regular"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.tsv,.md,.markdown,.txt"
+                    multiple
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("chatInput.uploadFiles")}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {isStreaming ? (
+            <TooltipProvider>
+              <Tooltip open={showStopTooltip} onOpenChange={setShowStopTooltip}>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={onStop}
+                    size="icon"
+                    className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
+                  >
+                    <Square className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("chatInput.stopGenerating")}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <Button
+              onClick={handleSend}
+              disabled={!input.trim() || isLoading || !selectedAgentId}
+              size="icon"
+              className={`h-10 w-10 ${
+                hasUnsupportedFiles || !selectedAgentId
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-blue-500 hover:bg-blue-600"
+              } text-white rounded-full flex items-center justify-center`}
+              title={
+                hasUnsupportedFiles
+                  ? t("chatInput.unsupportedFileTypeSimple")
+                  : !selectedAgentId
+                  ? t("agentSelector.pleaseSelectAgent")
+                  : t("chatInput.send")
+              }
+            >
+              <svg
+                width="14"
+                height="16"
+                viewBox="0 0 14 16"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  fillRule="evenodd"
+                  clipRule="evenodd"
+                  d="M7 16c-.595 0-1.077-.462-1.077-1.032V1.032C5.923.462 6.405 0 7 0s1.077.462 1.077 1.032v13.936C8.077 15.538 7.595 16 7 16z"
+                  fill="currentColor"
+                ></path>
+                <path
+                  fillRule="evenodd"
+                  clipRule="evenodd"
+                  d="M.315 7.44a1.002 1.002 0 0 1 0-1.46L6.238.302a1.11 1.11 0 0 1 1.523 0c.421.403.421 1.057 0 1.46L1.838 7.44a1.11 1.11 0 0 1-1.523 0z"
+                  fill="currentColor"
+                ></path>
+                <path
+                  fillRule="evenodd"
+                  clipRule="evenodd"
+                  d="M13.685 7.44a1.11 1.11 0 0 1-1.523 0L6.238 1.762a1.002 1.002 0 0 1 0-1.46 1.11 1.11 0 0 1 1.523 0l5.924 5.678c.42.403.42 1.056 0 1.46z"
+                  fill="currentColor"
+                ></path>
+              </svg>
+            </Button>
+          )}
+        </div>
       </div>
-    </div>
-    <div className="mt-1 flex items-center justify-center text-xs text-muted-foreground">
-      <div>
-        {recordingStatus === 'recording' ? (
-          <span className="text-red-500">{t("chatInput.recording")}</span>
-        ) : recordingStatus === 'error' ? (
-          <span className="text-red-500">{t("chatInput.recordingError")}</span>
-        ) : (
-          ""
-        )}
+      <div className="mt-1 flex items-center justify-center text-xs text-muted-foreground">
+        <div>
+          {recordingStatus === "recording" ? (
+            <span className="text-red-500">{t("chatInput.recording")}</span>
+          ) : recordingStatus === "error" ? (
+            <span className="text-red-500">
+              {t("chatInput.recordingError")}
+            </span>
+          ) : (
+            ""
+          )}
+        </div>
       </div>
-    </div>
-  </>
+    </>
+  );
 
   // Stop recording before sending a message
   const handleSend = () => {
     // Check if agent is selected
     if (!selectedAgentId) {
-      setErrorMessage(t('agentSelector.pleaseSelectAgent'));
+      setErrorMessage(t("agentSelector.pleaseSelectAgent"));
       setTimeout(() => setErrorMessage(null), 3000);
       return;
     }
 
     if (isRecording && mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      if (
+        socketRef.current &&
+        socketRef.current.readyState === WebSocket.OPEN
+      ) {
         socketRef.current.close();
       }
       setIsRecording(false);
@@ -1107,18 +1226,24 @@ export function ChatInput({
   };
 
   // Check if there are any unsupported file types
-  const hasUnsupportedFiles = attachments.some(attachment => {
+  const hasUnsupportedFiles = attachments.some((attachment) => {
     const extension = getFileExtension(attachment.file.name);
     const fileType = attachment.file.type;
-    
-    const isImage = fileType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension);
-    const isDocument = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(extension) ||
-                      fileType === 'application/pdf' ||
-                      fileType.includes('officedocument');
-    const isSupportedTextFile = ['md', 'markdown', 'txt'].includes(extension) ||
-                               fileType === 'text/csv' ||
-                               fileType === 'text/plain';
-    
+
+    const isImage =
+      fileType.startsWith("image/") ||
+      ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension);
+    const isDocument =
+      ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(
+        extension
+      ) ||
+      fileType === "application/pdf" ||
+      fileType.includes("officedocument");
+    const isSupportedTextFile =
+      ["md", "markdown", "txt"].includes(extension) ||
+      fileType === "text/csv" ||
+      fileType === "text/plain";
+
     return !(isImage || isDocument || isSupportedTextFile);
   });
 
@@ -1136,10 +1261,7 @@ export function ChatInput({
 
       {/* File viewer */}
       {viewingFile && (
-        <FileViewer
-          file={viewingFile}
-          onClose={() => setViewingFile(null)}
-        />
+        <FileViewer file={viewingFile} onClose={() => setViewingFile(null)} />
       )}
 
       {/* Error message */}
@@ -1151,44 +1273,66 @@ export function ChatInput({
           <div className="flex flex-col items-center mb-4">
             <div className="flex items-center mb-6">
               <div className="h-16 w-16 rounded-full overflow-hidden mr-4">
-                <img src={avatarUrl} alt={appConfig.appName} className="h-full w-full object-cover" />
+                <img
+                  src={avatarUrl}
+                  alt={appConfig.appName}
+                  className="h-full w-full object-cover"
+                />
               </div>
-              <h1 
+              <h1
                 className="text-4xl font-bold bg-clip-text text-transparent"
-                style={{ 
+                style={{
                   backgroundImage: (() => {
-                    const colors = extractColorsFromUri(appConfig.avatarUri || '');
-                    const mainColor = colors.mainColor || '273746';
+                    const colors = extractColorsFromUri(
+                      appConfig.avatarUri || ""
+                    );
+                    const mainColor = colors.mainColor || "273746";
                     const secondaryColor = colors.secondaryColor || mainColor;
                     return `linear-gradient(180deg, #${mainColor} 0%, #${secondaryColor} 100%)`;
-                  })()
+                  })(),
                 }}
               >
                 {t("chatInput.helloIm", { appName: appConfig.appName })}
               </h1>
             </div>
-            <p className="h-6 text-center text-muted-foreground">{t("chatInput.introMessage")}</p>
+            <p className="h-6 text-center text-muted-foreground">
+              {t("chatInput.introMessage")}
+            </p>
           </div>
-          <div ref={dropAreaRef} className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden">
+          <div
+            ref={dropAreaRef}
+            className="relative w-full max-w-4xl rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"
+          >
             {renderInputArea()}
           </div>
         </div>
       ) : (
         <div className="border-t-0 border-transparent bg-background">
           <div className="max-w-3xl mx-auto">
-            <div ref={dropAreaRef} className="relative rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden">
+            <div
+              ref={dropAreaRef}
+              className="relative rounded-3xl shadow-sm border border-slate-200 bg-slate-100 overflow-hidden"
+            >
               {renderInputArea()}
             </div>
           </div>
         </div>
-      )
-    }
-    {/* Footer */}
-    <div className="flex-shrink-0 mt-auto">
-      <div className="text-center text-sm py-1" style={{ color: 'rgb(163, 163, 163)', position: 'sticky', bottom: 0, backgroundColor: 'white', width: '100%' }}>
-        {t("chatInterface.aiGeneratedContentWarning")}
+      )}
+      {/* Footer */}
+      <div className="flex-shrink-0 mt-auto">
+        <div
+          className="text-center text-sm py-1"
+          style={{
+            color: "rgb(163, 163, 163)",
+            position: "sticky",
+            bottom: 0,
+            backgroundColor: "white",
+            width: "100%",
+          }}
+        >
+          {t("chatInterface.aiGeneratedContentWarning")}
+        </div>
       </div>
-    </div>
     </>
   );
-} 
+}

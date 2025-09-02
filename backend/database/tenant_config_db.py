@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any, Dict
 
 from .client import get_db_session
 from .db_models import TenantConfig
@@ -65,7 +65,7 @@ def insert_config(insert_data: Dict[str, Any]):
             session.add(TenantConfig(**insert_data))
             session.commit()
             return True
-        except Exception as e: 
+        except Exception as e:
             session.rollback()
             return False
 
@@ -100,7 +100,7 @@ def delete_config(tenant_id: str, user_id: str, select_key: str, config_value: s
             session.rollback()
             return False
 
-    
+
 def update_config_by_tenant_config_id(tenant_config_id: int, update_value: str):
     with get_db_session() as session:
         try:
@@ -127,4 +127,3 @@ def update_config_by_tenant_config_id_and_data(tenant_config_id: int, insert_dat
         except Exception as e:
             session.rollback()
             return False
-

@@ -1,21 +1,28 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, APIRouter, Header, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 
-from consts.model import ConversationResponse, ConversationRequest, RenameRequest, GenerateTitleRequest, OpinionRequest, MessageIdRequest
+from consts.model import (
+    ConversationRequest,
+    ConversationResponse,
+    GenerateTitleRequest,
+    MessageIdRequest,
+    OpinionRequest,
+    RenameRequest,
+)
+from database.conversation_db import get_message_id_by_index
 from services.conversation_management_service import (
     create_new_conversation,
-    get_conversation_list_service,
-    rename_conversation_service,
     delete_conversation_service,
-    get_conversation_history_service,
-    get_sources_service,
     generate_conversation_title_service,
-    update_message_opinion_service
+    get_conversation_history_service,
+    get_conversation_list_service,
+    get_sources_service,
+    rename_conversation_service,
+    update_message_opinion_service,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
-from database.conversation_db import get_message_id_by_index
 
 router = APIRouter(prefix="/conversation")
 
@@ -88,7 +95,8 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        success = rename_conversation_service(request.conversation_id, request.name, user_id)
+        rename_conversation_service(
+            request.conversation_id, request.name, user_id)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
@@ -111,7 +119,7 @@ async def delete_conversation_endpoint(conversation_id: int, authorization: Opti
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        success = delete_conversation_service(conversation_id, user_id)
+        delete_conversation_service(conversation_id, user_id)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
@@ -134,7 +142,8 @@ async def get_conversation_history_endpoint(conversation_id: int, authorization:
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        history_data = get_conversation_history_service(conversation_id, user_id)
+        history_data = get_conversation_history_service(
+            conversation_id, user_id)
         return ConversationResponse(code=0, message="success", data=history_data)
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
@@ -174,9 +183,11 @@ async def get_sources_endpoint(request: Dict[str, Any], authorization: Optional[
 
 
 @router.post("/generate_title", response_model=ConversationResponse)
-async def generate_conversation_title_endpoint(request: GenerateTitleRequest, 
-                                            http_request: Request,
-                                            authorization: Optional[str] = Header(None)):
+async def generate_conversation_title_endpoint(
+        request: GenerateTitleRequest,
+        http_request: Request,
+        authorization: Optional[str] = Header(None)
+):
     """
     Generate conversation title
 
@@ -184,13 +195,15 @@ async def generate_conversation_title_endpoint(request: GenerateTitleRequest,
         request: GenerateTitleRequest object containing:
             - conversation_id: Conversation ID
             - history: Conversation history list
+        http_request: http request containing language info
         authorization: Authorization header
 
     Returns:
         ConversationResponse object containing generated title
     """
     try:
-        user_id, tenant_id, language = get_current_user_info(authorization=authorization, request=http_request)
+        user_id, tenant_id, language = get_current_user_info(
+            authorization=authorization, request=http_request)
         title = await generate_conversation_title_service(request.conversation_id, request.history, user_id, tenant_id=tenant_id, language=language)
         return ConversationResponse(code=0, message="success", data=title)
     except Exception as e:
@@ -213,7 +226,7 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
         ConversationResponse object
     """
     try:
-        success = update_message_opinion_service(request.message_id, request.opinion)
+        update_message_opinion_service(request.message_id, request.opinion)
         return ConversationResponse(code=0, message="success", data=True)
     except Exception as e:
         logging.error(f"Failed to update message like/dislike: {str(e)}")
@@ -231,13 +244,13 @@ async def get_message_id_endpoint(request: MessageIdRequest):
         request: MessageIdRequest object containing:
             - conversation_id: Conversation ID
             - message_index: Message index
-        authorization: Authorization header
 
     Returns:
         ConversationResponse object containing message_id
     """
     try:
-        message_id = get_message_id_by_index(request.conversation_id, request.message_index)
+        message_id = get_message_id_by_index(
+            request.conversation_id, request.message_index)
         if message_id is None:
             raise HTTPException(status_code=404, detail="Message not found")
 

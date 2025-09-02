@@ -1,6 +1,6 @@
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from .client import get_db_session, filter_property
+from .client import filter_property, get_db_session
 from .db_models import MemoryUserConfig
 
 
@@ -88,4 +88,3 @@ def update_config_by_id(config_id: int, update_data: Dict[str, Any]) -> bool:
         except Exception:
             session.rollback()
             return False
-

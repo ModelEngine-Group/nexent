@@ -1,12 +1,14 @@
-import logging
 import asyncio
+import logging
 
-from nexent.core.models.stt_model import STTModel, STTConfig
-from nexent.core.models.tts_model import TTSModel, TTSConfig
-from fastapi import WebSocket, APIRouter
-from consts.const import APPID, TOKEN, CLUSTER, VOICE_TYPE, SPEED_RATIO, TEST_VOICE_PATH
+from fastapi import APIRouter, WebSocket
+from nexent.core.models.stt_model import STTConfig, STTModel
+from nexent.core.models.tts_model import TTSConfig, TTSModel
+
+from consts.const import APPID, CLUSTER, SPEED_RATIO, TEST_VOICE_PATH, TOKEN, VOICE_TYPE
 
 logger = logging.getLogger("voice_app")
+
 
 class VoiceService:
     """Unified voice service that hosts both STT and TTS on a single FastAPI application"""
@@ -20,8 +22,8 @@ class VoiceService:
             appid=APPID,
             token=TOKEN
         )
-        
-        # Initialize TTS configuration  
+
+        # Initialize TTS configuration
         self.tts_config = TTSConfig(
             appid=APPID,
             token=TOKEN,
@@ -68,12 +70,12 @@ class VoiceService:
             logger.info("TTS WebSocket connection attempt...")
             await websocket.accept()
             logger.info("TTS WebSocket connection accepted")
-            
+
             try:
                 # Receive text from client (single request)
                 data = await websocket.receive_json()
                 text = data.get("text")
-                
+
                 if not text:
                     if websocket.client_state.name == "CONNECTED":
                         await websocket.send_json({"error": "No text provided"})
@@ -137,7 +139,7 @@ class VoiceService:
 
         Args:
             model_type: The type of model to check, options are 'stt', 'tts'
-        
+
         Returns:
             bool: Returns True if all services are connected normally, False if any service connection fails
         """
@@ -149,13 +151,15 @@ class VoiceService:
                 logging.info(f'STT Config: {self.stt_config}')
                 stt_connected = await self.stt_model.check_connectivity()
                 if not stt_connected:
-                    logging.error("Speech Recognition (STT) service connection failed")
+                    logging.error(
+                        "Speech Recognition (STT) service connection failed")
 
             if model_type == 'tts':
                 logging.info(f'TTS Config: {self.tts_config}')
                 tts_connected = await self.tts_model.check_connectivity()
                 if not tts_connected:
-                    logging.error("Text-to-Speech (TTS) service connection failed")
+                    logging.error(
+                        "Text-to-Speech (TTS) service connection failed")
 
             # Return the corresponding connection status based on model_type
             if model_type == 'stt':
@@ -167,7 +171,8 @@ class VoiceService:
                 return False
 
         except Exception as e:
-            logging.error(f"Voice service connectivity test encountered an exception: {str(e)}")
+            logging.error(
+                f"Voice service connectivity test encountered an exception: {str(e)}")
             return False
 
 

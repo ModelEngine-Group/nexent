@@ -50,34 +50,40 @@ async def _parse_northbound_context(request: Request) -> NorthboundContext:
                 body_bytes = await request.body()
                 request_body = body_bytes.decode('utf-8') if body_bytes else ""
             except Exception as e:
-                logging.warning(f"Cannot read request body for signature verification: {e}")
+                logging.warning(
+                    f"Cannot read request body for signature verification: {e}")
                 request_body = ""
-        
+
         validate_aksk_authentication(request.headers, request_body)
     except (UnauthorizedError, LimitExceededError, SignatureValidationError) as e:
         raise e
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error: cannot parse northbound context")
-
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Internal Server Error: cannot parse northbound context")
 
     # 2. Parse JWT token
     auth_header = _get_header(request.headers, "Authorization")
     if not auth_header:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: No authorization header found")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: No authorization header found")
 
     # Use auth_utils to parse JWT token
     try:
         user_id, tenant_id = get_current_user_id(auth_header)
-        
-        if not user_id:
-            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: missing user_id in JWT token")
-        if not tenant_id:
-            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: unregistered user_id in JWT token")
-            
-    except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error: cannot parse JWT token")
 
-    request_id = _get_header(request.headers, "X-Request-Id") or str(uuid.uuid4())
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: missing user_id in JWT token")
+        if not tenant_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                                detail="Unauthorized: unregistered user_id in JWT token")
+
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Internal Server Error: cannot parse JWT token")
+
+    request_id = _get_header(
+        request.headers, "X-Request-Id") or str(uuid.uuid4())
 
     return NorthboundContext(
         request_id=request_id,
@@ -110,14 +116,17 @@ async def run_chat(
             idempotency_key=idempotency_key,
         )
     except UnauthorizedError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: AK/SK authentication failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: AK/SK authentication failed")
     except LimitExceededError:
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except SignatureValidationError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid signature")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: invalid signature")
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
-    
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
 @router.get("/chat/stop/{conversation_id}")
@@ -126,13 +135,17 @@ async def stop_chat_stream(request: Request, conversation_id: str):
         ctx: NorthboundContext = await _parse_northbound_context(request)
         return await stop_chat(ctx=ctx, external_conversation_id=conversation_id)
     except UnauthorizedError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: AK/SK authentication failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: AK/SK authentication failed")
     except LimitExceededError:
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except SignatureValidationError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid signature")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: invalid signature")
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
 @router.get("/conversations/{conversation_id}")
@@ -141,13 +154,17 @@ async def get_history(request: Request, conversation_id: str):
         ctx: NorthboundContext = await _parse_northbound_context(request)
         return await get_conversation_history(ctx=ctx, external_conversation_id=conversation_id)
     except UnauthorizedError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: AK/SK authentication failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: AK/SK authentication failed")
     except LimitExceededError:
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except SignatureValidationError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid signature")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: invalid signature")
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
 @router.get("/agents")
@@ -156,13 +173,17 @@ async def list_agents(request: Request):
         ctx: NorthboundContext = await _parse_northbound_context(request)
         return await get_agent_info_list(ctx=ctx)
     except UnauthorizedError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: AK/SK authentication failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: AK/SK authentication failed")
     except LimitExceededError:
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except SignatureValidationError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid signature")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: invalid signature")
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
 @router.get("/conversations")
@@ -171,13 +192,17 @@ async def list_convs(request: Request):
         ctx: NorthboundContext = await _parse_northbound_context(request)
         return await list_conversations(ctx=ctx)
     except UnauthorizedError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: AK/SK authentication failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: AK/SK authentication failed")
     except LimitExceededError:
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except SignatureValidationError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid signature")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: invalid signature")
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
 
 
 @router.put("/conversations/{conversation_id}/title")
@@ -195,14 +220,19 @@ async def update_convs_title(
             title=title,
             idempotency_key=idempotency_key,
         )
-        headers_out = {"Idempotency-Key": result.get("idempotency_key", ""), "X-Request-Id": ctx.request_id}
+        headers_out = {
+            "Idempotency-Key": result.get("idempotency_key", ""), "X-Request-Id": ctx.request_id}
         return JSONResponse(content=result, headers=headers_out)
 
     except UnauthorizedError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: AK/SK authentication failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: AK/SK authentication failed")
     except LimitExceededError:
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
+                            detail="Too Many Requests: rate limit exceeded")
     except SignatureValidationError:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid signature")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="Unauthorized: invalid signature")
     except Exception:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")

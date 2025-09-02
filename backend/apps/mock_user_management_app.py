@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Request
 
 from consts.const import DEFAULT_USER_ID
-from consts.model import STATUS_CODES, ServiceResponse, UserSignUpRequest, UserSignInRequest
+from consts.model import ServiceResponse, STATUS_CODES, UserSignInRequest, UserSignUpRequest
 
 logger = logging.getLogger("mock_user_management_app")
 router = APIRouter(prefix="/user", tags=["user"])
@@ -41,7 +41,8 @@ async def signup(request: UserSignUpRequest):
     """
     Mock user registration endpoint
     """
-    logger.info(f"Mock signup request: email={request.email}, is_admin={request.is_admin}")
+    logger.info(
+        f"Mock signup request: email={request.email}, is_admin={request.is_admin}")
 
     # Return mock success response
     return ServiceResponse(

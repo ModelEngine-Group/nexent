@@ -1,16 +1,28 @@
 import logging
 import os
 from contextlib import contextmanager
-from typing import Optional, BinaryIO, Dict, Any, Tuple, List
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 import boto3
 import psycopg2.extras
+from psycopg2 import extensions
 from botocore.client import Config
 from botocore.exceptions import ClientError
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, class_mapper
+from sqlalchemy.orm import class_mapper, sessionmaker
 
-from consts.const import MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_REGION, MINIO_DEFAULT_BUCKET, POSTGRES_HOST, POSTGRES_USER, NEXENT_POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT
+from consts.const import (
+    MINIO_ACCESS_KEY,
+    MINIO_DEFAULT_BUCKET,
+    MINIO_ENDPOINT,
+    MINIO_REGION,
+    MINIO_SECRET_KEY,
+    NEXENT_POSTGRES_PASSWORD,
+    POSTGRES_DB,
+    POSTGRES_HOST,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+)
 from database.db_models import TableBase
 
 logger = logging.getLogger("database.client")
@@ -31,27 +43,31 @@ class PostgresClient:
         self.password = NEXENT_POSTGRES_PASSWORD
         self.database = POSTGRES_DB
         self.port = POSTGRES_PORT
-        self.engine = create_engine("postgresql://",
-                                    connect_args={
-                                        "host": self.host,
-                                        "user": self.user,
-                                        "password": self.password,
-                                        "database": self.database,
-                                        "port": self.port,
-                                        "client_encoding": "utf8"
-                                    },
-                                    echo=False,
-                                    pool_size=10,
-                                    pool_pre_ping=True,
-                                    pool_timeout=30)
+        self.engine = create_engine(
+            "postgresql://",
+            connect_args={
+                "host": self.host,
+                "user": self.user,
+                "password": self.password,
+                "database": self.database,
+                "port": self.port,
+                "client_encoding": "utf8"
+            },
+            echo=False,
+            pool_size=10,
+            pool_pre_ping=True,
+            pool_timeout=30
+        )
         self.session_maker = sessionmaker(bind=self.engine)
 
-    def clean_string_values(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def clean_string_values(data: Dict[str, Any]) -> Dict[str, Any]:
         """Ensure all strings are UTF-8 encoded"""
         cleaned_data = {}
         for key, value in data.items():
             if isinstance(value, str):
-                cleaned_data[key] = value.encode('utf-8', errors='ignore').decode('utf-8')
+                cleaned_data[key] = value.encode(
+                    'utf-8', errors='ignore').decode('utf-8')
             else:
                 cleaned_data[key] = value
         return cleaned_data
@@ -73,10 +89,11 @@ class MinioClient:
         self.default_bucket = MINIO_DEFAULT_BUCKET
 
         # Initialize S3 client with proxy settings
-        self.client = boto3.client('s3', 
-            endpoint_url=self.endpoint, 
+        self.client = boto3.client(
+            's3',
+            endpoint_url=self.endpoint,
             aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key, 
+            aws_secret_access_key=self.secret_key,
             region_name=self.region,
             config=Config(
                 signature_version='s3v4',
@@ -84,7 +101,8 @@ class MinioClient:
                     'http': None,
                     'https': None
                 }
-            ))
+            )
+        )
 
         # Ensure default bucket exists
         self._ensure_bucket_exists(self.default_bucket)
@@ -98,16 +116,20 @@ class MinioClient:
             self.client.create_bucket(Bucket=bucket_name)
             logger.info(f"Created bucket: {bucket_name}")
 
-    def upload_file(self, file_path: str, object_name: Optional[str] = None, bucket: Optional[str] = None) -> Tuple[
-        bool, str]:
+    def upload_file(
+            self,
+            file_path: str,
+            object_name: Optional[str] = None,
+            bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """
         Upload local file to MinIO
-        
+
         Args:
             file_path: Local file path
             object_name: Object name, if not specified use filename
             bucket: Bucket name, if not specified use default bucket
-            
+
         Returns:
             Tuple[bool, str]: (Success status, File URL or error message)
         """
@@ -125,12 +147,12 @@ class MinioClient:
     def upload_fileobj(self, file_obj: BinaryIO, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
         """
         Upload file object to MinIO
-        
+
         Args:
             file_obj: File object
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
-            
+
         Returns:
             Tuple[bool, str]: (Success status, File URL or error message)
         """
@@ -145,12 +167,12 @@ class MinioClient:
     def download_file(self, object_name: str, file_path: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
         """
         Download file from MinIO to local
-        
+
         Args:
             object_name: Object name
             file_path: Local save path
             bucket: Bucket name, if not specified use default bucket
-            
+
         Returns:
             Tuple[bool, str]: (Success status, Success message or error message)
         """
@@ -164,12 +186,12 @@ class MinioClient:
     def get_file_url(self, object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Tuple[bool, str]:
         """
         Get presigned URL for file
-        
+
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
             expires: URL expiration time in seconds
-            
+
         Returns:
             Tuple[bool, str]: (Success status, Presigned URL or error message)
         """
@@ -187,27 +209,30 @@ class MinioClient:
             response = self.client.head_object(Bucket=bucket, Key=object_name)
             return int(response['ContentLength'])
         except ClientError as e:
-            logger.error(f"Get file size by objectname({object_name}) failed: {e}")
+            logger.error(
+                f"Get file size by objectname({object_name}) failed: {e}")
             return 0
 
     def list_files(self, prefix: str = "", bucket: Optional[str] = None) -> List[dict]:
         """
         List files in bucket
-        
+
         Args:
             prefix: Prefix filter
             bucket: Bucket name, if not specified use default bucket
-            
+
         Returns:
             List[dict]: List of file information
         """
         bucket = bucket or self.default_bucket
         try:
-            response = self.client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            response = self.client.list_objects_v2(
+                Bucket=bucket, Prefix=prefix)
             files = []
             if 'Contents' in response:
                 for obj in response['Contents']:
-                    files.append({'key': obj['Key'], 'size': obj['Size'], 'last_modified': obj['LastModified']})
+                    files.append(
+                        {'key': obj['Key'], 'size': obj['Size'], 'last_modified': obj['LastModified']})
             return files
         except Exception as e:
             logger.error(f"Error listing files: {str(e)}")
@@ -216,11 +241,11 @@ class MinioClient:
     def delete_file(self, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
         """
         Delete file
-        
+
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
-            
+
         Returns:
             Tuple[bool, str]: (Success status, Success message or error message)
         """
@@ -234,11 +259,11 @@ class MinioClient:
     def get_file_stream(self, object_name: str, bucket: Optional[str] = None) -> Tuple[bool, Any]:
         """
         Get file binary stream from MinIO
-        
+
         Args:
             object_name: Object name
             bucket: Bucket name, if not specified use default bucket
-            
+
         Returns:
             Tuple[bool, Any]: (Success status, File stream object or error message)
         """
@@ -254,8 +279,9 @@ class MinioClient:
 db_client = PostgresClient()
 minio_client = MinioClient()
 
+
 @contextmanager
-def get_db_session(db_session = None):
+def get_db_session(db_session=None):
     """
     param db_session: Optional session to use, if None, a new session will be created.
     Provide a transactional scope around a series of operations.
@@ -274,12 +300,14 @@ def get_db_session(db_session = None):
         if db_session is None:
             session.close()
 
+
 def as_dict(obj):
     if isinstance(obj, TableBase):
         return {c.key: getattr(obj, c.key) for c in class_mapper(obj.__class__).columns}
 
     # noinspection PyProtectedMember
     return dict(obj._mapping)
+
 
 def filter_property(data, model_class):
     """

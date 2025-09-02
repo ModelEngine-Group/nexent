@@ -175,7 +175,6 @@ export const modelService = {
     api_key: string,
     provider: string,
     type: ModelType,
-    max_tokens: number,
     models: any[]
   }): Promise<number> => {
     try {
@@ -186,8 +185,7 @@ export const modelService = {
           api_key: model.api_key,
           models: model.models,
           type: model.type,
-          provider: model.provider,
-          max_tokens: model.max_tokens
+          provider: model.provider
         })
       })
       const result: ApiResponse<any[]> = await response.json()

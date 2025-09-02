@@ -1,6 +1,8 @@
 import re
+import ast
 import time
 import threading
+from textwrap import dedent
 from typing import Any, Optional, List, Dict
 from collections.abc import Generator
 
@@ -12,7 +14,7 @@ from smolagents.local_python_executor import fix_final_answer_code
 from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
 from smolagents.models import ChatMessage
 from smolagents.monitoring import LogLevel
-from smolagents.utils import AgentExecutionError, AgentGenerationError, AgentParsingError, parse_code_blobs, \
+from smolagents.utils import AgentExecutionError, AgentGenerationError, AgentParsingError, \
     truncate_content
 
 from ..utils.observer import MessageObserver, ProcessType
@@ -22,6 +24,47 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
+
+def parse_code_blobs(text: str) -> str:
+    """Extract code blocs from the LLM's output.
+
+    If a valid code block is passed, it returns it directly.
+
+    Args:
+        text (`str`): LLM's output text to parse.
+
+    Returns:
+        `str`: Extracted code block.
+
+    Raises:
+        ValueError: If no valid code block is found in the text.
+    """
+    pattern = r"```(?:py|python)\s*\n(.*?)\n```"
+    matches = re.findall(pattern, text, re.DOTALL)
+    if matches:
+        return "\n\n".join(match.strip() for match in matches)
+    # Maybe the LLM outputted a code blob directly
+    try:
+        ast.parse(text)
+        return text
+    except SyntaxError:
+        pass
+
+    raise ValueError(
+        dedent(
+            f"""
+            Your code snippet is invalid, because the regex pattern {pattern} was not found in it.
+            Here is your code snippet:
+            {text}
+            Make sure to include code with the correct pattern, for instance:
+            Thoughts: Your thoughts
+            Code:
+            ```py
+            # Your python code here
+            ```<end_code>
+            """
+        ).strip()
+    )
 
 def convert_code_format(text):
     """

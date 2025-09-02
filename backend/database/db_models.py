@@ -1,16 +1,21 @@
-from sqlalchemy import Column, Integer, String, TIMESTAMP, Sequence, Numeric, JSON, Boolean, Text
+from sqlalchemy import Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
 SCHEMA = "nexent"
 
+
 class TableBase(DeclarativeBase):
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), onupdate=func.now(), doc="Update time")
+    create_time = Column(TIMESTAMP(timezone=False),
+                         server_default=func.now(), doc="Creation time")
+    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(
+    ), onupdate=func.now(), doc="Update time")
     created_by = Column(String(100), doc="Creator")
     updated_by = Column(String(100), doc="Updater")
-    delete_flag = Column(String(1), default="N", doc="Whether it is deleted. Optional values: Y/N")
+    delete_flag = Column(String(1), default="N",
+                         doc="Whether it is deleted. Optional values: Y/N")
     pass
+
 
 class ConversationRecord(TableBase):
     """
@@ -19,13 +24,18 @@ class ConversationRecord(TableBase):
     __tablename__ = "conversation_record_t"
     __table_args__ = {"schema": SCHEMA}
 
-    conversation_id = Column(Integer, Sequence("conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    conversation_id = Column(Integer, Sequence(
+        "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
-    delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    delete_flag = Column(String(
+        1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
+
 
 class ConversationMessage(TableBase):
     """
@@ -34,18 +44,28 @@ class ConversationMessage(TableBase):
     __tablename__ = "conversation_message_t"
     __table_args__ = {"schema": SCHEMA}
 
-    message_id = Column(Integer, Sequence("conversation_message_t_message_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
-    conversation_id = Column(Integer, doc="Formal foreign key used to associate with the conversation")
-    message_index = Column(Integer, doc="Sequence number for frontend display sorting")
-    message_role = Column(String(30), doc="The role sending the message, such as system, assistant, user")
+    message_id = Column(Integer, Sequence(
+        "conversation_message_t_message_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    conversation_id = Column(
+        Integer, doc="Formal foreign key used to associate with the conversation")
+    message_index = Column(
+        Integer, doc="Sequence number for frontend display sorting")
+    message_role = Column(
+        String(30), doc="The role sending the message, such as system, assistant, user")
     message_content = Column(String, doc="The complete content of the message")
-    minio_files = Column(String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
-    opinion_flag = Column(String(1), doc="User evaluation of the conversation. Enumeration value \"Y\" represents a positive review, \"N\" represents a negative review")
-    delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
+    minio_files = Column(
+        String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
+    opinion_flag = Column(String(
+        1), doc="User evaluation of the conversation. Enumeration value \"Y\" represents a positive review, \"N\" represents a negative review")
+    delete_flag = Column(String(
+        1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
+
 
 class ConversationMessageUnit(TableBase):
     """
@@ -54,17 +74,26 @@ class ConversationMessageUnit(TableBase):
     __tablename__ = "conversation_message_unit_t"
     __table_args__ = {"schema": SCHEMA}
 
-    unit_id = Column(Integer, Sequence("conversation_message_unit_t_unit_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
-    message_id = Column(Integer, doc="Formal foreign key used to associate with the message")
-    conversation_id = Column(Integer, doc="Formal foreign key used to associate with the conversation")
-    unit_index = Column(Integer, doc="Sequence number for frontend display sorting")
+    unit_id = Column(Integer, Sequence("conversation_message_unit_t_unit_id_seq",
+                     schema=SCHEMA), primary_key=True, nullable=False)
+    message_id = Column(
+        Integer, doc="Formal foreign key used to associate with the message")
+    conversation_id = Column(
+        Integer, doc="Formal foreign key used to associate with the conversation")
+    unit_index = Column(
+        Integer, doc="Sequence number for frontend display sorting")
     unit_type = Column(String(100), doc="Type of the smallest answer unit")
-    unit_content = Column(String, doc="Complete content of the smallest reply unit")
-    delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
+    unit_content = Column(
+        String, doc="Complete content of the smallest reply unit")
+    delete_flag = Column(String(
+        1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
+
 
 class ConversationSourceImage(TableBase):
     """
@@ -73,18 +102,28 @@ class ConversationSourceImage(TableBase):
     __tablename__ = "conversation_source_image_t"
     __table_args__ = {"schema": SCHEMA}
 
-    image_id = Column(Integer, Sequence("conversation_source_image_t_image_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
-    conversation_id = Column(Integer, doc="Formal foreign key used to associate with the conversation to which the search source belongs")
-    message_id = Column(Integer, doc="Formal foreign key used to associate with the conversation message to which the search source belongs")
-    unit_id = Column(Integer, doc="Formal foreign key used to associate with the smallest message unit (if any) to which the search source belongs")
+    image_id = Column(Integer, Sequence(
+        "conversation_source_image_t_image_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    conversation_id = Column(
+        Integer, doc="Formal foreign key used to associate with the conversation to which the search source belongs")
+    message_id = Column(
+        Integer, doc="Formal foreign key used to associate with the conversation message to which the search source belongs")
+    unit_id = Column(
+        Integer, doc="Formal foreign key used to associate with the smallest message unit (if any) to which the search source belongs")
     image_url = Column(String, doc="URL address of the image")
-    cite_index = Column(Integer, doc="[Reserved] Citation serial number for precise traceability")
-    search_type = Column(String(100), doc="[Reserved] Search source type, used to distinguish the retrieval tool from which the record originates. Optional values: web/local")
-    delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
+    cite_index = Column(
+        Integer, doc="[Reserved] Citation serial number for precise traceability")
+    search_type = Column(String(
+        100), doc="[Reserved] Search source type, used to distinguish the retrieval tool from which the record originates. Optional values: web/local")
+    delete_flag = Column(String(
+        1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
+
 
 class ConversationSourceSearch(TableBase):
     """
@@ -93,26 +132,42 @@ class ConversationSourceSearch(TableBase):
     __tablename__ = "conversation_source_search_t"
     __table_args__ = {"schema": SCHEMA}
 
-    search_id = Column(Integer, Sequence("conversation_source_search_t_search_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
-    unit_id = Column(Integer, doc="Formal foreign key used to associate with the smallest message unit (if any) to which the search source belongs")
-    message_id = Column(Integer, doc="Formal foreign key used to associate with the conversation message to which the search source belongs")
-    conversation_id = Column(Integer, doc="Formal foreign key used to associate with the conversation to which the search source belongs")
-    source_type = Column(String(100), doc="Source type, used to distinguish whether source_location is a URL or a path. Optional values: url/text")
-    source_title = Column(String(400), doc="Title or file name of the search source")
-    source_location = Column(String(400), doc="URL link or file path of the search source")
+    search_id = Column(Integer, Sequence(
+        "conversation_source_search_t_search_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    unit_id = Column(
+        Integer, doc="Formal foreign key used to associate with the smallest message unit (if any) to which the search source belongs")
+    message_id = Column(
+        Integer, doc="Formal foreign key used to associate with the conversation message to which the search source belongs")
+    conversation_id = Column(
+        Integer, doc="Formal foreign key used to associate with the conversation to which the search source belongs")
+    source_type = Column(String(
+        100), doc="Source type, used to distinguish whether source_location is a URL or a path. Optional values: url/text")
+    source_title = Column(
+        String(400), doc="Title or file name of the search source")
+    source_location = Column(
+        String(400), doc="URL link or file path of the search source")
     source_content = Column(String, doc="Original text of the search source")
-    score_overall = Column(Numeric(7, 6), doc="Overall similarity score between the source and the user query, calculated by weighted average of details")
+    score_overall = Column(Numeric(
+        7, 6), doc="Overall similarity score between the source and the user query, calculated by weighted average of details")
     score_accuracy = Column(Numeric(7, 6), doc="Accuracy score")
     score_semantic = Column(Numeric(7, 6), doc="Semantic similarity score")
-    published_date = Column(TIMESTAMP(timezone=False), doc="Upload date of local files or network search date")
-    cite_index = Column(Integer, doc="Citation serial number for precise traceability")
-    search_type = Column(String(100), doc="Search source type, specifically describing the retrieval tool used for this search record. Optional values: web_search/knowledge_base_search")
-    tool_sign = Column(String(30), doc="Simple tool identifier used to distinguish the index source in the summary text output by the large model")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
-    delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
+    published_date = Column(TIMESTAMP(
+        timezone=False), doc="Upload date of local files or network search date")
+    cite_index = Column(
+        Integer, doc="Citation serial number for precise traceability")
+    search_type = Column(String(
+        100), doc="Search source type, specifically describing the retrieval tool used for this search record. Optional values: web_search/knowledge_base_search")
+    tool_sign = Column(String(
+        30), doc="Simple tool identifier used to distinguish the index source in the summary text output by the large model")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
+    delete_flag = Column(String(
+        1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
+
 
 class ModelRecord(TableBase):
     """
@@ -121,23 +176,35 @@ class ModelRecord(TableBase):
     __tablename__ = "model_record_t"
     __table_args__ = {"schema": SCHEMA}
 
-    model_id = Column(Integer, Sequence("model_record_t_model_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="Model ID, unique primary key")
+    model_id = Column(Integer, Sequence("model_record_t_model_id_seq", schema=SCHEMA),
+                      primary_key=True, nullable=False, doc="Model ID, unique primary key")
     model_repo = Column(String(100), doc="Model path address")
     model_name = Column(String(100), nullable=False, doc="Model name")
-    model_factory = Column(String(100), doc="Model vendor, determining the API key and the specific format of the model response. Currently defaults to OpenAI-API-Compatible.")
-    model_type = Column(String(100), doc="Model type, such as chat, embedding, rerank, tts, asr")
-    api_key = Column(String(500), doc="Model API key, used for authentication for some models")
-    base_url = Column(String(500), doc="Base URL address for requesting remote model services")
+    model_factory = Column(String(
+        100), doc="Model vendor, determining the API key and the specific format of the model response. Currently defaults to OpenAI-API-Compatible.")
+    model_type = Column(
+        String(100), doc="Model type, such as chat, embedding, rerank, tts, asr")
+    api_key = Column(
+        String(500), doc="Model API key, used for authentication for some models")
+    base_url = Column(
+        String(500), doc="Base URL address for requesting remote model services")
     max_tokens = Column(Integer, doc="Maximum available tokens of the model")
-    used_token = Column(Integer, doc="Number of tokens already used by the model in Q&A")
-    display_name = Column(String(100), doc="Model name directly displayed on the frontend, customized by the user")
-    connect_status = Column(String(100), doc="Model connectivity status of the latest detection. Optional values: Detecting, Available, Unavailable")
+    used_token = Column(
+        Integer, doc="Number of tokens already used by the model in Q&A")
+    display_name = Column(String(
+        100), doc="Model name directly displayed on the frontend, customized by the user")
+    connect_status = Column(String(
+        100), doc="Model connectivity status of the latest detection. Optional values: Detecting, Available, Unavailable")
     tenant_id = Column(String(100), doc="Tenant ID for filtering")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    delete_flag = Column(String(1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    delete_flag = Column(String(
+        1), default="N", doc="After the user deletes it on the frontend, the deletion flag will be set to \"Y\" for soft deletion. Optional values: Y/N")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
+
 
 class ToolInfo(TableBase):
     """
@@ -148,7 +215,8 @@ class ToolInfo(TableBase):
 
     tool_id = Column(Integer, primary_key=True, nullable=False, doc="ID")
     name = Column(String(100), doc="Unique key name")
-    class_name = Column(String(100), doc="Tool class name, used when the tool is instantiated")
+    class_name = Column(
+        String(100), doc="Tool class name, used when the tool is instantiated")
     description = Column(String(2048), doc="Prompt tool description")
     source = Column(String(100), doc="Source")
     author = Column(String(100), doc="Tool author")
@@ -156,7 +224,9 @@ class ToolInfo(TableBase):
     params = Column(JSON, doc="Tool parameter information (json)")
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")
-    is_available = Column(Boolean, doc="Whether the tool can be used under the current main service")
+    is_available = Column(
+        Boolean, doc="Whether the tool can be used under the current main service")
+
 
 class AgentInfo(TableBase):
     """
@@ -177,8 +247,11 @@ class AgentInfo(TableBase):
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")
-    provide_run_summary = Column(Boolean, doc="Whether to provide the running summary to the manager agent")
-    business_description = Column(Text, doc="Manually entered by the user to describe the entire business process")
+    provide_run_summary = Column(
+        Boolean, doc="Whether to provide the running summary to the manager agent")
+    business_description = Column(
+        Text, doc="Manually entered by the user to describe the entire business process")
+
 
 class ToolInstance(TableBase):
     """
@@ -187,13 +260,15 @@ class ToolInstance(TableBase):
     __tablename__ = "ag_tool_instance_t"
     __table_args__ = {"schema": SCHEMA}
 
-    tool_instance_id = Column(Integer, primary_key=True, nullable=False, doc="ID")
+    tool_instance_id = Column(
+        Integer, primary_key=True, nullable=False, doc="ID")
     tool_id = Column(Integer, doc="Tenant tool ID")
     agent_id = Column(Integer, doc="Agent ID")
     params = Column(JSON, doc="Parameter configuration")
     user_id = Column(String(100), doc="User ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, doc="Enabled")
+
 
 class KnowledgeRecord(TableBase):
     """
@@ -202,14 +277,18 @@ class KnowledgeRecord(TableBase):
     __tablename__ = "knowledge_record_t"
     __table_args__ = {"schema": "nexent"}
 
-    knowledge_id = Column(Integer, Sequence("knowledge_record_t_knowledge_id_seq", schema="nexent"), primary_key=True, nullable=False, doc="Knowledge base ID, unique primary key")
+    knowledge_id = Column(Integer, Sequence("knowledge_record_t_knowledge_id_seq", schema="nexent"),
+                          primary_key=True, nullable=False, doc="Knowledge base ID, unique primary key")
     index_name = Column(String(100), doc="Knowledge base name")
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
     tenant_id = Column(String(100), doc="Tenant ID")
-    delete_flag = Column(String(1), default="N", doc="Knowledge base status. Currently defaults to 1, if knowledge base status is 0, then this knowledge base is unavailable")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update date, audit field")
+    delete_flag = Column(String(
+        1), default="N", doc="Knowledge base status. Currently defaults to 1, if knowledge base status is 0, then this knowledge base is unavailable")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update date, audit field")
     updated_by = Column(String(100), doc="ID of the last updater, audit field")
     created_by = Column(String(100), doc="ID of the creator, audit field")
 
@@ -221,17 +300,23 @@ class TenantConfig(TableBase):
     __tablename__ = "tenant_config_t"
     __table_args__ = {"schema": SCHEMA}
 
-    tenant_config_id = Column(Integer, Sequence("tenant_config_t_tenant_config_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
+    tenant_config_id = Column(Integer, Sequence(
+        "tenant_config_t_tenant_config_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
-    value_type = Column(String(100), doc=" the data type of config_value, optional values: single/multi", default="single")
+    value_type = Column(String(
+        100), doc=" the data type of config_value, optional values: single/multi", default="single")
     config_key = Column(String(100), doc="the key of the config")
     config_value = Column(String(10000), doc="the value of the config")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time")
+    create_time = Column(TIMESTAMP(timezone=False),
+                         server_default=func.now(), doc="Creation time")
+    update_time = Column(TIMESTAMP(timezone=False),
+                         server_default=func.now(), doc="Update time")
     created_by = Column(String(100), doc="Creator")
     updated_by = Column(String(100), doc="Updater")
-    delete_flag = Column(String(1), default="N", doc="Whether it is deleted. Optional values: Y/N")
+    delete_flag = Column(String(1), default="N",
+                         doc="Whether it is deleted. Optional values: Y/N")
+
 
 class MemoryUserConfig(TableBase):
     """
@@ -240,17 +325,23 @@ class MemoryUserConfig(TableBase):
     __tablename__ = "memory_user_config_t"
     __table_args__ = {"schema": SCHEMA}
 
-    config_id = Column(Integer, Sequence("memory_user_config_t_config_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
+    config_id = Column(Integer, Sequence("memory_user_config_t_config_id_seq",
+                       schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
-    value_type = Column(String(100), doc=" the data type of config_value, optional values: single/multi", default="single")
+    value_type = Column(String(
+        100), doc=" the data type of config_value, optional values: single/multi", default="single")
     config_key = Column(String(100), doc="the key of the config")
     config_value = Column(String(10000), doc="the value of the config")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time")
+    create_time = Column(TIMESTAMP(timezone=False),
+                         server_default=func.now(), doc="Creation time")
+    update_time = Column(TIMESTAMP(timezone=False),
+                         server_default=func.now(), doc="Update time")
     created_by = Column(String(100), doc="Creator")
     updated_by = Column(String(100), doc="Updater")
-    delete_flag = Column(String(1), default="N", doc="Whether it is deleted. Optional values: Y/N")
+    delete_flag = Column(String(1), default="N",
+                         doc="Whether it is deleted. Optional values: Y/N")
+
 
 class McpRecord(TableBase):
     """
@@ -259,17 +350,22 @@ class McpRecord(TableBase):
     __tablename__ = "mcp_record_t"
     __table_args__ = {"schema": SCHEMA}
 
-    mcp_id = Column(Integer, Sequence("mcp_record_t_mcp_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="MCP record ID, unique primary key")
+    mcp_id = Column(Integer, Sequence("mcp_record_t_mcp_id_seq", schema=SCHEMA),
+                    primary_key=True, nullable=False, doc="MCP record ID, unique primary key")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
     mcp_name = Column(String(100), doc="MCP name")
     mcp_server = Column(String(500), doc="MCP server address")
-    status = Column(Boolean, default=None, doc="MCP server connection status, True=connected, False=disconnected, None=unknown")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
+    status = Column(Boolean, default=None,
+                    doc="MCP server connection status, True=connected, False=disconnected, None=unknown")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update time, audit field")
     created_by = Column(String(100), doc="Creator ID, audit field")
     updated_by = Column(String(100), doc="Last updater ID, audit field")
-    delete_flag = Column(String(1), default="N", doc="When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N")
+    delete_flag = Column(String(
+        1), default="N", doc="When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N")
 
 
 class UserTenant(TableBase):
@@ -279,15 +375,18 @@ class UserTenant(TableBase):
     __tablename__ = "user_tenant_t"
     __table_args__ = {"schema": SCHEMA}
 
-    user_tenant_id = Column(Integer, Sequence("user_tenant_t_user_tenant_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
+    user_tenant_id = Column(Integer, Sequence("user_tenant_t_user_tenant_id_seq", schema=SCHEMA),
+                            primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update time, audit field")
     created_by = Column(String(100), doc="Creator ID, audit field")
     updated_by = Column(String(100), doc="Last updater ID, audit field")
-    delete_flag = Column(String(1), default="N", doc="When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N")
-
+    delete_flag = Column(String(
+        1), default="N", doc="When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N")
 
 
 class AgentRelation(TableBase):
@@ -297,15 +396,19 @@ class AgentRelation(TableBase):
     __tablename__ = "ag_agent_relation_t"
     __table_args__ = {"schema": SCHEMA}
 
-    relation_id = Column(Integer, primary_key=True, nullable=False, doc="Relationship ID, primary key")
+    relation_id = Column(Integer, primary_key=True,
+                         nullable=False, doc="Relationship ID, primary key")
     selected_agent_id = Column(Integer, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update time, audit field")
     created_by = Column(String(100), doc="Creator ID, audit field")
     updated_by = Column(String(100), doc="Last updater ID, audit field")
-    delete_flag = Column(String(1), default="N", doc="Delete flag, set to Y for soft delete, optional values Y/N")
+    delete_flag = Column(String(
+        1), default="N", doc="Delete flag, set to Y for soft delete, optional values Y/N")
 
 
 class PartnerMappingId(TableBase):
@@ -315,14 +418,21 @@ class PartnerMappingId(TableBase):
     __tablename__ = "partner_mapping_id_t"
     __table_args__ = {"schema": SCHEMA}
 
-    mapping_id = Column(Integer, Sequence("partner_mapping_id_t_mapping_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
-    external_id = Column(String(100), doc="The external id given by the outer partner")
-    internal_id = Column(Integer, doc="The internal id of the other database table")
-    mapping_type = Column(String(30), doc="Type of the external - internal mapping, value set: CONVERSATION")
+    mapping_id = Column(Integer, Sequence("partner_mapping_id_t_mapping_id_seq",
+                        schema=SCHEMA), primary_key=True, nullable=False, doc="ID")
+    external_id = Column(
+        String(100), doc="The external id given by the outer partner")
+    internal_id = Column(
+        Integer, doc="The internal id of the other database table")
+    mapping_type = Column(String(
+        30), doc="Type of the external - internal mapping, value set: CONVERSATION")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
-    create_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Creation time, audit field")
-    update_time = Column(TIMESTAMP(timezone=False), server_default=func.now(), doc="Update time, audit field")
+    create_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Creation time, audit field")
+    update_time = Column(TIMESTAMP(
+        timezone=False), server_default=func.now(), doc="Update time, audit field")
     created_by = Column(String(100), doc="Creator ID, audit field")
     updated_by = Column(String(100), doc="Last updater ID, audit field")
-    delete_flag = Column(String(1), default="N", doc="Delete flag, set to Y for soft delete, optional values Y/N")
+    delete_flag = Column(String(
+        1), default="N", doc="Delete flag, set to Y for soft delete, optional values Y/N")

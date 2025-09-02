@@ -1,43 +1,42 @@
-import logging
 import asyncio
-from typing import Optional, Any, List, Dict
+import logging
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, Body, Path, Query
+from fastapi import APIRouter, Body, Header, Path, Query
 from fastapi.responses import JSONResponse
-
-from consts.model import MemoryAgentShareMode
-from utils.auth_utils import get_current_user_id
-from utils.memory_utils import build_memory_config
-from consts.const import (
-    MEMORY_SWITCH_KEY,
-    MEMORY_AGENT_SHARE_KEY,
-)
-from services.memory_config_service import (
-    set_memory_switch,
-    set_agent_share,
-    add_disabled_agent_id,
-    remove_disabled_agent_id,
-    add_disabled_useragent_id,
-    remove_disabled_useragent_id,
-    get_user_configs,
-)
-
 from nexent.memory.memory_service import (
     add_memory as svc_add_memory,
-    search_memory as svc_search_memory,
-    list_memory as svc_list_memory,
-    delete_memory as svc_delete_memory,
     clear_memory as svc_clear_memory,
+    delete_memory as svc_delete_memory,
+    list_memory as svc_list_memory,
+    search_memory as svc_search_memory,
 )
+
+from consts.const import (
+    MEMORY_AGENT_SHARE_KEY,
+    MEMORY_SWITCH_KEY,
+)
+from consts.model import MemoryAgentShareMode
+from services.memory_config_service import (
+    add_disabled_agent_id,
+    add_disabled_useragent_id,
+    get_user_configs,
+    remove_disabled_agent_id,
+    remove_disabled_useragent_id,
+    set_agent_share,
+    set_memory_switch,
+)
+from utils.auth_utils import get_current_user_id
+from utils.memory_utils import build_memory_config
 
 logger = logging.getLogger("memory_config_app")
 logger.setLevel(logging.DEBUG)
 router = APIRouter(prefix="/memory")
 
+
 # ---------------------------------------------------------------------------
 # Generic helpers
 # ---------------------------------------------------------------------------
-
 def _success(message: str = "success", content: Optional[Any] = None):
     return JSONResponse(status_code=200, content={"message": message, "status": "success", "content": content})
 
@@ -45,16 +44,15 @@ def _success(message: str = "success", content: Optional[Any] = None):
 def _error(message: str = "error"):
     return JSONResponse(status_code=400, content={"message": message, "status": "error"})
 
+
 # ---------------------------------------------------------------------------
 # Helper function
 # ---------------------------------------------------------------------------
 
 
-
 # ---------------------------------------------------------------------------
 # Configuration Endpoints
 # ---------------------------------------------------------------------------
-
 @router.get("/config/load")
 def load_configs(authorization: Optional[str] = Header(None)):
     """Load all memory-related configuration for current user."""
@@ -75,10 +73,10 @@ def set_single_config(
 ):
     """Unified endpoint to set single-value configuration items."""
     user_id, _ = get_current_user_id(authorization)
-    ok: bool = False
 
     if key == MEMORY_SWITCH_KEY:
-        enabled = bool(value) if isinstance(value, bool) else str(value).lower() in {"true", "1", "y", "yes", "on"}
+        enabled = bool(value) if isinstance(value, bool) else str(
+            value).lower() in {"true", "1", "y", "yes", "on"}
         ok = set_memory_switch(user_id, enabled)
     elif key == MEMORY_AGENT_SHARE_KEY:
         try:
@@ -90,6 +88,7 @@ def set_single_config(
         return _error("Unsupported configuration key")
 
     return _success() if ok else _error("Failed to update configuration")
+
 
 @router.post("/config/disable_agent")
 def add_disable_agent(
@@ -134,13 +133,15 @@ def remove_disable_useragent(
 # ---------------------------------------------------------------------------
 # Memory CRUD Endpoints
 # ---------------------------------------------------------------------------
-
 @router.post("/add")
 def add_memory(
-    messages: List[Dict[str, Any]] = Body(..., description="Chat messages list"),
-    memory_level: str = Body(..., embed=True, description="Memory level: tenant/agent/user/user_agent"),
+    messages: List[Dict[str, Any]
+                   ] = Body(..., description="Chat messages list"),
+    memory_level: str = Body(..., embed=True,
+                             description="Memory level: tenant/agent/user/user_agent"),
     agent_id: Optional[str] = Body(None, embed=True),
-    infer: bool = Body(True, embed=True, description="Whether to run LLM inference during add"),
+    infer: bool = Body(
+        True, embed=True, description="Whether to run LLM inference during add"),
     authorization: Optional[str] = Header(None),
 ):
     user_id, tenant_id = get_current_user_id(authorization)
@@ -187,8 +188,10 @@ def search_memory(
 
 @router.get("/list")
 def list_memory(
-    memory_level: str = Query(..., description="Memory level: tenant/agent/user/user_agent"),
-    agent_id: Optional[str] = Query(None, description="Filter by agent id if applicable"),
+    memory_level: str = Query(...,
+                              description="Memory level: tenant/agent/user/user_agent"),
+    agent_id: Optional[str] = Query(
+        None, description="Filter by agent id if applicable"),
     authorization: Optional[str] = Header(None),
 ):
     user_id, tenant_id = get_current_user_id(authorization)
@@ -213,7 +216,8 @@ def delete_memory(
 ):
     _user_id, tenant_id = get_current_user_id(authorization)
     try:
-        result = asyncio.run(svc_delete_memory(memory_id=memory_id, memory_config=build_memory_config(tenant_id)))
+        result = asyncio.run(svc_delete_memory(
+            memory_id=memory_id, memory_config=build_memory_config(tenant_id)))
         return _success(content=result)
     except Exception as e:
         logger.error("delete_memory error: %s", e, exc_info=True)
@@ -222,8 +226,10 @@ def delete_memory(
 
 @router.delete("/clear")
 def clear_memory(
-    memory_level: str = Query(..., description="Memory level: tenant/agent/user/user_agent"),
-    agent_id: Optional[str] = Query(None, description="Filter by agent id if applicable"),
+    memory_level: str = Query(...,
+                              description="Memory level: tenant/agent/user/user_agent"),
+    agent_id: Optional[str] = Query(
+        None, description="Filter by agent id if applicable"),
     authorization: Optional[str] = Header(None),
 ):
     user_id, tenant_id = get_current_user_id(authorization)

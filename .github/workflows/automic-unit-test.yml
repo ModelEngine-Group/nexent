@@ -1,5 +1,9 @@
 name: Run Automated Unit Tests
 
+concurrency:
+  group: automated-unit-test-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -9,8 +13,16 @@ on:
         default: '["ubuntu-latest"]'
   pull_request:
     branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'test/**'
   push:
     branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'test/**'
 
 jobs:
   test:

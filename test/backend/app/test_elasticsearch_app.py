@@ -212,8 +212,7 @@ async def test_delete_index_success(es_core_mock, redis_service_mock, auth_data)
         mock_full_delete.assert_called_once_with(
             auth_data["index_name"], 
             ANY,  # Use ANY instead of es_core_mock to ignore object identity
-            auth_data["user_id"], 
-            auth_data["tenant_id"]
+            auth_data["user_id"]
         )
 
 @pytest.mark.asyncio
@@ -280,8 +279,7 @@ async def test_delete_index_redis_error(es_core_mock, redis_service_mock, auth_d
         mock_full_delete.assert_called_once_with(
             auth_data["index_name"], 
             ANY,  # Use ANY instead of es_core_mock to ignore object identity
-            auth_data["user_id"], 
-            auth_data["tenant_id"]
+            auth_data["user_id"]
         )
 
 @pytest.mark.asyncio

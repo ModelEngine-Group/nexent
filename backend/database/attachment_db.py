@@ -1,8 +1,8 @@
-import os
 import io
+import os
 import uuid
 from datetime import datetime
-from typing import Optional, List, Dict, Any, BinaryIO
+from typing import Any, BinaryIO, Dict, List, Optional
 
 from .client import minio_client
 
@@ -10,11 +10,11 @@ from .client import minio_client
 def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
     """
     Generate a unique object name
-    
+
     Args:
         file_name: Original file name
         prefix: Object name prefix
-        
+
     Returns:
         str: Generated object name
     """
@@ -28,17 +28,15 @@ def generate_object_name(file_name: str, prefix: str = "attachments") -> str:
     return f"{prefix}/{timestamp}_{unique_id}{ext}"
 
 
-def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optional[str] = None,
-                metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optional[str] = None) -> Dict[str, Any]:
     """
     Upload local file to MinIO
-    
+
     Args:
         file_path: Local file path
         object_name: Object name, if not specified will be auto-generated
         bucket: Bucket name, if not specified will use default bucket
-        metadata: File metadata
-        
+
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
     """
@@ -63,18 +61,21 @@ def upload_file(file_path: str, object_name: Optional[str] = None, bucket: Optio
     return response
 
 
-def upload_fileobj(file_obj: BinaryIO, file_name: str, bucket: Optional[str] = None,
-                   metadata: Optional[Dict[str, str]] = None, prefix: str = "attachments") -> Dict[str, Any]:
+def upload_fileobj(
+        file_obj: BinaryIO,
+        file_name: str,
+        bucket: Optional[str] = None,
+        prefix: str = "attachments"
+) -> Dict[str, Any]:
     """
     Upload file object to MinIO
-    
+
     Args:
         file_obj: File object
         file_name: File name
         bucket: Bucket name, if not specified will use default bucket
-        metadata: File metadata
         prefix: Object name prefix, default is "attachments"
-        
+
     Returns:
         Dict[str, Any]: Upload result, containing success flag, URL and error message (if any)
     """
@@ -92,7 +93,8 @@ def upload_fileobj(file_obj: BinaryIO, file_name: str, bucket: Optional[str] = N
     file_obj.seek(current_pos)
 
     # Upload file
-    success, result = minio_client.upload_fileobj(file_obj, object_name, bucket)
+    success, result = minio_client.upload_fileobj(
+        file_obj, object_name, bucket)
 
     # Build response
     response = {"success": success, "object_name": object_name, "file_name": file_name, "file_size": file_size,
@@ -109,20 +111,22 @@ def upload_fileobj(file_obj: BinaryIO, file_name: str, bucket: Optional[str] = N
 def download_file(object_name: str, file_path: str, bucket: Optional[str] = None) -> Dict[str, Any]:
     """
     Download file from MinIO to local
-    
+
     Args:
         object_name: Object name
         file_path: Local save path
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         Dict[str, Any]: Download result, containing success flag and error message (if any)
     """
     # Download file
-    success, result = minio_client.download_file(object_name, file_path, bucket)
+    success, result = minio_client.download_file(
+        object_name, file_path, bucket)
 
     # Build response
-    response = {"success": success, "object_name": object_name, "file_path": file_path}
+    response = {"success": success,
+                "object_name": object_name, "file_path": file_path}
 
     if not success:
         response["error"] = result
@@ -133,12 +137,12 @@ def download_file(object_name: str, file_path: str, bucket: Optional[str] = None
 def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 3600) -> Dict[str, Any]:
     """
     Get presigned URL for file
-    
+
     Args:
         object_name: Object name
         bucket: Bucket name, if not specified will use default bucket
         expires: URL expiration time in seconds
-        
+
     Returns:
         Dict[str, Any]: Result containing success flag, URL and error message (if any)
     """
@@ -146,7 +150,8 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
     success, result = minio_client.get_file_url(object_name, bucket, expires)
 
     # Build response
-    response = {"success": success, "object_name": object_name, "expires_in": expires}
+    response = {"success": success,
+                "object_name": object_name, "expires_in": expires}
 
     if success:
         response["url"] = result
@@ -167,11 +172,11 @@ def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> 
 def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     List files in bucket
-    
+
     Args:
         prefix: Prefix filter
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         List[Dict[str, Any]]: List of file information
     """
@@ -193,11 +198,11 @@ def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str,
 def delete_file(object_name: str, bucket: Optional[str] = None) -> Dict[str, Any]:
     """
     Delete file
-    
+
     Args:
         object_name: Object name
         bucket: Bucket name, if not specified will use default bucket
-        
+
     Returns:
         Dict[str, Any]: Delete result, containing success flag and error message (if any)
     """
@@ -227,7 +232,7 @@ def get_file_stream(object_name: str, bucket: Optional[str] = None) -> Optional[
     success, result = minio_client.get_file_stream(object_name, bucket)
     if not success:
         return None
-    
+
     # Read all data from StreamingBody and wrap it in BytesIO for BinaryIO compatibility
     try:
         binary_data = result.read()
@@ -240,21 +245,21 @@ def get_file_stream(object_name: str, bucket: Optional[str] = None) -> Optional[
 def get_content_type(file_path: str) -> str:
     """
     Get content type based on file extension
-    
+
     Args:
         file_path: File path or name
-        
+
     Returns:
         str: Content type
     """
     # File extension to MIME type mapping
-    mime_types = {'.jpg': 'image/jpeg', 
-                  '.jpeg': 'image/jpeg', 
-                  '.png': 'image/png', 
+    mime_types = {'.jpg': 'image/jpeg',
+                  '.jpeg': 'image/jpeg',
+                  '.png': 'image/png',
                   '.gif': 'image/gif',
-                  '.bmp': 'image/bmp', 
-                  '.webp': 'image/webp', 
-                  '.svg': 'image/svg+xml', 
+                  '.bmp': 'image/bmp',
+                  '.webp': 'image/webp',
+                  '.svg': 'image/svg+xml',
                   '.pdf': 'application/pdf',
                   '.doc': 'application/msword',
                   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -262,19 +267,19 @@ def get_content_type(file_path: str) -> str:
                   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                   '.ppt': 'application/vnd.ms-powerpoint',
                   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                  '.txt': 'text/plain', 
-                  '.csv': 'text/csv', 
-                  '.html': 'text/html', 
+                  '.txt': 'text/plain',
+                  '.csv': 'text/csv',
+                  '.html': 'text/html',
                   '.htm': 'text/html',
-                  '.json': 'application/json', 
-                  '.xml': 'application/xml', 
+                  '.json': 'application/json',
+                  '.xml': 'application/xml',
                   '.zip': 'application/zip',
-                  '.rar': 'application/x-rar-compressed', 
-                  '.tar': 'application/x-tar', 
+                  '.rar': 'application/x-rar-compressed',
+                  '.tar': 'application/x-tar',
                   '.gz': 'application/gzip',
-                  '.mp3': 'audio/mpeg', 
-                  '.mp4': 'video/mp4', 
-                  '.avi': 'video/x-msvideo', 
+                  '.mp3': 'audio/mpeg',
+                  '.mp4': 'video/mp4',
+                  '.avi': 'video/x-msvideo',
                   '.mov': 'video/quicktime',
                   '.wmv': 'video/x-ms-wmv'}
 

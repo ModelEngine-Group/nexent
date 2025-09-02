@@ -2,7 +2,6 @@ import sys
 import os
 from unittest.mock import patch, MagicMock, AsyncMock, ANY
 import pytest
-import pytest_asyncio
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -10,8 +9,7 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
 # Import and define all necessary Pydantic models
-from pydantic import BaseModel, Field
-from typing import List, Optional, Union, Dict, Any
+from pydantic import BaseModel
 
 # Define all models that might be used in routes
 class ChangeSummaryRequest(BaseModel):
@@ -25,7 +23,8 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 try:
     import consts.model
     # Backup original class and replace with our Pydantic model version
-    original_ChangeSummaryRequest = getattr(consts.model, "ChangeSummaryRequest", None)
+    original_ChangeSummaryRequest = getattr(
+        consts.model, "ChangeSummaryRequest", None)
     # Replace model
     consts.model.ChangeSummaryRequest = ChangeSummaryRequest
     # Ensure module level replacements as well
@@ -35,7 +34,8 @@ except ImportError:
 
 # Setup all mocks first - BEFORE any imports
 # Mock S3/MinIO first to prevent any connection attempts
-minio_mock = patch('botocore.client.BaseClient._make_api_call', return_value={})
+minio_mock = patch(
+    'botocore.client.BaseClient._make_api_call', return_value={})
 minio_mock.start()
 
 # Mock database clients
@@ -69,6 +69,8 @@ for route in router.routes:
 app = FastAPI()
 
 # Override dependencies
+
+
 async def override_get_es_core():
     return es_core_instance
 
@@ -82,6 +84,7 @@ TENANT_ID = "test_tenant_id"
 USER_INFO = ("test_user_id", "test_tenant_id", "en")  # Complete user info tuple
 SUMMARY_RESULT = "This is a test summary for the knowledge base"
 AUTH_HEADER = {"Authorization": "Bearer test_token"}
+
 
 @pytest.fixture(scope="module", autouse=True)
 def cleanup():
@@ -101,10 +104,12 @@ def cleanup():
     # Clear dependency overrides
     app.dependency_overrides.clear()
 
+
 @pytest.fixture
 def test_client():
     """Return a TestClient instance for the FastAPI app"""
     return TestClient(app)
+
 
 @pytest.mark.asyncio
 async def test_auto_summary_success(test_client):
@@ -113,39 +118,39 @@ async def test_auto_summary_success(test_client):
     async_mock = AsyncMock()
     stream_response = MagicMock()
     async_mock.return_value = stream_response
-    
+
     # Configure es_service_instance for this test
     with patch('backend.apps.knowledge_app.ElasticSearchService', return_value=es_service_instance):
         with patch('backend.apps.knowledge_app.get_current_user_info', return_value=USER_INFO):
             # Configure the service instance
             es_service_instance.summary_index_name = async_mock
-            
+
             # Execute test
             response = test_client.post(
                 f"/summary/{INDEX_NAME}/auto_summary?batch_size=500",
                 headers=AUTH_HEADER
             )
-    
+
     # Assertions - use ANY for es_core to ignore the specific instance
     async_mock.assert_called_once_with(
         index_name=INDEX_NAME,
         batch_size=500,
         es_core=ANY,  # Use ANY to match any es_core object
-        user_id=USER_INFO[0],
         tenant_id=USER_INFO[1]
     )
+
 
 @pytest.mark.asyncio
 async def test_auto_summary_exception(test_client):
     """Test auto summary generation with exception"""
     # Create a new async mock that raises an exception
     async_mock = AsyncMock(side_effect=Exception("Error generating summary"))
-    
+
     with patch('backend.apps.knowledge_app.ElasticSearchService', return_value=es_service_instance):
         with patch('backend.apps.knowledge_app.get_current_user_info', return_value=USER_INFO):
             # Configure the service instance
             es_service_instance.summary_index_name = async_mock
-            
+
             # Update test to expect ValueError from f-string formatting issue
             with pytest.raises(ValueError, match="Invalid format specifier"):
                 # Execute test
@@ -153,8 +158,9 @@ async def test_auto_summary_exception(test_client):
                     f"/summary/{INDEX_NAME}/auto_summary",
                     headers=AUTH_HEADER
                 )
-    
+
     # No response assertions since we're expecting an exception
+
 
 def test_change_summary_success(test_client):
     """Test successful summary update"""
@@ -175,7 +181,7 @@ def test_change_summary_success(test_client):
     mock_service.change_summary.return_value = expected_response
 
     # Execute test with direct patching of route handler function
-    with patch('backend.apps.knowledge_app.get_current_user_id', return_value=USER_ID):
+    with patch('backend.apps.knowledge_app.get_current_user_id', return_value=(USER_ID, TENANT_ID)):
         with patch('backend.apps.knowledge_app.ElasticSearchService', return_value=mock_service):
             response = test_client.post(
                 f"/summary/{INDEX_NAME}/summary",
@@ -197,6 +203,7 @@ def test_change_summary_success(test_client):
         user_id=USER_ID
     )
 
+
 def test_change_summary_exception(test_client):
     """Test summary update with exception"""
     # Setup request data
@@ -206,7 +213,8 @@ def test_change_summary_exception(test_client):
 
     # Configure service mock to raise exception
     mock_service = MagicMock()
-    mock_service.change_summary.side_effect = Exception("Error updating summary")
+    mock_service.change_summary.side_effect = Exception(
+        "Error updating summary")
 
     # Execute test
     with patch('backend.apps.knowledge_app.get_current_user_id', return_value=USER_ID):
@@ -220,6 +228,7 @@ def test_change_summary_exception(test_client):
     # Assertions
     assert response.status_code == 500
     assert "Knowledge base summary update failed" in response.json()["detail"]
+
 
 def test_get_summary_success(test_client):
     """Test successful summary retrieval"""
@@ -245,6 +254,7 @@ def test_get_summary_success(test_client):
     mock_service.get_summary.assert_called_once_with(
         index_name=INDEX_NAME
     )
+
 
 def test_get_summary_exception(test_client):
     """Test summary retrieval with exception"""

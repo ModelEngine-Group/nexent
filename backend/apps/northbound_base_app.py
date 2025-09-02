@@ -37,10 +37,11 @@ async def northbound_http_exception_handler(request, exc):
         content={"message": exc.detail},
     )
 
+
 @northbound_app.exception_handler(Exception)
 async def northbound_generic_exception_handler(request, exc):
     logger.error(f"Northbound Generic Exception: {exc}")
     return JSONResponse(
         status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
         content={"message": "Internal server error, please try again later."},
-    ) 
+    )

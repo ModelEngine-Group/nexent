@@ -99,13 +99,7 @@
    
    这些模板帮助为不同智能体类型生成高效、清晰的提示词。
 
-2. **提示词微调模板**
-   - `prompt_fine_tune.yaml` - 中文版本
-   - `prompt_fine_tune_en.yaml` - 英文版本
-   
-   用于微调和优化现有提示词的模板。
-
-3. **标题生成模板**
+2. **标题生成模板**
    - `generate_title.yaml` - 中文版本
    - `generate_title_en.yaml` - 英文版本
 

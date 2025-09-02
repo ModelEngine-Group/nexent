@@ -1,14 +1,19 @@
 import json
 from datetime import datetime
-from typing import Dict, List, Any, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
-from sqlalchemy import insert, func, select, asc, desc, update
+from sqlalchemy import asc, desc, func, insert, select, update
 
+from .client import as_dict, get_db_session
+from .db_models import (
+    ConversationMessage,
+    ConversationMessageUnit,
+    ConversationRecord,
+    ConversationSourceImage,
+    ConversationSourceSearch,
+)
 from .utils import add_creation_tracking, add_update_tracking
 
-from .client import get_db_session, as_dict
-from .db_models import ConversationRecord, ConversationMessage, ConversationMessageUnit, ConversationSourceSearch, \
-    ConversationSourceImage
 
 class MessageRecord(TypedDict):
     message_id: int
@@ -67,8 +72,10 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None) 
         stmt = insert(ConversationRecord).values(**data).returning(
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
-            (func.extract('epoch', ConversationRecord.create_time) * 1000).label('create_time'),
-            (func.extract('epoch', ConversationRecord.update_time) * 1000).label('update_time')
+            (func.extract('epoch', ConversationRecord.create_time)
+             * 1000).label('create_time'),
+            (func.extract('epoch', ConversationRecord.update_time)
+             * 1000).label('update_time')
         )
 
         record = session.execute(stmt).fetchone()
@@ -119,7 +126,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             data = add_creation_tracking(data, user_id)
 
         # insert into conversation_message_t
-        stmt = insert(ConversationMessage).values(**data).returning(ConversationMessage.message_id)
+        stmt = insert(ConversationMessage).values(
+            **data).returning(ConversationMessage.message_id)
         result = session.execute(stmt)
         message_id = result.scalar()
         return message_id
@@ -167,7 +175,8 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
                 row_data["updated_by"] = user_id
 
             # Insert and get unit_id
-            stmt = insert(ConversationMessageUnit).values(**row_data).returning(ConversationMessageUnit.unit_id)
+            stmt = insert(ConversationMessageUnit).values(
+                **row_data).returning(ConversationMessageUnit.unit_id)
             result = session.execute(stmt)
             unit_id = result.scalar_one()
             unit_ids.append(unit_id)
@@ -275,8 +284,10 @@ def get_conversation_list(user_id: Optional[str] = None) -> List[Dict[str, Any]]
         stmt = select(
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
-            (func.extract('epoch', ConversationRecord.create_time) * 1000).label('create_time'),
-            (func.extract('epoch', ConversationRecord.update_time) * 1000).label('update_time')
+            (func.extract('epoch', ConversationRecord.create_time)
+             * 1000).label('create_time'),
+            (func.extract('epoch', ConversationRecord.update_time)
+             * 1000).label('update_time')
         ).where(
             ConversationRecord.delete_flag == 'N'
         ).order_by(
@@ -320,7 +331,7 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
         # Prepare update data
         update_data = {
             "conversation_title": new_title,
-            "update_time": func.current_timestamp()  
+            "update_time": func.current_timestamp()
         }
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
@@ -419,7 +430,8 @@ def update_message_opinion(message_id: int, opinion: str, user_id: Optional[str]
         # Prepare update data
         update_data = {
             "opinion_flag": opinion,
-            "update_time": func.current_timestamp()  # Use the database's CURRENT_TIMESTAMP function
+            # Use the database's CURRENT_TIMESTAMP function
+            "update_time": func.current_timestamp()
         }
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
@@ -455,13 +467,15 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         # First check if conversation exists
         check_stmt = select(
             ConversationRecord.conversation_id,
-            (func.extract('epoch', ConversationRecord.create_time) * 1000).label('create_time')
+            (func.extract('epoch', ConversationRecord.create_time)
+             * 1000).label('create_time')
         ).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
         )
         if user_id:
-            check_stmt = check_stmt.where(ConversationRecord.created_by == user_id)
+            check_stmt = check_stmt.where(
+                ConversationRecord.created_by == user_id)
 
         conversation = session.execute(check_stmt).first()
 
@@ -497,6 +511,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             subquery.label('units')
         ).where(
             ConversationMessage.conversation_id == conversation_id,
+
             ConversationMessage.delete_flag == 'N'
         ).order_by(ConversationMessage.message_index)
 
@@ -529,7 +544,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             if message_data.get('minio_files'):
                 try:
                     if isinstance(message_data['minio_files'], str):
-                        message_data['minio_files'] = json.loads(message_data['minio_files'])
+                        message_data['minio_files'] = json.loads(
+                            message_data['minio_files'])
                 except (json.JSONDecodeError, TypeError):
                     # If parsing fails, keep original value
                     pass
@@ -568,14 +584,16 @@ def create_source_image(image_data: Dict[str, Any], user_id: Optional[str] = Non
             "conversation_id": image_data.get('conversation_id'),
             "image_url": image_data['image_url'],
             "delete_flag": 'N',
-            "create_time": func.current_timestamp()  # Use the database's CURRENT_TIMESTAMP function
+            # Use the database's CURRENT_TIMESTAMP function
+            "create_time": func.current_timestamp()
         }
 
         if user_id:
             data = add_creation_tracking(data, user_id)
 
         # Build the insert statement and return the newly created image ID
-        stmt = insert(ConversationSourceImage).values(**data).returning(ConversationSourceImage.image_id)
+        stmt = insert(ConversationSourceImage).values(
+            **data).returning(ConversationSourceImage.image_id)
 
         # Execute the insert statement
         result = session.execute(stmt)
@@ -602,7 +620,8 @@ def delete_source_image(image_id: int, user_id: Optional[str] = None) -> bool:
         # Prepare update data
         update_data = {
             "delete_flag": 'Y',
-            "update_time": func.current_timestamp()  # Use database's CURRENT_TIMESTAMP function
+            # Use database's CURRENT_TIMESTAMP function
+            "update_time": func.current_timestamp()
         }
 
         if user_id:
@@ -734,7 +753,8 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             "search_type": search_data['search_type'],
             "tool_sign": search_data['tool_sign'],
             "delete_flag": 'N',
-            "create_time": func.current_timestamp()  # Use the database's CURRENT_TIMESTAMP function
+            # Use the database's CURRENT_TIMESTAMP function
+            "create_time": func.current_timestamp()
         }
 
         # Add unit_id if provided
@@ -754,7 +774,8 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             data = add_creation_tracking(data, user_id)
 
         # Build the insert statement and return the newly created search ID
-        stmt = insert(ConversationSourceSearch).values(**data).returning(ConversationSourceSearch.search_id)
+        stmt = insert(ConversationSourceSearch).values(
+            **data).returning(ConversationSourceSearch.search_id)
 
         # Execute the insert statement
         result = session.execute(stmt)
@@ -781,7 +802,8 @@ def delete_source_search(search_id: int, user_id: Optional[str] = None) -> bool:
         # Prepare update data
         update_data = {
             "delete_flag": 'Y',
-            "update_time": func.current_timestamp()  # Use the database's CURRENT_TIMESTAMP function
+            # Use the database's CURRENT_TIMESTAMP function
+            "update_time": func.current_timestamp()
         }
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
@@ -912,7 +934,6 @@ def get_message_id_by_index(conversation_id: int, message_index: int) -> Optiona
     Args:
         conversation_id: Conversation ID (integer)
         message_index: Message index (integer)
-        user_id: Reserved parameter for created_by and updated_by fields
 
     Returns:
         Optional[int]: Message ID if found, None otherwise

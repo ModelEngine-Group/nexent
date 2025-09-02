@@ -1,27 +1,29 @@
 """
 Celery tasks for data processing and vector storage
 """
+import asyncio
+import json
 import logging
 import os
-import json
-import time
-import aiohttp
-import asyncio
-import ray
-from typing import Dict, Any, Optional
-from celery import chain, Task, states
 import threading
+import time
+from typing import Any, Dict, Optional
 
-from .ray_actors import DataProcessorRayActor
-from .app import app
-from utils.file_management_utils import get_file_size
+import aiohttp
+import ray
+from celery import Task, chain, states
+
 from consts.const import ELASTICSEARCH_SERVICE
+from utils.file_management_utils import get_file_size
+from .app import app
+from .ray_actors import DataProcessorRayActor
 
-# Configure logging
+
 logger = logging.getLogger("data_process.tasks")
 
 # Thread lock for initializing Ray to prevent race conditions
 ray_init_lock = threading.Lock()
+
 
 def init_ray_in_worker():
     """
@@ -29,7 +31,8 @@ def init_ray_in_worker():
     This function is designed to be called from within a task.
     """
     if not ray.is_initialized():
-        logger.info("Ray not initialized. Initializing Ray for Celery worker...")
+        logger.info(
+            "Ray not initialized. Initializing Ray for Celery worker...")
         try:
             # `configure_logging=False` prevents Ray from setting up its own loggers,
             # which can interfere with Celery's logging.
@@ -59,7 +62,7 @@ def run_async(coro):
         except RuntimeError:
             # No running loop, safe to use asyncio.run
             return asyncio.run(coro)
-        
+
         # We're in an existing event loop context
         if loop.is_running():
             # Try to use nest_asyncio for compatibility
@@ -68,10 +71,11 @@ def run_async(coro):
                 nest_asyncio.apply()
                 return loop.run_until_complete(coro)
             except ImportError:
-                logger.warning("nest_asyncio not available, creating new thread for async operation")
+                logger.warning(
+                    "nest_asyncio not available, creating new thread for async operation")
                 # Fallback: run in a new thread
                 import concurrent.futures
-                
+
                 def run_in_thread():
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
@@ -80,14 +84,14 @@ def run_async(coro):
                     finally:
                         new_loop.close()
                         asyncio.set_event_loop(None)
-                
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(run_in_thread)
                     return future.result()
         else:
             # Loop exists but not running, safe to use run_until_complete
             return loop.run_until_complete(coro)
-            
+
     except Exception as e:
         logger.error(f"Error running async coroutine: {str(e)}")
         raise
@@ -104,18 +108,20 @@ def get_ray_actor() -> Any:
     with ray_init_lock:
         init_ray_in_worker()
     actor = DataProcessorRayActor.remote()
-    
-    logger.debug("Successfully created a new DataProcessorRayActor for a task.")
+
+    logger.debug(
+        "Successfully created a new DataProcessorRayActor for a task.")
     return actor
+
 
 class LoggingTask(Task):
     """Base task class with enhanced logging"""
-    
+
     def on_success(self, retval, task_id, args, kwargs):
         """Log successful task completion"""
         logger.debug(f"Task {self.name}[{task_id}] completed successfully")
         return super().on_success(retval, task_id, args, kwargs)
-    
+
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Log task failure with enhanced error handling"""
         logger.error(f"Task {self.name}[{task_id}] failed: {exc}")
@@ -126,7 +132,7 @@ class LoggingTask(Task):
             logger.error(f"Exception type: {exc_type}, message: {exc_msg}")
         # Let Celery handle the exception serialization automatically
         return super().on_failure(exc, task_id, args, kwargs, einfo)
-    
+
     def on_retry(self, exc, task_id, args, kwargs, einfo):
         """Log task retry"""
         logger.warning(f"Task {self.name}[{task_id}] retrying: {exc}")
@@ -134,12 +140,17 @@ class LoggingTask(Task):
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process', queue='process_q')
-def process(self, source: str, source_type: str, 
-            chunking_strategy: str = "basic", index_name: Optional[str] = None, 
-            original_filename: Optional[str] = None, **params) -> Dict:
+def process(
+        self,
+        source: str,
+        source_type: str,
+        chunking_strategy: str = "basic",
+        index_name: Optional[str] = None,
+        original_filename: Optional[str] = None, **params
+) -> Dict:
     """
     Process a file and extract text/chunks
-    
+
     Args:
         source: Source file path, URL, or text content
         source_type: Type of source ("local", "minio")
@@ -151,8 +162,9 @@ def process(self, source: str, source_type: str,
     start_time = time.time()
     task_id = self.request.id
 
-    logger.info(f"[{self.request.id}] PROCESS TASK: source_type: {source_type}")
-    
+    logger.info(
+        f"[{self.request.id}] PROCESS TASK: source_type: {source_type}")
+
     self.update_state(
         state=states.STARTED,
         meta={
@@ -167,7 +179,7 @@ def process(self, source: str, source_type: str,
     )
     # Get the data processor instance
     actor = get_ray_actor()
-    
+
     try:
         # Process the file based on the source type
         file_size_mb = 0
@@ -175,12 +187,13 @@ def process(self, source: str, source_type: str,
             # Check file existence and size for optimization
             if not os.path.exists(source):
                 raise FileNotFoundError(f"File does not exist: {source}")
-            
+
             file_size = os.path.getsize(source)
             file_size_mb = file_size / (1024 * 1024)
-            
-            logger.info(f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
-            
+
+            logger.info(
+                f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
+
             # The unified actor call, mapping 'file' source_type to 'local' destination
             chunks_ref = actor.process_file.remote(
                 source,
@@ -191,14 +204,17 @@ def process(self, source: str, source_type: str,
             )
 
             chunks = ray.get(chunks_ref)
-                
+
             end_time = time.time()
             elapsed_time = end_time - start_time
-            processing_speed = file_size_mb / elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
-            logger.info(f"[{self.request.id}] PROCESS TASK: File processing completed. Processing speed {processing_speed:.2f} MB/s")
+            processing_speed = file_size_mb / \
+                elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
+            logger.info(
+                f"[{self.request.id}] PROCESS TASK: File processing completed. Processing speed {processing_speed:.2f} MB/s")
 
         elif source_type == "minio":
-            logger.info(f"[{self.request.id}] PROCESS TASK: Processing from URL: {source}")
+            logger.info(
+                f"[{self.request.id}] PROCESS TASK: Processing from URL: {source}")
 
             # For URL source, core.py expects a non-local destination to trigger URL fetching
             chunks_ref = actor.process_file.remote(
@@ -211,11 +227,13 @@ def process(self, source: str, source_type: str,
             chunks = ray.get(chunks_ref)
             end_time = time.time()
             elapsed_time = end_time - start_time
-            logger.info(f"[{self.request.id}] PROCESS TASK: URL processing completed in {elapsed_time:.2f}s")
-                
+            logger.info(
+                f"[{self.request.id}] PROCESS TASK: URL processing completed in {elapsed_time:.2f}s")
+
         else:
             # For other source types, implement accordingly
-            raise NotImplementedError(f"Source type '{source_type}' not yet supported")
+            raise NotImplementedError(
+                f"Source type '{source_type}' not yet supported")
 
         # Update task state to SUCCESS with metadata
         self.update_state(
@@ -232,20 +250,21 @@ def process(self, source: str, source_type: str,
                 'processing_speed_mb_s': file_size_mb / elapsed_time if elapsed_time > 0 else 0
             }
         )
-            
-        logger.info(f"[{self.request.id}] PROCESS TASK: Successfully processed {len(chunks)} chunks in {elapsed_time:.2f}s")
-        
+
+        logger.info(
+            f"[{self.request.id}] PROCESS TASK: Successfully processed {len(chunks)} chunks in {elapsed_time:.2f}s")
+
         # Prepare data for the next task in the chain
         returned_data = {
             'chunks': chunks,
             'source': source,
             'index_name': index_name,
             'original_filename': original_filename,
-            'task_id': task_id 
+            'task_id': task_id
         }
 
         return returned_data
-        
+
     except Exception as e:
         logger.error(f"Error processing file {source}: {str(e)}")
         try:
@@ -277,13 +296,20 @@ def process(self, source: str, source_type: str,
             )
             raise
 
+
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward', queue='forward_q')
-def forward(self, processed_data: Dict, index_name: str, 
-            source: str, source_type: str = 'minio', 
-            original_filename: Optional[str] = None, authorization: Optional[str] = None) -> Dict:
+def forward(
+        self,
+        processed_data: Dict,
+        index_name: str,
+        source: str,
+        source_type: str = 'minio',
+        original_filename: Optional[str] = None,
+        authorization: Optional[str] = None
+) -> Dict:
     """
     Vectorize and store processed chunks in Elasticsearch
-    
+
     Args:
         processed_data: Dict containing chunks and metadata
         index_name: Name of the index to store documents
@@ -291,7 +317,7 @@ def forward(self, processed_data: Dict, index_name: str,
         source_type: The type of the source("local", "minio")
         original_filename: The original name of the file
         authorization: Authorization header for API calls
-        
+
     Returns:
         Dict containing storage results and metadata
     """
@@ -300,7 +326,7 @@ def forward(self, processed_data: Dict, index_name: str,
     original_source = source
     original_index_name = index_name
     filename = original_filename
-    
+
     try:
         chunks = processed_data.get('chunks')
         if processed_data.get('source'):
@@ -309,7 +335,8 @@ def forward(self, processed_data: Dict, index_name: str,
             original_index_name = processed_data.get('index_name')
         if processed_data.get('original_filename'):
             filename = processed_data.get('original_filename')
-        logger.info(f"[{self.request.id}] FORWARD TASK: Received data for source '{original_source}' with {len(chunks) if chunks else 'None'} chunks")
+        logger.info(
+            f"[{self.request.id}] FORWARD TASK: Received data for source '{original_source}' with {len(chunks) if chunks else 'None'} chunks")
 
         # Update task state to FORWARDING
         self.update_state(
@@ -323,7 +350,7 @@ def forward(self, processed_data: Dict, index_name: str,
                 'stage': 'vectorizing_and_storing'
             }
         )
-        
+
         if chunks is None:
             raise Exception(json.dumps({
                 "message": "No chunks received for forwarding",
@@ -333,19 +360,22 @@ def forward(self, processed_data: Dict, index_name: str,
                 "original_filename": filename
             }, ensure_ascii=False))
         if len(chunks) == 0:
-            logger.warning(f"[{self.request.id}] FORWARD TASK: Empty chunks list received for source {original_source}")
+            logger.warning(
+                f"[{self.request.id}] FORWARD TASK: Empty chunks list received for source {original_source}")
         formatted_chunks = []
         for i, chunk in enumerate(chunks):
             # Extract text and metadata
             content = chunk.get("content", "")
             metadata = chunk.get("metadata", {})
-            
+
             # Validate chunk content
             if not content or len(content.strip()) == 0:
-                logger.warning(f"[{self.request.id}] FORWARD TASK: Chunk {i+1} has empty text content, skipping")
+                logger.warning(
+                    f"[{self.request.id}] FORWARD TASK: Chunk {i+1} has empty text content, skipping")
                 continue
 
-            file_size = get_file_size(source_type, original_source) if isinstance(original_source, str) else 0
+            file_size = get_file_size(source_type, original_source) if isinstance(
+                original_source, str) else 0
 
             # Format as expected by the Elasticsearch API
             formatted_chunk = {
@@ -360,7 +390,7 @@ def forward(self, processed_data: Dict, index_name: str,
                 "date": metadata.get("date"),
             }
             formatted_chunks.append(formatted_chunk)
-        
+
         if len(formatted_chunks) == 0:
             raise Exception(json.dumps({
                 "message": "No valid chunks to forward after formatting",
@@ -369,6 +399,7 @@ def forward(self, processed_data: Dict, index_name: str,
                 "source": original_source,
                 "original_filename": original_filename
             }, ensure_ascii=False))
+
         async def index_documents():
             elasticsearch_url = ELASTICSEARCH_SERVICE
             if not elasticsearch_url:
@@ -384,14 +415,15 @@ def forward(self, processed_data: Dict, index_name: str,
             headers = {"Content-Type": "application/json"}
             if authorization:
                 headers["Authorization"] = authorization
-            
+
             max_retries = 5
             retry_delay = 5
             for retry in range(max_retries):
                 try:
                     connector = aiohttp.TCPConnector(verify_ssl=False)
-                    timeout = aiohttp.ClientTimeout(total=120)  # Increased timeout for large documents
-                    
+                    # Increased timeout for large documents
+                    timeout = aiohttp.ClientTimeout(total=120)
+
                     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                         async with session.post(
                             full_url,
@@ -401,7 +433,7 @@ def forward(self, processed_data: Dict, index_name: str,
                         ) as response:
                             result = await response.json()
                             return result
-                            
+
                 except aiohttp.ClientResponseError as e:
                     if e.status == 503 and retry < max_retries - 1:
                         wait_time = retry_delay * (retry + 1)
@@ -415,10 +447,12 @@ def forward(self, processed_data: Dict, index_name: str,
                             "original_filename": original_filename
                         }, ensure_ascii=False))
                 except aiohttp.ClientConnectorError as e:
-                    logger.error(f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
+                    logger.error(
+                        f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
                     if retry < max_retries - 1:
                         wait_time = retry_delay * (retry + 1)
-                        logger.warning(f"[{self.request.id}] FORWARD TASK: Connection error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
+                        logger.warning(
+                            f"[{self.request.id}] FORWARD TASK: Connection error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
                     else:
                         raise Exception(json.dumps({
@@ -431,7 +465,8 @@ def forward(self, processed_data: Dict, index_name: str,
                 except asyncio.TimeoutError as e:
                     if retry < max_retries - 1:
                         wait_time = retry_delay * (retry + 1)
-                        logger.warning(f"[{self.request.id}] FORWARD TASK: Timeout when indexing documents: {str(e)}. Retrying in {wait_time}s...")
+                        logger.warning(
+                            f"[{self.request.id}] FORWARD TASK: Timeout when indexing documents: {str(e)}. Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
                     else:
                         raise Exception(json.dumps({
@@ -444,7 +479,8 @@ def forward(self, processed_data: Dict, index_name: str,
                 except Exception as e:
                     if retry < max_retries - 1:
                         wait_time = retry_delay * (retry + 1)
-                        logger.warning(f"[{self.request.id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
+                        logger.warning(
+                            f"[{self.request.id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
                     else:
                         raise Exception(json.dumps({
@@ -455,11 +491,13 @@ def forward(self, processed_data: Dict, index_name: str,
                             "original_filename": original_filename
                         }, ensure_ascii=False))
         es_result = run_async(index_documents())
-        logger.debug(f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
+        logger.debug(
+            f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
 
         if isinstance(es_result, dict) and es_result.get("success"):
             total_indexed = es_result.get("total_indexed", 0)
-            total_submitted = es_result.get("total_submitted", len(formatted_chunks))
+            total_submitted = es_result.get(
+                "total_submitted", len(formatted_chunks))
             logger.debug(f"[{self.request.id}] FORWARD TASK: main_server reported {total_indexed}/{total_submitted} documents indexed successfully for '{original_source}'. Message: {es_result.get('message')}")
 
             if total_indexed < total_submitted:
@@ -476,7 +514,8 @@ def forward(self, processed_data: Dict, index_name: str,
                     "original_filename": original_filename
                 }, ensure_ascii=False))
         elif isinstance(es_result, dict) and not es_result.get("success"):
-            error_message = es_result.get("message", "Unknown error from main_server")
+            error_message = es_result.get(
+                "message", "Unknown error from main_server")
             raise Exception(json.dumps({
                 "message": f"main_server API error: {error_message}",
                 "index_name": original_index_name,
@@ -506,8 +545,9 @@ def forward(self, processed_data: Dict, index_name: str,
                 'stage': 'completed'
             }
         )
-        
-        logger.info(f"Stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
+
+        logger.info(
+            f"Stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
         return {
             'task_id': task_id,
             'source': original_source,
@@ -521,7 +561,8 @@ def forward(self, processed_data: Dict, index_name: str,
         # If it's an Exception, all go here (including our custom JSON message)
         try:
             error_info = json.loads(str(e))
-            logger.error(f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_info.get('message', str(e))}")
+            logger.error(
+                f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_info.get('message', str(e))}")
             self.update_state(
                 meta={
                     'source': error_info.get('source', ''),
@@ -532,7 +573,7 @@ def forward(self, processed_data: Dict, index_name: str,
                     'stage': 'forward_task_failed'
                 }
             )
-        except Exception:
+        except Exception as e:
             logger.error(f"Error forwarding chunks: {str(e)}")
             self.update_state(
                 meta={
@@ -542,15 +583,22 @@ def forward(self, processed_data: Dict, index_name: str,
             )
         raise
 
+
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_and_forward')
-def process_and_forward(self, source: str, source_type: str,
-                        chunking_strategy: str, index_name: Optional[str] = None,
-                        original_filename: Optional[str] = None, authorization: Optional[str] = None) -> str:
+def process_and_forward(
+        self,
+        source: str,
+        source_type: str,
+        chunking_strategy: str,
+        index_name: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        authorization: Optional[str] = None
+) -> str:
     """
     Combined task that chains processing and forwarding
-    
+
     This task delegates to a chain of process -> forward
-    
+
     Args:
         source: Source file path, URL, or text content
         source_type: source of the file("local", "minio")
@@ -558,13 +606,13 @@ def process_and_forward(self, source: str, source_type: str,
         index_name: Name of the index to store documents
         original_filename: The original name of the file
         authorization: Authorization header for API calls
-        **params: Additional parameters
-        
+
     Returns:
         Task ID of the chain
     """
-    logger.info(f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}")
-    
+    logger.info(
+        f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}")
+
     # Create a task chain
     task_chain = chain(
         process.s(
@@ -582,38 +630,46 @@ def process_and_forward(self, source: str, source_type: str,
             authorization=authorization
         ).set(queue='forward_q')
     )
-    
+
     # Execute the chain
     result = task_chain.apply_async()
     if result is None or not hasattr(result, 'id') or result.id is None:
-        logger.error("Celery chain apply_async() did not return a valid result or result.id")
+        logger.error(
+            "Celery chain apply_async() did not return a valid result or result.id")
         return ""
     logger.info(f"Created task chain ID: {result.id}")
-    
+
     return result.id
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_sync')
-def process_sync(self, source: str, source_type: str, 
-                 chunking_strategy: str = "basic", timeout: int = 30, **params) -> Dict:
+def process_sync(
+        self,
+        source: str,
+        source_type: str,
+        chunking_strategy: str = "basic",
+        timeout: int = 30,
+        **params
+) -> Dict:
     """
     Synchronous process task that returns text directly (for real-time API)
-    
+
     Args:
         source: Source file path, URL, or text content
         source_type: source of the file("local", "minio")
         chunking_strategy: Strategy for chunking the document
         timeout: Timeout for the operation
         **params: Additional parameters
-        
+
     Returns:
         Dict containing the extracted text and metadata
     """
     start_time = time.time()
     task_id = self.request.id
-    
+
     # Check if we're in a valid Celery context before updating state
-    is_celery_context = hasattr(self, 'request') and self.request.id is not None
+    is_celery_context = hasattr(
+        self, 'request') and self.request.id is not None
 
     # Update task state to PROCESSING only if in Celery context
     if is_celery_context:
@@ -627,9 +683,10 @@ def process_sync(self, source: str, source_type: str,
                 'sync_mode': True
             }
         )
-    
-    logger.info(f"Synchronous processing file: {source} with strategy: {chunking_strategy}")
-    
+
+    logger.info(
+        f"Synchronous processing file: {source} with strategy: {chunking_strategy}")
+
     # Get the data processor instance
     actor = get_ray_actor()
 
@@ -644,17 +701,19 @@ def process_sync(self, source: str, source_type: str,
                 task_id=task_id,
                 **params
             )
-            
+
             chunks = ray.get(chunks_ref)
         else:
-            raise NotImplementedError(f"Source type '{source_type}' not yet implemented")
-        
+            raise NotImplementedError(
+                f"Source type '{source_type}' not yet implemented")
+
         end_time = time.time()
         elapsed_time = end_time - start_time
-        
+
         # Extract text from chunks
-        text_content = "\n\n".join([chunk.get("content", "") for chunk in chunks])
-        
+        text_content = "\n\n".join(
+            [chunk.get("content", "") for chunk in chunks])
+
         # Update task state to COMPLETE only if in Celery context
         if is_celery_context:
             self.update_state(
@@ -668,9 +727,10 @@ def process_sync(self, source: str, source_type: str,
                     'sync_mode': True
                 }
             )
-        
-        logger.info(f"Synchronously processed {len(chunks)} chunks from {source} in {elapsed_time:.2f}s")
-        
+
+        logger.info(
+            f"Synchronously processed {len(chunks)} chunks from {source} in {elapsed_time:.2f}s")
+
         return {
             'task_id': task_id,
             'source': source,
@@ -680,10 +740,10 @@ def process_sync(self, source: str, source_type: str,
             'processing_time': elapsed_time,
             'text_length': len(text_content)
         }
-        
+
     except Exception as e:
         logger.error(f"Error synchronously processing file {source}: {str(e)}")
-        
+
         # Update task state to FAILURE with custom metadata only if in Celery context
         if is_celery_context:
             self.update_state(

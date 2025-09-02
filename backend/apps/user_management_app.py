@@ -1,32 +1,29 @@
 import logging
-from typing import Optional, Any, Tuple
-from fastapi import APIRouter, HTTPException, Header, Request
-from dotenv import load_dotenv
-from supabase import create_client, Client
-import requests
 import os
+from typing import Any, Optional, Tuple
 
-from consts.const import SUPABASE_URL, SUPABASE_KEY
-from consts.model import STATUS_CODES, ServiceResponse, UserSignUpRequest, UserSignInRequest
+import requests
+from dotenv import load_dotenv
+from fastapi import APIRouter, Header, HTTPException, Request
+from supabase import Client
+
+from consts.model import ServiceResponse, STATUS_CODES, UserSignInRequest, UserSignUpRequest
 from database.model_management_db import create_model_record
-from utils.auth_utils import get_jwt_expiry_seconds, calculate_expires_at, get_current_user_id
 from database.user_tenant_db import insert_user_tenant
-from utils.config_utils import config_manager
+from utils.auth_utils import calculate_expires_at, get_current_user_id, get_jwt_expiry_seconds, get_supabase_client
+from consts.const import INVITE_CODE
 
 load_dotenv()
 logging.getLogger("httpx").setLevel(logging.WARNING)
 router = APIRouter(prefix="/user", tags=["user"])
 
 
-# Create base supabase client
-def get_supabase_client() -> Client:
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
 # Set token to client
 def set_auth_token_to_client(client: Client, token: str) -> None:
-    jwt_token = token.replace("Bearer ", "") if token.startswith("Bearer ") else token
-    
+    """Set token to client"""
+    jwt_token = token.replace(
+        "Bearer ", "") if token.startswith("Bearer ") else token
+
     try:
         # Only set access_token
         client.auth.access_token = jwt_token
@@ -34,17 +31,18 @@ def set_auth_token_to_client(client: Client, token: str) -> None:
         logging.error(f"设置访问令牌失败: {str(e)}")
 
 
-# Get token from authorization header and create authorized supabase client
 def get_authorized_client(authorization: Optional[str] = Header(None)) -> Client:
+    """Get token from authorization header and create authorized supabase client"""
     client = get_supabase_client()
     if authorization:
-        token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+        token = authorization.replace("Bearer ", "") if authorization.startswith(
+            "Bearer ") else authorization
         set_auth_token_to_client(client, token)
     return client
 
 
-# Get current user from client, return user object or None
 def get_current_user_from_client(client: Client) -> Optional[Any]:
+    """Get current user from client, return user object or None"""
     try:
         user_response = client.auth.get_user()
         if user_response and user_response.user:
@@ -55,8 +53,8 @@ def get_current_user_from_client(client: Client) -> Optional[Any]:
         return None
 
 
-# Validate token function, return (is valid, user object)
 def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
+    """Validate token function, return (is valid, user object)"""
     client = get_supabase_client()
     set_auth_token_to_client(client, token)
     try:
@@ -69,8 +67,8 @@ def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
         return False, None
 
 
-# Get current user as dependency
 async def get_current_user(request: Request) -> Any:
+    """Get current user as dependency"""
     authorization = request.headers.get("Authorization")
     if not authorization:
         raise HTTPException(status_code=401, detail="未提供授权令牌")
@@ -82,8 +80,8 @@ async def get_current_user(request: Request) -> Any:
     return user
 
 
-# Try to extend session validity, return new session information or None
 def extend_session(client: Client, refresh_token: str) -> Optional[dict]:
+    """Try to extend session validity, return new session information or None"""
     try:
         response = client.auth.refresh_session(refresh_token)
         if response and response.session:
@@ -99,32 +97,32 @@ def extend_session(client: Client, refresh_token: str) -> Optional[dict]:
         return None
 
 
-# Service health check
 @router.get("/service_health", response_model=ServiceResponse)
 async def service_health():
+    """Service health check"""
     try:
-        SUPABASE_URL = os.getenv("SUPABASE_URL")
-        response = requests.get(f'{SUPABASE_URL}/auth/v1/health', headers={
+        supabase_url = os.getenv("SUPABASE_URL")
+        response = requests.get(f'{supabase_url}/auth/v1/health', headers={
             'apikey': os.getenv("SUPABASE_KEY")
         })
-        
+
         if not response.ok:
             return ServiceResponse(
                 code=STATUS_CODES["AUTH_SERVICE_UNAVAILABLE"],
                 message="认证服务不可用",
                 data=False
             )
-        
+
         data = response.json()
         # Check if the service is available by checking if the response contains the name field and its value is "GoTrue"
         is_available = data and data.get("name") == "GoTrue"
-        
+
         return ServiceResponse(
             code=STATUS_CODES["SUCCESS"] if is_available else STATUS_CODES["AUTH_SERVICE_UNAVAILABLE"],
             message="认证服务正常" if is_available else "认证服务不可用",
             data=is_available
         )
-        
+
     except Exception as e:
         logging.error(f"认证服务连通性检查失败: {str(e)}")
         return ServiceResponse(
@@ -133,32 +131,26 @@ async def service_health():
             data=False
         )
 
-# User registration
+
 @router.post("/signup", response_model=ServiceResponse)
 async def signup(request: UserSignUpRequest):
+    """User registration"""
     client = get_supabase_client()
-    
+
     # Record basic information of the registration request
     logging.info(f"收到注册请求: email={request.email}, is_admin={request.is_admin}")
-    
+
     # If it is an admin registration, verify the invite code
     if request.is_admin:
         logging.info("检测到管理员注册请求，开始验证邀请码")
-        
-        # Try to get the invite code configuration from different sources
-        invite_code = config_manager.get_config("INVITE_CODE")
-        logging.info(f"从config_manager获取的INVITE_CODE: {invite_code}")
-        
-        # If config_manager does not get the invite code, try to get it directly from the environment variable
-        if not invite_code:
-            invite_code = os.getenv("INVITE_CODE")
-            logging.info(f"INVITE_CODE from environment variable: {invite_code}")
-        
-        if not invite_code:
-            logging.error("Admin invite code not found in any configuration source")
-            logging.error("Please check the following configuration sources:")
-            logging.error("1. INVITE_CODE configuration in config_manager")
-            logging.error("2. INVITE_CODE environment variable")
+
+        # Get the invite code from consts.const (which reads from environment variable)
+        logging.info(f"The INVITE_CODE obtained from consts.const: {INVITE_CODE}")
+
+        if not INVITE_CODE:
+            logging.error(
+                "Admin invite code not found in configuration")
+            logging.error("Please check the INVITE_CODE environment variable")
             return ServiceResponse(
                 code=STATUS_CODES["SERVER_ERROR"],
                 message="Admin registration feature is not available, please contact the system administrator to configure the invite code",
@@ -167,9 +159,9 @@ async def signup(request: UserSignUpRequest):
                     "details": "The system has not configured the admin invite code, please contact technical support"
                 }
             )
-        
+
         logging.info(f"User provided invite code: {request.invite_code}")
-        
+
         if not request.invite_code:
             logging.warning("User did not provide admin invite code")
             return ServiceResponse(
@@ -180,9 +172,10 @@ async def signup(request: UserSignUpRequest):
                     "field": "inviteCode"
                 }
             )
-        
-        if request.invite_code != invite_code:
-            logging.warning(f"Admin invite code verification failed: user provided='{request.invite_code}', system configured='{invite_code}'")
+
+        if request.invite_code != INVITE_CODE:
+            logging.warning(
+                f"Admin invite code verification failed: user provided='{request.invite_code}', system configured='{INVITE_CODE}'")
             return ServiceResponse(
                 code=STATUS_CODES["INVALID_INPUT"],
                 message="Admin invite code error, please check and re-enter",
@@ -192,15 +185,15 @@ async def signup(request: UserSignUpRequest):
                     "hint": "Please confirm that the invite code is entered correctly, case-sensitive"
                 }
             )
-        
+
         logging.info("Admin invite code verification successful")
-    
+
     try:
         # Set user metadata, including role information
         response = client.auth.sign_up({
             "email": request.email,
             "password": request.password,
-            "options":{
+            "options": {
                 "data": {
                     "role": "admin" if request.is_admin else "user"
                 }
@@ -210,7 +203,7 @@ async def signup(request: UserSignUpRequest):
         if response.user:
             user_id = response.user.id
             user_role = "admin" if request.is_admin else "user"
-            
+
             # Determine tenant ID
             if request.is_admin:
                 # The tenant_id of the admin is the same as the user_id
@@ -218,19 +211,21 @@ async def signup(request: UserSignUpRequest):
             else:
                 # Normal users use the default tenant ID
                 tenant_id = "tenant_id"
-            
+
             # Create user tenant relationship
             user_tenant_created = insert_user_tenant(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 created_by=user_id
             )
-            
+
             if not user_tenant_created:
-                logging.error(f"Failed to create user tenant relationship: user_id={user_id}, tenant_id={tenant_id}")
                 # Registration successful but tenant relationship creation failed, continue to return success, but record the error
-            
-            logging.info(f"User {request.email} registered successfully, role: {user_role}, tenant: {tenant_id}")
+                logging.error(
+                    f"Failed to create user tenant relationship: user_id={user_id}, tenant_id={tenant_id}")
+
+            logging.info(
+                f"User {request.email} registered successfully, role: {user_role}, tenant: {tenant_id}")
 
             success_message = f"🎉 {'Admin account' if request.is_admin else 'User account'} registered successfully!"
             if request.is_admin:
@@ -275,7 +270,8 @@ async def signup(request: UserSignUpRequest):
                 }
             )
         else:
-            logging.error("Supabase registration request returned no user object")
+            logging.error(
+                "Supabase registration request returned no user object")
             return ServiceResponse(
                 code=STATUS_CODES["SERVER_ERROR"],
                 message="Registration service is temporarily unavailable, please try again later",
@@ -300,7 +296,7 @@ async def signup(request: UserSignUpRequest):
                     "suggestion": "Please use a different email address or try logging in to an existing account"
                 }
             )
-        
+
         # Password strength is not enough
         if "password" in error_message and ("weak" in error_message or "strength" in error_message):
             return ServiceResponse(
@@ -312,7 +308,7 @@ async def signup(request: UserSignUpRequest):
                     "requirements": "Password must be at least 6 characters long, including letters, numbers, and special symbols"
                 }
             )
-        
+
         # Email format error
         if "email" in error_message and ("invalid" in error_message or "format" in error_message):
             return ServiceResponse(
@@ -324,7 +320,7 @@ async def signup(request: UserSignUpRequest):
                     "example": "Please enter the correct format: user@example.com"
                 }
             )
-        
+
         # Network connection problem
         if "timeout" in error_message or "connection" in error_message:
             return ServiceResponse(
@@ -348,9 +344,9 @@ async def signup(request: UserSignUpRequest):
         )
 
 
-# User login
 @router.post("/signin", response_model=ServiceResponse)
 async def signin(request: UserSignInRequest):
+    """User login"""
     client = get_supabase_client()
     try:
         response = client.auth.sign_in_with_password({
@@ -361,13 +357,14 @@ async def signin(request: UserSignInRequest):
         # Get actual expiration time from access_token
         expiry_seconds = get_jwt_expiry_seconds(response.session.access_token)
         expires_at = calculate_expires_at(response.session.access_token)
-        
+
         # Get role information from user metadata
         user_role = "user"  # Default role
         if 'role' in response.user.user_metadata:  # Adapt to historical user data
             user_role = response.user.user_metadata['role']
 
-        logging.info(f"User {request.email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
+        logging.info(
+            f"User {request.email} logged in successfully, session validity is {expiry_seconds} seconds, role: {user_role}")
 
         return ServiceResponse(
             code=STATUS_CODES["SUCCESS"],
@@ -404,9 +401,9 @@ async def signin(request: UserSignInRequest):
         )
 
 
-# Refresh token
 @router.post("/refresh_token", response_model=ServiceResponse)
 async def refresh_token(request: Request):
+    """Refresh token"""
     authorization = request.headers.get("Authorization")
     if not authorization:
         return ServiceResponse(
@@ -435,7 +432,8 @@ async def refresh_token(request: Request):
                 data=None
             )
 
-        logging.info(f"Token refresh successful: session validity is {session_info['expires_in_seconds']} seconds")
+        logging.info(
+            f"Token refresh successful: session validity is {session_info['expires_in_seconds']} seconds")
 
         return ServiceResponse(
             code=STATUS_CODES["SUCCESS"],
@@ -460,9 +458,9 @@ async def refresh_token(request: Request):
         )
 
 
-# User logout
 @router.post("/logout", response_model=ServiceResponse)
 async def logout(request: Request):
+    """User logout"""
     authorization = request.headers.get("Authorization")
     if not authorization:
         return ServiceResponse(
@@ -488,9 +486,9 @@ async def logout(request: Request):
         )
 
 
-# Get current user session
 @router.get("/session", response_model=ServiceResponse)
 async def get_session(request: Request):
+    """Get current user session"""
     authorization = request.headers.get("Authorization")
     if not authorization:
         return ServiceResponse(
@@ -507,7 +505,7 @@ async def get_session(request: Request):
         user_role = "user"  # Default role
         if user.user_metadata and 'role' in user.user_metadata:
             user_role = user.user_metadata['role']
-            
+
         return ServiceResponse(
             code=STATUS_CODES["SUCCESS"],
             message="Session is valid",
@@ -527,9 +525,9 @@ async def get_session(request: Request):
         )
 
 
-# Get current user ID, return None if not logged in
 @router.get("/current_user_id", response_model=ServiceResponse)
 async def get_user_id(request: Request):
+    """Get current user ID, return None if not logged in"""
     authorization = request.headers.get("Authorization")
     if not authorization:
         return ServiceResponse(
@@ -559,11 +557,13 @@ async def get_user_id(request: Request):
                 data={"user_id": user_id}
             )
     except Exception as token_error:
-        logging.warning(f"Failed to parse user ID from token: {str(token_error)}")
+        logging.warning(
+            f"Failed to parse user ID from token: {str(token_error)}")
 
     # If all methods fail, return the session invalid information
     return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],  # Keep the same status code as the original script
+        # Keep the same status code as the original script
+        code=STATUS_CODES["SUCCESS"],
         message="User not logged in or session invalid",
         data={"user_id": None}
     )

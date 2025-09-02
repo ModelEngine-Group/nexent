@@ -2,9 +2,11 @@
 Celery application configuration for data processing tasks
 """
 import logging
+
 from celery import Celery
-from consts.const import REDIS_URL, REDIS_BACKEND_URL, ELASTICSEARCH_SERVICE
 from celery.backends.base import DisabledBackend
+
+from consts.const import ELASTICSEARCH_SERVICE, REDIS_BACKEND_URL, REDIS_URL
 
 # Configure logging
 logger = logging.getLogger("data_process.app")
@@ -14,7 +16,8 @@ import_path = 'data_process.tasks'
 logger.debug(f"Using import path: {import_path}")
 
 if not REDIS_URL or not REDIS_BACKEND_URL:
-    raise ValueError("FATAL: REDIS_URL or REDIS_BACKEND_URL is not configured. Please check the environment variables in this container.")
+    raise ValueError(
+        "FATAL: REDIS_URL or REDIS_BACKEND_URL is not configured. Please check the environment variables in this container.")
 
 logger.debug(f"Broker URL from config: {REDIS_URL}")
 logger.debug(f"Backend URL from config: {REDIS_BACKEND_URL}")
@@ -83,7 +86,7 @@ app.conf.update(
     broker_connection_max_retries=10,
     broker_heartbeat=30,  # Heartbeat check
     broker_pool_limit=10,  # Connection pool size
-    
+
     # Add transport options
     broker_transport_options={
         'visibility_timeout': 3600,

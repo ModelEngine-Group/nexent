@@ -369,7 +369,6 @@ select_deployment_mode() {
   echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
   echo "   2) 🏗️  Infrastructure mode - Only start infrastructure services"
   echo "   3) 🚀 Production mode - Only expose port 3000 for security"
-  echo "   4) 🧪 Beta mode - Use develop branch images (from .env.beta)"
 
   if [ -n "$MODE_CHOICE" ]; then
     mode_choice="$MODE_CHOICE"
@@ -392,11 +391,6 @@ select_deployment_mode() {
           export COMPOSE_FILE_SUFFIX=".prod.yml"
           disable_dashboard
           echo "✅ Selected production mode 🚀"
-          ;;
-      4)
-          export DEPLOYMENT_MODE="beta"
-          export COMPOSE_FILE_SUFFIX=".yml"
-          echo "✅ Selected beta mode 🧪"
           ;;
       *)
           export DEPLOYMENT_MODE="development"
@@ -572,7 +566,7 @@ deploy_infrastructure() {
       fi
       
       # Start Supabase services
-      if ! ${docker_compose_command} -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
+      if ! $docker_compose_command -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
           echo "   ❌ ERROR Failed to start supabase services"
           ERROR_OCCURRED=1
           return 1
@@ -751,34 +745,26 @@ create_default_admin_user() {
 }
 
 choose_image_env() {
-  if [ "$DEPLOYMENT_MODE" = "beta" ]; then
-    echo "🌐 Beta Mode: using .env.beta for image sources."
-    source .env.beta
-    echo ""
-    echo "--------------------------------"
-    echo ""
+  if [ -n "$IS_MAINLAND" ]; then
+    is_mainland="$IS_MAINLAND"
+    echo "🌏 Using is_mainland from argument: $is_mainland"
   else
-    if [ -n "$IS_MAINLAND" ]; then
-      is_mainland="$IS_MAINLAND"
-      echo "🌏 Using is_mainland from argument: $is_mainland"
-    else
-      read -p "🌏 Is your server network located in mainland China? [Y/N] (default N): " is_mainland
-    fi
-
-    # Sanitize potential Windows CR in input
-    is_mainland=$(sanitize_input "$is_mainland")
-    if [[ "$is_mainland" =~ ^[Yy]$ ]]; then
-      echo "🌐 Detected mainland China network, using .env.mainland for image sources."
-      source .env.mainland
-    else
-      echo "🌐 Using general image sources from .env.general."
-      source .env.general
-    fi
-
-    echo ""
-    echo "--------------------------------"
-    echo ""
+    read -p "🌏 Is your server network located in mainland China? [Y/N] (default N): " is_mainland
   fi
+
+  # Sanitize potential Windows CR in input
+  is_mainland=$(sanitize_input "$is_mainland")
+  if [[ "$is_mainland" =~ ^[Yy]$ ]]; then
+    echo "🌐 Detected mainland China network, using .env.mainland for image sources."
+    source .env.mainland
+  else
+    echo "🌐 Using general image sources from .env.general."
+    source .env.general
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
 }
 
 main_deploy() {

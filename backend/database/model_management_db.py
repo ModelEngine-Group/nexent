@@ -1,11 +1,10 @@
-from typing import Optional, Dict, List, Any
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, insert, update, select, and_
+from sqlalchemy import and_, func, insert, select, update
 
-from .client import db_client, get_db_session, as_dict
+from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
-from consts.const import DEFAULT_TENANT_ID
 
 
 def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str) -> bool:
@@ -42,7 +41,12 @@ def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str
         return result.rowcount > 0
 
 
-def update_model_record(model_id: int, update_data: Dict[str, Any], user_id: Optional[str] = None, tenant_id: Optional[str] = None) -> bool:
+def update_model_record(
+        model_id: int,
+        update_data: Dict[str, Any],
+        user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None
+) -> bool:
     """
     Update a model record
 
@@ -50,6 +54,7 @@ def update_model_record(model_id: int, update_data: Dict[str, Any], user_id: Opt
         model_id: Model ID
         update_data: Dictionary containing update data
         user_id: Reserved parameter for filling updated_by field
+        tenant_id: Tenant ID
 
     Returns:
         bool: Whether the operation was successful
@@ -85,6 +90,7 @@ def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
     Args:
         model_id: Model ID
         user_id: Reserved parameter for filling updated_by field
+        tenant_id: Tenant ID
 
     Returns:
         bool: Whether the operation was successful
@@ -118,6 +124,7 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
 
     Args:
         filters: Dictionary of filter conditions, optional parameter
+        tenant_id: Tenant ID
 
     Returns:
         List[Dict[str, Any]]: List of model records
@@ -163,6 +170,7 @@ def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dic
     model = records[0]
     return model
 
+
 def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[int]:
     """
     Get a model ID by display name
@@ -195,21 +203,21 @@ def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Opt
             ModelRecord.model_id == model_id,
             ModelRecord.delete_flag == 'N'
         )
-        
+
         # If tenant ID is provided, add tenant filter
         if tenant_id:
             stmt = stmt.where(ModelRecord.tenant_id == tenant_id)
-            
+
         # Execute query
         result = session.scalars(stmt).first()
-        
+
         # If no record is found, return None
         if result is None:
             return None
-            
+
         # Convert SQLAlchemy model object to dictionary
-        result_dict = {key: value for key, value in result.__dict__.items() 
-                      if not key.startswith('_')}
+        result_dict = {key: value for key,
+                       value in result.__dict__.items() if not key.startswith('_')}
 
         return result_dict
 

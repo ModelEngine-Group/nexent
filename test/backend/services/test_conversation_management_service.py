@@ -293,10 +293,9 @@ class TestConversationManagementService(unittest.TestCase):
         mock_rename_conversation.return_value = True
 
         # Execute
-        result = rename_conversation_service(123, "Updated Title", self.user_id)
+        rename_conversation_service(123, "Updated Title", self.user_id)
 
         # Assert
-        self.assertTrue(result)
         mock_rename_conversation.assert_called_once_with(123, "Updated Title", self.user_id)
 
     @patch('backend.services.conversation_management_service.delete_conversation')
@@ -305,10 +304,9 @@ class TestConversationManagementService(unittest.TestCase):
         mock_delete_conversation.return_value = True
 
         # Execute
-        result = delete_conversation_service(123, self.user_id)
+        delete_conversation_service(123, self.user_id)
 
         # Assert
-        self.assertTrue(result)
         mock_delete_conversation.assert_called_once_with(123, self.user_id)
 
     @patch('backend.services.conversation_management_service.get_conversation_history')
@@ -442,10 +440,9 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_opinion.return_value = True
 
         # Execute
-        result = update_message_opinion_service(123, "Y")
+        update_message_opinion_service(123, "Y")
 
         # Assert
-        self.assertTrue(result)
         mock_update_opinion.assert_called_once_with(123, "Y")
 
 

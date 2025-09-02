@@ -186,7 +186,6 @@ async def test_auto_summary_success(test_data):
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
         assert call_kwargs['batch_size'] == 500
-        assert call_kwargs['user_id'] == mock_user_info[0]
         assert call_kwargs['tenant_id'] == mock_user_info[1]
         assert call_kwargs['language'] == mock_user_info[2]
         # We don't check call_kwargs['es_core'] directly since different instances might be used

@@ -1,9 +1,11 @@
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
-from database.client import get_db_session, as_dict
+from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
+
 
 def create_knowledge_record(query: Dict[str, Any]) -> int:
     """
@@ -42,6 +44,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> int:
         session.rollback()
         raise e
 
+
 def update_knowledge_record(query: Dict[str, Any]) -> bool:
     """
     Update a knowledge base record
@@ -61,21 +64,22 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
                 KnowledgeRecord.index_name == query['index_name'],
                 KnowledgeRecord.delete_flag != 'Y'
             ).first()
-            
+
             if not record:
                 return False
-                
+
             record.knowledge_describe = query["knowledge_describe"]
             record.update_time = func.current_timestamp()
             if query.get("user_id"):
                 record.updated_by = query["user_id"]
-                
+
             session.flush()
             session.commit()
             return True
     except SQLAlchemyError as e:
         session.rollback()
         raise e
+
 
 def delete_knowledge_record(query: Dict[str, Any]) -> bool:
     """
@@ -96,22 +100,23 @@ def delete_knowledge_record(query: Dict[str, Any]) -> bool:
                 KnowledgeRecord.index_name == query['index_name'],
                 KnowledgeRecord.delete_flag != 'Y'
             ).first()
-            
+
             if not record:
                 return False
-                
+
             # Update record for soft delete
             record.delete_flag = 'Y'
             record.update_time = func.current_timestamp()
             if query.get('user_id'):
                 record.updated_by = query['user_id']
-                
+
             session.flush()
             session.commit()
             return True
     except SQLAlchemyError as e:
         session.rollback()
         raise e
+
 
 def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
@@ -134,15 +139,17 @@ def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, An
 
             # Add tenant_id filter only if it is provided in the query
             if 'tenant_id' in query and query['tenant_id'] is not None:
-                db_query = db_query.filter(KnowledgeRecord.tenant_id == query['tenant_id'])
-            
+                db_query = db_query.filter(
+                    KnowledgeRecord.tenant_id == query['tenant_id'])
+
             result = db_query.first()
-            
+
             if result:
                 return as_dict(result)
             return {}
     except SQLAlchemyError as e:
         raise e
+
 
 def get_knowledge_info_by_knowledge_ids(knowledge_ids: List[str]) -> List[Dict[str, Any]]:
     try:
@@ -162,6 +169,7 @@ def get_knowledge_info_by_knowledge_ids(knowledge_ids: List[str]) -> List[Dict[s
     except SQLAlchemyError as e:
         raise e
 
+
 def get_knowledge_ids_by_index_names(index_names: List[str]) -> List[str]:
     try:
         with get_db_session() as session:
@@ -172,4 +180,3 @@ def get_knowledge_ids_by_index_names(index_names: List[str]) -> List[str]:
             return [item.knowledge_id for item in result]
     except SQLAlchemyError as e:
         raise e
-    

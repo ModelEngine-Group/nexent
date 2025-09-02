@@ -1,24 +1,25 @@
 import asyncio
 import json
 import logging
-from typing import List, Optional, Dict, Any
 from datetime import datetime
-from jinja2 import StrictUndefined, Template
+from http import HTTPStatus
+from typing import List, Optional, Dict, Any
 
-from fastapi import HTTPException, Header
+from fastapi import Header
+from jinja2 import StrictUndefined, Template
 from smolagents import OpenAIServerModel
 
 from consts.model import MessageRequest, ConversationResponse, AgentRequest, MessageUnit
 from database.conversation_db import create_conversation_message, create_source_search, create_message_units, \
-    create_source_image, rename_conversation, get_conversation_list, get_conversation_history, get_source_images_by_message, \
+    create_source_image, rename_conversation, get_conversation_list, get_conversation_history, \
+    get_source_images_by_message, \
     get_source_images_by_conversation, get_source_searches_by_message, get_source_searches_by_conversation, \
     delete_conversation, get_conversation, create_conversation, update_message_opinion
-
-from utils.config_utils import tenant_config_manager,get_model_name_from_config
-from utils.auth_utils import get_current_user_id
 from nexent.core.utils.observer import ProcessType
-from utils.str_utils import remove_think_tags, add_no_think_token
+from utils.auth_utils import get_current_user_id
+from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.prompt_template_utils import get_generate_title_prompt_template
+from utils.str_utils import remove_think_tags, add_no_think_token
 
 logger = logging.getLogger("conversation_management_service")
 
@@ -49,13 +50,14 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
             try:
                 user_id = get_current_user_id(authorization)
             except Exception as auth_error:
-                logging.warning(f"Ignoring authorization during save_message: {auth_error}")
+                logging.warning(
+                    f"Ignoring authorization during save_message: {auth_error}")
         message_data = request.model_dump()
 
         # Validate conversation_id
         conversation_id = message_data.get('conversation_id')
         if not conversation_id:
-            raise HTTPException(status_code=400, detail="conversation_id is required, please call /conversation/create to create a conversation first")
+            raise Exception("conversation_id is required, please call /conversation/create to create a conversation first")
 
         # Process different types of message units
         message_units = message_data['message']
@@ -81,15 +83,18 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
         # Process string/final_answer type, create message record
         if string_content is not None:
             message_data_copy = {'conversation_id': conversation_id, 'message_idx': message_data['message_idx'],
-                'role': message_data['role'], 'content': string_content, 'minio_files': minio_files}
-            message_id = create_conversation_message(message_data_copy, user_id)
+                                 'role': message_data['role'], 'content': string_content, 'minio_files': minio_files}
+            message_id = create_conversation_message(
+                message_data_copy, user_id)
 
         # If there are other types of units but no string type, create an empty content message for them
         if other_units and message_id is None:
             message_data_copy = {'conversation_id': conversation_id, 'message_idx': message_data['message_idx'],
-                'role': message_data['role'], 'content': "",  # Empty content
-                'minio_files': minio_files}
-            message_id = create_conversation_message(message_data_copy, user_id)
+                                 # Empty content
+                                 'role': message_data['role'], 'content': "",
+                                 'minio_files': minio_files}
+            message_id = create_conversation_message(
+                message_data_copy, user_id)
 
         # Process other types of units
         filtered_message_units = []
@@ -115,7 +120,7 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
                     if isinstance(content_json, dict) and 'images_url' in content_json:
                         for image_url in content_json['images_url']:
                             image_data = {'message_id': message_id, 'conversation_id': conversation_id,
-                                'image_url': image_url}
+                                          'image_url': image_url}
                             create_source_image(image_data)
                 except Exception as e:
                     logging.error(f"Failed to save image content: {str(e)}")
@@ -126,7 +131,8 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
         # Create message unit records and get unit_ids
         unit_ids = []
         if filtered_message_units and message_id is not None:
-            unit_ids = create_message_units(filtered_message_units, message_id, conversation_id)
+            unit_ids = create_message_units(
+                filtered_message_units, message_id, conversation_id)
 
         # Process search content using corresponding unit_ids
         search_placeholder_index = 0
@@ -143,7 +149,8 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
                         current_index += 1
 
                 if placeholder_unit_id is None:
-                    logging.error("Could not find unit_id for search content placeholder")
+                    logging.error(
+                        "Could not find unit_id for search content placeholder")
                     continue
 
                 # Parse search content
@@ -157,22 +164,22 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
                 # Iterate through each search result and save separately
                 for result in search_results:
                     search_data = {'message_id': message_id, 'conversation_id': conversation_id,
-                        'unit_id': placeholder_unit_id,  # Use the placeholder's unit_id
-                        'source_type': result.get('source_type', ''), 'source_title': result.get('title', ''),
-                        'source_location': result.get('url', ''), 'source_content': result.get('text', ''),
-                        'score_overall': float(result.get('score')) if result.get('score') and result.get(
-                            'score') != '' else None,
-                        'score_accuracy': float(result.get('score_details', {}).get('accuracy')) if result.get(
-                            'score_details', {}).get('accuracy') and result.get('score_details', {}).get(
-                            'accuracy') != '' else None,
-                        'score_semantic': float(result.get('score_details', {}).get('semantic')) if result.get(
-                            'score_details', {}).get('semantic') and result.get('score_details', {}).get(
-                            'semantic') != '' else None,
-                        'published_date': result.get('published_date') if result.get(
-                            'published_date') and result.get('published_date') != '' else None,
-                        'cite_index': result.get('cite_index', None) if result.get('cite_index') != '' else None,
-                        'search_type': result.get('search_type') if result.get('search_type') and result.get(
-                            'search_type') != '' else None, 'tool_sign': result.get('tool_sign', '')}
+                                   'unit_id': placeholder_unit_id,  # Use the placeholder's unit_id
+                                   'source_type': result.get('source_type', ''), 'source_title': result.get('title', ''),
+                                   'source_location': result.get('url', ''), 'source_content': result.get('text', ''),
+                                   'score_overall': float(result.get('score')) if result.get('score') and result.get(
+                                       'score') != '' else None,
+                                   'score_accuracy': float(result.get('score_details', {}).get('accuracy')) if result.get(
+                                       'score_details', {}).get('accuracy') and result.get('score_details', {}).get(
+                                       'accuracy') != '' else None,
+                                   'score_semantic': float(result.get('score_details', {}).get('semantic')) if result.get(
+                                       'score_details', {}).get('semantic') and result.get('score_details', {}).get(
+                                       'semantic') != '' else None,
+                                   'published_date': result.get('published_date') if result.get(
+                                       'published_date') and result.get('published_date') != '' else None,
+                                   'cite_index': result.get('cite_index', None) if result.get('cite_index') != '' else None,
+                                   'search_type': result.get('search_type') if result.get('search_type') and result.get(
+                                       'search_type') != '' else None, 'tool_sign': result.get('tool_sign', '')}
                     create_source_search(search_data, user_id)
 
                 search_placeholder_index += 1
@@ -185,34 +192,34 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
 
     except Exception as e:
         logging.error(f"Failed to save message: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def save_conversation_user(request: AgentRequest, authorization: Optional[str] = None):
-    user_role_count = sum(1 for item in getattr(request, "history", []) if item.get("role") == "user")
+    user_role_count = sum(1 for item in getattr(
+        request, "history", []) if item.get("role") == "user")
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2,
-        role="user", message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
+                                      role="user", message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
     save_message(conversation_req, authorization=authorization)
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], authorization: Optional[str] = None):
-    user_role_count = sum(1 for item in getattr(request, "history", []) if item.get("role") == "user")
+    user_role_count = sum(1 for item in getattr(
+        request, "history", []) if item.get("role") == "user")
 
     message_list = []
     for item in messages:
         message = json.loads(item)
         if (len(message_list) and
             message.get("type") in [ProcessType.MODEL_OUTPUT_CODE.value, ProcessType.MODEL_OUTPUT_THINKING.value] and
-            message.get("type") == message_list[-1].get("type")):
+                message.get("type") == message_list[-1].get("type")):
             message_list[-1]["content"] += message["content"]
         else:
             message_list.append(message)
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2 + 1,
-        role="assistant", message=message_list, minio_files=request.minio_files)
+                                      role="assistant", message=message_list, minio_files=request.minio_files)
     save_message(conversation_req, authorization=authorization)
 
 
@@ -249,11 +256,12 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = 'zh') -> st
     """
     prompt_template = get_generate_title_prompt_template(language=language)
 
-    model_config = tenant_config_manager.get_model_config(key="LLM_ID", tenant_id=tenant_id)
+    model_config = tenant_config_manager.get_model_config(
+        key="LLM_ID", tenant_id=tenant_id)
 
     # Create OpenAIServerModel instance
     llm = OpenAIServerModel(model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "", api_base=model_config.get("base_url", ""),
-        api_key=model_config.get("api_key", ""), temperature=0.7, top_p=0.95)
+                            api_key=model_config.get("api_key", ""), temperature=0.7, top_p=0.95)
 
     # Build messages
     user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({
@@ -284,7 +292,7 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     """
     success = rename_conversation(conversation_id, title, user_id)
     if not success:
-        raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} does not exist or has been deleted")
+        raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
     return success
 
 
@@ -304,7 +312,7 @@ def create_new_conversation(title: str, user_id: str) -> Dict[str, Any]:
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
@@ -319,7 +327,7 @@ def get_conversation_list_service(user_id: str) -> List[Dict[str, Any]]:
         return conversations
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:
@@ -337,16 +345,11 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str) -
     try:
         success = rename_conversation(conversation_id, name, user_id)
         if not success:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Conversation {conversation_id} does not exist or has been deleted"
-            )
+            raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
         return True
     except Exception as e:
         logging.error(f"Failed to rename conversation: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
@@ -363,16 +366,11 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     try:
         success = delete_conversation(conversation_id, user_id)
         if not success:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Conversation {conversation_id} does not exist or has been deleted"
-            )
+            raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def get_conversation_history_service(conversation_id: int, user_id: str) -> List[Dict[str, Any]]:
@@ -391,7 +389,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
         history_data = get_conversation_history(conversation_id, user_id)
 
         if not history_data:
-            logging.debug(f"No history data found for conversation_id: {conversation_id}")
+            logging.debug(
+                f"No history data found for conversation_id: {conversation_id}")
             return []
 
         # Collect search content, grouped by unit_id
@@ -406,7 +405,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             published_date = None
             if record['published_date'] is not None:
                 if isinstance(record['published_date'], datetime):
-                    published_date = record['published_date'].strftime("%Y-%m-%d")
+                    published_date = record['published_date'].strftime(
+                        "%Y-%m-%d")
                 elif isinstance(record['published_date'], str):
                     published_date = record['published_date']
 
@@ -428,7 +428,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 if unit_id not in search_by_unit_id:
                     search_by_unit_id[unit_id] = []
                 search_by_unit_id[unit_id].append(search_item)
-            
+
             # Group by message_id (for message-level search field)
             if message_id not in search_by_message:
                 search_by_message[message_id] = []
@@ -449,7 +449,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             message_id = msg['message_id']
             role = msg['role']
             message_content = msg['message_content']
-            message_units = msg['units'] or []  # Initialize for all message types
+            # Initialize for all message types
+            message_units = msg['units'] or []
 
             if role == 'user':
                 # User message: directly use message_content as message field value
@@ -523,7 +524,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
 
         # Build final result
         formatted_history = {
-            'conversation_id': str(history_data['conversation_id']),  # Convert to string
+            # Convert to string
+            'conversation_id': str(history_data['conversation_id']),
             'create_time': history_data['create_time'],
             'message': messages
         }
@@ -531,9 +533,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
 
     except Exception as e:
         logging.error(f"Failed to get conversation history: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def get_sources_service(conversation_id: Optional[int], message_id: Optional[int], source_type: str = "all", user_id: str = "") -> Dict[str, Any]:
@@ -573,9 +573,11 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
         if source_type in ["image", "all"]:
             images = []
             if message_id:
-                image_records = get_source_images_by_message(message_id, user_id)
+                image_records = get_source_images_by_message(
+                    message_id, user_id)
             elif conversation_id:
-                image_records = get_source_images_by_conversation(conversation_id, user_id)
+                image_records = get_source_images_by_conversation(
+                    conversation_id, user_id)
 
             for image in image_records:
                 images.append(image["image_url"])
@@ -587,9 +589,11 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
             searches = []
             search_records = []
             if message_id:
-                search_records = get_source_searches_by_message(message_id, user_id)
+                search_records = get_source_searches_by_message(
+                    message_id, user_id)
             elif conversation_id:
-                search_records = get_source_searches_by_conversation(conversation_id, user_id)
+                search_records = get_source_searches_by_conversation(
+                    conversation_id, user_id)
 
             for record in search_records:
                 search_item = {
@@ -659,9 +663,7 @@ async def generate_conversation_title_service(conversation_id: int, history: Lis
 
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
 
 
 def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> bool:
@@ -678,10 +680,8 @@ def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> b
     try:
         success = update_message_opinion(message_id, opinion)
         if not success:
-            raise HTTPException(status_code=404, detail="Message does not exist or has been deleted")
+            raise Exception("Message does not exist or has been deleted")
         return True
     except Exception as e:
         logging.error(f"Failed to update message like/dislike: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+        raise Exception(str(e))
