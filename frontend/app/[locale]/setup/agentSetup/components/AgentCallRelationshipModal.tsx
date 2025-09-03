@@ -41,22 +41,41 @@ interface AgentCallRelationshipModalProps {
 const NODE_W = 140;
 const NODE_H = 60;
 
-// Color configuration
+
+const AGENT_W = 160;                  
+const AGENT_H = 56;                    
+const TOOL_SIZE = 86;                 
+const TOOL_TEETH = 10;                 
+const TOOL_TEETH_DEPTH_RATIO = 0.085;  
+
+const MAX_TOOL_NAME_CHARS = 10;       
+
+const TREE_DEPTH_FACTOR = 120;         
+const TREE_SEP_SIB = 1.15;
+const TREE_SEP_NON = 1.35;
+
+
+function truncateByCodePoints(s: string, max: number) {
+  const arr = Array.from(s);
+  return arr.length > max ? arr.slice(0, max).join('') + '…' : s;
+}
+
+// Enhanced color configuration with modern palette
 const themeConfig = {
   colors: {
     node: {
-      main: '#2c3e50',
+      main: '#1a1a2e',
       levels: {
-        1: '#3498db',
-        2: '#9b59b6', 
-        3: '#e74c3c',
-        4: '#f39c12'
+        1: '#16213e',
+        2: '#0f3460', 
+        3: '#533483',
+        4: '#7209b7'
       },
       tools: {
-        1: '#e67e22',
-        2: '#1abc9c',
-        3: '#34495e',
-        4: '#f1c40f'
+        1: '#ff6b6b',
+        2: '#4ecdc4',
+        3: '#45b7d1',
+        4: '#96ceb4'
       }
     }
   }
@@ -84,37 +103,81 @@ const CustomNode = ({ nodeDatum }: any) => {
   const color = getNodeColor(nodeDatum.type, nodeDatum.depth);
   const icon = isAgent ? <RobotOutlined /> : <ToolOutlined />;
 
-  // Small size coordinated with NODE_W/H
-  const textLength = nodeDatum.name.length;
-  const nodeWidth  = Math.max(isAgent ? 110 : 92, Math.min(textLength * 8 + 36, NODE_W));
-  const nodeHeight = isAgent ? 54 : 46;
+
+  const rawName: string = nodeDatum.name || '';
+  const displayName: string = !isAgent
+    ? truncateByCodePoints(rawName, MAX_TOOL_NAME_CHARS)
+    : rawName;
+
+
+  const fontSize = isAgent ? '14px' : '12px';
+  const fontWeight = isAgent ? '600' : '500';
+
+
+  const nodeWidth  = isAgent ? AGENT_W : TOOL_SIZE;
+  const nodeHeight = isAgent ? AGENT_H : TOOL_SIZE;
+
+  // Select different shapes based on node type with enhanced styling
+  const renderNodeShape = () => {
+    if (isAgent) {
+      // Agent nodes use rounded rectangle with enhanced styling
+      return (
+        <rect
+          width={nodeWidth}
+          height={nodeHeight}
+          rx={14}
+          ry={14}
+          fill={color}
+          stroke={`${color}80`}
+          strokeWidth={1.5}
+          style={{ 
+            transition: 'all 0.3s ease',
+            filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.12))'
+          }}
+        />
+      );
+    } else {
+
+      const cx = nodeWidth / 2;
+      const cy = nodeHeight / 2;
+      const outerRadius = nodeWidth / 2 - 2;
+      const teethDepth = Math.max(outerRadius * TOOL_TEETH_DEPTH_RATIO, 3.5);
+
+      const d: string[] = [];
+      for (let i = 0; i < TOOL_TEETH * 2; i++) {
+        const angle = (i * Math.PI) / TOOL_TEETH; 
+        const r = i % 2 === 0 ? outerRadius : outerRadius - teethDepth;
+        const x = cx + r * Math.cos(angle);
+        const y = cy + r * Math.sin(angle);
+        d.push(`${i === 0 ? 'M' : 'L'} ${x} ${y}`);
+      }
+      d.push('Z');
+
+      return (
+        <path
+          d={d.join(' ')}
+          fill={color}
+          stroke={`${color}80`}
+          strokeWidth={1.5}
+          style={{ 
+            transition: 'all 0.3s ease',
+            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.10))'
+          }}
+        />
+      );
+    }
+  };
 
   return (
     <g transform={`translate(-${nodeWidth / 2}, -${nodeHeight / 2})`}>
-      <rect
-        width={nodeWidth}
-        height={nodeHeight}
-        rx={isAgent ? 10 : 8}
-        fill={`url(#grad-${color.replace('#', '')})`}
-        stroke={`${color}80`}
-        strokeWidth={1}
-      />
-      <defs>
-        <linearGradient id={`grad-${color.replace('#', '')}`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: `${color}20`, stopOpacity: 1 }} />
-          <stop offset="100%" style={{ stopColor: `${color}08`, stopOpacity: 1 }} />
-        </linearGradient>
-        <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="1.5" stdDeviation="3" floodColor="#000" floodOpacity="0.1" />
-        </filter>
-      </defs>
-
+      {renderNodeShape()}
+      
       <foreignObject
         x={0}
         y={0}
         width={nodeWidth}
         height={nodeHeight}
-        style={{ overflow: 'visible' }}
+        style={{ overflow: 'hidden', borderRadius: isAgent ? 14 : nodeWidth / 2 }}
       >
         <div
           style={{
@@ -123,16 +186,41 @@ const CustomNode = ({ nodeDatum }: any) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '13px',
-            color: '#1f2328',
-            fontFamily: 'Arial, sans-serif',
-            fontWeight: 'normal',
+            gap: '6px',
+            padding: isAgent ? '0 16px' : '0 12px',
+            fontSize,
+            color: isAgent ? '#ffffff' : '#1e293b',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            fontWeight,
             textAlign: 'center',
             lineHeight: 1,
             userSelect: 'none',
+            letterSpacing: '0.02em',
+            whiteSpace: 'nowrap',
           }}
         >
-          {icon} {nodeDatum.name}
+          <span style={{ 
+            display: 'inline-flex',
+            width: isAgent ? '18px' : '16px',
+            height: isAgent ? '18px' : '16px',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: 'translateY(-0.5px)',
+            flex: '0 0 auto'
+          }}>
+            {icon}
+          </span>
+          <span
+            style={{
+              display: 'inline-block',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={rawName}
+          >
+            {displayName}
+          </span>
         </div>
       </foreignObject>
     </g>
@@ -212,24 +300,23 @@ export default function AgentCallRelationshipModal({
         message.error(result.message || '获取调用关系失败')
       }
     } catch (error) {
-      console.error('获取Agent调用关系失败:', error)
-      message.error('获取Agent调用关系失败，请稍后重试')
+      console.error('Failed to get the agent call relationship:', error)
+      message.error('Failed to get the agent call relationship')
     } finally {
       setLoading(false)
     }
   }
 
   // Generate tree data (using recursive method)
-  const generateTreeData = useCallback((data: AgentCallRelationship, maxDepth: number = 6): TreeNodeDatum => {
+  const generateTreeData = useCallback((data: AgentCallRelationship): TreeNodeDatum => {
     const centerX = 600;
     const startY = 50;
-    const levelHeight = 180;
-    const agentSpacing = 280;
-    const toolSpacing = 180;
+    const levelHeight = 160;
+    const agentSpacing = 240;
+    const toolSpacing = 160;
 
     // Recursively generate child nodes
     const generateSubNodes = (subAgents: SubAgent[], depth: number, parentX: number, parentY: number): TreeNodeDatum[] => {
-      if (depth > maxDepth) return [];
       
       return subAgents.map((subAgent, index) => {
         const x = parentX + (index - (subAgents.length - 1) / 2) * agentSpacing;
@@ -252,7 +339,7 @@ export default function AgentCallRelationshipModal({
             const row = Math.floor(toolIndex / toolsPerRow);
             const col = toolIndex % toolsPerRow;
             const toolX = toolStartX + col * toolSpacing;
-            const toolY = y + levelHeight + row * 60;
+            const toolY = y + levelHeight + row * 56;
 
             subAgentNode.children!.push({
               name: tool.name,
@@ -292,7 +379,7 @@ export default function AgentCallRelationshipModal({
         const row = Math.floor(index / toolsPerRow);
         const col = index % toolsPerRow;
         const x = startX2 + col * toolSpacing;
-        const y = startY + levelHeight + row * 60;
+        const y = startY + levelHeight + row * 56;
 
         treeData.children!.push({
           name: tool.name,
@@ -350,13 +437,14 @@ export default function AgentCallRelationshipModal({
             <div
               ref={treeWrapRef}
               style={{
-                height: '900px',
+                height: '820px',
                 width: '100%',
-                background: 'linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%)',
-                borderRadius: 16,
+                background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%)',
+                borderRadius: 20,
                 overflow: 'hidden',
                 padding: 0,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                boxShadow: '0 20px 60px rgba(0,0,0,0.15), 0 8px 25px rgba(0,0,0,0.1)',
+                position: 'relative'
               }}
             >
               <Tree
@@ -366,12 +454,12 @@ export default function AgentCallRelationshipModal({
                 pathFunc={(linkData: any) => customPathFunc(linkData, 'vertical')}
                 translate={translate}
                 renderCustomNodeElement={CustomNode}
-                depthFactor={140}
-                separation={{ siblings: 1.3, nonSiblings: 1.6 }}
+                depthFactor={TREE_DEPTH_FACTOR}
+                separation={{ siblings: TREE_SEP_SIB, nonSiblings: TREE_SEP_NON }}
                 nodeSize={{ x: NODE_W, y: NODE_H }}
                 pathClassFunc={() => 'connection'}
                 zoomable={true}
-                scaleExtent={{ min: 0.7, max: 1.8 }}
+                scaleExtent={{ min: 0.8, max: 1.4 }}
                 collapsible={false}
                 initialDepth={undefined}
                 enableLegacyTransitions={true}
@@ -387,34 +475,49 @@ export default function AgentCallRelationshipModal({
       </Modal>
 
       <style jsx>{`
-        .connection {
-          stroke: #4a4a4a;
-          stroke-width: 1.5;
-          stroke-opacity: 0.9;
-          fill: none;
-          stroke-linecap: square;
-          stroke-linejoin: miter;
-          transition: stroke-width 0.2s, stroke-opacity 0.2s;
-        }
-        .connection:hover {
-          stroke-opacity: 1;
-          stroke-width: 2;
-        }
-        /* Double insurance: force hide library's built-in labels (class names may differ between versions) */
-        :global(.rd3t-label),
-        :global(.rd3t-label__title),
-        :global(.rd3t-label__attributes) {
-          display: none !important;
-          opacity: 0 !important;
-          visibility: hidden !important;
-        }
-        
-        /* Ensure consistent SVG text rendering */
-        :global(svg text) {
-          text-rendering: optimizeSpeed !important;
-        }
-      `}</style>
+         .connection {
+           stroke: #64748b;
+           stroke-width: 2;
+           stroke-opacity: 0.85;
+           fill: none;
+           stroke-linecap: round;
+           stroke-linejoin: round;
+           transition: all 0.25s ease;
+         }
+         
+         .connection:hover {
+           stroke: #475569;
+           stroke-opacity: 1;
+           stroke-width: 2.4;
+         }
+         
+         /* Enhanced node hover effects */
+         :global(.rd3t-node) {
+           transition: filter 0.2s ease;
+         }
+         
+         :global(.rd3t-node:hover) {
+           filter: brightness(1.04) drop-shadow(0 4px 10px rgba(0,0,0,0.16));
+         }
+         
+         /* Double insurance: force hide library's built-in labels */
+         :global(.rd3t-label),
+         :global(.rd3t-label__title),
+         :global(.rd3t-label__attributes) {
+           display: none !important;
+           opacity: 0 !important;
+           visibility: hidden !important;
+         }
+         
+         /* Enhanced SVG rendering */
+         :global(svg) {
+           filter: drop-shadow(0 1px 3px rgba(0,0,0,0.08));
+         }
+         
+         :global(svg text) {
+           text-rendering: optimizeLegibility !important;
+         }
+       `}</style>
     </>
   );
 }
-
