@@ -259,7 +259,7 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         embeddings = [item["embedding"] for item in response["data"]]
         return embeddings
 
-    async def dimension_check(self, timeout: float = 5.0) -> List[List[float]]:
+    async def dimension_check(self, timeout: float = 30.0) -> List[List[float]]:
         try:
             # Create a simple test input
             test_input = "Hello, nexent!"
