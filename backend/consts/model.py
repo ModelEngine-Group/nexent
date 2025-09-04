@@ -28,7 +28,7 @@ class ModelConnectStatusEnum(Enum):
 # Request models for user authentication
 STATUS_CODES = {
     "SUCCESS": 200,
-    # 客户端错误状态码
+    # Client error status codes
     "USER_EXISTS": 1001,
     "INVALID_CREDENTIALS": 1002,
     "TOKEN_EXPIRED": 1003,
@@ -39,7 +39,7 @@ STATUS_CODES = {
 }
 
 
-# 用户认证相关请求模型
+# User authentication related request models
 class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
@@ -164,7 +164,7 @@ class MessageRequest(BaseModel):
 
 
 class ConversationRequest(BaseModel):
-    title: str = "新对话"
+    title: str = "New Conversation"
 
 
 class ConversationResponse(BaseModel):

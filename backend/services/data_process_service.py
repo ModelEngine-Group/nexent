@@ -45,7 +45,7 @@ class DataProcessService:
 
         self._inspector = None
         self._inspector_last_time = 0
-        self._inspector_ttl = 60  # inspector缓存时间，秒
+        self._inspector_ttl = 60  # inspector cache time, seconds
         self._inspector_lock = None
         import threading
         self._inspector_lock = threading.Lock()
@@ -180,8 +180,10 @@ class DataProcessService:
                     # Add to the set, duplicates will be handled
                     task_ids.add(task_id)
             except Exception as redis_error:
-                logger.warning(f"Failed to query Redis for stored task IDs: {str(redis_error)}")
-            logger.debug(f"Total unique task IDs collected (inspector + Redis): {len(task_ids)}")
+                logger.warning(
+                    f"Failed to query Redis for stored task IDs: {str(redis_error)}")
+            logger.debug(
+                f"Total unique task IDs collected (inspector + Redis): {len(task_ids)}")
             tasks = [get_task_info(task_id) for task_id in task_ids]
             all_task_infos = await asyncio.gather(*tasks, return_exceptions=True)
             for task_info in all_task_infos:
@@ -370,7 +372,7 @@ class DataProcessService:
                     }
                 }
 
-            # 延迟加载CLIP模型
+            # Lazy load CLIP model
             if not self.clip_available:
                 self._init_clip_model()
 

@@ -238,8 +238,8 @@ def _stream_results(produce_queue, latest, stop_flags, threads):
 
 
 def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = 'zh'):
-    input_label = "接受输入" if language == 'zh' else "Inputs"
-    output_label = "返回输出类型" if language == 'zh' else "Output type"
+    input_label = "Inputs" if language == 'zh' else "Inputs"
+    output_label = "Output type" if language == 'zh' else "Output type"
 
     tool_description = "\n".join(
         [f"- {tool['name']}: {tool['description']} \n {input_label}: {tool['inputs']}\n {output_label}: {tool['output_type']}"

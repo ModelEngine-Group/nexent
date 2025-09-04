@@ -132,7 +132,7 @@ async def create_agent_config(
                             logger.warning(
                                 f"Failed to get summary for knowledge base {knowledge_name}: {e}")
                 else:
-                    knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
+                    knowledge_base_summary = "No knowledge base indexes are currently available.\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
                 break  # Only process the first KnowledgeBaseSearchTool found
     except Exception as e:
         logger.error(f"Failed to build knowledge base summary: {e}")

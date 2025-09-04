@@ -114,7 +114,8 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
         model_list = await get_provider_models(model_data)
 
         # Merge existing model's max_tokens attribute
-        model_list = merge_existing_model_tokens(model_list, tenant_id, request.provider, request.model_type)
+        model_list = merge_existing_model_tokens(
+            model_list, tenant_id, request.provider, request.model_type)
 
         # Sort model list by ID
         model_list = sort_models_by_id(model_list)
@@ -163,7 +164,8 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
                     existing_max_tokens = existing_model_by_display["max_tokens"]
                     new_max_tokens = model["max_tokens"]
                     if existing_max_tokens != new_max_tokens:
-                        update_model_record(existing_model_by_display["model_id"], {"max_tokens": new_max_tokens}, user_id)
+                        update_model_record(existing_model_by_display["model_id"], {
+                                            "max_tokens": new_max_tokens}, user_id)
                     continue
 
             model_dict = await prepare_model_dict(
@@ -270,7 +272,7 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
     If the model is an embedding or multi_embedding type, both types will be deleted
 
     Args:
-        display_name: Display name of the model to delete (唯一键)
+        display_name: Display name of the model to delete (unique key)
         authorization: Authorization header
     """
     try:
@@ -285,10 +287,10 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
                 message=f"Model not found: {display_name}",
                 data=None
             )
-        # 支持 embedding/multi_embedding 互删
+        # Support mutual deletion of embedding/multi_embedding
         deleted_types = []
         if model["model_type"] in ["embedding", "multi_embedding"]:
-            # 查找所有 embedding/multi_embedding 且 display_name 相同的模型
+            # Find all embedding/multi_embedding models with the same display_name
             for t in ["embedding", "multi_embedding"]:
                 m = get_model_by_display_name(display_name, tenant_id)
                 if m and m["model_type"] == t:
