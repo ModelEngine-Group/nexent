@@ -1,5 +1,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons'
+import React from 'react'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -155,3 +157,64 @@ export function getUrlParam<T>(
         return 'string';
     }
   };
+
+// Connectivity status utilities
+export type ConnectivityStatusType = "checking" | "available" | "unavailable" | null;
+
+// Get the connectivity status icon
+export const getConnectivityIcon = (status: ConnectivityStatusType): React.ReactNode => {
+  switch (status) {
+    case "checking":
+      return React.createElement(LoadingOutlined, { style: { color: '#1890ff' } })
+    case "available":
+      return React.createElement(CheckCircleOutlined, { style: { color: '#52c41a' } })
+    case "unavailable":
+      return React.createElement(CloseCircleOutlined, { style: { color: '#ff4d4f' } })
+    default:
+      return null
+  }
+}
+
+// Get the connectivity status color
+export const getConnectivityColor = (status: ConnectivityStatusType): string => {
+  switch (status) {
+    case "checking":
+      return '#1890ff'
+    case "available":
+      return '#52c41a'
+    case "unavailable":
+      return '#ff4d4f'
+    default:
+      return '#d9d9d9'
+  }
+}
+
+export type ConnectivityMeta = {
+  icon: React.ReactNode
+  color: string
+}
+
+export const getConnectivityMeta = (status: ConnectivityStatusType): ConnectivityMeta => {
+  switch (status) {
+    case "checking":
+      return {
+        icon: React.createElement(LoadingOutlined, { style: { color: '#1890ff' } }),
+        color: '#1890ff'
+      }
+    case "available":
+      return {
+        icon: React.createElement(CheckCircleOutlined, { style: { color: '#52c41a' } }),
+        color: '#52c41a'
+      }
+    case "unavailable":
+      return {
+        icon: React.createElement(CloseCircleOutlined, { style: { color: '#ff4d4f' } }),
+        color: '#ff4d4f'
+      }
+    default:
+      return {
+        icon: null,
+        color: '#d9d9d9'
+      }
+  }
+}

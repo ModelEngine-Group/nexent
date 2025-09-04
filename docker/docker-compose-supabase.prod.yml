@@ -1,7 +1,7 @@
 services:
   kong:
     container_name: supabase-kong-mini
-    image: kong:2.8.1
+    image: ${SUPABASE_KONG}
     restart: unless-stopped
     volumes:
       - $ROOT_DIR/volumes/api/kong.yml:/home/kong/temp.yml
@@ -35,7 +35,7 @@ services:
 
   auth:
     container_name: supabase-auth-mini
-    image: supabase/gotrue:v2.170.0
+    image: ${SUPABASE_GOTRUE}
     restart: unless-stopped
     healthcheck:
       test:
@@ -87,7 +87,7 @@ services:
 
   db:
     container_name: supabase-db-mini
-    image: supabase/postgres:15.8.1.060
+    image: ${SUPABASE_DB}
     restart: unless-stopped
     volumes:
       - $ROOT_DIR/volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql

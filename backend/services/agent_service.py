@@ -2,30 +2,50 @@ import asyncio
 import json
 import logging
 import os
-from collections import deque
 import uuid
+from collections import deque
 
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
-from agents.agent_run_manager import agent_run_manager
-from agents.create_agent_info import create_agent_run_info
-from agents.create_agent_info import create_tool_config_list
-from agents.preprocess_manager import preprocess_manager
-from consts.exceptions import AgentRunException, MemoryPreparationException
-from consts.model import AgentInfoRequest, ExportAndImportAgentInfo, ExportAndImportDataFormat, ToolInstanceInfoRequest, \
-    ToolSourceEnum, MCPInfo
-from consts.model import AgentRequest
-from database.agent_db import create_agent, search_blank_sub_agent_by_main_agent_id, \
-    search_agent_info_by_agent_id, update_agent, delete_agent_by_id, query_all_agent_info_by_tenant_id, \
-    query_sub_agents_id_list, insert_related_agent, delete_agent_relationship, search_agent_id_by_agent_name, \
-    delete_related_agent
-from database.remote_mcp_db import get_mcp_server_by_name_and_tenant, check_mcp_name_exists
-from database.tool_db import create_or_update_tool_by_tool_info, query_all_tools, query_all_enabled_tool_instances, \
-    search_tools_for_sub_agent, check_tool_is_available, delete_tools_by_agent_id
 from nexent.core.agents.run_agent import agent_run
 from nexent.memory.memory_service import clear_memory
-from services.conversation_management_service import save_conversation_user, save_conversation_assistant
+
+from agents.agent_run_manager import agent_run_manager
+from agents.create_agent_info import create_agent_run_info, create_tool_config_list
+from agents.preprocess_manager import preprocess_manager
+from consts.exceptions import AgentRunException, MemoryPreparationException
+from consts.model import (
+    AgentInfoRequest,
+    AgentRequest,
+    ExportAndImportAgentInfo,
+    ExportAndImportDataFormat,
+    MCPInfo,
+    ToolInstanceInfoRequest,
+    ToolSourceEnum
+)
+from database.agent_db import (
+    create_agent,
+    delete_agent_by_id,
+    delete_agent_relationship,
+    delete_related_agent,
+    insert_related_agent,
+    query_all_agent_info_by_tenant_id,
+    query_sub_agents_id_list,
+    search_agent_id_by_agent_name,
+    search_agent_info_by_agent_id,
+    search_blank_sub_agent_by_main_agent_id,
+    update_agent
+)
+from database.remote_mcp_db import check_mcp_name_exists, get_mcp_server_by_name_and_tenant
+from database.tool_db import (
+    check_tool_is_available,
+    create_or_update_tool_by_tool_info,
+    delete_tools_by_agent_id,
+    query_all_enabled_tool_instances,
+    query_all_tools,
+    search_tools_for_sub_agent
+)
+from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
 from services.remote_mcp_service import add_remote_mcp_server_list
 from services.tool_configuration_service import update_tool_list
@@ -758,7 +778,8 @@ async def run_agent_stream(
     """
     # Save user message only if not in debug mode (before streaming starts)
     if not agent_request.is_debug:
-        save_messages(agent_request, target="user", authorization=authorization)
+        save_messages(agent_request, target="user",
+                      authorization=authorization)
 
     # Choose streaming strategy based on user's memory switch
     resolved_user_id, resolved_tenant_id, _ = _resolve_user_tenant_language(

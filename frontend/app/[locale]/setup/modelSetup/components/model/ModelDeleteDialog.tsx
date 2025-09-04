@@ -622,17 +622,19 @@ export const ModelDeleteDialog = ({
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Tooltip title={t('model.dialog.modelList.tooltip.settings')}>
-                        <Button
-                          type="text"
-                          icon={<SettingOutlined />}
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent switch toggle
-                            handleSettingsClick(providerModel);
-                          }}
-                        />
-                      </Tooltip>
+                      {deletingModelType !== 'embedding' && (
+                        <Tooltip title={t('model.dialog.modelList.tooltip.settings')}>
+                          <Button
+                            type="text"
+                            icon={<SettingOutlined />}
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent switch toggle
+                              handleSettingsClick(providerModel);
+                            }}
+                          />
+                        </Tooltip>
+                      )}
                       <Switch
                         size="small"
                         checked={checked}

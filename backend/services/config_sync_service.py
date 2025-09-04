@@ -1,11 +1,25 @@
 import logging
 
-from consts.const import DEFAULT_APP_NAME_ZH, DEFAULT_APP_NAME_EN, DEFAULT_APP_DESCRIPTION_ZH, \
-    DEFAULT_APP_DESCRIPTION_EN, DEFAULT_APP_ICON_URL, MODEL_CONFIG_MAPPING, APP_NAME, APP_DESCRIPTION, ICON_TYPE, \
-    AVATAR_URI, CUSTOM_ICON_URL
+from consts.const import (
+    APP_DESCRIPTION,
+    APP_NAME,
+    AVATAR_URI,
+    CUSTOM_ICON_URL,
+    DEFAULT_APP_DESCRIPTION_EN,
+    DEFAULT_APP_DESCRIPTION_ZH,
+    DEFAULT_APP_ICON_URL,
+    DEFAULT_APP_NAME_EN,
+    DEFAULT_APP_NAME_ZH,
+    ICON_TYPE,
+    MODEL_CONFIG_MAPPING
+)
 from database.model_management_db import get_model_id_by_display_name
-from utils.config_utils import tenant_config_manager, get_env_key, safe_value, \
-    get_model_name_from_config
+from utils.config_utils import (
+    get_env_key,
+    get_model_name_from_config,
+    safe_value,
+    tenant_config_manager
+)
 
 logger = logging.getLogger("config_sync_service")
 

@@ -1,0 +1,39 @@
+name: Docker Build Web Images
+
+concurrency:
+  group: docker-build-web-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'frontend/**'
+      - 'make/web/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop]
+    paths:
+      - 'frontend/**'
+      - 'make/web/**'
+      - '.github/workflows/**'
+
+jobs:
+  build-web-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build web image (amd64) and load locally
+        run: |
+          docker build --platform linux/amd64 -t nexent/nexent-web:dev-amd64 -f make/web/Dockerfile .
+
+  build-web-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build web image (arm64) and load locally
+        run: |
+          docker build --platform linux/arm64 -t nexent/nexent-web:dev-arm64 -f make/web/Dockerfile .

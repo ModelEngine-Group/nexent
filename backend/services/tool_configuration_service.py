@@ -10,15 +10,19 @@ from fastmcp import Client
 import jsonref
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 
-from database.tool_db import create_or_update_tool_by_tool_info, query_tool_instances_by_id, \
-    update_tool_table_from_scan_tool_list, query_all_tools
-from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum
 from consts.const import LOCAL_MCP_SERVER
-from database.remote_mcp_db import get_mcp_records_by_tenant
-
 from consts.exceptions import MCPConnectionError
+from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum
+from database.remote_mcp_db import get_mcp_records_by_tenant
+from database.tool_db import (
+    create_or_update_tool_by_tool_info,
+    query_all_tools,
+    query_tool_instances_by_id,
+    update_tool_table_from_scan_tool_list
+)
 
 logger = logging.getLogger("tool_configuration_service")
+
 
 def python_type_to_json_schema(annotation: Any) -> str:
     """
@@ -54,6 +58,7 @@ def python_type_to_json_schema(annotation: Any) -> str:
 
     # Return mapped type, or original type name if no mapping exists
     return type_mapping.get(type_name, type_name)
+
 
 def get_local_tools() -> List[ToolInfo]:
     """
@@ -340,5 +345,5 @@ async def list_all_tools(tenant_id: str):
             "params": tool.get("params", [])
         }
         formatted_tools.append(formatted_tool)
-    
+
     return formatted_tools

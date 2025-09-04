@@ -3,6 +3,8 @@ from unittest.mock import patch, MagicMock, call
 import json
 import os
 import redis
+import hashlib
+import urllib.parse
 
 from backend.services.redis_service import RedisService, get_redis_service
 
@@ -489,6 +491,299 @@ class TestRedisService(unittest.TestCase):
         mock_redis_service_class.assert_called_once()  # Only created once
         self.assertEqual(service1, mock_instance)
         self.assertEqual(service2, mock_instance)  # Should return same instance
+    
+    def test_recursively_delete_task_and_parents_no_parent(self):
+        """Test _recursively_delete_task_and_parents with task that has no parent"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        task_data = json.dumps({
+            'result': {'some_data': 'value'},
+            'parent_id': None
+        }).encode()
+        
+        self.mock_backend_client.get.return_value = task_data
+        self.mock_backend_client.delete.return_value = 1
+        
+        # Execute
+        deleted_count, processed_ids = self.redis_service._recursively_delete_task_and_parents("task123")
+        
+        # Verify
+        self.assertEqual(deleted_count, 1)
+        self.assertEqual(processed_ids, {"task123"})
+        self.mock_backend_client.get.assert_called_once_with('celery-task-meta-task123')
+        self.mock_backend_client.delete.assert_called_once_with('celery-task-meta-task123')
+    
+    def test_recursively_delete_task_and_parents_with_cycle_detection(self):
+        """Test _recursively_delete_task_and_parents detects and breaks cycles"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        # Create a cycle: task1 -> task2 -> task1
+        task1_data = json.dumps({'parent_id': 'task2'}).encode()
+        task2_data = json.dumps({'parent_id': 'task1'}).encode()
+        
+        self.mock_backend_client.get.side_effect = [task1_data, task2_data]
+        self.mock_backend_client.delete.return_value = 1
+        
+        # Execute
+        deleted_count, processed_ids = self.redis_service._recursively_delete_task_and_parents("task1")
+        
+        # Verify - should stop when cycle is detected
+        self.assertEqual(deleted_count, 2)
+        self.assertEqual(processed_ids, {"task1", "task2"})
+        self.assertEqual(self.mock_backend_client.delete.call_count, 2)
+    
+    def test_recursively_delete_task_and_parents_json_decode_error(self):
+        """Test _recursively_delete_task_and_parents handles JSON decode errors"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        # Invalid JSON data
+        invalid_json_data = b'invalid json data'
+        
+        self.mock_backend_client.get.return_value = invalid_json_data
+        self.mock_backend_client.delete.return_value = 1
+        
+        # Execute
+        deleted_count, processed_ids = self.redis_service._recursively_delete_task_and_parents("task123")
+        
+        # Verify - should still delete the task even if JSON parsing fails
+        self.assertEqual(deleted_count, 1)
+        self.assertEqual(processed_ids, {"task123"})
+        self.mock_backend_client.delete.assert_called_once_with('celery-task-meta-task123')
+    
+    def test_recursively_delete_task_and_parents_redis_error(self):
+        """Test _recursively_delete_task_and_parents handles Redis errors"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        # Simulate Redis error
+        self.mock_backend_client.get.side_effect = redis.RedisError("Connection lost")
+        
+        # Execute
+        deleted_count, processed_ids = self.redis_service._recursively_delete_task_and_parents("task123")
+        
+        # Verify - should return 0 when Redis error occurs
+        self.assertEqual(deleted_count, 0)
+        self.assertEqual(processed_ids, {"task123"})
+    
+    def test_cleanup_celery_tasks_with_failed_task_metadata(self):
+        """Test _cleanup_celery_tasks handles failed tasks with exception metadata"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        task_keys = [b'celery-task-meta-1']
+        
+        # Task with exception metadata containing index name
+        task_data = json.dumps({
+            'result': {
+                'exc_message': 'Error processing task: {"index_name": "test_index", "error": "failed"}'
+            }
+        }).encode()
+        
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_data
+        
+        # Execute
+        with patch.object(self.redis_service, '_recursively_delete_task_and_parents') as mock_recursive_delete:
+            mock_recursive_delete.return_value = (1, {'1'})
+            result = self.redis_service._cleanup_celery_tasks("test_index")
+        
+        # Verify
+        self.assertEqual(result, 1)
+        mock_recursive_delete.assert_called_once_with('1')
+    
+    def test_cleanup_celery_tasks_invalid_exception_metadata(self):
+        """Test _cleanup_celery_tasks handles invalid exception metadata gracefully"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        task_keys = [b'celery-task-meta-1']
+        
+        # Task with invalid exception metadata
+        task_data = json.dumps({
+            'result': {
+                'exc_message': 'Invalid JSON metadata'
+            }
+        }).encode()
+        
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_data
+        
+        # Execute
+        result = self.redis_service._cleanup_celery_tasks("test_index")
+        
+        # Verify - should not crash and return 0
+        self.assertEqual(result, 0)
+    
+    def test_cleanup_cache_keys_partial_failure(self):
+        """Test _cleanup_cache_keys handles partial failures gracefully"""
+        # Setup
+        self.redis_service._client = self.mock_redis_client
+        
+        # First pattern succeeds, second fails, third succeeds
+        def mock_keys_side_effect(pattern):
+            if pattern == 'kb:test_index:*':
+                raise redis.RedisError("Connection error")
+            elif pattern == '*test_index*':
+                return [b'key1', b'key2']
+            elif pattern == 'index:test_index:*':
+                return [b'key3']
+            else:
+                return []
+        
+        self.mock_redis_client.keys.side_effect = mock_keys_side_effect
+        self.mock_redis_client.delete.return_value = 1
+        
+        # Execute
+        result = self.redis_service._cleanup_cache_keys("test_index")
+        
+        # Verify - should continue processing despite one pattern failing
+        self.assertEqual(result, 2)  # 2 successful delete operations
+    
+    def test_cleanup_cache_keys_all_patterns_fail(self):
+        """Test _cleanup_cache_keys handles errors gracefully when all patterns fail"""
+        # Setup
+        self.redis_service._client = self.mock_redis_client
+        
+        # Simulate an error for all pattern calls
+        # Each call to keys() will fail but be caught by inner try-catch
+        self.mock_redis_client.keys.side_effect = redis.RedisError("Redis connection failed")
+        
+        # Execute - should not raise exception but return 0
+        result = self.redis_service._cleanup_cache_keys("test_index")
+        
+        # Verify - should handle gracefully and return 0
+        self.assertEqual(result, 0)
+        # Should have tried all 4 patterns
+        self.assertEqual(self.mock_redis_client.keys.call_count, 4)
+    
+
+    def test_cleanup_document_cache_keys_empty_patterns(self):
+        """Test _cleanup_document_cache_keys handles empty key patterns"""
+        # Setup
+        self.redis_service._client = self.mock_redis_client
+        
+        # All patterns return empty results
+        self.mock_redis_client.keys.return_value = []
+        
+        # Execute
+        result = self.redis_service._cleanup_document_cache_keys("test_index", "path/to/doc.pdf")
+        
+        # Verify
+        self.assertEqual(result, 0)
+        self.assertEqual(self.mock_redis_client.keys.call_count, 6)  # All 6 patterns checked
+        self.mock_redis_client.delete.assert_not_called()
+    
+    def test_get_knowledgebase_task_count_with_backend_errors(self):
+        """Test get_knowledgebase_task_count handles backend errors gracefully"""
+        # Setup
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        # Setup backend client to fail - this will be caught by outer try block
+        self.mock_backend_client.keys.side_effect = redis.RedisError("Backend connection failed")
+        
+        # Setup regular client to succeed (but it won't be reached due to outer exception)
+        self.mock_redis_client.keys.return_value = [b'key1', b'key2', b'key3']
+        
+        # Execute
+        result = self.redis_service.get_knowledgebase_task_count("test_index")
+        
+        # Verify - when backend_client.keys() fails, the outer try catches it
+        # and the method returns 0 without processing cache keys
+        self.assertEqual(result, 0)
+        
+        # Verify that backend keys was called and failed
+        self.mock_backend_client.keys.assert_called_once_with('celery-task-meta-*')
+        # Verify that regular client keys was NOT called due to the exception
+        self.mock_redis_client.keys.assert_not_called()
+    
+    def test_get_knowledgebase_task_count_complete_failure(self):
+        """Test get_knowledgebase_task_count handles complete Redis failure"""
+        # Setup
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        # Both clients fail
+        self.mock_backend_client.keys.side_effect = redis.RedisError("Backend failed")
+        self.mock_redis_client.keys.side_effect = redis.RedisError("Cache failed")
+        
+        # Execute
+        result = self.redis_service.get_knowledgebase_task_count("test_index")
+        
+        # Verify - should return 0 and not crash
+        self.assertEqual(result, 0)
+    
+    def test_ping_backend_client_failure(self):
+        """Test ping method when backend client fails but main client succeeds"""
+        # Setup
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        self.mock_redis_client.ping.return_value = True
+        self.mock_backend_client.ping.side_effect = redis.RedisError("Backend connection failed")
+        
+        # Execute
+        result = self.redis_service.ping()
+        
+        # Verify
+        self.mock_redis_client.ping.assert_called_once()
+        self.mock_backend_client.ping.assert_called_once()
+        self.assertFalse(result)  # Should return False if any client fails
+    
+    def test_init_method(self):
+        """Test RedisService initialization"""
+        # Execute
+        service = RedisService()
+        
+        # Verify
+        self.assertIsNone(service._client)
+        self.assertIsNone(service._backend_client)
+    
+    def test_cleanup_celery_tasks_non_dict_result(self):
+        """Test _cleanup_celery_tasks handles non-dict result values"""
+        # Setup
+        self.redis_service._backend_client = self.mock_backend_client
+        
+        task_keys = [b'celery-task-meta-1']
+        
+        # Task with non-dict result
+        task_data = json.dumps({
+            'result': "string result instead of dict"
+        }).encode()
+        
+        self.mock_backend_client.keys.return_value = task_keys
+        self.mock_backend_client.get.return_value = task_data
+        
+        # Execute
+        result = self.redis_service._cleanup_celery_tasks("test_index")
+        
+        # Verify - should handle gracefully and return 0
+        self.assertEqual(result, 0)
+
+    def test_cleanup_cache_keys_all_failures(self):
+        """Test _cleanup_cache_keys returns 0 when all patterns fail"""
+        self.redis_service._client = self.mock_redis_client
+        self.mock_redis_client.keys.side_effect = redis.RedisError("Redis connection failed")
+
+        result = self.redis_service._cleanup_cache_keys("test_index")
+        self.assertEqual(result, 0)
+        self.assertEqual(self.mock_redis_client.keys.call_count, 4)
+
+    def test_ping_backend_failure(self):
+        """Test ping returns False if backend client fails but main client succeeds"""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+
+        self.mock_redis_client.ping.return_value = True
+        self.mock_backend_client.ping.side_effect = redis.RedisError("Backend connection failed")
+
+        result = self.redis_service.ping()
+        self.assertFalse(result)
+        self.mock_redis_client.ping.assert_called_once()
+        self.mock_backend_client.ping.assert_called_once()
 
 
 if __name__ == '__main__':

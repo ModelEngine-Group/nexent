@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       runner_label_json:
-        description: 'JSON格式的runner标签数组（如["ubuntu-latest"]或["self-hosted"]）'
+        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: true
         default: '["ubuntu-latest"]'
 
