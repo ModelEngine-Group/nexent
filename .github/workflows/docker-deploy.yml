@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       deployment_mode:
-        description: '部署模式: development or production'
+        description: 'Deployment mode: development or production'
         required: true
         default: 'development'
         type: choice
@@ -12,7 +12,7 @@ on:
           - development
           - production
       runner_label_json:
-        description: 'JSON 格式的 runner 标签数组'
+        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: true
         default: '[]'
 
@@ -22,9 +22,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          retries: 3
       - name: Build main application image
         run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent -f make/main/Dockerfile .
 
@@ -33,9 +30,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          retries: 3
       - name: Check if model is cached locally
         id: check-model
         run: |
@@ -60,9 +54,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          retries: 3
       - name: Build web frontend image
         run: docker build --build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua -t nexent/nexent-web -f make/web/Dockerfile .
 
@@ -71,9 +62,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          retries: 3
       - name: Build docs image
         run: docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
 
@@ -83,9 +71,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          retries: 3
       - name: Copy project to $HOME/nexent
         run: |
           rm -rf $HOME/nexent

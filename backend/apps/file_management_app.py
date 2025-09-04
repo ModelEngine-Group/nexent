@@ -2,8 +2,8 @@ import asyncio
 import json
 import logging
 import os
+from http import HTTPStatus
 from io import BytesIO
-from pathlib import Path
 from typing import List, Optional
 
 import httpx
@@ -12,28 +12,15 @@ from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Path as 
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from agents.preprocess_manager import preprocess_manager
-from consts.const import DATA_PROCESS_SERVICE, MAX_CONCURRENT_UPLOADS, UPLOAD_FOLDER
+from consts.const import DATA_PROCESS_SERVICE
 from consts.model import ProcessParams
-from database.attachment_db import (
-    delete_file,
-    get_content_type,
-    get_file_stream,
-    get_file_url,
-    list_files,
-    upload_fileobj,
-)
+from services.file_management_service import upload_to_minio, upload_files_impl, \
+    get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl
 from utils.attachment_utils import convert_image_to_text, convert_long_text_to_text
 from utils.auth_utils import get_current_user_info
-from utils.file_management_utils import save_upload_file, trigger_data_process
+from utils.file_management_utils import trigger_data_process
 
 logger = logging.getLogger("file_management_app")
-
-# Create upload directory
-upload_dir = Path(UPLOAD_FOLDER)
-upload_dir.mkdir(exist_ok=True)
-
-# Concurrency control
-upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 
 # Create API router
 router = APIRouter(prefix="/file")
@@ -43,43 +30,9 @@ router = APIRouter(prefix="/file")
 @router.options("/{full_path:path}")
 async def options_route(full_path: str):
     return JSONResponse(
-        status_code=200,
+        status_code=HTTPStatus.OK,
         content={"detail": "OK"},
     )
-
-
-async def _upload_to_minio(files: List[UploadFile], folder: str) -> List[dict]:
-    """Helper function to upload files to MinIO and return results."""
-    results = []
-    for f in files:
-        try:
-            # Read file content
-            file_content = await f.read()
-
-            # Convert file content to BytesIO object
-            file_obj = BytesIO(file_content)
-
-            # Upload file
-            result = upload_fileobj(
-                file_obj=file_obj,
-                file_name=f.filename or "",
-                prefix=folder
-            )
-
-            # Reset file pointer for potential re-reading
-            await f.seek(0)
-            results.append(result)
-
-        except Exception as e:
-            # Log single file upload failure but continue processing other files
-            logger.error(
-                f"Failed to upload file {f.filename}: {e}", exc_info=True)
-            results.append({
-                "success": False,
-                "file_name": f.filename,
-                "error": "An error occurred while processing the file."
-            })
-    return results
 
 
 @router.post("/upload")
@@ -91,47 +44,14 @@ async def upload_files(
             "attachments", description="Storage folder path for MinIO (optional)")
 ):
     if not file:
-        raise HTTPException(status_code=400, detail="No files in the request")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                            detail="No files in the request")
 
-    uploaded_filenames = []
-    uploaded_file_paths = []
-    errors = []
-
-    if destination == "local":
-        async with upload_semaphore:
-            for f in file:
-                if not f:
-                    continue
-
-                safe_filename = os.path.basename(f.filename or "")
-                upload_path = upload_dir / safe_filename
-                absolute_path = upload_path.absolute()
-
-                # Save file
-                if await save_upload_file(f, upload_path):
-                    uploaded_filenames.append(safe_filename)
-                    uploaded_file_paths.append(str(absolute_path))
-                    logger.info(f"Successfully saved file: {safe_filename}")
-                else:
-                    errors.append(f"Failed to save file: {f.filename}")
-
-    elif destination == "minio":
-        minio_results = await _upload_to_minio(files=file, folder=folder)
-        for result in minio_results:
-            if result.get("success"):
-                uploaded_filenames.append(result.get("file_name"))
-                uploaded_file_paths.append(result.get("object_name"))
-            else:
-                file_name = result.get('file_name')
-                error_msg = result.get('error', 'Unknown error')
-                errors.append(f"Failed to upload {file_name}: {error_msg}")
-    else:
-        raise HTTPException(
-            status_code=400, detail="Invalid destination. Must be 'local' or 'minio'.")
+    errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(destination, file, folder)
 
     if uploaded_file_paths:
         return JSONResponse(
-            status_code=200,
+            status_code=HTTPStatus.OK,
             content={
                 "message": f"Files uploaded successfully to {destination}, ready for processing.",
                 "uploaded_filenames": uploaded_filenames,
@@ -140,13 +60,8 @@ async def upload_files(
             }
         )
     else:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "error": "No valid files uploaded",
-                "errors": errors
-            }
-        )
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                            detail="No valid files uploaded")
 
 
 @router.post("/process")
@@ -178,15 +93,11 @@ async def process_files(
         error_message = "Data process service failed"
         if isinstance(process_result, dict) and "message" in process_result:
             error_message = process_result["message"]
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": error_message
-            }
-        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=error_message)
 
     return JSONResponse(
-        status_code=201,
+        status_code=HTTPStatus.CREATED,
         content={
             "message": "Files processing triggered successfully",
             "process_tasks": process_result
@@ -208,7 +119,7 @@ async def storage_upload_files(
 
     Returns upload results including file information and access URLs
     """
-    results = await _upload_to_minio(files=files, folder=folder)
+    results = await upload_to_minio(files=files, folder=folder)
 
     # Return upload results for all files
     return {
@@ -236,12 +147,7 @@ async def get_storage_files(
     Returns file list and metadata
     """
     try:
-        # Get file list
-        files = list_files(prefix=prefix)
-
-        # Limit return count
-        files = files[:limit]
-
+        files = await list_files_impl(prefix, limit)
         # Remove URLs if not needed
         if not include_urls:
             for file in files:
@@ -252,10 +158,9 @@ async def get_storage_files(
             "total": len(files),
             "files": files
         }
-
     except Exception as e:
         raise HTTPException(
-            status_code=500,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to get file list: {str(e)}"
         )
 
@@ -278,22 +183,11 @@ async def get_storage_file(
     try:
         if download == "redirect":
             # return a redirect download URL
-            result = get_file_url(object_name=object_name, expires=expires)
-            if not result["success"]:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}"
-                )
+            result = await get_file_url_impl(object_name=object_name, expires=expires)
             return RedirectResponse(url=result["url"])
         elif download == "stream":
             # return a readable file stream
-            file_stream = get_file_stream(object_name=object_name)
-            if file_stream is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="File not found or failed to read from storage"
-                )
-            content_type = get_content_type(object_name)
+            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
             return StreamingResponse(
                 file_stream,
                 media_type=content_type,
@@ -303,18 +197,10 @@ async def get_storage_file(
             )
         else:
             # return file metadata
-            result = get_file_url(object_name=object_name, expires=expires)
-            if not result["success"]:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"File does not exist or cannot be accessed: {result.get('error', 'Unknown error')}"
-                )
-            return result
+            return await get_file_url_impl(object_name=object_name, expires=expires)
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
         raise HTTPException(
-            status_code=500,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to get file information: {str(e)}"
         )
 
@@ -331,26 +217,14 @@ async def remove_storage_file(
     Returns deletion operation result
     """
     try:
-        # Delete file
-        result = delete_file(object_name=object_name)
-
-        if not result["success"]:
-            raise HTTPException(
-                status_code=404,
-                detail=f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}"
-            )
-
+        await delete_file_impl(object_name=object_name)
         return {
             "success": True,
             "message": f"File {object_name} successfully deleted"
         }
-
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-
         raise HTTPException(
-            status_code=500,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete file: {str(e)}"
         )
 
@@ -380,7 +254,8 @@ async def get_storage_file_batch_urls(
     for object_name in object_names:
         try:
             # Get file URL
-            result = get_file_url(object_name=object_name, expires=expires)
+            result = get_file_url_impl(
+                object_name=object_name, expires=expires)
             results.append({
                 "object_name": object_name,
                 "success": result["success"],
@@ -417,7 +292,6 @@ async def agent_preprocess_api(
             authorization, request)
         file_cache = []
         for file in files:
-            import time
             try:
                 content = await file.read()
                 file_cache.append({

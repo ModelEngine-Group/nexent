@@ -1,0 +1,41 @@
+name: Docker Build Main Images
+
+concurrency:
+  group: docker-build-main-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'make/main/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'make/main/**'
+      - '.github/workflows/**'
+
+jobs:
+  build-main-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build main image (amd64) and load locally
+        run: |
+          docker build --platform linux/amd64 -t nexent/nexent:dev-amd64 -f make/main/Dockerfile .
+
+  build-main-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build main image (arm64) and load locally
+        run: |
+          docker build --platform linux/arm64 -t nexent/nexent:dev-arm64 -f make/main/Dockerfile .

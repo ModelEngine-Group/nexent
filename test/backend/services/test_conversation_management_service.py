@@ -1,6 +1,7 @@
 from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
 import unittest
 import json
+import asyncio
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
@@ -41,6 +42,42 @@ class TestConversationManagementService(unittest.TestCase):
 
         # Reset all mocks before each test
         minio_client_mock.reset_mock()
+
+    @patch('backend.services.conversation_management_service.create_conversation_message')
+    @patch('backend.services.conversation_management_service.create_source_image')
+    def test_save_message_picture_web_invalid_json(self, mock_create_image, mock_create_msg):
+        mock_create_msg.return_value = 1
+        message_request = MessageRequest(
+            conversation_id=456,
+            message_idx=99,
+            role="assistant",
+            message=[MessageUnit(type="picture_web", content="not a valid json")],
+            minio_files=[]
+        )
+        result = save_message(message_request)
+        self.assertEqual(result.code, 0)
+        mock_create_image.assert_not_called()
+
+    def test_get_sources_service_no_id(self):
+        """传入 conversation_id=None, message_id=None 时应返回错误"""
+        result = get_sources_service(None, None, user_id=self.user_id)
+        self.assertEqual(result['code'], 400)
+        self.assertEqual(result['message'], "Must provide conversation_id or message_id parameter")
+
+    @patch('backend.services.conversation_management_service.extract_user_messages')
+    @patch('backend.services.conversation_management_service.call_llm_for_title')
+    @patch('backend.services.conversation_management_service.update_conversation_title')
+    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    def test_generate_conversation_title_service_no_title(
+        self, mock_get_config, mock_update, mock_call_llm, mock_extract
+    ):
+        mock_get_config.return_value = {"model_name": "gpt-4", "api_key": "fake"}
+        mock_extract.return_value = "content"
+        mock_call_llm.return_value = None
+        result = asyncio.run(generate_conversation_title_service(
+            123, [], self.user_id, self.tenant_id))
+        self.assertIsNone(result)
+        mock_update.assert_called_once_with(123, None, self.user_id)
 
     @patch('backend.services.conversation_management_service.create_conversation_message')
     @patch('backend.services.conversation_management_service.create_source_search')

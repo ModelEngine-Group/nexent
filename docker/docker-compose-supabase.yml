@@ -1,7 +1,7 @@
 services:
   kong:
     container_name: supabase-kong-mini
-    image: kong:2.8.1
+    image: ${SUPABASE_KONG}
     restart: unless-stopped
     ports:
       - "8000:8000/tcp"
@@ -38,7 +38,7 @@ services:
 
   auth:
     container_name: supabase-auth-mini
-    image: supabase/gotrue:v2.170.0
+    image: ${SUPABASE_GOTRUE}
     restart: unless-stopped
     healthcheck:
       test:
@@ -89,9 +89,9 @@ services:
 
   db:
     container_name: supabase-db-mini
-    image: supabase/postgres:15.8.1.060
+    image: ${SUPABASE_DB}
     restart: unless-stopped
-    # 暴露数据库端口，以便直连管理
+    # Expose the database port for direct connection management
     ports:
       - ${SUPABASE_POSTGRES_PORT}:${SUPABASE_POSTGRES_PORT}
     volumes:

@@ -12,27 +12,19 @@ on:
       - 'backend/**'
       - 'sdk/**'
       - 'make/data_process/**'
+      - '.github/workflows/**'
   push:
     branches: [develop]
     paths:
       - 'backend/**'
       - 'sdk/**'
       - 'make/data_process/**'
+      - '.github/workflows/**'
 
 jobs:
   build-data-process-amd64:
     runs-on: ubuntu-latest
     steps:
-      - name: Free up disk space on GitHub runner
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-      - name: Set up Docker Buildx
-        run: |
-          if ! docker buildx inspect nexent_builder > /dev/null 2>&1; then
-            docker buildx create --name nexent_builder --use
-          else
-            docker buildx use nexent_builder
-          fi
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Clone model
@@ -43,21 +35,11 @@ jobs:
           rm -rf .git .gitattributes
       - name: Build data process image (amd64) and load locally
         run: |
-          docker buildx build --platform linux/amd64 -t nexent/nexent-data-process:dev-amd64 --load -f make/data_process/Dockerfile .
+          docker build --platform linux/amd64 -t nexent/nexent-data-process:dev-amd64 -f make/data_process/Dockerfile .
 
   build-data-process-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
-      - name: Free up disk space on GitHub runner
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-      - name: Set up Docker Buildx
-        run: |
-          if ! docker buildx inspect nexent_builder > /dev/null 2>&1; then
-            docker buildx create --name nexent_builder --use
-          else
-            docker buildx use nexent_builder
-          fi
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Clone model
@@ -68,4 +50,4 @@ jobs:
           rm -rf .git .gitattributes
       - name: Build data process image (arm64) and load locally
         run: |
-          docker buildx build --platform linux/arm64 -t nexent/nexent-data-process:dev-arm64 --load -f make/data_process/Dockerfile .
+          docker build --platform linux/arm64 -t nexent/nexent-data-process:dev-arm64 -f make/data_process/Dockerfile .

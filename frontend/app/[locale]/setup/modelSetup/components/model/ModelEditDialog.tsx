@@ -6,7 +6,7 @@ import { Modal, Input, Button, App } from 'antd'
 import { useConfig } from '@/hooks/useConfig'
 import { modelService } from '@/services/modelService'
 import { ModelOption, ModelType } from '@/types/config'
-
+import { getConnectivityIcon, getConnectivityColor, getConnectivityMeta, ConnectivityStatusType } from '@/lib/utils'
 
 interface ModelEditDialogProps {
   isOpen: boolean
@@ -29,6 +29,14 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
     vectorDimension: "1024"
   })
   const [loading, setLoading] = useState(false)
+  const [verifyingConnectivity, setVerifyingConnectivity] = useState(false)
+  const [connectivityStatus, setConnectivityStatus] = useState<{
+    status: ConnectivityStatusType
+    message: string
+  }>({
+    status: null,
+    message: ""
+  })
 
   useEffect(() => {
     if (model) {
@@ -46,12 +54,62 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
 
   const handleFormChange = (field: string, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }))
+    // If the key configuration item changes, clear the verification status
+    if (['url', 'apiKey', 'maxTokens', 'vectorDimension'].includes(field)) {
+      setConnectivityStatus({ status: null, message: "" })
+    }
   }
 
   const isEmbeddingModel = form.type === "embedding" || form.type === "multi_embedding"
 
   const isFormValid = () => {
     return form.name.trim() !== "" && form.url.trim() !== ""
+  }
+
+  // Verify model connectivity
+  const handleVerifyConnectivity = async () => {
+    if (!isFormValid()) {
+      message.warning(t('model.dialog.warning.incompleteForm'))
+      return
+    }
+
+    setVerifyingConnectivity(true)
+    setConnectivityStatus({ status: "checking", message: t('model.dialog.status.verifying') })
+
+    try {
+      const modelType = form.type as ModelType
+
+      const config = {
+        modelName: form.name,
+        modelType: modelType,
+        baseUrl: form.url,
+        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+        maxTokens: form.type === "embedding" ? parseInt(form.vectorDimension) : parseInt(form.maxTokens),
+        embeddingDim: form.type === "embedding" ? parseInt(form.vectorDimension) : undefined
+      }
+
+      const result = await modelService.verifyModelConfigConnectivity(config)
+
+      // Set connectivity status
+      let connectivityMessage = ''
+      if (result.connectivity) {
+        connectivityMessage = t('model.dialog.connectivity.status.available')
+      } else {
+        connectivityMessage = t('model.dialog.connectivity.status.unavailable')
+      }
+      setConnectivityStatus({
+        status: result.connectivity ? "available" : "unavailable",
+        message: connectivityMessage
+      })
+
+    } catch (error) {
+      setConnectivityStatus({
+        status: "unavailable",
+        message: t('model.dialog.connectivity.status.unavailable')
+      })
+    } finally {
+      setVerifyingConnectivity(false)
+    }
   }
 
   const handleSave = async () => {
@@ -66,10 +124,10 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
       
       await modelService.updateSingleModel({
         model_id: model.id, // 使用模型名称作为ID
-        name: form.name,
+        displayName: form.displayName,
         url: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens: maxTokensValue,
+        ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
         source: model.source
       })
 
@@ -128,11 +186,11 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
         {/* Model Name */}
         <div>
           <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t('model.dialog.label.name')}
+            {t('model.dialog.label.displayName')}
           </label>
           <Input
-            value={form.name}
-            onChange={(e) => handleFormChange('name', e.target.value)}
+            value={form.displayName}
+            onChange={(e) => handleFormChange('displayName', e.target.value)}
           />
         </div>
 
@@ -170,6 +228,37 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
             />
           </div>
         )}
+
+        {/* Connectivity verification area */}
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center">
+              <span className="text-sm font-medium text-gray-700">{t('model.dialog.connectivity.title')}</span>
+              {connectivityStatus.status && (
+                <div className="ml-2 flex items-center">
+                  {getConnectivityMeta(connectivityStatus.status).icon}
+                  <span
+                    className="ml-1 text-xs"
+                    style={{ color: getConnectivityMeta(connectivityStatus.status).color }}
+                  >
+                    {connectivityStatus.status === 'available' && t('model.dialog.connectivity.status.available')}
+                    {connectivityStatus.status === 'unavailable' && t('model.dialog.connectivity.status.unavailable')}
+                    {connectivityStatus.status === 'checking' && t('model.dialog.status.verifying')}
+                  </span>
+                </div>
+              )}
+            </div>
+            <Button
+              size="small"
+              type="default"
+              onClick={handleVerifyConnectivity}
+              loading={verifyingConnectivity}
+              disabled={!isFormValid() || verifyingConnectivity}
+            >
+              {verifyingConnectivity ? t('model.dialog.button.verifying') : t('model.dialog.button.verify')}
+            </Button>
+          </div>
+        </div>
 
         <div className="flex justify-end space-x-3">
           <Button onClick={onClose}>{t('common.button.cancel')}</Button>

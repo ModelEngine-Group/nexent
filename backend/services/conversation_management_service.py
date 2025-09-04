@@ -2,23 +2,36 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from fastapi import Header
 from jinja2 import StrictUndefined, Template
+from nexent.core.utils.observer import ProcessType
 from smolagents import OpenAIServerModel
 
-from consts.model import MessageRequest, ConversationResponse, AgentRequest, MessageUnit
-from database.conversation_db import create_conversation_message, create_source_search, create_message_units, \
-    create_source_image, rename_conversation, get_conversation_list, get_conversation_history, \
-    get_source_images_by_message, \
-    get_source_images_by_conversation, get_source_searches_by_message, get_source_searches_by_conversation, \
-    delete_conversation, get_conversation, create_conversation, update_message_opinion, get_message_id_by_index
-from nexent.core.utils.observer import ProcessType
+from consts.model import AgentRequest, ConversationResponse, MessageRequest, MessageUnit
+from database.conversation_db import (
+    create_conversation,
+    create_conversation_message,
+    create_message_units,
+    create_source_image,
+    create_source_search,
+    delete_conversation,
+    get_conversation,
+    get_conversation_history,
+    get_conversation_list,
+    get_message_id_by_index,
+    get_source_images_by_conversation,
+    get_source_images_by_message,
+    get_source_searches_by_conversation,
+    get_source_searches_by_message,
+    rename_conversation,
+    update_message_opinion
+)
 from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
-from utils.str_utils import remove_think_tags, add_no_think_token
+from utils.str_utils import add_no_think_token, remove_think_tags
 
 logger = logging.getLogger("conversation_management_service")
 

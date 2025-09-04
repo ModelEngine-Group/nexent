@@ -1,8 +1,11 @@
+import asyncio
 import base64
+import concurrent.futures
 import io
 import logging
 import os
 import tempfile
+import threading
 import time
 import warnings
 from typing import Optional, List, Dict, Any
@@ -13,14 +16,11 @@ import torch
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 
-from consts.model import BatchTaskRequest
-from data_process.utils import get_task_info, get_all_task_ids_from_redis
-import concurrent.futures
-import asyncio
-
 from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
+from consts.model import BatchTaskRequest
 from data_process.app import app as celery_app
 from data_process.tasks import process_and_forward
+from data_process.utils import get_task_info, get_all_task_ids_from_redis
 
 # Configure logging
 logger = logging.getLogger("data_process.service")
@@ -45,6 +45,7 @@ class DataProcessService:
 
         self._inspector = None
         self._inspector_last_time = 0
+        self._inspector_ttl = 60  # Inspector cache time in seconds
         self._inspector_ttl = 60  # inspector cache time, seconds
         self._inspector_lock = None
         import threading
@@ -66,8 +67,7 @@ class DataProcessService:
                     connection_pool=self.redis_pool)
                 logger.info("Redis client initialized successfully.")
             else:
-                logger.warning(
-                    "REDIS_BACKEND_URL not set, Redis client not initialized.")
+                logger.warning("REDIS_BACKEND_URL not set, Redis client not initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize Redis client: {str(e)}")
 
@@ -84,8 +84,7 @@ class DataProcessService:
             self.clip_available = True
             logger.info("CLIP model loaded successfully")
         except Exception as e:
-            logger.warning(
-                f"Failed to load CLIP model, size-only filtering will be used: {str(e)}")
+            logger.warning(f"Failed to load CLIP model, size-only filtering will be used: {str(e)}")
             self.clip_available = False
 
     async def start(self):
@@ -105,8 +104,7 @@ class DataProcessService:
             if not celery_app.conf.broker_url or not celery_app.conf.result_backend:
                 celery_app.conf.broker_url = REDIS_URL
                 celery_app.conf.result_backend = REDIS_BACKEND_URL
-                logger.warning(
-                    f"Celery broker URL is not configured properly, reconfiguring to {celery_app.conf.broker_url}")
+                logger.warning(f"Celery broker URL is not configured properly, reconfiguring to {celery_app.conf.broker_url}")
             try:
                 inspector = celery_app.control.inspect()
                 inspector.ping()
