@@ -292,5 +292,5 @@ async def embedding_dimension_check(model_config: dict):
         return dimension
     except Exception as e:
         logger.warning(
-            f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; API Key: {model_api_key}; Error: {str(e)}")
+            f"UNCONNECTED: {model_name}; Base URL: {model_base_url}; Error: {str(e)}")
         return 0
