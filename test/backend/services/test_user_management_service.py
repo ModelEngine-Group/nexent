@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 import sys
 import os
 import aiohttp
@@ -51,11 +51,19 @@ class TestSetAuthTokenToClient(unittest.TestCase):
         
         self.assertEqual(mock_client.auth.access_token, "test-jwt-token")
 
-    def test_set_token_exception(self):
+    @patch('backend.services.user_management_service.logging')
+    def test_set_token_exception(self, mock_logging):
         """Test exception handling when setting token"""
-        # This test is simplified to avoid complex mocking issues
-        # The actual function handles exceptions properly as shown in other tests
-        self.assertTrue(True)  # Placeholder test
+        mock_client = MagicMock()
+        # Mock the auth attribute to raise an exception when access_token is set
+        type(mock_client.auth).access_token = PropertyMock(side_effect=Exception("Auth error"))
+        token = "test-jwt-token"
+        
+        # This should not raise an exception, but should log the error
+        set_auth_token_to_client(mock_client, token)
+        
+        # Verify that the error was logged
+        mock_logging.error.assert_called_once_with("Set access token failed: Auth error")
 
 
 class TestGetAuthorizedClient(unittest.TestCase):
