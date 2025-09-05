@@ -7,10 +7,10 @@ from http import HTTPStatus
 
 from gotrue.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.model import ServiceResponse, UserSignInRequest, UserSignUpRequest
+from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
-    extend_session, check_auth_service_health, signup_user, signin_user, refresh_user_token, \
+    check_auth_service_health, signup_user, signin_user, refresh_user_token, \
     get_session_by_authorization
 from utils.auth_utils import get_current_user_id
 
