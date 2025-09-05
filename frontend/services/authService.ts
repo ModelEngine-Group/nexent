@@ -36,7 +36,7 @@ export const authService = {
           console.warn("Session verification failed, HTTP status code:", response.status);
           
           // HTTP 401 means the token is expired or invalid
-          if (response.status === 401) {
+          if (response.status === STATUS_CODES.UNAUTHORIZED_HTTP) {
             return null;
           }
           
@@ -84,7 +84,7 @@ export const authService = {
     try {
       const response = await fetch(API_ENDPOINTS.user.serviceHealth, {method: 'GET'});
       
-      return response.status === 200;
+      return response.status === STATUS_CODES.SUCCESS;
     } catch (error) {
       return false;
     }
