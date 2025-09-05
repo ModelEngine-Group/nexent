@@ -1,10 +1,12 @@
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import JSONResponse
+from http import HTTPStatus
 
 from consts.const import DEFAULT_USER_ID
-from consts.model import ServiceResponse, STATUS_CODES, UserSignInRequest, UserSignUpRequest
+from consts.model import UserSignInRequest, UserSignUpRequest
 
 logger = logging.getLogger("mock_user_management_app")
 router = APIRouter(prefix="/user", tags=["user"])
@@ -24,31 +26,35 @@ MOCK_SESSION = {
 }
 
 
-@router.get("/service_health", response_model=ServiceResponse)
+@router.get("/service_health")
 async def service_health():
     """
     Mock service health check endpoint
     """
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="Mock user service is healthy",
-        data=True
-    )
+    try:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Auth service is available"})
+    except Exception as e:
+        logger.error(f"Service health check failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="Service health check failed")
 
 
-@router.post("/signup", response_model=ServiceResponse)
+@router.post("/signup")
 async def signup(request: UserSignUpRequest):
     """
     Mock user registration endpoint
     """
-    logger.info(
-        f"Mock signup request: email={request.email}, is_admin={request.is_admin}")
+    try:
+        logger.info(
+            f"Mock signup request: email={request.email}, is_admin={request.is_admin}")
 
-    # Return mock success response
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="🎉 Mock user account registered successfully!",
-        data={
+        # Mock success response matching user_management_app.py format
+        if request.is_admin:
+            success_message = "🎉 Admin account registered successfully! You now have system management permissions."
+        else:
+            success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        
+        user_data = {
             "user": {
                 "id": MOCK_USER["id"],
                 "email": request.email,
@@ -62,119 +68,125 @@ async def signup(request: UserSignUpRequest):
             },
             "registration_type": "admin" if request.is_admin else "user"
         }
-    )
+        
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": success_message, "data": user_data})
+    except Exception as e:
+        logger.error(f"User signup failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="User registration failed")
 
 
-@router.post("/signin", response_model=ServiceResponse)
+@router.post("/signin")
 async def signin(request: UserSignInRequest):
     """
     Mock user login endpoint
     """
-    logger.info(f"Mock signin request: email={request.email}")
+    try:
+        logger.info(f"Mock signin request: email={request.email}")
 
-    # Return mock success response
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="Login successful, session validity is 10 years",
-        data={
-            "user": {
-                "id": MOCK_USER["id"],
-                "email": request.email,
-                "role": MOCK_USER["role"]
-            },
-            "session": {
-                "access_token": MOCK_SESSION["access_token"],
-                "refresh_token": MOCK_SESSION["refresh_token"],
-                "expires_at": MOCK_SESSION["expires_at"],
-                "expires_in_seconds": MOCK_SESSION["expires_in_seconds"]
+        # Mock success response matching user_management_app.py format
+        signin_content = {
+            "message": "Login successful, session validity is 10 years",
+            "data": {
+                "user": {
+                    "id": MOCK_USER["id"],
+                    "email": request.email,
+                    "role": MOCK_USER["role"]
+                },
+                "session": {
+                    "access_token": MOCK_SESSION["access_token"],
+                    "refresh_token": MOCK_SESSION["refresh_token"],
+                    "expires_at": MOCK_SESSION["expires_at"],
+                    "expires_in_seconds": MOCK_SESSION["expires_in_seconds"]
+                }
             }
         }
-    )
+        
+        return JSONResponse(status_code=HTTPStatus.OK, content=signin_content)
+    except Exception as e:
+        logger.error(f"User signin failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="User login failed")
 
 
-@router.post("/refresh_token", response_model=ServiceResponse)
-async def refresh_token(request: Request):
+@router.post("/refresh_token")
+async def user_refresh_token(request: Request):
     """
     Mock token refresh endpoint
     """
-    logger.info("Mock refresh token request")
+    try:
+        logger.info("Mock refresh token request")
 
-    # In speed/mock mode, extend for a very long time (10 years)
-    new_expires_at = int((datetime.now() + timedelta(days=3650)).timestamp())
-
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="Token refreshed successfully",
-        data={
-            "session": {
-                "access_token": f"mock_access_token_{new_expires_at}",
-                "refresh_token": f"mock_refresh_token_{new_expires_at}",
-                "expires_at": new_expires_at,
-                "expires_in_seconds": 315360000
-            }
+        # In speed/mock mode, extend for a very long time (10 years)
+        new_expires_at = int((datetime.now() + timedelta(days=3650)).timestamp())
+        
+        session_info = {
+            "access_token": f"mock_access_token_{new_expires_at}",
+            "refresh_token": f"mock_refresh_token_{new_expires_at}",
+            "expires_at": new_expires_at,
+            "expires_in_seconds": 315360000
         }
-    )
+
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Token refresh successful", "data": {"session": session_info}})
+    except Exception as e:
+        logger.error(f"Token refresh failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="Token refresh failed")
 
 
-@router.post("/logout", response_model=ServiceResponse)
+@router.post("/logout")
 async def logout(request: Request):
     """
     Mock user logout endpoint
     """
-    logger.info("Mock logout request")
+    try:
+        logger.info("Mock logout request")
 
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="Logout successful",
-        data=None
-    )
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Logout successful"})
+    except Exception as e:
+        logger.error(f"User logout failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="User logout failed")
 
 
-@router.get("/session", response_model=ServiceResponse)
+@router.get("/session")
 async def get_session(request: Request):
     """
     Mock session validation endpoint
     """
-    authorization = request.headers.get("Authorization")
-
-    if not authorization:
-        return ServiceResponse(
-            code=STATUS_CODES["UNAUTHORIZED"],
-            message="No authorization token provided",
-            data=None
-        )
-
-    # In mock mode, always return valid session
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="Session is valid",
-        data={
+    try:
+        # In mock mode, always return valid session
+        data = {
             "user": {
                 "id": MOCK_USER["id"],
                 "email": MOCK_USER["email"],
                 "role": MOCK_USER["role"]
             }
         }
-    )
+        
+        return JSONResponse(status_code=HTTPStatus.OK,
+                         content={"message": "Session is valid",
+                                  "data": data})
+    except Exception as e:
+        logger.error(f"Session validation failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="Session validation failed")
 
 
-@router.get("/current_user_id", response_model=ServiceResponse)
+@router.get("/current_user_id")
 async def get_user_id(request: Request):
     """
     Mock current user ID endpoint
     """
-    authorization = request.headers.get("Authorization")
-
-    if not authorization:
-        return ServiceResponse(
-            code=STATUS_CODES["SUCCESS"],
-            message="No authorization token provided",
-            data={"user_id": None}
-        )
-
-    # In mock mode, always return the mock user ID
-    return ServiceResponse(
-        code=STATUS_CODES["SUCCESS"],
-        message="Get user ID successfully",
-        data={"user_id": MOCK_USER["id"]}
-    )
+    try:
+        # In mock mode, always return the mock user ID
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Get user ID successfully",
+                                     "data": {"user_id": MOCK_USER["id"]}})
+    except Exception as e:
+        logger.error(f"Get user ID failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+                          detail="Failed to get user ID")

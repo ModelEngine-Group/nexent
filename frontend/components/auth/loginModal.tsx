@@ -6,7 +6,7 @@ import { UserOutlined, LockOutlined } from "@ant-design/icons";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthForm } from "@/hooks/useAuthForm";
-import { EVENTS, STATUS_CODES } from "@/types/auth";
+import { EVENTS } from "@/types/auth";
 
 const { Text } = Typography;
 
@@ -71,11 +71,11 @@ export function LoginModal() {
       setEmailError("");
       setPasswordError(true);
 
+      // Handle backend errors based on HTTP status code
+      const httpStatusCode = error?.code;
+
       // Check if error is due to server timeout or auth service unavailability
-      if (
-        error?.code === STATUS_CODES.SERVER_ERROR ||
-        error?.code === STATUS_CODES.AUTH_SERVICE_UNAVAILABLE
-      ) {
+      if (httpStatusCode === 500 || httpStatusCode === 503) {
         // Display server error message in password field
         form.setFields([
           {
@@ -84,8 +84,22 @@ export function LoginModal() {
             value: values.password,
           },
         ]);
+      } else if (httpStatusCode === 422) {
+        // HTTP 422 Unprocessable Entity - Invalid credentials
+        form.setFields([
+          {
+            name: "email",
+            errors: [""],
+            value: values.email,
+          },
+          {
+            name: "password",
+            errors: [t("auth.invalidCredentials")],
+            value: values.password,
+          },
+        ]);
       } else {
-        // Display invalid credentials error in both fields
+        // Display invalid credentials error for other cases
         form.setFields([
           {
             name: "email",

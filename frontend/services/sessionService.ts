@@ -4,7 +4,6 @@
 
 import { API_ENDPOINTS } from "./api";
 
-import { STATUS_CODES } from "@/types/auth";
 import { fetchWithAuth, saveSessionToStorage, removeSessionFromStorage, getSessionFromStorage } from "@/lib/auth";
 
 // Record the time of the last token refresh
@@ -44,9 +43,21 @@ export const sessionService = {
           })
         });
         
+        // Check HTTP status code instead of data.code
+        if (!response.ok) {
+          console.warn("Token refresh failed, HTTP status code:", response.status);
+          
+          // HTTP 401 means the token is expired
+          if (response.status === 401) {
+            removeSessionFromStorage();
+          }
+          
+          return false;
+        }
+        
         const data = await response.json();
         
-        if (data.code === STATUS_CODES.SUCCESS && data.data?.session) {
+        if (data.data?.session) {
           // Update the session information in local storage
           const updatedSession = {
             ...sessionObj,
@@ -58,13 +69,7 @@ export const sessionService = {
           saveSessionToStorage(updatedSession);
           return true;
         } else {
-          console.warn("Token refresh failed:", data.message);
-          
-          // If it is a TOKEN_EXPIRED error, clear the session
-          if (data.code === STATUS_CODES.TOKEN_EXPIRED) {
-            removeSessionFromStorage();
-          }
-          
+          console.warn("Token refresh failed: incorrect response data format");
           return false;
         }
       } else {

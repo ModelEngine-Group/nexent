@@ -2,7 +2,6 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from backend.consts.exceptions import MCPDatabaseError
 import pytest
 from unittest.mock import MagicMock
 
@@ -61,7 +60,6 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()
-exceptions_mock.MCPDatabaseError = MCPDatabaseError
 sys.modules['consts.exceptions'] = exceptions_mock
 sys.modules['backend.consts.exceptions'] = exceptions_mock
 
