@@ -246,82 +246,116 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
     """Test check_auth_service_health"""
 
     @patch.dict(os.environ, {'SUPABASE_URL': 'http://test.supabase.co', 'SUPABASE_KEY': 'test-key'})
-    @patch('aiohttp.ClientSession')
-    async def test_health_check_success(self, mock_session_cls):
+    async def test_health_check_success(self):
         """Test successful health check"""
-        mock_response = AsyncMock()
-        mock_response.ok = True
-        mock_response.json = AsyncMock(return_value={"name": "GoTrue"})
+        # Create a proper async context manager mock
+        class MockResponse:
+            def __init__(self):
+                self.ok = True
+            
+            async def json(self):
+                return {"name": "GoTrue"}
         
-        mock_context_manager = AsyncMock()
-        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+        class MockGet:
+            def __init__(self):
+                self.response = MockResponse()
+            
+            async def __aenter__(self):
+                return self.response
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
         
-        mock_session = AsyncMock()
-        mock_session.get.return_value = mock_context_manager
+        class MockSession:
+            def get(self, *args, **kwargs):
+                return MockGet()
         
-        mock_session_context = AsyncMock()
-        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+        class MockClientSession:
+            async def __aenter__(self):
+                return MockSession()
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
         
-        mock_session_cls.return_value = mock_session_context
-        
-        result = await check_auth_service_health()
-        
-        self.assertTrue(result)
+        # Patch the ClientSession
+        with patch('backend.services.user_management_service.aiohttp.ClientSession', MockClientSession):
+            result = await check_auth_service_health()
+            self.assertTrue(result)
 
     @patch.dict(os.environ, {'SUPABASE_URL': 'http://test.supabase.co', 'SUPABASE_KEY': 'test-key'})
-    @patch('aiohttp.ClientSession')
-    async def test_health_check_wrong_service(self, mock_session_cls):
+    async def test_health_check_wrong_service(self):
         """Test health check with wrong service name"""
-        mock_response = AsyncMock()
-        mock_response.ok = True
-        mock_response.json = AsyncMock(return_value={"name": "WrongService"})
+        # Create a proper async context manager mock
+        class MockResponse:
+            def __init__(self):
+                self.ok = True
+            
+            async def json(self):
+                return {"name": "WrongService"}
         
-        mock_context_manager = AsyncMock()
-        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+        class MockGet:
+            def __init__(self):
+                self.response = MockResponse()
+            
+            async def __aenter__(self):
+                return self.response
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
         
-        mock_session = AsyncMock()
-        mock_session.get.return_value = mock_context_manager
+        class MockSession:
+            def get(self, *args, **kwargs):
+                return MockGet()
         
-        mock_session_context = AsyncMock()
-        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+        class MockClientSession:
+            async def __aenter__(self):
+                return MockSession()
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
         
-        mock_session_cls.return_value = mock_session_context
-        
-        result = await check_auth_service_health()
-        
-        self.assertFalse(result)
+        # Patch the ClientSession
+        with patch('backend.services.user_management_service.aiohttp.ClientSession', MockClientSession):
+            result = await check_auth_service_health()
+            self.assertFalse(result)
 
     @patch.dict(os.environ, {'SUPABASE_URL': 'http://test.supabase.co', 'SUPABASE_KEY': 'test-key'})
-    @patch('aiohttp.ClientSession')
-    async def test_health_check_not_ok(self, mock_session_cls):
+    async def test_health_check_not_ok(self):
         """Test health check with non-OK response"""
-        mock_response = AsyncMock()
-        mock_response.ok = False
+        # Create a proper async context manager mock
+        class MockResponse:
+            def __init__(self):
+                self.ok = False
         
-        mock_context_manager = AsyncMock()
-        mock_context_manager.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context_manager.__aexit__ = AsyncMock(return_value=None)
+        class MockGet:
+            def __init__(self):
+                self.response = MockResponse()
+            
+            async def __aenter__(self):
+                return self.response
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
         
-        mock_session = AsyncMock()
-        mock_session.get.return_value = mock_context_manager
+        class MockSession:
+            def get(self, *args, **kwargs):
+                return MockGet()
         
-        mock_session_context = AsyncMock()
-        mock_session_context.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_context.__aexit__ = AsyncMock(return_value=None)
+        class MockClientSession:
+            async def __aenter__(self):
+                return MockSession()
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
         
-        mock_session_cls.return_value = mock_session_context
-        
-        result = await check_auth_service_health()
-        
-        self.assertFalse(result)
+        # Patch the ClientSession
+        with patch('backend.services.user_management_service.aiohttp.ClientSession', MockClientSession):
+            result = await check_auth_service_health()
+            self.assertFalse(result)
 
     @patch.dict(os.environ, {'SUPABASE_URL': 'http://test.supabase.co', 'SUPABASE_KEY': 'test-key'})
     @patch('backend.services.user_management_service.logging')
-    @patch('aiohttp.ClientSession')
+    @patch('backend.services.user_management_service.aiohttp.ClientSession')
     async def test_health_check_connection_error(self, mock_session_cls, mock_logging):
         """Test health check with connection error"""
         mock_session_cls.side_effect = aiohttp.ClientError("Connection failed")
@@ -333,7 +367,7 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
 
     @patch.dict(os.environ, {'SUPABASE_URL': 'http://test.supabase.co', 'SUPABASE_KEY': 'test-key'})
     @patch('backend.services.user_management_service.logging')
-    @patch('aiohttp.ClientSession')
+    @patch('backend.services.user_management_service.aiohttp.ClientSession')
     async def test_health_check_general_exception(self, mock_session_cls, mock_logging):
         """Test health check with general exception"""
         mock_session_cls.side_effect = Exception("General error")
