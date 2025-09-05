@@ -6,7 +6,6 @@ export const STATUS_CODES = {
   SUCCESS: 200,               // 成功
   
   // 客户端错误状态码
-  USER_EXISTS: 1001,          // 用户已存在 (已弃用，使用HTTP 409)
   INVALID_CREDENTIALS: 1002,  // 无效的登录凭证
   TOKEN_EXPIRED: 1003,        // Token已过期
   UNAUTHORIZED: 1004,         // 未授权操作
@@ -15,11 +14,6 @@ export const STATUS_CODES = {
   
   // 服务器错误状态码
   SERVER_ERROR: 1005,         // 服务器内部错误
-  
-  // HTTP状态码 (用于注册接口)
-  HTTP_CONFLICT: 409,         // 冲突 (如邮箱已存在)
-  HTTP_UNPROCESSABLE_ENTITY: 422, // 无法处理的实体 (如密码过弱)
-  HTTP_INTERNAL_SERVER_ERROR: 500, // 内部服务器错误
 };
 
 // 本地存储键
