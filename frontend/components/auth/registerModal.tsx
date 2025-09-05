@@ -23,7 +23,6 @@ import {
 
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthForm, AuthFormValues } from "@/hooks/useAuthForm";
-import { STATUS_CODES } from "@/types/auth";
 
 const { Text } = Typography;
 
@@ -133,12 +132,12 @@ export function RegisterModal() {
         }
       }
 
+      // process the specific error type returned by the backend (based on HTTP status code and error_type)
+      const httpStatusCode = error?.code;
       const errorType = error?.data?.error_type;
 
-      if (
-        error?.code === STATUS_CODES.USER_EXISTS ||
-        errorType === "EMAIL_ALREADY_EXISTS"
-      ) {
+      // HTTP 409 Conflict
+      if (httpStatusCode === 409 || errorType === "EMAIL_ALREADY_EXISTS") {
         const errorMsg = t("auth.emailAlreadyExists");
         message.error(errorMsg);
         setEmailError(errorMsg);
@@ -149,7 +148,22 @@ export function RegisterModal() {
             value: values.email,
           },
         ]);
-      } else if (errorType === "INVITE_CODE_NOT_CONFIGURED") {
+      }
+      // HTTP 422 Unprocessable Entity
+      else if (httpStatusCode === 422 || errorType === "WEAK_PASSWORD") {
+        const errorMsg = t("auth.weakPassword");
+        message.error(errorMsg);
+        setPasswordError({ target: "password", message: errorMsg });
+        form.setFields([
+          {
+            name: "password",
+            errors: [errorMsg],
+            value: values.password,
+          },
+        ]);
+      }
+      // Invite code not configured
+      else if (errorType === "INVITE_CODE_NOT_CONFIGURED") {
         const errorMsg = t("auth.inviteCodeNotConfigured");
         message.error(errorMsg);
         form.setFields([
@@ -179,18 +193,9 @@ export function RegisterModal() {
             value: values.inviteCode,
           },
         ]);
-      } else if (errorType === "WEAK_PASSWORD") {
-        const errorMsg = t("auth.weakPassword");
-        message.error(errorMsg);
-        setPasswordError({ target: "password", message: errorMsg });
-        form.setFields([
-          {
-            name: "password",
-            errors: [errorMsg],
-            value: values.password,
-          },
-        ]);
-      } else if (errorType === "INVALID_EMAIL_FORMAT") {
+      }
+      // Invalid email format
+      else if (errorType === "INVALID_EMAIL_FORMAT") {
         const errorMsg = t("auth.invalidEmailFormat");
         message.error(errorMsg);
         setEmailError(errorMsg);
@@ -201,17 +206,28 @@ export function RegisterModal() {
             value: values.email,
           },
         ]);
-      } else if (errorType === "NETWORK_ERROR") {
-        const errorMsg = t("auth.networkError");
-        message.error(errorMsg);
-        setEmailError(errorMsg);
-      } else if (errorType === "REGISTRATION_SERVICE_ERROR") {
+      }
+      // Registration service error
+      else if (errorType === "REGISTRATION_SERVICE_ERROR" || httpStatusCode === 500) {
         const errorMsg = t("auth.registrationServiceError");
         message.error(errorMsg);
         setEmailError(errorMsg);
-      } else {
-        // Other unknown errors or cases without error_type, use generic error message
-        const errorMsg = t("auth.unknownError");
+      }
+      // Network error
+      else if (errorType === "NETWORK_ERROR") {
+        const errorMsg = t("auth.networkError");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+      }
+      // Auth service unavailable
+      else if (httpStatusCode === 503 || errorType === "AUTH_SERVICE_UNAVAILABLE") {
+        const errorMsg = t("auth.authServiceUnavailable");
+        message.error(errorMsg);
+        setEmailError(errorMsg);
+      }
+      // Other unknown errors
+      else {
+        const errorMsg = error?.message || t("auth.unknownError");
         message.error(errorMsg);
         setPasswordError({ target: "", message: "" });
       }

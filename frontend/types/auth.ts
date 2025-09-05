@@ -2,19 +2,17 @@
  * 认证相关类型与常量定义
  */
 export const STATUS_CODES = {
-  // 成功状态码
-  SUCCESS: 200,               // 成功
+  SUCCESS: 200,
   
-  // 客户端错误状态码
-  USER_EXISTS: 1001,          // 用户已存在
-  INVALID_CREDENTIALS: 1002,  // 无效的登录凭证
-  TOKEN_EXPIRED: 1003,        // Token已过期
-  UNAUTHORIZED: 1004,         // 未授权操作
-  INVALID_INPUT: 1006,        // 无效的输入参数
-  AUTH_SERVICE_UNAVAILABLE: 1007, // 认证服务不可用
-  
-  // 服务器错误状态码
-  SERVER_ERROR: 1005,         // 服务器内部错误
+  UNAUTHORIZED_HTTP: 401,
+
+  INVALID_CREDENTIALS: 1002,
+  TOKEN_EXPIRED: 1003,
+  UNAUTHORIZED: 1004,
+  INVALID_INPUT: 1006,
+  AUTH_SERVICE_UNAVAILABLE: 1007,
+
+  SERVER_ERROR: 1005,
 };
 
 // 本地存储键
