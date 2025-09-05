@@ -4,7 +4,6 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import Header
 from jinja2 import StrictUndefined, Template
 from nexent.core.utils.observer import ProcessType
 from smolagents import OpenAIServerModel
@@ -28,7 +27,6 @@ from database.conversation_db import (
     rename_conversation,
     update_message_opinion
 )
-from utils.auth_utils import get_current_user_id
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import add_no_think_token, remove_think_tags
@@ -36,7 +34,7 @@ from utils.str_utils import add_no_think_token, remove_think_tags
 logger = logging.getLogger("conversation_management_service")
 
 
-def save_message(request: MessageRequest, authorization: Optional[str] = Header(None)):
+def save_message(request: MessageRequest, user_id: str, tenant_id: str):
     """
     Save a new message record
 
@@ -56,14 +54,8 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
             - message: "success" success message
     """
     try:
-        # Authorization may be a FastAPI Header object or None when called outside a request
-        user_id = None
-        if isinstance(authorization, str) and authorization:
-            try:
-                user_id = get_current_user_id(authorization)
-            except Exception as auth_error:
-                logging.warning(
-                    f"Ignoring authorization during save_message: {auth_error}")
+        if tenant_id is None or user_id is None:
+            logging.warning("Missing tenant_id or user_id to save message")
         message_data = request.model_dump()
 
         # Validate conversation_id
@@ -205,16 +197,16 @@ def save_message(request: MessageRequest, authorization: Optional[str] = Header(
         raise Exception(str(e))
 
 
-def save_conversation_user(request: AgentRequest, authorization: Optional[str] = None):
+def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.get("role") == "user")
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2,
                                       role="user", message=[MessageUnit(type="string", content=request.query)], minio_files=request.minio_files)
-    save_message(conversation_req, authorization=authorization)
+    save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
 
 
-def save_conversation_assistant(request: AgentRequest, messages: List[str], authorization: Optional[str] = None):
+def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.get("role") == "user")
 
@@ -230,7 +222,7 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], auth
 
     conversation_req = MessageRequest(conversation_id=request.conversation_id, message_idx=user_role_count * 2 + 1,
                                       role="assistant", message=message_list, minio_files=request.minio_files)
-    save_message(conversation_req, authorization=authorization)
+    save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
 
 
 def extract_user_messages(history: List[Dict[str, str]]) -> str:

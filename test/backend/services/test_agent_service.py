@@ -1794,44 +1794,33 @@ def mock_http_request():
 
 
 @pytest.mark.asyncio
-@patch(
-    "backend.services.agent_service._resolve_user_tenant_language",
-    return_value=("test_user", "test_tenant", "en"),
-)
 @patch('backend.services.agent_service.build_memory_context')
 @patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
 @patch('backend.services.agent_service.agent_run_manager')
-@patch('backend.services.agent_service.get_current_user_info')
 async def test_prepare_agent_run(
-    mock_get_user_info,
     mock_agent_run_manager,
     mock_create_run_info,
     mock_build_memory_context,
-    mock_resolve,
     mock_agent_request,
     mock_http_request,
 ):
     """Test prepare_agent_run function."""
     # Setup
-    mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_run_info = MagicMock()
     mock_create_run_info.return_value = mock_run_info
     mock_memory_context = MagicMock()
     mock_build_memory_context.return_value = mock_memory_context
 
     # Execute
-    agent_run_info, memory_context = await prepare_agent_run(mock_agent_request, mock_http_request, "Bearer token")
+    agent_run_info, memory_context = await prepare_agent_run(
+        mock_agent_request,
+        user_id="test_user",
+        tenant_id="test_tenant",
+    )
 
     # Assert
     assert agent_run_info == mock_run_info
     assert memory_context == mock_memory_context
-    # Should resolve user/tenant via helper
-    mock_resolve.assert_called_once_with(
-        authorization="Bearer token",
-        http_request=mock_http_request,
-        user_id=None,
-        tenant_id=None,
-    )
     mock_build_memory_context.assert_called_once_with(
         "test_user", "test_tenant", 1)
     mock_create_run_info.assert_called_once()
@@ -1843,17 +1832,27 @@ async def test_prepare_agent_run(
 def test_save_messages(mock_submit, mock_agent_request):
     """Test save_messages function."""
     # Test user message saving
-    save_messages(mock_agent_request, "user", authorization="Bearer token")
+    save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
     mock_submit.assert_called_once()
 
     # Test assistant message saving
-    save_messages(mock_agent_request, "assistant", messages=[
-                  "test message"], authorization="Bearer token")
+    save_messages(
+        mock_agent_request,
+        "assistant",
+        user_id="u",
+        tenant_id="t",
+        messages=["test message"],
+    )
     assert mock_submit.call_count == 2
 
     # Test invalid target should not raise according to current implementation; ensure no submit called
-    save_messages(mock_agent_request, "invalid", messages=[
-                  "test message"], authorization="Bearer token")
+    save_messages(
+        mock_agent_request,
+        "invalid",
+        user_id="u",
+        tenant_id="t",
+        messages=["test message"],
+    )
     assert mock_submit.call_count == 2
 
 
@@ -1888,13 +1887,16 @@ async def test_run_agent_stream(
     # Assert
     assert isinstance(response, StreamingResponse)
     mock_save_messages.assert_called_once_with(
-        mock_agent_request, target="user", authorization="Bearer token")
-    mock_generate_stream.assert_called_once_with(
         mock_agent_request,
-        mock_http_request,
-        "Bearer token",
+        target="user",
         user_id=None,
         tenant_id=None,
+    )
+    mock_generate_stream.assert_called_once_with(
+        mock_agent_request,
+        user_id=None,
+        tenant_id=None,
+        language="en",
     )
 
     # Test debug mode
@@ -2340,7 +2342,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     # Collect streamed chunks
     collected = []
     async for out in agent_service._stream_agent_chunks(
-        agent_request, "Bearer token", MagicMock(), MagicMock()
+        agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
 
@@ -2367,11 +2369,6 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
     http_request = Request(scope={"type": "http", "headers": []})
 
     # Monkeypatch helpers
-    monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
-        MagicMock(return_value=("u", "t", "en")),
-        raising=False,
-    )
     monkeypatch.setattr(
         "backend.services.agent_service.build_memory_context",
         MagicMock(return_value=MagicMock()),
@@ -2410,7 +2407,7 @@ async def test_generate_stream_no_memory_registers_and_streams(monkeypatch):
     # Collect output
     collected = []
     async for d in agent_service.generate_stream_no_memory(
-        agent_request, http_request, "Bearer"
+        agent_request, user_id="u", tenant_id="t"
     ):
         collected.append(d)
 
@@ -2446,10 +2443,9 @@ async def test_run_agent_stream_no_memory(
     assert isinstance(resp, StreamingResponse)
     mock_gen_no_mem.assert_called_once_with(
         mock_agent_request,
-        mock_http_request,
-        "Bearer token",
         user_id=None,
         tenant_id=None,
+        language="en",
     )
 
 
@@ -2466,13 +2462,6 @@ async def test_generate_stream_with_memory_emits_tokens_and_unregisters(monkeypa
         is_debug=False,
     )
     http_request = Request(scope={"type": "http", "headers": []})
-
-    # Resolve to concrete user/tenant
-    monkeypatch.setattr(
-        "backend.services.agent_service._resolve_user_tenant_language",
-        MagicMock(return_value=("u", "t", "en")),
-        raising=False,
-    )
 
     # Enable memory switch in preview
     monkeypatch.setattr(
@@ -2522,7 +2511,7 @@ async def test_generate_stream_with_memory_emits_tokens_and_unregisters(monkeypa
     # Collect output
     out = []
     async for d in agent_service.generate_stream_with_memory(
-        agent_request, http_request, "Bearer"
+        agent_request, user_id="u", tenant_id="t"
     ):
         out.append(d)
 
@@ -2547,13 +2536,6 @@ async def test_generate_stream_with_memory_fallback_on_failure(monkeypatch):
         is_debug=False,
     )
     http_request = Request(scope={"type": "http", "headers": []})
-
-    # Resolve ids
-    monkeypatch.setattr(
-        "backend.services.agent_service._resolve_user_tenant_language",
-        MagicMock(return_value=("u", "t", "en")),
-        raising=False,
-    )
 
     # Enable memory
     monkeypatch.setattr(
@@ -2596,7 +2578,7 @@ async def test_generate_stream_with_memory_fallback_on_failure(monkeypatch):
 
     out = []
     async for d in agent_service.generate_stream_with_memory(
-        agent_request, http_request, "Bearer"
+        agent_request, user_id="u", tenant_id="t"
     ):
         out.append(d)
 

@@ -17,7 +17,6 @@ from .memory_utils import build_memory_identifiers
 
 
 logger = logging.getLogger("memory_service")
-logger.setLevel(logging.DEBUG)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -79,13 +78,15 @@ async def add_memory_in_levels(
     memory_levels: List[str] = ["agent", "user_agent"],
 ):
     """
-    Add memory according to user's preference for all four levels.
+    Add memory across the specified levels concurrently, then merge results.
+
     Args:
         ...
         memory_levels: List[str: "tenant"|"agent"|"user"|"user_agent"]
+
     Returns:
         {"results": [
-            {'id': '...', 'memory': '...', 'event': "ADD"|"DELETE"|"UPDATE"|"NONE"},
+            {"id": "...", "memory": "...", "event": "ADD"|"DELETE"|"UPDATE"|"NONE"},
             ...
         ]}
     """
@@ -94,48 +95,41 @@ async def add_memory_in_levels(
     # Mapping from memory id to its index in result_list
     id2idx: Dict[str, int] = {}
 
-    # Add memory for the specified levels
-    for memory_level in memory_levels:
+    async def _add_level(level: str) -> List[Dict[str, Any]]:
         try:
-            if memory_level not in {"tenant", "user", "agent", "user_agent"}:
-                raise ValueError("Unsupported memory level: " + memory_level)
-            try:
-                result = await add_memory(
-                    messages=messages,
-                    memory_level=memory_level,
-                    memory_config=memory_config,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    agent_id=agent_id,
-                    infer=True,
-                )
-                results = result.get("results", [])
-                logger.debug(f"Memory add results for level '{memory_level}': {results}")
-            except Exception as e:
-                import traceback
-                logger.error(f"Error adding memory in level '{memory_level}': {e}")
-                logger.error(f"Traceback: \n{traceback.format_exc()}")
-                continue
-
-            # Merge results into the aggregated list with priority handling
-            for item in results:
-                item_id = item.get("id")
-                existing_idx = id2idx.get(item_id)
-                if existing_idx is None:
-                    # New memory entry
-                    result_list.append(item)
-                    id2idx[item_id] = len(result_list) - 1
-                else:
-                    # Existing memory entry, decide whether to replace based on event priority
-                    existing_event = result_list[existing_idx].get("event")
-                    new_event = item.get("event")
-                    if event_priority.get(new_event, 0) > event_priority.get(existing_event, 0):
-                        result_list[existing_idx] = item
+            if level not in {"tenant", "user", "agent", "user_agent"}:
+                raise ValueError("Unsupported memory level: " + level)
+            res = await add_memory(
+                messages=messages,
+                memory_level=level,
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                infer=True,
+            )
+            items = res.get("results", [])
+            logger.debug(f"Memory add results for level '{level}': {items}")
+            return items
         except Exception as e:
-            import traceback
-            logger.error(f"Error adding memory in level {memory_level}: {e}")
-            logger.error(f"Traceback: \n{traceback.format_exc()}")
-            continue
+            logger.error(f"Error adding memory in level '{level}': {e}")
+            return []
+
+    tasks = [asyncio.create_task(_add_level(level)) for level in memory_levels]
+    all_level_results = await asyncio.gather(*tasks)
+
+    for results in all_level_results:
+        for item in results:
+            item_id = item.get("id")
+            existing_idx = id2idx.get(item_id)
+            if existing_idx is None:
+                result_list.append(item)
+                id2idx[item_id] = len(result_list) - 1
+            else:
+                existing_event = result_list[existing_idx].get("event")
+                new_event = item.get("event")
+                if event_priority.get(new_event, 0) > event_priority.get(existing_event, 0):
+                    result_list[existing_idx] = item
 
     return {"results": result_list}
 
@@ -148,7 +142,7 @@ async def search_memory(
     user_id: str,
     agent_id: Optional[str] = None,
     top_k: int = 5,
-    threshold: Optional[float] = 0.65
+    threshold: Optional[float] = 0.65,
 ) -> Any:
     """Search memory and return *mem0* search results list."""
     mem_user_id = build_memory_identifiers(memory_level=memory_level, user_id=user_id, tenant_id=tenant_id)
@@ -201,12 +195,32 @@ async def search_memory_in_levels(
     result_list = []
 
     logger.info(f"Searching memory in levels: {memory_levels}")
-    for memory_level in memory_levels:
-        search_res = await search_memory(query_text, memory_level, memory_config, tenant_id, user_id, agent_id, top_k, threshold)
-        raw_results = search_res.get("results", [])
-        # Add memory level into memory items
-        level_results = [{**item, "memory_level": memory_level} for item in raw_results]
+
+    async def _search_level(level: str):
+        try:
+            res = await search_memory(
+                query_text,
+                level,
+                memory_config,
+                tenant_id,
+                user_id,
+                agent_id,
+                top_k,
+                threshold,
+            )
+            raw = res.get("results", [])
+            return [{**item, "memory_level": level} for item in raw]
+        except Exception as e:
+            logger.error(f"search_memory failed on level '{level}': {e}")
+            return []
+
+    # Run searches concurrently and preserve order of memory_levels
+    tasks = [asyncio.create_task(_search_level(level)) for level in memory_levels]
+    all_level_results = await asyncio.gather(*tasks)
+
+    for level_results in all_level_results:
         result_list.extend(level_results)
+
     return {"results": result_list}
 
 

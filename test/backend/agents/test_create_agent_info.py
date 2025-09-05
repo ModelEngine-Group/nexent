@@ -728,8 +728,7 @@ class TestCreateAgentRunInfo:
     @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):
         """测试成功创建agent运行信息"""
-        with patch('backend.agents.create_agent_info.get_current_user_id') as mock_get_user, \
-                patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
                 patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
@@ -738,7 +737,6 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.threading') as mock_threading:
 
             # 设置mock返回值
-            mock_get_user.return_value = ("user_1", "tenant_1")
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
             mock_get_mcp.return_value = [
@@ -758,7 +756,8 @@ class TestCreateAgentRunInfo:
                 minio_files=[],
                 query="test query",
                 history=[],
-                authorization="Bearer token",
+                user_id="user_1",
+                tenant_id="tenant_1",
                 language="zh"
             )
 
@@ -774,7 +773,6 @@ class TestCreateAgentRunInfo:
             )
 
             # 验证其他函数被正确调用
-            mock_get_user.assert_called_once_with("Bearer token")
             mock_join_query.assert_called_once_with(
                 minio_files=[], query="test query")
             mock_create_models.assert_called_once_with("tenant_1")
@@ -804,9 +802,6 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_forwards_allow_memory_false(self):
         with (
             patch(
-                "backend.agents.create_agent_info.get_current_user_id"
-            ) as mock_get_user,
-            patch(
                 "backend.agents.create_agent_info.join_minio_file_description_to_query"
             ) as mock_join_query,
             patch(
@@ -825,7 +820,6 @@ class TestCreateAgentRunInfo:
             patch("backend.agents.create_agent_info.urljoin") as mock_urljoin,
             patch("backend.agents.create_agent_info.threading") as mock_threading,
         ):
-            mock_get_user.return_value = ("user_1", "tenant_1")
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
             mock_get_mcp.return_value = []
@@ -839,7 +833,8 @@ class TestCreateAgentRunInfo:
                 minio_files=[],
                 query="test query",
                 history=[],
-                authorization="Bearer token",
+                tenant_id="tenant_1",
+                user_id="user_1",
                 language="zh",
                 allow_memory_search=False,
             )

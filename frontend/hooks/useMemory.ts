@@ -490,3 +490,24 @@ export function useMemory({ visible, currentUserId, currentTenantId, message }: 
     handleDeleteMemory,
   }
 }
+
+// expose memory notification indicator to ChatHeader
+export function useMemoryIndicator(modalVisible: boolean) {
+  const [hasNewMemory, setHasNewMemory] = useState(false)
+
+  // Reset indicator when memory modal is opened
+  useEffect(() => {
+    if (modalVisible) {
+      setHasNewMemory(false)
+    }
+  }, [modalVisible])
+
+  // Listen for backend event that notifies new memory addition
+  useEffect(() => {
+    const handler = () => setHasNewMemory(true)
+    window.addEventListener("nexent:new-memory", handler as EventListener)
+    return () => window.removeEventListener("nexent:new-memory", handler as EventListener)
+  }, [])
+
+  return hasNewMemory
+}

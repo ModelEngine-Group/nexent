@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Dropdown } from "antd";
+import { Dropdown, Badge } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { BrainCircuit, Globe } from "lucide-react";
 
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { languageOptions } from "@/lib/constants";
 import { useLanguageSwitch } from "@/lib/language";
+import { useMemoryIndicator } from "@/hooks/useMemory";
 
 import MemoryManageModal from "../internal/memory/memoryManageModal";
 
@@ -34,6 +35,7 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
   const [memoryModalVisible, setMemoryModalVisible] = useState(false);
+  const hasNewMemory = useMemoryIndicator(memoryModalVisible);
   const inputRef = useRef<HTMLInputElement>(null);
   const { t } = useTranslation("common");
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
@@ -129,16 +131,18 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
                 </a>
               </Dropdown>
               {/* Memory Setting */}
-              <Button
-                variant="ghost"
-                className="h-8 w-12 rounded-full"
-                onClick={() => setMemoryModalVisible(true)}
-              >
-                <BrainCircuit
-                  className="size-5"
-                  stroke="url(#brainCogGradient)"
-                />
-              </Button>
+              <Badge dot={hasNewMemory} offset={[-4, 4]}>
+                <Button
+                  variant="ghost"
+                  className="h-6 w-5 mr-4 rounded-full"
+                  onClick={() => setMemoryModalVisible(true)}
+                >
+                  <BrainCircuit
+                    className="size-5"
+                    stroke="url(#brainCogGradient)"
+                  />
+                </Button>
+              </Badge>
             </div>
           </div>
         </div>

@@ -680,7 +680,9 @@ export const handleStreamResponse = async (
                   // If there's no currentStep, create one
                   if (!currentStep) {
                     currentStep = {
-                      id: `step-memory-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                      id: `step-memory-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 9)}`,
                       title: "Memory Search",
                       content: "",
                       expanded: true,
@@ -688,17 +690,21 @@ export const handleStreamResponse = async (
                       metrics: "",
                       thinking: { content: "", expanded: true },
                       code: { content: "", expanded: true },
-                      output: { content: "", expanded: true }
+                      output: { content: "", expanded: true },
                     };
                   }
 
                   // Check if there's already a memory_search message to update
-                  const existingMemoryIndex = currentStep.contents.findIndex(item => item.type === "memory_search");
+                  const existingMemoryIndex = currentStep.contents.findIndex(
+                    (item) => item.type === "memory_search"
+                  );
 
                   if (existingMemoryIndex >= 0) {
                     // Update existing memory search message
-                    currentStep.contents[existingMemoryIndex].content = messageContent;
-                    currentStep.contents[existingMemoryIndex].timestamp = Date.now();
+                    currentStep.contents[existingMemoryIndex].content =
+                      messageContent;
+                    currentStep.contents[existingMemoryIndex].timestamp =
+                      Date.now();
                   } else {
                     // Add new memory search content to the current step's contents array
                     let memMsg = "";
@@ -706,14 +712,18 @@ export const handleStreamResponse = async (
                       const m = JSON.parse(messageContent);
                       let txt = m.message || "";
                       switch (txt) {
-                        case '<MEM_START>':
-                          m.message = t('chatStreamHandler.memoryRetrieving');
+                        case "<MEM_START>":
+                          m.message = t("chatStreamHandler.memoryRetrieving");
                           break;
-                        case '<MEM_DONE>':
-                          m.message = t('chatStreamHandler.memoryRetrieved');
+                        case "<MEM_DONE>":
+                          m.message = t("chatStreamHandler.memoryRetrieved");
+                          try {
+                            const evt = new Event("nexent:new-memory");
+                            window.dispatchEvent(evt);
+                          } catch (_) {}
                           break;
-                        case '<MEM_FAILED>':
-                          m.message = t('chatStreamHandler.memoryFailed');
+                        case "<MEM_FAILED>":
+                          m.message = t("chatStreamHandler.memoryFailed");
                           break;
                         default:
                           break;
@@ -723,11 +733,13 @@ export const handleStreamResponse = async (
                       memMsg = messageContent;
                     }
                     currentStep.contents.push({
-                      id: `memory-search-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                      id: `memory-search-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .substring(2, 7)}`,
                       type: "memory_search",
                       content: memMsg, // translated JSON string
                       expanded: true,
-                      timestamp: Date.now()
+                      timestamp: Date.now(),
                     });
                   }
 

@@ -17,7 +17,6 @@ from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id
 from database.tool_db import search_tools_for_sub_agent
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.auth_utils import get_current_user_id
 from consts.const import LOCAL_MCP_SERVER
 
 logger = logging.getLogger("create_agent_info")
@@ -314,12 +313,11 @@ async def create_agent_run_info(
     minio_files,
     query,
     history,
-    authorization,
+    tenant_id: str,
+    user_id: str,
     language: str = "zh",
     allow_memory_search: bool = True,
 ):
-    user_id, tenant_id = get_current_user_id(authorization)
-
     final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
     model_list = await create_model_config_list(tenant_id)
     agent_config = await create_agent_config(

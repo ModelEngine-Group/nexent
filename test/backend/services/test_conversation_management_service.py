@@ -54,12 +54,13 @@ class TestConversationManagementService(unittest.TestCase):
             message=[MessageUnit(type="picture_web", content="not a valid json")],
             minio_files=[]
         )
-        result = save_message(message_request)
+        result = save_message(
+            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
         self.assertEqual(result.code, 0)
         mock_create_image.assert_not_called()
 
     def test_get_sources_service_no_id(self):
-        """传入 conversation_id=None, message_id=None 时应返回错误"""
+        """Should return error when both conversation_id and message_id are None."""
         result = get_sources_service(None, None, user_id=self.user_id)
         self.assertEqual(result['code'], 400)
         self.assertEqual(result['message'], "Must provide conversation_id or message_id parameter")
@@ -99,7 +100,8 @@ class TestConversationManagementService(unittest.TestCase):
         )
 
         # Execute
-        result = save_message(message_request)
+        result = save_message(
+            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
 
         # Assert
         self.assertEqual(result.code, 0)
@@ -154,7 +156,8 @@ class TestConversationManagementService(unittest.TestCase):
         )
 
         # Execute
-        result = save_message(message_request)
+        result = save_message(
+            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
 
         # Assert
         self.assertEqual(result.code, 0)
@@ -206,7 +209,8 @@ class TestConversationManagementService(unittest.TestCase):
         )
 
         # Execute
-        result = save_message(message_request)
+        result = save_message(
+            message_request, user_id=self.user_id, tenant_id=self.tenant_id)
 
         # Assert base result
         self.assertEqual(result.code, 0)
@@ -243,7 +247,7 @@ class TestConversationManagementService(unittest.TestCase):
         )
 
         # Execute
-        save_conversation_user(agent_request)
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         # Assert
         mock_save_message.assert_called_once()
@@ -277,7 +281,8 @@ class TestConversationManagementService(unittest.TestCase):
         ]
 
         # Execute
-        save_conversation_assistant(agent_request, messages)
+        save_conversation_assistant(
+            agent_request, messages, self.user_id, self.tenant_id)
 
         # Assert
         mock_save_message.assert_called_once()

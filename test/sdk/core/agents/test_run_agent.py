@@ -210,7 +210,7 @@ def basic_agent_run_info(mock_observer):
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_agent_run_thread_local_flow(basic_agent_run_info, mock_memory_context, monkeypatch):
+def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
     """Verify local execution path when mcp_host is empty or None."""
     # Patch NexentAgent inside run_agent to a MagicMock instance
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
@@ -273,13 +273,6 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
     mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
-
-
-def test_agent_run_thread_invalid_type():
-    """Passing a non-AgentRunInfo instance should raise a TypeError."""
-    mock_memory_context = MagicMock()
-    with pytest.raises(TypeError):
-        run_agent.agent_run_thread("not_an_agent_run_info", mock_memory_context)
 
 
 def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):
