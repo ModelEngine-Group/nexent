@@ -1,7 +1,5 @@
-import json
 import sys
 import os
-from io import BytesIO
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -36,6 +34,7 @@ error_response = {
     "error": "Failed to fetch image or image format not supported"
 }
 
+
 @pytest.mark.asyncio
 async def test_proxy_image_success(monkeypatch):
     """Test successful image proxy request"""
@@ -43,30 +42,31 @@ async def test_proxy_image_success(monkeypatch):
     mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.json = AsyncMock(return_value=success_response)
-    
+
     # Create mock session
     mock_session = AsyncMock()
     mock_get = AsyncMock()
     mock_get.__aenter__.return_value = mock_response
     mock_session.get = MagicMock(return_value=mock_get)
-    
+
     # Create mock session factory
     mock_client_session = AsyncMock()
     mock_client_session.__aenter__.return_value = mock_session
-    
-    # Patch the ClientSession
-    with patch('backend.apps.image_app.aiohttp.ClientSession') as mock_session_class:
+
+    # Patch the ClientSession in the correct module
+    with patch('backend.services.image_service.aiohttp.ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
-        
+
         # Test with TestClient
         response = client.get(f"/image?url={encoded_test_url}")
-        
+
         # Assertions
         assert response.status_code == 200
         assert response.json() == success_response
-        
+
         # Verify correct URL was called
         mock_session.get.assert_called_once()
+
 
 @pytest.mark.asyncio
 async def test_proxy_image_remote_error(monkeypatch):
@@ -75,34 +75,35 @@ async def test_proxy_image_remote_error(monkeypatch):
     mock_response = AsyncMock()
     mock_response.status = 404
     mock_response.text = AsyncMock(return_value="Image not found")
-    
+
     # Create mock session
     mock_session = AsyncMock()
     mock_get = AsyncMock()
     mock_get.__aenter__.return_value = mock_response
     mock_session.get = MagicMock(return_value=mock_get)
-    
+
     # Create mock session factory
     mock_client_session = AsyncMock()
     mock_client_session.__aenter__.return_value = mock_session
-    
+
     # Create expected error response
     expected_error_response = {
         "success": False,
         "error": "Failed to fetch image: Image not found"
     }
-    
-    # Patch the ClientSession
-    with patch('backend.apps.image_app.aiohttp.ClientSession') as mock_session_class:
+
+    # Patch the ClientSession in the correct module
+    with patch('backend.services.image_service.aiohttp.ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
-        
+
         # Test with TestClient
         response = client.get(f"/image?url={encoded_test_url}")
-        
+
         # Assertions
         assert response.status_code == 200
         assert response.json()["success"] is False
         assert "Failed to fetch image" in response.json()["error"]
+
 
 @pytest.mark.asyncio
 async def test_proxy_image_exception(monkeypatch):
@@ -112,59 +113,61 @@ async def test_proxy_image_exception(monkeypatch):
     mock_get = AsyncMock()
     mock_get.__aenter__.side_effect = Exception("Connection error")
     mock_session.get = MagicMock(return_value=mock_get)
-    
+
     # Create mock session factory
     mock_client_session = AsyncMock()
     mock_client_session.__aenter__.return_value = mock_session
-    
-    # Patch the ClientSession
-    with patch('backend.apps.image_app.aiohttp.ClientSession') as mock_session_class:
+
+    # Patch the ClientSession in the correct module
+    with patch('backend.services.image_service.aiohttp.ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
-        
+
         # Test with TestClient
         response = client.get(f"/image?url={encoded_test_url}")
-        
+
         # Assertions
         assert response.status_code == 200
         assert response.json()["success"] is False
         assert response.json()["error"] == "Connection error"
+
 
 @pytest.mark.asyncio
 async def test_proxy_image_with_special_chars(monkeypatch):
     """Test image proxy with URL containing special characters"""
     special_url = "https://example.com/image with spaces.jpg"
     encoded_special_url = "https%3A%2F%2Fexample.com%2Fimage%20with%20spaces.jpg"
-    
+
     # Create mock response
     mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.json = AsyncMock(return_value=success_response)
-    
+
     # Create mock session
     mock_session = AsyncMock()
     mock_get = AsyncMock()
     mock_get.__aenter__.return_value = mock_response
     mock_session.get = MagicMock(return_value=mock_get)
-    
+
     # Create mock session factory
     mock_client_session = AsyncMock()
     mock_client_session.__aenter__.return_value = mock_session
-    
-    # Patch the ClientSession
-    with patch('backend.apps.image_app.aiohttp.ClientSession') as mock_session_class:
+
+    # Patch the ClientSession in the correct module
+    with patch('backend.services.image_service.aiohttp.ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
-        
+
         # Test with TestClient
         response = client.get(f"/image?url={encoded_special_url}")
-        
+
         # Assertions
         assert response.status_code == 200
         assert response.json() == success_response
-        
+
         # Verify URL was correctly passed
         mock_session.get.assert_called_once()
         called_args = mock_session.get.call_args[0][0]
         assert special_url in called_args or encoded_special_url in called_args
+
 
 @pytest.mark.asyncio
 async def test_proxy_image_logging(monkeypatch):
@@ -174,23 +177,23 @@ async def test_proxy_image_logging(monkeypatch):
     mock_get = AsyncMock()
     mock_get.__aenter__.side_effect = Exception("Logging test error")
     mock_session.get = MagicMock(return_value=mock_get)
-    
+
     # Create mock session factory
     mock_client_session = AsyncMock()
     mock_client_session.__aenter__.return_value = mock_session
-    
-    # Patch the ClientSession
-    with patch('backend.apps.image_app.aiohttp.ClientSession') as mock_session_class:
+
+    # Patch the ClientSession in the correct module
+    with patch('backend.services.image_service.aiohttp.ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
-        
+
         # Test with TestClient
         response = client.get(f"/image?url={encoded_test_url}")
-        
+
         # Focus on verifying the error handling in the response
         assert response.status_code == 200  # API should still return 200 status
         response_data = response.json()
         assert response_data["success"] is False
         assert "Logging test error" in response_data["error"]
-        
+
         # Verify the mock was called with the expected URL
         mock_session.get.assert_called_once()

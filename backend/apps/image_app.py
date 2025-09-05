@@ -1,10 +1,9 @@
 import logging
 from urllib.parse import unquote
 
-import aiohttp
 from fastapi import APIRouter
 
-from consts.const import DATA_PROCESS_SERVICE
+from services.image_service import proxy_image_impl
 
 # Create router
 router = APIRouter()
@@ -28,22 +27,7 @@ async def proxy_image(url: str):
     try:
         # URL decode
         decoded_url = unquote(url)
-
-        # Create session to call the data processing service
-        async with aiohttp.ClientSession() as session:
-            # Call the data processing service to load the image
-            data_process_url = f"{DATA_PROCESS_SERVICE}/tasks/load_image?url={decoded_url}"
-
-            async with session.get(data_process_url) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.warning(
-                        f"Failed to fetch image from data process service: {error_text}")
-                    return {"success": False, "error": "Failed to fetch image or image format not supported"}
-
-                result = await response.json()
-                return result
-
+        return await proxy_image_impl(decoded_url)
     except Exception as e:
         logger.error(
             f"Error occurred while proxying image: {str(e)}, URL: {url[:50]}...")
