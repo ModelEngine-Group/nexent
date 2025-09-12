@@ -4,7 +4,7 @@ import knowledgeBaseService from './knowledgeBaseService';
 
 import { NON_TERMINAL_STATUSES } from '@/const/knowledgeBase';
 import { Document, KnowledgeBase } from '@/types/knowledgeBase';
-import log from '@/utils/logger';
+import log from '@/lib/logger';
 
 class KnowledgeBasePollingService {
   private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();

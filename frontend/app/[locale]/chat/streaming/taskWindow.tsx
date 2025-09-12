@@ -17,7 +17,7 @@ import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType, CardItem, MessageHandler } from "@/types/chat";
 import { useChatTaskMessage } from "@/hooks/useChatTaskMessage";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Icon mapping dictionary - map strings to corresponding icon components
 const iconMap: Record<string, React.ReactNode> = {

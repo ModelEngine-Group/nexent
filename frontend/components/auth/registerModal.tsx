@@ -24,7 +24,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { AuthFormValues } from "@/types/auth"
 import { useAuthForm } from "@/hooks/useAuthForm";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 const { Text } = Typography;
 

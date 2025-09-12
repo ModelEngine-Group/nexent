@@ -1,8 +1,7 @@
 import i18n from 'i18next';
 
 import { API_ENDPOINTS } from './api';
-import { McpServer, McpTool } from '../types/agentConfig';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Translation function
 const t = (key: string, options?: any): string => {

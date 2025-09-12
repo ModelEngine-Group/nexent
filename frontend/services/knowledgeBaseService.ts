@@ -6,7 +6,8 @@ import { NAME_CHECK_STATUS } from '@/const/agentConfig';
 import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from '@/const/knowledgeBase';
 import { Document, KnowledgeBase, KnowledgeBaseCreateParams } from '@/types/knowledgeBase';
 import { getAuthHeaders, fetchWithAuth } from '@/lib/auth';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
+
 // @ts-ignore
 const fetch: typeof fetchWithAuth = fetchWithAuth;
 

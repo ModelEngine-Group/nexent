@@ -17,12 +17,12 @@ import {
 } from "@/services/agentConfigService";
 import { OpenAIModel } from "@/types/modelConfig";
 import { Agent, AgentSetupOrchestratorProps } from "@/types/agentConfig";
+import log from "@/lib/logger";
 
 import SubAgentPool from "./agent/SubAgentPool";
 import CollaborativeAgentDisplay from "./agent/CollaborativeAgentDisplay";
 import { MemoizedToolPool } from "./tool/ToolPool";
 import PromptManager from "./PromptManager";
-import log from "@/utils/logger";
 
 /**
  * Agent Setup Orchestrator - Main coordination component for agent setup workflow

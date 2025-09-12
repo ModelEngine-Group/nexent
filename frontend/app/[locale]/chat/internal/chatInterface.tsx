@@ -45,7 +45,7 @@ import {
 } from "./extractMsgFromHistoryResponse";
 
 import { X } from "lucide-react";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
 

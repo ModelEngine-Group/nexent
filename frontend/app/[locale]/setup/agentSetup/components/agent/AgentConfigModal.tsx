@@ -12,6 +12,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 
+import log from "@/lib/logger";
 import { OpenAIModel } from "@/types/modelConfig";
 import {
   checkAgentName,
@@ -20,7 +21,6 @@ import {
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 
 import { SimplePromptEditor } from "../PromptManager";
-import log from "@/utils/logger";
 
 export interface AgentConfigModalProps {
   agentId?: number;

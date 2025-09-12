@@ -5,10 +5,8 @@ import { useTranslation } from 'react-i18next';
 
 import { DOCUMENT_ACTION_TYPES } from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
-import { Document, DocumentState, DocumentAction } from "@/types/knowledgeBase";
-import log from "@/utils/logger";
-
-
+import { DocumentState, DocumentAction } from "@/types/knowledgeBase";
+import log from "@/lib/logger";
 
 // Reducer function
 const documentReducer = (state: DocumentState, action: DocumentAction): DocumentState => {

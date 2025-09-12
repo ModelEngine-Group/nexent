@@ -6,7 +6,7 @@ import { TOKEN_REFRESH_CD } from "@/const/constants";
 import { API_ENDPOINTS } from "./api";
 
 import { fetchWithAuth, saveSessionToStorage, removeSessionFromStorage, getSessionFromStorage } from "@/lib/auth";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Record the time of the last token refresh
 let lastTokenRefreshTime = 0;

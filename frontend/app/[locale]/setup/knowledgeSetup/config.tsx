@@ -7,9 +7,8 @@ import { useTranslation } from "react-i18next";
 import { App } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 import { DOCUMENT_ACTION_TYPES } from "@/const/knowledgeBase";
-
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-
+import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { API_ENDPOINTS } from "@/services/api";
@@ -31,7 +30,7 @@ import {
   DocumentProvider,
 } from "./contexts/DocumentContext";
 import { useUIContext, UIProvider } from "./contexts/UIStateContext";
-import log from "@/utils/logger";
+
 
 // EmptyState component defined directly in this file
 interface EmptyStateProps {

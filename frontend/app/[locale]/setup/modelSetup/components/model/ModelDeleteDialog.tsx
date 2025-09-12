@@ -8,9 +8,9 @@ import { MODEL_TYPES, MODEL_SOURCES } from '@/const/modelConfig'
 import { useConfig } from '@/hooks/useConfig'
 import { modelService } from '@/services/modelService'
 import { ModelOption, ModelType, ModelSource } from '@/types/modelConfig'
+import log from "@/lib/logger";
 
 import { ModelEditDialog, ProviderConfigEditDialog } from './ModelEditDialog'
-import log from "@/utils/logger";
 
 interface ModelDeleteDialogProps {
   isOpen: boolean

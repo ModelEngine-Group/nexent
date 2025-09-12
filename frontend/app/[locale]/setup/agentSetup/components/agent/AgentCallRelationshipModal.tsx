@@ -4,8 +4,10 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, Spin, message, Typography } from "antd";
 import { RobotOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { fetchAgentCallRelationship } from "@/services/agentConfigService";
 import Tree from "react-d3-tree";
+
+import log from "@/lib/logger";
+import { fetchAgentCallRelationship } from "@/services/agentConfigService";
 import {
   AgentCallRelationship,
   AgentCallRelationshipSubAgent,
@@ -14,7 +16,7 @@ import {
 } from "@/types/agentConfig";
 
 import {AGENT_CALL_RELATIONSHIP_THEME_CONFIG, AGENT_CALL_RELATIONSHIP_NODE_TYPES, AGENT_CALL_RELATIONSHIP_ORIENTATION, AgentCallRelationshipOrientation } from "@/const/agentConfig";
-import log from "@/utils/logger";
+
 
 const { Text } = Typography;
 

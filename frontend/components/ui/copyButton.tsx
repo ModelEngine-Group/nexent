@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy } from "lucide-react";
 
 import { copyToClipboard } from "@/lib/clipboard";
-
+import log from "@/lib/logger";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -11,7 +11,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import log from "@/utils/logger";
+
 
 interface CopyButtonProps {
   content: string;

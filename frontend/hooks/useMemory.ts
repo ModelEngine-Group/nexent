@@ -19,7 +19,7 @@ import {
 } from "@/services/memoryService"
 
 import { pageSize, MemoryGroup, UseMemoryOptions } from "@/types/memory"
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 export function useMemory({ visible, currentUserId, currentTenantId, message }: UseMemoryOptions) {
   const { t } = useTranslation()

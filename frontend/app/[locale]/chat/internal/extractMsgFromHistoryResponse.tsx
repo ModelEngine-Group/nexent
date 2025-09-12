@@ -10,7 +10,7 @@ import {
   ChatMessageType,
   MinioFileItem,
 } from "@/types/chat";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // function: process the user break tag
 const processSpecialTag = (content: string, t: any): string => {

@@ -5,6 +5,7 @@ import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
 import { App } from 'antd';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
+import log from "@/lib/logger";
 import { 
   checkKnowledgeBaseName,
   fetchKnowledgeBaseInfo,
@@ -12,7 +13,6 @@ import {
 } from '@/services/uploadService';
 
 import UploadAreaUI from './UploadAreaUI';
-import log from "@/utils/logger";
 
 interface UploadAreaProps {
   isDragging?: boolean;

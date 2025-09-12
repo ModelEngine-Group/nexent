@@ -4,7 +4,7 @@ import { GlobalConfig } from '@/types/modelConfig';
 
 import { fetchWithAuth, getAuthHeaders } from '@/lib/auth';
 import { ConfigStore } from '@/lib/config';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 // @ts-ignore
 const fetch = fetchWithAuth;
 

@@ -23,7 +23,7 @@ import {
 } from "@/services/agentConfigService";
 import { generatePromptStream } from "@/services/promptService";
 import { updateToolList } from "@/services/mcpService";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 import AgentSetupOrchestrator from "./components/AgentSetupOrchestrator";
 import DebugConfig from "./components/DebugConfig";

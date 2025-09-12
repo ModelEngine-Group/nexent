@@ -3,12 +3,12 @@
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, AgentStep } from "@/types/chat";
+import log from "@/lib/logger";
 
 import {
   deduplicateImages,
   deduplicateSearchResults,
 } from "../internal/chatHelpers";
-import log from "@/utils/logger";
 
 // function: process the user break tag
 const processUserBreakTag = (content: string, t: any): string => {

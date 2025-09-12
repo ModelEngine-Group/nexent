@@ -8,7 +8,7 @@ import * as initialsStyle from '@dicebear/initials';
 import { fetchWithErrorHandling } from "@/services/api";
 import { STORAGE_KEYS } from "@/const/auth";
 import { Session } from "@/types/auth";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Get color corresponding to user role
 export function getRoleColor(role: string): string {

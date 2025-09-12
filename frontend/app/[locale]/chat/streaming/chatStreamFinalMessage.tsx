@@ -15,11 +15,11 @@ import { ChatMessageType } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
 import { copyToClipboard } from "@/lib/clipboard";
-
-import { ChatAttachment } from "../internal/chatAttachment";
+import log from "@/lib/logger";
 import { AttachmentItem } from "@/types/chat";
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import log from "@/utils/logger";
+
+import { ChatAttachment } from "../internal/chatAttachment";
 
 interface FinalMessageProps {
   message: ChatMessageType;

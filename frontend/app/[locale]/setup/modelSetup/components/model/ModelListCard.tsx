@@ -7,7 +7,7 @@ import { CloseOutlined } from '@ant-design/icons'
 
 import { MODEL_TYPES, MODEL_STATUS } from '@/const/modelConfig'
 import { ModelConnectStatus, ModelOption, ModelSource, ModelType } from '@/types/modelConfig'
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Unified management of model connection status colors
 const CONNECT_STATUS_COLORS: Record<ModelConnectStatus | 'default', string> = {

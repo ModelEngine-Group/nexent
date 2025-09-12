@@ -1,8 +1,8 @@
 'use client';
 
-import { GlobalConfig, AppConfig, ModelConfig } from '../types/modelConfig';
-import { APP_CONFIG_KEY, MODEL_CONFIG_KEY, defaultConfig } from '../const/modelConfig';
-import log from "@/utils/logger";
+import { GlobalConfig, AppConfig, ModelConfig } from '@/types/modelConfig';
+import { APP_CONFIG_KEY, MODEL_CONFIG_KEY, defaultConfig } from '@/const/modelConfig';
+import log from "@/lib/logger";
 
 class ConfigStoreClass {
   private static instance: ConfigStoreClass | null = null;

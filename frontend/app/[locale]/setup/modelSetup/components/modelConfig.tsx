@@ -15,13 +15,11 @@ import { modelService } from '@/services/modelService'
 import { configService } from '@/services/configService'
 import { ModelOption, ModelType } from '@/types/modelConfig'
 import { configStore } from '@/lib/config'
+import log from "@/lib/logger";
 
 import { ModelListCard } from './model/ModelListCard'
 import { ModelAddDialog } from './model/ModelAddDialog'
 import { ModelDeleteDialog } from './model/ModelDeleteDialog'
-import log from "@/utils/logger";
-
-
 
 // ModelConnectStatus type definition
 type ModelConnectStatus = typeof MODEL_STATUS[keyof typeof MODEL_STATUS];

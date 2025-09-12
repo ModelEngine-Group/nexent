@@ -2,10 +2,10 @@
 
 import { API_ENDPOINTS, ApiError } from './api';
 import { CONNECTION_STATUS, ConnectionStatus } from '@/const/modelConfig';
-import { ModelEngineCheckResult } from '../types/modelConfig';
+import { ModelEngineCheckResult } from '@/types/modelConfig';
 
 import { fetchWithAuth } from '@/lib/auth';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // @ts-ignore
 const fetch = fetchWithAuth;

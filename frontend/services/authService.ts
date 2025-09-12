@@ -10,7 +10,7 @@ import { STATUS_CODES } from "@/const/auth";
 
 import { generateAvatarUrl, removeSessionFromStorage } from "@/lib/auth"
 import { fetchWithAuth, getSessionFromStorage, saveSessionToStorage } from "@/lib/auth";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 
 // Authentication service

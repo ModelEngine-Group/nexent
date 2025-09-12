@@ -27,11 +27,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
+import log from "@/lib/logger";
 import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
-import log from "@/utils/logger";
 
 // Image viewer component
 function ImageViewer({

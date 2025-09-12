@@ -8,7 +8,7 @@ import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { ChatMessageType, ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { API_ENDPOINTS } from "@/services/api";
 import { formatDate, formatUrl } from "@/lib/utils";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 
 export function ChatRightPanel({

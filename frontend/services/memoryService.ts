@@ -5,7 +5,7 @@ import { fetchAllAgents } from "./agentConfigService";
 
 import { MemoryItem, MemoryGroup } from "@/types/memory";
 import { getAuthHeaders } from '@/lib/auth';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
 // Error message translation helper
