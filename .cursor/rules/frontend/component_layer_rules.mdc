@@ -1,0 +1,105 @@
+---
+globs: frontend/components/**/*.tsx
+description: Component layer rules for reusable UI components
+---
+
+### Purpose and Scope
+
+- Component layer contains reusable UI components for `frontend/components/**/*.tsx`
+- Responsibilities: Create reusable components, implement business logic, handle interactions, provide consistent UI
+- **MANDATORY**: All components must use TypeScript and functional components
+
+### Component Organization
+
+- **`components/ui/`** - Base UI components (buttons, inputs, dialogs, etc.)
+- **`components/auth/`** - Authentication-related components
+- **`components/providers/`** - Context providers and global state management
+- Use index files for clean imports: `export { Button } from './button'`
+
+### Component Structure
+
+- Use functional components with TypeScript
+- Define proper interfaces for all props
+- Use React hooks for state management
+- Implement proper error boundaries where needed
+- Follow single responsibility principle
+
+### Props and State Management
+
+- All props must be typed with interfaces
+- Use optional props with default values when appropriate
+- Prefer controlled components over uncontrolled
+- Use local state for component-specific data
+- Use context for shared state across components
+
+### Styling and Design
+
+- Use Tailwind CSS classes for styling
+- Follow design system patterns and spacing
+- Ensure responsive design with mobile-first approach
+- Use CSS variables for theme colors
+- Implement proper focus states and accessibility
+
+### Internationalization
+
+- All user-facing text must use `useTranslation` hook
+- Use descriptive translation keys: `t('button.save')` instead of `t('save')`
+- Provide fallback text for missing translations
+- Group related translations in namespaces
+
+### Error Handling
+
+- Implement proper error boundaries for component trees
+- Handle async operations with loading and error states
+- Provide meaningful error messages to users
+- Log errors appropriately for debugging
+
+### Example
+```tsx
+// frontend/components/ui/button.tsx
+import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
+
+interface ButtonProps {
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary' | 'outline';
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  loading?: boolean;
+  onClick?: () => void;
+  className?: string;
+}
+
+export function Button({
+  children,
+  variant = 'primary',
+  size = 'md',
+  disabled = false,
+  loading = false,
+  onClick,
+  className,
+}: ButtonProps) {
+  const { t } = useTranslation('common');
+  
+  return (
+    <button
+      className={cn(
+        'inline-flex items-center justify-center rounded-md font-medium transition-colors',
+        variant === 'primary' && 'bg-primary text-primary-foreground hover:bg-primary/90',
+        variant === 'secondary' && 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        variant === 'outline' && 'border border-input bg-background hover:bg-accent',
+        size === 'sm' && 'h-9 px-3 text-sm',
+        size === 'md' && 'h-10 px-4 py-2',
+        size === 'lg' && 'h-11 px-8 text-lg',
+        className
+      )}
+      disabled={disabled || loading}
+      onClick={onClick}
+    >
+      {loading && <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+      {children}
+    </button>
+  );
+}
+```

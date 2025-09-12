@@ -22,7 +22,7 @@ import {
   CONNECTION_STATUS,
   ConnectionStatus,
 } from "@/const/modelConfig";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 import AppModelConfig from "./modelSetup/config";
 import DataConfig from "./knowledgeSetup/config";

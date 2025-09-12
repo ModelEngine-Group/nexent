@@ -7,7 +7,8 @@ import type {
   ApiConversationResponse
 } from '@/types/conversation';
 import { getAuthHeaders, fetchWithAuth } from '@/lib/auth';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
+
 // @ts-ignore
 const fetch = fetchWithAuth;
 

@@ -1,9 +1,9 @@
 import { createAvatar } from '@dicebear/core';
 import * as iconStyle from '@dicebear/icons';
 
-import type { AppConfig } from '../types/modelConfig';
 import { presetIcons } from "@/const/avatar"
-import log from "@/utils/logger";
+import log from "@/lib/logger";
+import type { AppConfig } from '@/types/modelConfig';
 
 // Seeded random number generator
 class SeededRandom {

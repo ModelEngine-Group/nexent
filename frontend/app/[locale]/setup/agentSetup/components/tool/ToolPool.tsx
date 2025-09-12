@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
+import log from "@/lib/logger";
 import { Tool, ToolPoolProps, ToolGroup} from "@/types/agentConfig";
 import {
   fetchTools,
@@ -27,7 +28,6 @@ import { updateToolList } from "@/services/mcpService";
 
 import ToolConfigModal from "./ToolConfigModal";
 import McpConfigModal from "../McpConfigModal";
-import log from "@/utils/logger";
 
 /**
  * Tool Pool Component

@@ -23,7 +23,7 @@ import { updateAgent } from "@/services/agentConfigService";
 import AgentConfigModal from "./agent/AgentConfigModal";
 
 import "@/styles/milkdown-nord.css";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 export function SimplePromptEditor({
   value,

@@ -2,9 +2,8 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons' 
 import { DOCUMENT_STATUS } from "@/const/knowledgeBase"
-import { CONNECTION_STATUS, MODEL_STATUS } from "@/const/modelConfig"
 import React from 'react'
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

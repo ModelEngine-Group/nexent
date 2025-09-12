@@ -3,7 +3,7 @@ import { API_ENDPOINTS } from "./api";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 /**
  * get tool list from backend

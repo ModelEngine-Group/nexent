@@ -1,0 +1,62 @@
+---
+globs: frontend/app/**/*.tsx
+description: Page layer rules for Next.js App Router pages and layouts
+---
+
+### Purpose and Scope
+
+- Page layer handles routing and layouts for `frontend/app/**/*.tsx`
+- Responsibilities: Define routes, handle data fetching, provide layouts, coordinate state
+- **MANDATORY**: All pages must support internationalization through `[locale]` dynamic route
+
+### File Structure
+
+- **`page.tsx`** - Page components that define routes
+- **`layout.tsx`** - Layout components that wrap pages  
+- **`loading.tsx`** - Loading UI components
+- **`error.tsx`** - Error UI components
+- **`not-found.tsx`** - 404 UI components
+- Use kebab-case for new route segments
+- Prefer nested layouts over prop drilling
+
+### Internationalization
+
+- Client components: `const { t } = useTranslation('namespace')`
+- Server components: `getTranslations` from `next-intl`
+- Organize translation keys by feature/namespace
+
+### Data Fetching
+
+- Use Server Components for initial data fetching
+- Use `fetch` with proper caching for server-side data
+- Client-side fetching: custom hooks in `hooks/` directory
+- Handle loading and error states appropriately
+
+### Layout and Metadata
+
+- Define metadata in `layout.tsx` using Next.js metadata API
+- Use dynamic metadata for page-specific information
+- Ensure responsive design with Tailwind CSS
+- Maintain consistent layout structure
+
+### State Management
+
+- Use React Context for shared page-level state
+- Keep page-specific state local to component
+- Use custom hooks for complex state logic
+- Avoid prop drilling with context providers
+
+### Example
+```tsx
+// frontend/app/[locale]/chat/page.tsx
+import { useTranslations } from 'next-intl';
+
+export default function ChatPage({ params }: { params: { locale: string } }) {
+  const t = useTranslations('chat');
+  return (
+    <div className="flex h-screen">
+      <h1 className="text-2xl font-bold p-4">{t('title')}</h1>
+    </div>
+  );
+}
+```

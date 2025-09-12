@@ -1,5 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 const API_BASE_URL = '/api';
 

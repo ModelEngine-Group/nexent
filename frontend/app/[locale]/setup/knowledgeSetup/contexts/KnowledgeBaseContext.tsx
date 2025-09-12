@@ -10,7 +10,7 @@ import { KnowledgeBase, KnowledgeBaseState, KnowledgeBaseAction } from "@/types/
 import { KNOWLEDGE_BASE_ACTION_TYPES } from "@/const/knowledgeBase"
 
 import { configStore } from "@/lib/config"
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 
 

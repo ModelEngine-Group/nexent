@@ -8,7 +8,7 @@ import { ThemeProvider as NextThemesProvider } from "next-themes";
 import I18nProviderWrapper from "@/components/providers/I18nProviderWrapper";
 
 import "@/styles/globals.css";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 const inter = Inter({ subsets: ["latin"] });
 

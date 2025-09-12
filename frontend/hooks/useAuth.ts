@@ -13,7 +13,7 @@ import { API_ENDPOINTS } from "@/services/api"
 import { User, AuthContextType } from "@/types/auth"
 import { EVENTS, STATUS_CODES } from "@/const/auth"
 import { getSessionFromStorage } from "@/lib/auth"
-import log from "@/utils/logger"
+import log from "@/lib/logger"
 
 // Create auth context
 const AuthContext = createContext<AuthContextType | undefined>(undefined)

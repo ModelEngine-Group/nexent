@@ -15,12 +15,12 @@ import {
   Document
 } from "@/types/knowledgeBase";
 import { formatFileSize, sortByStatusAndDate } from "@/lib/utils";
+import log from "@/lib/logger";
 
 import DocumentStatus from "./DocumentStatus";
 import UploadArea from "../upload/UploadArea";
 import { useKnowledgeBaseContext } from "../../contexts/KnowledgeBaseContext";
 import { useDocumentContext } from "../../contexts/DocumentContext";
-import log from "@/utils/logger";
 
 interface DocumentListProps {
   documents: Document[];

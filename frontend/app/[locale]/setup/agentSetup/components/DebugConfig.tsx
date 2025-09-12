@@ -11,7 +11,7 @@ import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import { ChatStreamFinalMessage } from "@/app/chat/streaming/chatStreamFinalMessage";
 import { TaskWindow } from "@/app/chat/streaming/taskWindow";
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Agent debugging component Props interface
 interface AgentDebuggingProps {

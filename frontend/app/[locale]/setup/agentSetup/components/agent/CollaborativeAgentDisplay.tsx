@@ -10,7 +10,7 @@ import {
   addRelatedAgent,
   deleteRelatedAgent,
 } from "@/services/agentConfigService";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 export default function CollaborativeAgentDisplay({
   availableAgents,

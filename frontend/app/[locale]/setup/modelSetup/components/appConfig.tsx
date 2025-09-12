@@ -9,10 +9,10 @@ import { Pencil } from 'lucide-react';
 import { useConfig } from '@/hooks/useConfig';
 import { presetIcons, colorOptions } from "@/const/avatar"
 import { generateAvatarUri } from '@/lib/avatar';
+import log from "@/lib/logger";
 import { LAYOUT_CONFIG, CARD_THEMES, ICON_TYPES } from '@/const/modelConfig';
 
 import 'bootstrap-icons/font/bootstrap-icons.css';
-import log from "@/utils/logger";
 
 const { TextArea } = Input;
 const { Text } = Typography;

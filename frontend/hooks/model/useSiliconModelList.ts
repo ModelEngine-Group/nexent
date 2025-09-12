@@ -3,7 +3,7 @@ import { message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { modelService } from '@/services/modelService'
 import { ModelType } from '@/types/modelConfig'
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 interface UseSiliconModelListProps {
   form: {

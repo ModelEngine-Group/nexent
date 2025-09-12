@@ -13,7 +13,7 @@ import {
 import { getAuthHeaders } from '@/lib/auth'
 import {STATUS_CODES} from "@/const/auth";
 import { MODEL_TYPES, MODEL_SOURCES } from '@/const/modelConfig';
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 // Error class
 export class ModelError extends Error {

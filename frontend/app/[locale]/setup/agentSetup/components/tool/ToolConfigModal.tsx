@@ -11,7 +11,7 @@ import {
   updateToolConfig,
   searchToolConfig,
 } from "@/services/agentConfigService";
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 export default function ToolConfigModal({
   isOpen,

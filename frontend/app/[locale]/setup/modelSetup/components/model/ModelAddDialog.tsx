@@ -10,7 +10,7 @@ import { modelService } from '@/services/modelService'
 import { ModelType, SingleModelConfig } from '@/types/modelConfig'
 import { MODEL_TYPES } from '@/const/modelConfig'
 import { useSiliconModelList } from '@/hooks/model/useSiliconModelList'
-import log from "@/utils/logger";
+import log from "@/lib/logger";
 
 const { Option } = Select
 
