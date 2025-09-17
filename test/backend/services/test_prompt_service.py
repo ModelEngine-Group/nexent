@@ -25,7 +25,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
                 get_enabled_tool_description_for_generate_prompt,
                 get_enabled_sub_agent_description_for_generate_prompt,
                 generate_system_prompt,
-                join_info_for_generate_system_prompt
+                join_info_for_generate_system_prompt,
+                process_thinking_tokens
             )
 
 
@@ -38,9 +39,7 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.OpenAIServerModel')
     @patch('backend.services.prompt_service.tenant_config_manager')
     @patch('backend.services.prompt_service.get_model_name_from_config')
-    @patch('backend.services.prompt_service.remove_think_tags')
-    def test_call_llm_for_system_prompt(self, mock_remove_think_tags,
-                                        mock_get_model_name, mock_tenant_config, mock_openai):
+    def test_call_llm_for_system_prompt(self, mock_get_model_name, mock_tenant_config, mock_openai):
         # Setup
         mock_model_config = {
             "base_url": "http://example.com",
@@ -48,7 +47,6 @@ class TestPromptService(unittest.TestCase):
         }
         mock_tenant_config.get_model_config.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
-        mock_remove_think_tags.side_effect = lambda x: x  # Return input unchanged
 
         mock_llm_instance = mock_openai.return_value
 
@@ -486,6 +484,170 @@ class TestPromptService(unittest.TestCase):
             call_llm_for_system_prompt("user prompt", "system prompt")
 
         self.assertIn("LLM error", str(context.exception))
+
+
+def test_process_thinking_tokens_normal_token():
+    """Test process_thinking_tokens with normal token when not thinking"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = []
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    is_thinking = process_thinking_tokens(
+        "Hello", False, token_join, mock_callback)
+
+    assert is_thinking == False
+    assert token_join == ["Hello"]
+    assert callback_calls == ["Hello"]
+
+
+def test_process_thinking_tokens_start_thinking():
+    """Test process_thinking_tokens when encountering <think> tag"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = []
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    is_thinking = process_thinking_tokens(
+        "<think>", False, token_join, mock_callback)
+
+    assert is_thinking == True
+    assert token_join == []
+    assert callback_calls == []
+
+
+def test_process_thinking_tokens_content_while_thinking():
+    """Test process_thinking_tokens with content while in thinking mode"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = ["Hello"]
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    is_thinking = process_thinking_tokens(
+        "thinking content", True, token_join, mock_callback)
+
+    assert is_thinking == True
+    assert token_join == ["Hello"]  # Should not change
+    assert callback_calls == []
+
+
+def test_process_thinking_tokens_end_thinking():
+    """Test process_thinking_tokens when encountering </think> tag"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = ["Hello"]
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    is_thinking = process_thinking_tokens(
+        "</think>", True, token_join, mock_callback)
+
+    assert is_thinking == False
+    assert token_join == ["Hello"]  # Should not change
+    assert callback_calls == []
+
+
+def test_process_thinking_tokens_content_after_thinking():
+    """Test process_thinking_tokens with content after thinking ends"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = ["Hello"]
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    is_thinking = process_thinking_tokens(
+        "World", False, token_join, mock_callback)
+
+    assert is_thinking == False
+    assert token_join == ["Hello", "World"]
+    assert callback_calls == ["HelloWorld"]
+
+
+def test_process_thinking_tokens_complete_flow():
+    """Test process_thinking_tokens with complete thinking flow"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = []
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    # Start with normal content
+    is_thinking = process_thinking_tokens(
+        "Start ", False, token_join, mock_callback)
+    assert is_thinking == False
+
+    # Enter thinking mode
+    is_thinking = process_thinking_tokens(
+        "<think>", False, token_join, mock_callback)
+    assert is_thinking == True
+
+    # Thinking content (ignored)
+    is_thinking = process_thinking_tokens(
+        "thinking", True, token_join, mock_callback)
+    assert is_thinking == True
+
+    # More thinking content (ignored)
+    is_thinking = process_thinking_tokens(
+        " more", True, token_join, mock_callback)
+    assert is_thinking == True
+
+    # End thinking
+    is_thinking = process_thinking_tokens(
+        "</think>", True, token_join, mock_callback)
+    assert is_thinking == False
+
+    # Continue with normal content
+    is_thinking = process_thinking_tokens(
+        " End", False, token_join, mock_callback)
+    assert is_thinking == False
+
+    # Verify final state
+    assert token_join == ["Start ", " End"]
+    assert callback_calls == ["Start ", "Start  End"]
+
+
+def test_process_thinking_tokens_no_callback():
+    """Test process_thinking_tokens without callback function"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = []
+
+    is_thinking = process_thinking_tokens("Hello", False, token_join, None)
+
+    assert is_thinking == False
+    assert token_join == ["Hello"]
+
+
+def test_process_thinking_tokens_empty_token():
+    """Test process_thinking_tokens with empty token"""
+    from backend.services.prompt_service import process_thinking_tokens
+
+    token_join = []
+    callback_calls = []
+
+    def mock_callback(text):
+        callback_calls.append(text)
+
+    is_thinking = process_thinking_tokens("", False, token_join, mock_callback)
+
+    assert is_thinking == False
+    assert token_join == [""]
+    assert callback_calls == [""]
 
 
 if __name__ == '__main__':
