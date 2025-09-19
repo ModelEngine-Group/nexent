@@ -336,8 +336,7 @@ async def create_agent_run_info(
         "remote_mcp_server": default_mcp_url,
         "status": True
     })
-    remote_mcp_dict = {record["remote_mcp_server_name"]
-        : record for record in remote_mcp_list if record["status"]}
+    remote_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list if record["status"]}
 
     # Filter MCP servers and tools
     mcp_host = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)

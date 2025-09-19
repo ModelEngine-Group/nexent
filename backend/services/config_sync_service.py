@@ -128,7 +128,8 @@ async def load_config_impl(language: str, tenant_id: str):
 
 def build_app_config(language: str, tenant_id: str) -> dict:
     default_app_name = DEFAULT_APP_NAME_ZH if language == LANGUAGE["ZH"] else DEFAULT_APP_NAME_EN
-    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == LANGUAGE["ZH"] else DEFAULT_APP_DESCRIPTION_EN
+    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == LANGUAGE[
+        "ZH"] else DEFAULT_APP_DESCRIPTION_EN
 
     return {
         "name": tenant_config_manager.get_app_config(APP_NAME, tenant_id=tenant_id) or default_app_name,

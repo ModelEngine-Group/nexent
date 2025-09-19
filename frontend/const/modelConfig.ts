@@ -19,7 +19,8 @@ export const MODEL_TYPES = {
 export const MODEL_SOURCES = {
   OPENAI: "openai",
   SILICON: "silicon",
-  OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible"
+  OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
+  CUSTOM: "custom"
 } as const;
 
 // Model status constants
@@ -114,14 +115,6 @@ export const defaultConfig: GlobalConfig = {
   },
   models: {
     llm: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-    },
-    llmSecondary: {
       modelName: "",
       displayName: "",
       apiConfig: {

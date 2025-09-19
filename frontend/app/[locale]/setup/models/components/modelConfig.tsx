@@ -30,7 +30,6 @@ const getModelData = (t: any) => ({
     title: t('modelConfig.category.llm'),
     options: [
       { id: "main", name: t('modelConfig.option.mainModel') },
-      { id: "secondary", name: t('modelConfig.option.secondaryModel') },
     ],
   },
   embedding: {
@@ -104,7 +103,7 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
   const [selectedModels, setSelectedModels] = useState<
     Record<string, Record<string, string>>
   >({
-    llm: { main: "", secondary: "" },
+    llm: { main: "" },
     embedding: { embedding: "", multi_embedding: "" },
     reranker: { reranker: "" },
     multimodal: { vlm: "" },
@@ -201,12 +200,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
           )
         : true;
 
-      const llmSecondary = modelConfig.llmSecondary.displayName;
-      const llmSecondaryExists = llmSecondary
-        ? allModels.some(
-            (m) => m.displayName === llmSecondary && m.type === MODEL_TYPES.LLM
-          )
-        : true;
 
       const embedding = modelConfig.embedding.displayName;
       const embeddingExists = embedding
@@ -257,7 +250,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
       const updatedSelectedModels = {
         llm: {
           main: llmMainExists ? llmMain : "",
-          secondary: llmSecondaryExists ? llmSecondary : "",
         },
         embedding: {
           embedding: embeddingExists ? embedding : "",
@@ -289,13 +281,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
         };
       }
 
-      if (!llmSecondaryExists && llmSecondary) {
-        configUpdates.llmSecondary = {
-          modelName: "",
-          displayName: "",
-          apiConfig: { apiKey: "", modelUrl: "" },
-        };
-      }
 
       if (!embeddingExists && embedding) {
         configUpdates.embedding = {
@@ -337,7 +322,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
       // Check if there are configured models that need connectivity verification
       const hasConfiguredModels =
         !!modelConfig.llm.modelName ||
-        !!modelConfig.llmSecondary.modelName ||
         !!modelConfig.embedding.modelName ||
         !!modelConfig.multiEmbedding.modelName ||
         !!modelConfig.rerank.modelName ||
@@ -398,7 +382,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
     if (!hasSelectedModels) {
       // Directly check if each model exists in configuration
       const hasLlmMain = !!modelConfig.llm.modelName;
-      const hasLlmSecondary = !!modelConfig.llmSecondary.modelName;
       const hasEmbedding = !!modelConfig.embedding.modelName;
       const hasReranker = !!modelConfig.rerank.modelName;
       const hasVlm = !!modelConfig.vlm.modelName;
@@ -407,7 +390,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
 
       hasSelectedModels =
         hasLlmMain ||
-        hasLlmSecondary ||
         hasEmbedding ||
         hasReranker ||
         hasVlm ||
@@ -417,8 +399,6 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
       if (hasSelectedModels) {
         // Override current selected models with models from configuration
         currentSelectedModels.llm.main = modelConfig.llm.modelName;
-        currentSelectedModels.llm.secondary =
-          modelConfig.llmSecondary.modelName;
         currentSelectedModels.embedding.embedding =
           modelConfig.embedding.modelName;
         currentSelectedModels.embedding.multi_embedding =
@@ -700,9 +680,7 @@ export const ModelConfigSection = forwardRef<ModelConfigSectionRef, ModelConfigS
 
     // Update configuration
     let configKey = category;
-    if (category === MODEL_TYPES.LLM && option === "secondary") {
-      configKey = "llmSecondary";
-    } else if (
+    if (
       category === MODEL_TYPES.EMBEDDING &&
       option === MODEL_TYPES.MULTI_EMBEDDING
     ) {

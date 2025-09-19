@@ -10,9 +10,9 @@ import {
   ModelSource,
 } from "@/types/modelConfig";
 
-import { getAuthHeaders } from '@/lib/auth'
-import {STATUS_CODES} from "@/const/auth";
-import { MODEL_TYPES, MODEL_SOURCES } from '@/const/modelConfig';
+import { getAuthHeaders } from "@/lib/auth";
+import { STATUS_CODES } from "@/const/auth";
+import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
 // Error class
@@ -43,7 +43,7 @@ export const modelService = {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
-      
+
       if (response.status === STATUS_CODES.SUCCESS && result.data) {
         const modelOptions: ModelOption[] = [];
         const typeMap: Record<string, ModelType> = {
@@ -422,10 +422,7 @@ export const modelService = {
         log.warn("Model configuration connectivity verification cancelled");
         throw error;
       }
-      log.error(
-        "Model configuration connectivity verification failed:",
-        error
-      );
+      log.error("Model configuration connectivity verification failed:", error);
       return {
         connectivity: false,
         model_name: "UNKNOWN_MODEL",
@@ -440,7 +437,7 @@ export const modelService = {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
-      
+
       if (response.status === STATUS_CODES.SUCCESS && result.data) {
         // Return all models, not just available ones
         return result.data.map((model: any) => ({
@@ -455,7 +452,7 @@ export const modelService = {
           connect_status: model.connect_status as ModelConnectStatus,
         }));
       }
-      
+
       return [];
     } catch (error) {
       log.warn("Failed to load LLM models:", error);

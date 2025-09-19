@@ -764,11 +764,17 @@ class TestLoadConfigImpl:
         # Mock model configurations with max_tokens and model_type
         embedding_config = {
             "max_tokens": 1536,
-            "model_type": "embedding"
+            "model_type": "embedding",
+            "base_url": "http://test.com",
+            "api_key": "test_key",
+            "dimension": 1536
         }
         multi_embedding_config = {
             "max_tokens": 768,
-            "model_type": "multi_embedding"
+            "model_type": "multi_embedding",
+            "base_url": "http://test.com",
+            "api_key": "test_key",
+            "dimension": 768
         }
 
         service_mocks['tenant_config_manager'].get_model_config.side_effect = [
@@ -836,14 +842,16 @@ class TestLoadConfigImpl:
 
         # Mock build_app_config to raise an exception
         with patch('backend.services.config_sync_service.build_app_config') as mock_build_app_config:
-            mock_build_app_config.side_effect = Exception("Database connection failed")
+            mock_build_app_config.side_effect = Exception(
+                "Database connection failed")
 
             # Execute and assert that exception is raised
             with pytest.raises(Exception) as exc_info:
                 await load_config_impl(language, tenant_id)
 
             # Verify the exception message
-            assert f"Failed to load config for tenant {tenant_id}." in str(exc_info.value)
+            assert f"Failed to load config for tenant {tenant_id}." in str(
+                exc_info.value)
 
             # Verify that logger.error was called
             service_mocks['logger'].error.assert_called_once_with(
