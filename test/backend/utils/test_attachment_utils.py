@@ -129,7 +129,7 @@ class TestConvertLongTextToText:
         # Assertions
         assert result == "Summarized text"
         assert truncation == "0"
-        mock_config_manager.get_model_config.assert_called_once_with(key="LLM_SECONDARY_ID", tenant_id="tenant123")
+        mock_config_manager.get_model_config.assert_called_once_with(key="LLM_ID", tenant_id="tenant123")
         mock_long_context_model.assert_called_once()
         mock_model_instance.analyze_long_text.assert_called_once()
 

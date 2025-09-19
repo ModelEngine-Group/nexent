@@ -15,6 +15,8 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_config_service import build_memory_context
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
 from database.tool_db import search_tools_for_sub_agent
+from database.model_management_db import get_model_records
+from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING, LANGUAGE
@@ -24,21 +26,34 @@ logger.setLevel(logging.DEBUG)
 
 
 async def create_model_config_list(tenant_id):
+    records = get_model_records({"model_type": "llm"}, tenant_id)
+    model_list = []
+    for record in records:
+        model_list.append(
+            ModelConfig(cite_name=record["display_name"],
+                        api_key=record.get("api_key", ""),
+                        model_name=add_repo_to_name(
+                                model_repo=record["model_repo"],
+                                model_name=record["model_name"],
+                            ),
+                        url=record["base_url"]))
+    # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    sub_model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llmSecondary"], tenant_id=tenant_id)
+    model_list.append(
+        ModelConfig(cite_name="main_model",
+                    api_key=main_model_config.get("api_key", ""),
+                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
+                        "model_name") else "",
+                    url=main_model_config.get("base_url", "")))
+    model_list.append(
+        ModelConfig(cite_name="sub_model",
+                    api_key=main_model_config.get("api_key", ""),
+                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
+                        "model_name") else "",
+                    url=main_model_config.get("base_url", "")))
 
-    return [ModelConfig(cite_name="main_model",
-                        api_key=main_model_config.get("api_key", ""),
-                        model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
-                            "model_name") else "",
-                        url=main_model_config.get("base_url", "")),
-            ModelConfig(cite_name="sub_model",
-                        api_key=sub_model_config.get("api_key", ""),
-                        model_name=get_model_name_from_config(sub_model_config) if sub_model_config.get(
-                            "model_name") else "",
-                        url=sub_model_config.get("base_url", ""))]
+    return model_list
 
 
 async def create_agent_config(

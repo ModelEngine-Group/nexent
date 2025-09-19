@@ -55,13 +55,13 @@ def convert_long_text_to_text(query: str, file_context: str, tenant_id: str, lan
     Returns:
         tuple[str, str]: Summarized text description and truncation percentage string
     """
-    secondary_model_config = tenant_config_manager.get_model_config(key=MODEL_CONFIG_MAPPING["llmSecondary"], tenant_id=tenant_id)
+    llm_model_config = tenant_config_manager.get_model_config(key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     long_text_to_text_model = OpenAILongContextModel(
         observer=MessageObserver(),
-        model_id=get_model_name_from_config(secondary_model_config),
-        api_base=secondary_model_config.get("base_url"),
-        api_key=secondary_model_config.get("api_key"),
-        max_context_tokens=secondary_model_config.get("max_tokens")
+        model_id=get_model_name_from_config(llm_model_config),
+        api_base=llm_model_config.get("base_url"),
+        api_key=llm_model_config.get("api_key"),
+        max_context_tokens=llm_model_config.get("max_tokens")
     )
     
     # Load prompts from yaml file
