@@ -1,7 +1,7 @@
 // Agent Configuration Types
 import { ChatMessageType } from "./chat";
 import { OpenAIModel } from "./modelConfig";
-import { GENERATE_PROMPT_STREAM_TYPES, TOOL_SOURCE_TYPES } from "../const/agentConfig";
+import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 
 // ========== Core Interfaces ==========
 
@@ -151,7 +151,8 @@ export interface ToolPoolProps {
 export interface SimplePromptEditorProps {
   value: string;
   onChange: (value: string) => void;
-  height?: string;
+  height?: string | number;
+  bordered?: boolean;
 }
 
 // CollaborativeAgentDisplay component props interface
@@ -304,4 +305,3 @@ export interface StreamResponseData {
   content: string;
   is_complete: boolean;
 }
-
