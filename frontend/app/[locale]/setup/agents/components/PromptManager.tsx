@@ -22,7 +22,7 @@ import log from "@/lib/logger";
 export function SimplePromptEditor({
   value,
   onChange,
-  height = undefined,
+  height,
   bordered = false,
 }: SimplePromptEditorProps) {
   const [internalValue, setInternalValue] = useState(value);
@@ -46,7 +46,7 @@ export function SimplePromptEditor({
         onChange(e.target.value);
       }}
       style={height ? { height, resize: "none" } : { resize: "none" }}
-      autoSize={height ? false : { minRows: 8, maxRows: 1000 }}
+      autoSize={height ? false : { minRows: 8, maxRows: 100  }}
       bordered={bordered}
     />
   );
