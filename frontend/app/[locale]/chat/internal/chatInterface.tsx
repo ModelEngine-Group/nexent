@@ -250,6 +250,9 @@ export function ChatInterface() {
   const handleSend = async () => {
     if (!input.trim() && attachments.length === 0) return; // Allow sending attachments only, without text content
 
+    // Flag to track if we should reset button states in finally block
+    let shouldResetButtonStates = true;
+
     // If in new conversation state, switch to conversation state after sending message
     if (isNewConversation) {
       setIsNewConversation(false);
@@ -373,6 +376,10 @@ export function ChatInterface() {
             t("chatInterface.createDialogFailedButContinue"),
             error
           );
+          // Reset button states when conversation creation fails
+          setIsLoading(false);
+          setIsStreaming(false);
+          return;
         }
       }
 
@@ -594,20 +601,47 @@ export function ChatInterface() {
 
         // Handle preprocessing result
         if (!result.success) {
+          // Reset button states immediately when preprocessing fails
+          setIsLoading(false);
+          setIsStreaming(false);
+            
+          // Remove from streaming conversations (both new and existing conversations)
+          if (currentConversationId) {
+            setStreamingConversations((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(currentConversationId);
+              return newSet;
+            });
+          }
+          
           setSessionMessages((prev) => {
             const newMessages = { ...prev };
             const lastMsg =
               newMessages[currentConversationId]?.[
                 newMessages[currentConversationId].length - 1
               ];
+            
             if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
-              lastMsg.error = t("chatInterface.fileProcessingFailed", {
-                error: result.error,
-              });
+              // Handle error codes with internationalization
+              let errorMessage;
+              if (result.error === 'REQUEST_ENTITY_TOO_LARGE') {
+                errorMessage = t("chatInterface.fileSizeExceeded");
+              } else if (result.error === 'FILE_PARSING_FAILED') {
+                errorMessage = t("chatInterface.fileParsingFailed");
+              } else {
+                // For any other error, show a generic message without exposing technical details
+                errorMessage = t("chatInterface.fileProcessingFailed", {
+                  error: "Unknown error"
+                });
+              }
+              
+              lastMsg.content = errorMessage;
               lastMsg.isComplete = true;
             }
+            
             return newMessages;
           });
+          shouldResetButtonStates = false; // Don't reset again in finally block
           return;
         }
 
@@ -810,10 +844,8 @@ export function ChatInterface() {
         });
       } else {
         log.error(t("chatInterface.errorLabel"), error);
-        const errorMessage =
-          error instanceof Error
-            ? error.message
-            : t("chatInterface.errorProcessingRequest");
+        // Show user-friendly error message instead of technical error details
+        const errorMessage = t("chatInterface.errorProcessingRequest");
         setSessionMessages((prev) => {
           const newMessages = { ...prev };
           const lastMsg =
@@ -861,6 +893,12 @@ export function ChatInterface() {
             return newSet;
           });
         }
+      }
+    } finally {
+      // Only reset button states if we should (not when preprocessing fails)
+      if (shouldResetButtonStates) {
+        setIsLoading(false);
+        setIsStreaming(false);
       }
     }
   };
@@ -1085,10 +1123,7 @@ export function ChatInterface() {
 
           setConversationLoadError((prev) => ({
             ...prev,
-            [dialog.conversation_id]:
-              error instanceof Error
-                ? error.message
-                : "Failed to load conversation",
+            [dialog.conversation_id]: "Failed to load conversation",
           }));
         } finally {
           // ensure loading state is cleared
@@ -1228,10 +1263,7 @@ export function ChatInterface() {
 
         setConversationLoadError((prev) => ({
           ...prev,
-          [dialog.conversation_id]:
-            error instanceof Error
-              ? error.message
-              : "Failed to load conversation",
+          [dialog.conversation_id]: "Failed to load conversation",
         }));
       } finally {
         // ensure loading state is cleared

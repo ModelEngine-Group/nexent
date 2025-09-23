@@ -1,7 +1,7 @@
 'use client';
 
-import { GlobalConfig, AppConfig, ModelConfig } from '@/types/modelConfig';
-import { APP_CONFIG_KEY, MODEL_CONFIG_KEY, defaultConfig } from '@/const/modelConfig';
+import { GlobalConfig, AppConfig, ModelConfig } from '../types/modelConfig';
+import { APP_CONFIG_KEY, MODEL_CONFIG_KEY, defaultConfig } from '../const/modelConfig';
 import log from "@/lib/logger";
 
 class ConfigStoreClass {
@@ -207,14 +207,6 @@ class ConfigStoreClass {
         apiConfig: {
           apiKey: backendConfig.models.llm?.apiConfig?.apiKey || "",
           modelUrl: backendConfig.models.llm?.apiConfig?.modelUrl || ""
-        }
-      },
-      llmSecondary: {
-        modelName: backendConfig.models.llmSecondary?.name || "",
-        displayName: backendConfig.models.llmSecondary?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.llmSecondary?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.llmSecondary?.apiConfig?.modelUrl || ""
         }
       },
       embedding: {

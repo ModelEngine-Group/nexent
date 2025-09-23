@@ -1,6 +1,6 @@
 // Agent Configuration Types
 import { ChatMessageType } from "./chat";
-import { OpenAIModel } from "./modelConfig";
+import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 
 // ========== Core Interfaces ==========
@@ -41,7 +41,6 @@ export interface ToolParam {
     | "boolean"
     | "array"
     | "object"
-    | "OpenAIModel"
     | "Optional";
   required: boolean;
   value?: any;
@@ -84,8 +83,8 @@ export interface AgentSetupOrchestratorProps {
   setSelectedTools: (tools: Tool[]) => void;
   isCreatingNewAgent: boolean;
   setIsCreatingNewAgent: (value: boolean) => void;
-  mainAgentModel: OpenAIModel;
-  setMainAgentModel: (value: OpenAIModel) => void;
+  mainAgentModel: string | null;
+  setMainAgentModel: (value: string | null) => void;
   mainAgentMaxStep: number;
   setMainAgentMaxStep: (value: number) => void;
   tools: Tool[];
@@ -113,7 +112,7 @@ export interface AgentSetupOrchestratorProps {
   isGeneratingAgent?: boolean;
   onDebug?: () => void;
   getCurrentAgentId?: () => number | undefined;
-  onGenerateAgent?: () => void;
+  onGenerateAgent?: (selectedModel?: ModelOption) => void;
   onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   editingAgent?: any;
@@ -295,6 +294,7 @@ export interface McpTool {
 export interface GeneratePromptParams {
   agent_id: number;
   task_description: string;
+  model_id: string;
 }
 
 /**

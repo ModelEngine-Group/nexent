@@ -137,7 +137,7 @@ export function getUrlParam<T>(
    * @param backendType Backend type name
    * @returns Corresponding frontend type
    */
-  export const convertParamType = (backendType: string): 'string' | 'number' | 'boolean' | 'array' | 'object' | 'OpenAIModel' | 'Optional' => {
+  export const convertParamType = (backendType: string): 'string' | 'number' | 'boolean' | 'array' | 'object' | 'Optional' => {
     switch (backendType) {
       case 'string':
         return 'string';
@@ -152,8 +152,6 @@ export function getUrlParam<T>(
         return 'object';
       case 'Optional':
         return 'string'; 
-      case 'OpenAIModel':
-        return 'OpenAIModel';    
       default:
         log.warn(`Unknown type: ${backendType}, using string as default type`);
         return 'string';

@@ -642,139 +642,141 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           background: #aaa;
         }
       `}</style>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex as any]}
-        components={{
-          // Heading components
-          h1: ({ children }: any) => (
-            <h1>
-              <TextWrapper>{children}</TextWrapper>
-            </h1>
-          ),
-          h2: ({ children }: any) => (
-            <h2>
-              <TextWrapper>{children}</TextWrapper>
-            </h2>
-          ),
-          h3: ({ children }: any) => (
-            <h3>
-              <TextWrapper>{children}</TextWrapper>
-            </h3>
-          ),
-          h4: ({ children }: any) => (
-            <h4>
-              <TextWrapper>{children}</TextWrapper>
-            </h4>
-          ),
-          h5: ({ children }: any) => (
-            <h5>
-              <TextWrapper>{children}</TextWrapper>
-            </h5>
-          ),
-          h6: ({ children }: any) => (
-            <h6>
-              <TextWrapper>{children}</TextWrapper>
-            </h6>
-          ),
-          // Paragraph
-          p: ({ children }: any) => (
-            <p className={`user-paragraph`}>
-              <TextWrapper>{children}</TextWrapper>
-            </p>
-          ),
-          // List item
-          li: ({ children }: any) => (
-            <li>
-              <TextWrapper>{children}</TextWrapper>
-            </li>
-          ),
-          // Blockquote
-          blockquote: ({ children }: any) => (
-            <blockquote className="border-l-4 border-gray-300 pl-4 py-2 my-4 bg-gray-50 italic text-base leading-relaxed">
-              <TextWrapper>{children}</TextWrapper>
-            </blockquote>
-          ),
-          // Table components
-          td: ({ children }: any) => (
-            <td>
-              <TextWrapper>{children}</TextWrapper>
-            </td>
-          ),
-          th: ({ children }: any) => (
-            <th>
-              <TextWrapper>{children}</TextWrapper>
-            </th>
-          ),
-          // Emphasis components
-          strong: ({ children }: any) => (
-            <strong>
-              <TextWrapper>{children}</TextWrapper>
-            </strong>
-          ),
-          em: ({ children }: any) => (
-            <em>
-              <TextWrapper>{children}</TextWrapper>
-            </em>
-          ),
-          // Strikethrough
-          del: ({ children }: any) => (
-            <del>
-              <TextWrapper>{children}</TextWrapper>
-            </del>
-          ),
-          // Link
-          a: ({ href, children, ...props }: any) => (
-            <a href={href} {...props}>
-              <TextWrapper>{children}</TextWrapper>
-            </a>
-          ),
-          // Code blocks and inline code
-          code({ node, inline, className, children, ...props }: any) {
-            const match = /language-(\w+)/.exec(className || "");
-            const codeContent = String(children).replace(/^\n+|\n+$/g, "");
-            return !inline && match ? (
-              <div className="code-block-container group">
-                <div className="code-block-header">
-                  <span
-                    className="code-language-label"
-                    data-language={match[1]}
-                  >
-                    {match[1]}
-                  </span>
-                  <CopyButton
-                    content={codeContent}
-                    variant="code-block"
-                    className="header-copy-button"
-                    tooltipText={{
-                      copy: t("chatStreamMessage.copyContent"),
-                      copied: t("chatStreamMessage.copied"),
-                    }}
-                  />
-                </div>
-                <div className="code-block-content">
-                  <SyntaxHighlighter
-                    style={customStyle}
-                    language={match[1]}
-                    PreTag="div"
-                    {...props}
-                  >
-                    {codeContent}
-                  </SyntaxHighlighter>
-                </div>
-              </div>
-            ) : (
-              <code {...props}>
+      <div className={`markdown-body ${className || ""}`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex as any]}
+          components={{
+            // Heading components
+            h1: ({ children }: any) => (
+              <h1>
                 <TextWrapper>{children}</TextWrapper>
-              </code>
-            );
-          },
-          // Image
-          img: ({ src, alt }: any) => <img src={src} alt={alt} />,
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+              </h1>
+            ),
+            h2: ({ children }: any) => (
+              <h2>
+                <TextWrapper>{children}</TextWrapper>
+              </h2>
+            ),
+            h3: ({ children }: any) => (
+              <h3>
+                <TextWrapper>{children}</TextWrapper>
+              </h3>
+            ),
+            h4: ({ children }: any) => (
+              <h4>
+                <TextWrapper>{children}</TextWrapper>
+              </h4>
+            ),
+            h5: ({ children }: any) => (
+              <h5>
+                <TextWrapper>{children}</TextWrapper>
+              </h5>
+            ),
+            h6: ({ children }: any) => (
+              <h6>
+                <TextWrapper>{children}</TextWrapper>
+              </h6>
+            ),
+            // Paragraph
+            p: ({ children }: any) => (
+              <p className={`user-paragraph`}>
+                <TextWrapper>{children}</TextWrapper>
+              </p>
+            ),
+            // List item
+            li: ({ children }: any) => (
+              <li>
+                <TextWrapper>{children}</TextWrapper>
+              </li>
+            ),
+            // Blockquote
+            blockquote: ({ children }: any) => (
+              <blockquote className="border-l-4 border-gray-300 pl-4 py-2 my-4 bg-gray-50 italic text-base leading-relaxed">
+                <TextWrapper>{children}</TextWrapper>
+              </blockquote>
+            ),
+            // Table components
+            td: ({ children }: any) => (
+              <td>
+                <TextWrapper>{children}</TextWrapper>
+              </td>
+            ),
+            th: ({ children }: any) => (
+              <th>
+                <TextWrapper>{children}</TextWrapper>
+              </th>
+            ),
+            // Emphasis components
+            strong: ({ children }: any) => (
+              <strong>
+                <TextWrapper>{children}</TextWrapper>
+              </strong>
+            ),
+            em: ({ children }: any) => (
+              <em>
+                <TextWrapper>{children}</TextWrapper>
+              </em>
+            ),
+            // Strikethrough
+            del: ({ children }: any) => (
+              <del>
+                <TextWrapper>{children}</TextWrapper>
+              </del>
+            ),
+            // Link
+            a: ({ href, children, ...props }: any) => (
+              <a href={href} {...props}>
+                <TextWrapper>{children}</TextWrapper>
+              </a>
+            ),
+            // Code blocks and inline code
+            code({ node, inline, className, children, ...props }: any) {
+              const match = /language-(\w+)/.exec(className || "");
+              const codeContent = String(children).replace(/^\n+|\n+$/g, "");
+              return !inline && match ? (
+                <div className="code-block-container group">
+                  <div className="code-block-header">
+                    <span
+                      className="code-language-label"
+                      data-language={match[1]}
+                    >
+                      {match[1]}
+                    </span>
+                    <CopyButton
+                      content={codeContent}
+                      variant="code-block"
+                      className="header-copy-button"
+                      tooltipText={{
+                        copy: t("chatStreamMessage.copyContent"),
+                        copied: t("chatStreamMessage.copied"),
+                      }}
+                    />
+                  </div>
+                  <div className="code-block-content">
+                    <SyntaxHighlighter
+                      style={customStyle}
+                      language={match[1]}
+                      PreTag="div"
+                      {...props}
+                    >
+                      {codeContent}
+                    </SyntaxHighlighter>
+                  </div>
+                </div>
+              ) : (
+                <code {...props}>
+                  <TextWrapper>{children}</TextWrapper>
+                </code>
+              );
+            },
+            // Image
+            img: ({ src, alt }: any) => <img src={src} alt={alt} />,
+          }}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
     </>
   );
 };

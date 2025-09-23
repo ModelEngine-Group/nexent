@@ -2,6 +2,53 @@ import pytest
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock
 
+# Mock consts module first to avoid ModuleNotFoundError
+consts_mock = MagicMock()
+consts_mock.const = MagicMock()
+# Set required constants in consts.const
+consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
+consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
+consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
+consts_mock.const.MINIO_REGION = "us-east-1"
+consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_mock.const.POSTGRES_HOST = "localhost"
+consts_mock.const.POSTGRES_USER = "test_user"
+consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_mock.const.POSTGRES_DB = "test_db"
+consts_mock.const.POSTGRES_PORT = 5432
+consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.LOCAL_MCP_SERVER = "http://localhost:5011"
+consts_mock.const.MODEL_CONFIG_MAPPING = {"llm": "llm_config"}
+consts_mock.const.LANGUAGE = {"ZH": "zh"}
+
+# Add the mocked consts module to sys.modules
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_mock.const
+
+# Mock utils module
+utils_mock = MagicMock()
+utils_mock.auth_utils = MagicMock()
+utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+
+# Add the mocked utils module to sys.modules
+sys.modules['utils'] = utils_mock
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+
+# Provide a stub for the `boto3` module so that it can be imported safely even
+# if the testing environment does not have it available.
+boto3_mock = MagicMock()
+sys.modules['boto3'] = boto3_mock
+
+# Mock the entire client module
+client_mock = MagicMock()
+client_mock.MinioClient = MagicMock()
+client_mock.PostgresClient = MagicMock()
+client_mock.db_client = MagicMock()
+client_mock.get_db_session = MagicMock()
+client_mock.as_dict = MagicMock()
+
+# Add the mocked client module to sys.modules
+sys.modules['backend.database.client'] = client_mock
 
 # Mock external dependencies before imports
 sys.modules['nexent.core.utils.observer'] = MagicMock()
@@ -9,18 +56,18 @@ sys.modules['nexent.core.agents.agent_model'] = MagicMock()
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
 sys.modules['services.remote_mcp_service'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
+sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['services.elasticsearch_service'] = MagicMock()
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.langchain_utils'] = MagicMock()
+sys.modules['utils.model_name_utils'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
 sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
-sys.modules['consts.const'] = MagicMock()
 
 # Create mock classes that might be imported
 mock_agent_config = MagicMock()
@@ -38,9 +85,6 @@ sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observe
 # Mock BASE_BUILTIN_MODULES
 sys.modules['smolagents.utils'].BASE_BUILTIN_MODULES = ["os", "sys", "json"]
 
-# Mock LOCAL_MCP_SERVER constant
-sys.modules['consts.const'].LOCAL_MCP_SERVER = "http://localhost:5011"
-
 # Now import the module under test
 from backend.agents.create_agent_info import (
     discover_langchain_tools,
@@ -52,6 +96,9 @@ from backend.agents.create_agent_info import (
     join_minio_file_description_to_query,
     prepare_prompt_templates
 )
+
+# Import constants for testing
+from consts.const import MODEL_CONFIG_MAPPING
 
 
 class TestDiscoverLangchainTools:
@@ -592,33 +639,153 @@ class TestCreateModelConfigList:
     @pytest.mark.asyncio
     async def test_create_model_config_list(self):
         """Test case for model configuration list creation"""
-        with patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
-                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
+        # Reset mock call count before test
+        mock_model_config.reset_mock()
+        
+        with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
+                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name, \
+                patch('backend.agents.create_agent_info.add_repo_to_name') as mock_add_repo:
 
-            # Set mock return values
-            mock_manager.get_model_config.side_effect = [
+            # Mock database records
+            mock_get_records.return_value = [
                 {
-                    "api_key": "main_key",
-                    "model_name": "main_model",
-                    "base_url": "http://main.url",
-                    "is_deep_thinking": True
+                    "display_name": "GPT-4",
+                    "api_key": "gpt4_key",
+                    "model_repo": "openai",
+                    "model_name": "gpt-4",
+                    "base_url": "https://api.openai.com"
                 },
                 {
-                    "api_key": "sub_key",
-                    "model_name": "sub_model",
-                    "base_url": "http://sub.url",
-                    "is_deep_thinking": False
+                    "display_name": "Claude",
+                    "api_key": "claude_key", 
+                    "model_repo": "anthropic",
+                    "model_name": "claude-3",
+                    "base_url": "https://api.anthropic.com"
                 }
             ]
 
-            mock_get_model_name.side_effect = [
-                "main_model_name", "sub_model_name"]
+            # Mock tenant config for main_model and sub_model
+            mock_manager.get_model_config.return_value = {
+                "api_key": "main_key",
+                "model_name": "main_model",
+                "base_url": "http://main.url"
+            }
+
+            # Mock utility functions
+            mock_add_repo.side_effect = ["openai/gpt-4", "anthropic/claude-3"]
+            mock_get_model_name.return_value = "main_model_name"
 
             result = await create_model_config_list("tenant_1")
 
+            # Should have 4 models: 2 from database + 2 default (main_model, sub_model)
+            assert len(result) == 4
+            
+            # Verify get_model_records was called correctly
+            mock_get_records.assert_called_once_with({"model_type": "llm"}, "tenant_1")
+            
+            # Verify tenant_config_manager was called for default models
+            mock_manager.get_model_config.assert_called_once_with(
+                key=MODEL_CONFIG_MAPPING["llm"], tenant_id="tenant_1")
+            
+            # Verify ModelConfig was called 4 times
+            assert mock_model_config.call_count == 4
+            
+            # Verify the calls to ModelConfig
+            calls = mock_model_config.call_args_list
+            
+            # First call: GPT-4 model from database
+            assert calls[0][1]['cite_name'] == "GPT-4"
+            assert calls[0][1]['api_key'] == "gpt4_key"
+            assert calls[0][1]['model_name'] == "openai/gpt-4"
+            assert calls[0][1]['url'] == "https://api.openai.com"
+            
+            # Second call: Claude model from database
+            assert calls[1][1]['cite_name'] == "Claude"
+            assert calls[1][1]['api_key'] == "claude_key"
+            assert calls[1][1]['model_name'] == "anthropic/claude-3"
+            assert calls[1][1]['url'] == "https://api.anthropic.com"
+            
+            # Third call: main_model
+            assert calls[2][1]['cite_name'] == "main_model"
+            assert calls[2][1]['api_key'] == "main_key"
+            assert calls[2][1]['model_name'] == "main_model_name"
+            assert calls[2][1]['url'] == "http://main.url"
+            
+            # Fourth call: sub_model
+            assert calls[3][1]['cite_name'] == "sub_model"
+            assert calls[3][1]['api_key'] == "main_key"
+            assert calls[3][1]['model_name'] == "main_model_name"
+            assert calls[3][1]['url'] == "http://main.url"
+
+    @pytest.mark.asyncio
+    async def test_create_model_config_list_empty_database(self):
+        """Test case when database returns no records"""
+        # Reset mock call count before test
+        mock_model_config.reset_mock()
+        
+        with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
+                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
+
+            # Mock empty database records
+            mock_get_records.return_value = []
+
+            # Mock tenant config for main_model and sub_model
+            mock_manager.get_model_config.return_value = {
+                "api_key": "main_key",
+                "model_name": "main_model",
+                "base_url": "http://main.url"
+            }
+
+            mock_get_model_name.return_value = "main_model_name"
+
+            result = await create_model_config_list("tenant_1")
+
+            # Should have 2 models: only default models (main_model, sub_model)
             assert len(result) == 2
-            # Verify that ModelConfig was called twice
+            
+            # Verify ModelConfig was called 2 times
             assert mock_model_config.call_count == 2
+            
+            # Verify both calls are for default models
+            calls = mock_model_config.call_args_list
+            assert calls[0][1]['cite_name'] == "main_model"
+            assert calls[1][1]['cite_name'] == "sub_model"
+
+    @pytest.mark.asyncio
+    async def test_create_model_config_list_no_model_name_in_config(self):
+        """Test case when tenant config has no model_name"""
+        # Reset mock call count before test
+        mock_model_config.reset_mock()
+        
+        with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
+                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
+
+            # Mock empty database records
+            mock_get_records.return_value = []
+
+            # Mock tenant config without model_name
+            mock_manager.get_model_config.return_value = {
+                "api_key": "main_key",
+                "base_url": "http://main.url"
+                # No model_name field
+            }
+
+            result = await create_model_config_list("tenant_1")
+
+            # Should have 2 models: only default models (main_model, sub_model)
+            assert len(result) == 2
+            
+            # Verify ModelConfig was called 2 times with empty model_name
+            assert mock_model_config.call_count == 2
+            
+            calls = mock_model_config.call_args_list
+            assert calls[0][1]['cite_name'] == "main_model"
+            assert calls[0][1]['model_name'] == ""  # Should be empty when no model_name in config
+            assert calls[1][1]['cite_name'] == "sub_model"
+            assert calls[1][1]['model_name'] == ""  # Should be empty when no model_name in config
 
 
 class TestFilterMcpServersAndTools:

@@ -16,7 +16,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Generator, List, Optional
 
-from dotenv import load_dotenv
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
 from jinja2 import Template, StrictUndefined
@@ -43,7 +42,9 @@ from utils.prompt_template_utils import get_knowledge_summary_prompt_template
 logger = logging.getLogger("elasticsearch_service")
 
 
-def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: str) -> Generator:
+
+
+def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: str, model_id: Optional[int] = None) -> Generator:
     """
     Generate a knowledge base summary based on keywords
 
@@ -55,9 +56,6 @@ def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: s
     Returns:
         str:  Generate a knowledge base summary
     """
-    # Load environment variables
-    load_dotenv()
-
     # Load prompt words based on language
     prompts = get_knowledge_summary_prompt_template(language)
 
@@ -73,9 +71,31 @@ def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: s
         {"role": MESSAGE_ROLE["USER"], "content": user_prompt}
     ]
 
-    # Get model configuration from tenant config manager
-    model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llmSecondary"], tenant_id=tenant_id)
+    # Get model configuration
+    if model_id:
+        try:
+            from database.model_management_db import get_model_by_model_id
+            model_info = get_model_by_model_id(model_id, tenant_id)
+            if model_info:
+                model_config = {
+                    'api_key': model_info.get('api_key', ''),
+                    'base_url': model_info.get('base_url', ''),
+                    'model_name': model_info.get('model_name', ''),
+                    'model_repo': model_info.get('model_repo', '')
+                }
+            else:
+                # Fallback to default model if specified model not found
+                logger.warning(f"Specified model {model_id} not found, falling back to default LLM.")
+                model_config = tenant_config_manager.get_model_config(
+                    key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+        except Exception as e:
+            logger.warning(f"Failed to get model {model_id}, using default model: {e}")
+            model_config = tenant_config_manager.get_model_config(
+                key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    else:
+        # Use default model configuration
+        model_config = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
 
     # initialize OpenAI client
     client = OpenAI(api_key=model_config.get('api_key', ""),
@@ -83,10 +103,15 @@ def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: s
 
     try:
         # Create stream chat completion request
-        max_tokens = KNOWLEDGE_SUMMARY_MAX_TOKENS_ZH if language == LANGUAGE["ZH"] else KNOWLEDGE_SUMMARY_MAX_TOKENS_EN
+        max_tokens = KNOWLEDGE_SUMMARY_MAX_TOKENS_ZH if language == LANGUAGE[
+            "ZH"] else KNOWLEDGE_SUMMARY_MAX_TOKENS_EN
+        # Get model name for the request
+        model_name_for_request = model_config.get("model_name", "")
+        if model_config.get("model_repo"):
+            model_name_for_request = f"{model_config['model_repo']}/{model_name_for_request}"
+
         stream = client.chat.completions.create(
-            model=get_model_name_from_config(model_config) if model_config.get(
-                "model_name") else "",  # use model name from config
+            model=model_name_for_request,
             messages=messages,
             max_tokens=max_tokens,  # add max_tokens limit
             stream=True  # enable stream output
@@ -385,7 +410,8 @@ class ElasticSearchService:
             }
             success = delete_knowledge_record(update_data)
             if not success:
-                raise Exception(f"Error deleting knowledge record for index {index_name}")
+                raise Exception(
+                    f"Error deleting knowledge record for index {index_name}")
 
             return {"status": "success", "message": f"Index {index_name} and associated files deleted successfully"}
         except Exception as e:
@@ -397,8 +423,10 @@ class ElasticSearchService:
                 "*", description="Pattern to match index names"),
             include_stats: bool = Query(
                 False, description="Whether to include index stats"),
-            tenant_id: str = Body(description="ID of the tenant listing the knowledge base"),
-            user_id: str = Body(description="ID of the user listing the knowledge base"),
+            tenant_id: str = Body(
+                description="ID of the tenant listing the knowledge base"),
+            user_id: str = Body(
+                description="ID of the user listing the knowledge base"),
             es_core: ElasticSearchCore = Depends(get_es_core)
     ):
         """
@@ -424,7 +452,8 @@ class ElasticSearchService:
         for record in db_record:
             # async PG database to sync ES, remove the data that is not in ES
             if record["index_name"] not in all_indices_list:
-                delete_knowledge_record({"index_name": record["index_name"], "user_id": user_id})
+                delete_knowledge_record(
+                    {"index_name": record["index_name"], "user_id": user_id})
                 continue
             if record["embedding_model_name"] is None:
                 model_name_is_none_list.append(record["index_name"])
@@ -449,8 +478,9 @@ class ElasticSearchService:
                         "stats": index_stats
                     })
                     if index_name in model_name_is_none_list:
-                        update_model_name_by_index_name(index_name, 
-                                                        index_stats.get("base_info", {}).get("embedding_model", ""), 
+                        update_model_name_by_index_name(index_name,
+                                                        index_stats.get("base_info", {}).get(
+                                                            "embedding_model", ""),
                                                         tenant_id, user_id)
             response["indices_info"] = stats_info
 
@@ -514,11 +544,14 @@ class ElasticSearchService:
             error_msg = str(e)
             # Check if it's an ElasticSearch connection issue
             if "503" in error_msg or "search_phase_execution_exception" in error_msg:
-                raise Exception(f"ElasticSearch service unavailable for index {index_name}: {error_msg}")
+                raise Exception(
+                    f"ElasticSearch service unavailable for index {index_name}: {error_msg}")
             elif "ApiError" in error_msg:
-                raise Exception(f"ElasticSearch API error for index {index_name}: {error_msg}")
+                raise Exception(
+                    f"ElasticSearch API error for index {index_name}: {error_msg}")
             else:
-                raise Exception(f"Error getting info for index {index_name}: {error_msg}")
+                raise Exception(
+                    f"Error getting info for index {index_name}: {error_msg}")
 
     @staticmethod
     def index_documents(
@@ -551,7 +584,8 @@ class ElasticSearchService:
                         index_name, es_core=es_core)
                     logger.info(f"Created new index {index_name}")
                 except Exception as create_error:
-                    raise Exception(f"Failed to create index {index_name}: {str(create_error)}")
+                    raise Exception(
+                        f"Failed to create index {index_name}: {str(create_error)}")
 
             # Transform indexing request results to documents
             documents = []
@@ -783,7 +817,8 @@ class ElasticSearchService:
             return {"files": files}
 
         except Exception as e:
-            raise Exception(f"Error getting file list for index {index_name}: {str(e)}")
+            raise Exception(
+                f"Error getting file list for index {index_name}: {str(e)}")
 
     @staticmethod
     def delete_documents(
@@ -828,9 +863,12 @@ class ElasticSearchService:
                                      1000, description="Number of documents to retrieve per batch"),
                                  es_core: ElasticSearchCore = Depends(
                                      get_es_core),
+                                 user_id: Optional[str] = Body(
+                                     None, description="ID of the user delete the knowledge base"),
                                  tenant_id: Optional[str] = Body(
                                      None, description="ID of the tenant"),
-                                 language: str = LANGUAGE["ZH"]
+                                 language: str = LANGUAGE["ZH"],
+                                 model_id: Optional[int] = None
                                  ):
         """
         Generate a summary for the specified index based on its content
@@ -848,7 +886,8 @@ class ElasticSearchService:
         try:
             # Get all documents
             if not tenant_id:
-                raise Exception("Tenant ID is required for summary generation.")
+                raise Exception(
+                    "Tenant ID is required for summary generation.")
             all_documents = ElasticSearchService.get_random_documents(
                 index_name, batch_size, es_core)
             all_chunks = self._clean_chunks_for_summary(all_documents)
@@ -860,7 +899,7 @@ class ElasticSearchService:
             async def generate_summary():
                 token_join = []
                 try:
-                    for new_token in generate_knowledge_summary_stream(keywords_for_summary, language, tenant_id):
+                    for new_token in generate_knowledge_summary_stream(keywords_for_summary, language, tenant_id, model_id):
                         if new_token == "END":
                             break
                         else:
@@ -947,7 +986,8 @@ class ElasticSearchService:
             }
 
         except Exception as e:
-            raise Exception(f"Error retrieving random documents from index {index_name}: {str(e)}")
+            raise Exception(
+                f"Error retrieving random documents from index {index_name}: {str(e)}")
 
     @staticmethod
     def change_summary(

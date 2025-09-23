@@ -20,6 +20,8 @@ async def auto_summary(
                                description="Name of the index to get documents from"),
         batch_size: int = Query(
             1000, description="Number of documents to retrieve per batch"),
+        model_id: Optional[int] = Query(
+            None, description="Model ID to use for summary generation"),
         es_core: ElasticSearchCore = Depends(get_es_core),
         authorization: Optional[str] = Header(None)
 ):
@@ -34,7 +36,8 @@ async def auto_summary(
             batch_size=batch_size,
             es_core=es_core,
             tenant_id=tenant_id,
-            language=language
+            language=language,
+            model_id=model_id
         )
     except Exception as e:
         logger.error("Knowledge base summary generation failed", exc_info=True)

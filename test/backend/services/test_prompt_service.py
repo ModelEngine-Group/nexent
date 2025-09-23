@@ -35,17 +35,18 @@ class TestPromptService(unittest.TestCase):
     def setUp(self):
         # Reset all mocks before each test
         minio_client_mock.reset_mock()
+        self.test_model_id = 1
 
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.OpenAIServerModel')
-    @patch('backend.services.prompt_service.tenant_config_manager')
     @patch('backend.services.prompt_service.get_model_name_from_config')
-    def test_call_llm_for_system_prompt(self, mock_get_model_name, mock_tenant_config, mock_openai):
+    def test_call_llm_for_system_prompt(self, mock_get_model_name, mock_openai, mock_get_model_by_id):
         # Setup
         mock_model_config = {
             "base_url": "http://example.com",
             "api_key": "fake-key"
         }
-        mock_tenant_config.get_model_config.return_value = mock_model_config
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -62,10 +63,11 @@ class TestPromptService(unittest.TestCase):
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         # Execute
-        result = call_llm_for_system_prompt("user prompt", "system prompt")
+        result = call_llm_for_system_prompt(self.test_model_id, "user prompt", "system prompt")
 
         # Assert
         self.assertEqual(result, "Generated prompt")
+        mock_get_model_by_id.assert_called_once_with(model_id=self.test_model_id, tenant_id=None)
         mock_openai.assert_called_once_with(
             model_id="gpt-4",
             api_base="http://example.com",
@@ -108,6 +110,7 @@ class TestPromptService(unittest.TestCase):
         # Execute - test as a generator
         result_gen = generate_and_save_system_prompt_impl(
             agent_id=123,
+            model_id=self.test_model_id,
             task_description="Test task",
             user_id="user123",
             tenant_id="tenant456",
@@ -128,6 +131,7 @@ class TestPromptService(unittest.TestCase):
             "Test task",
             mock_get_tool_desc.return_value,
             "tenant456",
+            self.test_model_id,
             "zh"
         )
 
@@ -159,6 +163,7 @@ class TestPromptService(unittest.TestCase):
         result_list = []
         for result in gen_system_prompt_streamable(
             agent_id=123,
+            model_id=self.test_model_id,
             task_description="Test task",
             user_id="user123",
             tenant_id="tenant456",
@@ -170,6 +175,7 @@ class TestPromptService(unittest.TestCase):
         # Verify generate_and_save_system_prompt_impl was called with correct parameters
         mock_generate_impl.assert_called_once_with(
             agent_id=123,
+            model_id=self.test_model_id,
             task_description="Test task",
             user_id="user123",
             tenant_id="tenant456",
@@ -201,7 +207,7 @@ class TestPromptService(unittest.TestCase):
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to simulate streaming responses
-        def mock_llm_call(content, sys_prompt, callback, tenant_id):
+        def mock_llm_call(model_id, content, sys_prompt, callback, tenant_id):
             # Simulate different responses based on system prompt
             if "duty" in sys_prompt.lower():
                 if callback:
@@ -248,6 +254,7 @@ class TestPromptService(unittest.TestCase):
             mock_task_description,
             mock_tools,
             mock_tenant_id,
+            self.test_model_id,
             mock_language
         ):
             result_list.append(result)
@@ -315,7 +322,7 @@ class TestPromptService(unittest.TestCase):
         mock_join_info.return_value = "Joined template content"
 
         # Mock call_llm_for_system_prompt to raise exception for one prompt type
-        def mock_llm_call_with_exception(content, sys_prompt, callback, tenant_id):
+        def mock_llm_call_with_exception(model_id, content, sys_prompt, callback, tenant_id):
             if "duty" in sys_prompt.lower():
                 raise Exception("LLM error for duty prompt")
             elif "constraint" in sys_prompt.lower():
@@ -343,6 +350,7 @@ class TestPromptService(unittest.TestCase):
             mock_task_description,
             mock_tools,
             mock_tenant_id,
+            self.test_model_id,
             mock_language
         ):
             result_list.append(result)
@@ -461,16 +469,16 @@ class TestPromptService(unittest.TestCase):
         mock_search_agent_info.assert_any_call(
             agent_id=3, tenant_id="tenant456")
 
+    @patch('backend.services.prompt_service.get_model_by_model_id')
     @patch('backend.services.prompt_service.OpenAIServerModel')
-    @patch('backend.services.prompt_service.tenant_config_manager')
     @patch('backend.services.prompt_service.get_model_name_from_config')
-    def test_call_llm_for_system_prompt_exception(self, mock_get_model_name, mock_tenant_config, mock_openai):
+    def test_call_llm_for_system_prompt_exception(self, mock_get_model_name, mock_openai, mock_get_model_by_id):
         # Setup
         mock_model_config = {
             "base_url": "http://example.com",
             "api_key": "fake-key"
         }
-        mock_tenant_config.get_model_config.return_value = mock_model_config
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -481,7 +489,7 @@ class TestPromptService(unittest.TestCase):
 
         # Execute and Assert
         with self.assertRaises(Exception) as context:
-            call_llm_for_system_prompt("user prompt", "system prompt")
+            call_llm_for_system_prompt(self.test_model_id, "user prompt", "system prompt")
 
         self.assertIn("LLM error", str(context.exception))
 

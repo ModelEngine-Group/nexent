@@ -7,6 +7,7 @@ class TestPromptApp(unittest.TestCase):
     def setUp(self):
         """Set up test environment before each test"""
         self.test_agent_id = 123
+        self.test_model_id = "gpt-4"
         self.test_authorization = "Bearer test_token"
         self.test_user_id = "user123"
         self.test_tenant_id = "tenant456"
@@ -35,6 +36,7 @@ class TestPromptApp(unittest.TestCase):
         result_list = []
         for result in mock_gen_streamable(
             agent_id=self.test_agent_id,
+            model_id=self.test_model_id,
             task_description="Test task description",
             user_id=self.test_user_id,
             tenant_id=self.test_tenant_id,
@@ -45,6 +47,7 @@ class TestPromptApp(unittest.TestCase):
         # Verify that gen_system_prompt_streamable was called with correct parameters
         mock_gen_streamable.assert_called_once_with(
             agent_id=self.test_agent_id,
+            model_id=self.test_model_id,
             task_description="Test task description",
             user_id=self.test_user_id,
             tenant_id=self.test_tenant_id,
@@ -70,6 +73,7 @@ class TestPromptApp(unittest.TestCase):
         with self.assertRaises(Exception) as context:
             mock_gen_streamable(
                 agent_id=self.test_agent_id,
+                model_id=self.test_model_id,
                 task_description="Test task description",
                 user_id=self.test_user_id,
                 tenant_id=self.test_tenant_id,
@@ -94,6 +98,7 @@ class TestPromptApp(unittest.TestCase):
         result_list = []
         for result in mock_gen_streamable(
             agent_id=self.test_agent_id,
+            model_id=self.test_model_id,
             task_description="Test task description",
             user_id="default_user",  # Default user when no auth
             tenant_id="default_tenant",  # Default tenant when no auth
@@ -104,6 +109,7 @@ class TestPromptApp(unittest.TestCase):
         # Verify that gen_system_prompt_streamable was called with default parameters
         mock_gen_streamable.assert_called_once_with(
             agent_id=self.test_agent_id,
+            model_id=self.test_model_id,
             task_description="Test task description",
             user_id="default_user",
             tenant_id="default_tenant",
@@ -124,6 +130,7 @@ class TestPromptApp(unittest.TestCase):
         with self.assertRaises((TypeError, ValueError)):
             # Simulate missing required parameter
             self.assertIsNotNone(self.test_agent_id)
+            self.assertIsNotNone(self.test_model_id)
             # Missing task_description should cause an issue in real implementation
             task_description = None
             if task_description is None:

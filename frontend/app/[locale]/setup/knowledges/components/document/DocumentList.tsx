@@ -3,17 +3,24 @@ import React, {
   useRef,
   forwardRef,
   useImperativeHandle,
+  useEffect,
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Input, Button, App } from "antd";
+import { Input, Button, App, Select } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 
-import { UI_CONFIG, COLUMN_WIDTHS, DOCUMENT_NAME_CONFIG, LAYOUT, DOCUMENT_STATUS } from "@/const/knowledgeBase";
+import {
+  UI_CONFIG,
+  COLUMN_WIDTHS,
+  DOCUMENT_NAME_CONFIG,
+  LAYOUT,
+  DOCUMENT_STATUS,
+} from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
-import { 
-  Document
-} from "@/types/knowledgeBase";
+import { modelService } from "@/services/modelService";
+import { Document } from "@/types/knowledgeBase";
+import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize, sortByStatusAndDate } from "@/lib/utils";
 import log from "@/lib/logger";
 
@@ -122,6 +129,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [summary, setSummary] = useState("");
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [selectedModel, setSelectedModel] = useState<number>(0);
+    const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
     const {} = useKnowledgeBaseContext();
     const { t } = useTranslation();
 
@@ -129,6 +139,31 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     React.useEffect(() => {
       setShowDetail(false);
     }, [knowledgeBaseName]);
+
+    // Load available models when showing detail
+    useEffect(() => {
+      const loadModels = async () => {
+        if (showDetail && availableModels.length === 0) {
+          setIsLoadingModels(true);
+          try {
+            const models = await modelService.getLLMModels();
+            setAvailableModels(models);
+            // Set first available model as default
+            if (models.length > 0) {
+              setSelectedModel(models[0].id);
+            } else {
+              message.warning(t("businessLogic.config.error.noAvailableModels"));
+            }
+          } catch (error) {
+            log.error("Failed to load models:", error);
+            message.error(t("modelConfig.error.loadListFailed"));
+          } finally {
+            setIsLoadingModels(false);
+          }
+        }
+      };
+      loadModels();
+    }, [showDetail]);
 
     // Get summary when showing detailed content
     React.useEffect(() => {
@@ -164,7 +199,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           1000,
           (newText) => {
             setSummary((prev) => prev + newText);
-          }
+          },
+          selectedModel
         );
         message.success(t("document.summary.completed"));
       } catch (error) {
@@ -295,14 +331,36 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 <span className="font-bold text-lg">
                   {t("document.summary.title")}
                 </span>
-                <Button
-                  type="default"
-                  onClick={handleAutoSummary}
-                  loading={isSummarizing}
-                  disabled={!knowledgeBaseName || isSummarizing}
-                >
-                  {t("document.button.autoSummary")}
-                </Button>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      {t("document.summary.modelLabel")}:
+                    </span>
+                    <Select
+                      value={selectedModel}
+                      onChange={setSelectedModel}
+                      loading={isLoadingModels}
+                      disabled={isSummarizing}
+                      style={{ width: 200 }}
+                      placeholder={t("document.summary.modelPlaceholder")}
+                      options={availableModels.map((model) => ({
+                        value: model.id,
+                        label: model.displayName,
+                        disabled: model.connect_status === "unavailable",
+                      }))}
+                    />
+                  </div>
+                  <Button
+                    type="default"
+                    onClick={handleAutoSummary}
+                    loading={isSummarizing}
+                    disabled={
+                      !knowledgeBaseName || isSummarizing || !selectedModel
+                    }
+                  >
+                    {t("document.button.autoSummary")}
+                  </Button>
+                </div>
               </div>
               <Input.TextArea
                 value={summary}
@@ -419,9 +477,11 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           onClick={() => onDelete(doc.id)}
                           className={LAYOUT.ACTION_TEXT}
                           disabled={
-                            doc.status === DOCUMENT_STATUS.WAIT_FOR_PROCESSING ||
+                            doc.status ===
+                              DOCUMENT_STATUS.WAIT_FOR_PROCESSING ||
                             doc.status === DOCUMENT_STATUS.PROCESSING ||
-                            doc.status === DOCUMENT_STATUS.WAIT_FOR_FORWARDING ||
+                            doc.status ===
+                              DOCUMENT_STATUS.WAIT_FOR_FORWARDING ||
                             doc.status === DOCUMENT_STATUS.FORWARDING
                           }
                         >

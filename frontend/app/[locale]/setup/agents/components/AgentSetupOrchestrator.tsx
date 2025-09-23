@@ -15,7 +15,6 @@ import {
   deleteAgent,
   searchAgentInfo,
 } from "@/services/agentConfigService";
-import { OpenAIModel } from "@/types/modelConfig";
 import { Agent, AgentSetupOrchestratorProps } from "@/types/agentConfig";
 import log from "@/lib/logger";
 
@@ -158,9 +157,7 @@ export default function AgentSetupOrchestrator({
           setEnabledAgentIds([]);
         }
         // Update the model
-        if (modelName) {
-          setMainAgentModel(modelName as OpenAIModel);
-        }
+        setMainAgentModel(modelName);
         // Update the maximum number of steps
         if (maxSteps) {
           setMainAgentMaxStep(maxSteps);
@@ -200,6 +197,7 @@ export default function AgentSetupOrchestrator({
       if (!isEditingAgent) {
         // Only clear and get new Agent configuration in creating mode
         setBusinessLogic("");
+        setMainAgentModel(null); // Clear model selection when creating new agent
         fetchSubAgentIdAndEnableToolList(t);
       } else {
         // In edit mode, data is loaded in handleEditAgent, here validate the form
@@ -209,7 +207,7 @@ export default function AgentSetupOrchestrator({
       // Only refresh list when exiting creation mode in non-editing mode to avoid flicker when exiting editing mode
       if (!isEditingAgent && hasInitialized.current) {
         setBusinessLogic("");
-        setMainAgentModel(OpenAIModel.MainModel);
+        setMainAgentModel(null);
         setMainAgentMaxStep(5);
         // Delay refreshing agent list to avoid jumping
         setTimeout(() => {
@@ -323,7 +321,7 @@ export default function AgentSetupOrchestrator({
   const handleSaveNewAgent = async (
     name: string,
     description: string,
-    model: string,
+    model: string | null,
     max_step: number,
     business_description: string
   ) => {
@@ -336,7 +334,7 @@ export default function AgentSetupOrchestrator({
             Number(editingAgent.id),
             name,
             description,
-            model,
+            model === null ? undefined : model,
             max_step,
             false,
             true,
@@ -351,7 +349,7 @@ export default function AgentSetupOrchestrator({
             Number(mainAgentId),
             name,
             description,
-            model,
+            model === null ? undefined : model,
             max_step,
             false,
             true,
@@ -418,6 +416,11 @@ export default function AgentSetupOrchestrator({
       return;
     }
 
+    if (!mainAgentModel) {
+      message.warning(t("businessLogic.config.message.selectModelRequired"));
+      return;
+    }
+
     const hasPromptContent =
       dutyContent?.trim() ||
       constraintContent?.trim() ||
@@ -472,7 +475,7 @@ export default function AgentSetupOrchestrator({
       onEditingStateChange?.(true, agentDetail);
 
       // Load Agent data to interface
-      setMainAgentModel(agentDetail.model as OpenAIModel);
+      setMainAgentModel(agentDetail.model);
       setMainAgentMaxStep(agentDetail.max_step);
       setBusinessLogic(agentDetail.business_description || "");
 
@@ -515,7 +518,7 @@ export default function AgentSetupOrchestrator({
   };
 
   // Handle the update of the model
-  const handleModelChange = async (value: OpenAIModel) => {
+  const handleModelChange = async (value: string) => {
     const targetAgentId =
       isEditingAgent && editingAgent ? editingAgent.id : mainAgentId;
 
@@ -660,6 +663,9 @@ export default function AgentSetupOrchestrator({
     if (!businessLogic || businessLogic.trim() === "") {
       return t("businessLogic.config.message.businessDescriptionRequired");
     }
+    if (!mainAgentModel) {
+      return t("businessLogic.config.message.selectModelRequired");
+    }
     if (
       !dutyContent?.trim() &&
       !constraintContent?.trim() &&
@@ -677,6 +683,7 @@ export default function AgentSetupOrchestrator({
   const localCanSaveAgent = !!(
     businessLogic?.trim() &&
     agentName?.trim() &&
+    mainAgentModel &&
     (dutyContent?.trim() ||
       constraintContent?.trim() ||
       fewShotsContent?.trim())
@@ -796,10 +803,10 @@ export default function AgentSetupOrchestrator({
               agentDisplayName={agentDisplayName}
               onAgentDisplayNameChange={setAgentDisplayName}
               isEditingMode={isEditingAgent || isCreatingNewAgent}
-              mainAgentModel={mainAgentModel}
+              mainAgentModel={mainAgentModel ?? undefined}
               mainAgentMaxStep={mainAgentMaxStep}
               onModelChange={(value: string) =>
-                handleModelChange(value as OpenAIModel)
+                handleModelChange(value)
               }
               onMaxStepChange={handleMaxStepChange}
               onBusinessLogicChange={(value: string) => setBusinessLogic(value)}

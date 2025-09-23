@@ -49,7 +49,6 @@ export const API_ENDPOINTS = {
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,
-    fineTune: `${API_BASE_URL}/prompt/fine_tune`,
   },
   stt: {
     ws: `/api/voice/stt/ws`,
@@ -92,6 +91,8 @@ export const API_ENDPOINTS = {
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
     updateSingleModel: `${API_BASE_URL}/model/update`,
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
+    // LLM model list for generation
+    llmModelList: `${API_BASE_URL}/model/llm_list`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -178,6 +179,11 @@ export const fetchWithErrorHandling = async (url: string, options: RequestInit =
       if (response.status === 499) {
         handleSessionExpired();
         throw new ApiError(STATUS_CODES.TOKEN_EXPIRED, "Connection disconnected, session may have expired");
+      }
+
+      // Handle request entity too large error (413)
+      if (response.status === 413) {
+        throw new ApiError(STATUS_CODES.REQUEST_ENTITY_TOO_LARGE, "REQUEST_ENTITY_TOO_LARGE");
       }
 
       // Other HTTP errors

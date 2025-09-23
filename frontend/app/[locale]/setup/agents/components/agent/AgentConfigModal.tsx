@@ -13,7 +13,8 @@ import {
 } from "@ant-design/icons";
 
 import log from "@/lib/logger";
-import { OpenAIModel } from "@/types/modelConfig";
+import { ModelOption } from "@/types/modelConfig";
+import { modelService } from "@/services/modelService";
 import {
   checkAgentName,
   checkAgentDisplayName,
@@ -120,6 +121,25 @@ export default function AgentConfigModal({
     useState<string>("available");
   // Add state to track if user is actively typing agent display name
   const [isUserTypingDisplayName, setIsUserTypingDisplayName] = useState(false);
+
+  // Add state for LLM models
+  const [llmModels, setLlmModels] = useState<ModelOption[]>([]);
+
+  // Load LLM models on component mount
+  useEffect(() => {
+    const loadLLMModels = async () => {
+      try {
+        const models = await modelService.getLLMModels();
+        setLlmModels(models);
+      } catch (error) {
+        log.error("Failed to load LLM models:", error);
+        setLlmModels([]);
+      } finally {
+      }
+    };
+
+    loadLLMModels();
+  }, []);
 
   // Agent name validation function
   const validateAgentName = useCallback(
@@ -433,19 +453,30 @@ export default function AgentConfigModal({
           {t("businessLogic.config.model")}:
         </label>
         <Select
-          value={mainAgentModel}
+          value={mainAgentModel || undefined}
           onChange={(value) => onModelChange?.(value)}
           size="large"
           disabled={!isEditingMode}
           style={{ width: "100%" }}
+          placeholder={t("businessLogic.config.modelPlaceholder")}
         >
-          <Select.Option value={OpenAIModel.MainModel}>
-            {t("model.option.main")}
-          </Select.Option>
-          <Select.Option value={OpenAIModel.SubModel}>
-            {t("model.option.sub")}
-          </Select.Option>
+          {llmModels.map((model) => (
+            <Select.Option 
+              key={model.id} 
+              value={model.displayName}
+              disabled={model.connect_status !== "available"}
+            >
+              <div className="flex items-center justify-between">
+                <span>{model.displayName}</span>
+              </div>
+            </Select.Option>
+          ))}
         </Select>
+        {llmModels.length === 0 && (
+          <p className="mt-1 text-sm text-gray-500">
+            {t("businessLogic.config.error.noAvailableModels")}
+          </p>
+        )}
       </div>
 
       {/* Max Steps */}

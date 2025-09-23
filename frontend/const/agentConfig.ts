@@ -56,7 +56,6 @@ export const GENERATE_PROMPT_STREAM_TYPES = {
 } as const;
 
 export const TOOL_PARAM_TYPES = {
-  OPENAI_MODEL: "OpenAIModel",
   STRING: "string",
   NUMBER: "number",
   BOOLEAN: "boolean",

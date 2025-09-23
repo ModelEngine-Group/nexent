@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { Modal, Input, Switch, Select, InputNumber, Tag, App } from "antd";
 
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
-import { OpenAIModel } from "@/types/modelConfig";
 import { ToolParam, ToolConfigModalProps } from "@/types/agentConfig";
 import {
   updateToolConfig,
@@ -160,22 +159,6 @@ export default function ToolConfigModal({
 
   const renderParamInput = (param: ToolParam, index: number) => {
     switch (param.type) {
-      case TOOL_PARAM_TYPES.OPENAI_MODEL:
-        return (
-          <Select
-            value={param.value as string}
-            onChange={(value) => handleParamChange(index, value)}
-            placeholder={t("toolConfig.input.model.placeholder")}
-            style={{ width: "100%" }}
-            options={[
-              {
-                label: t("toolConfig.model.main"),
-                value: OpenAIModel.MainModel,
-              },
-              { label: t("toolConfig.model.sub"), value: OpenAIModel.SubModel },
-            ]}
-          />
-        );
       case TOOL_PARAM_TYPES.STRING:
         const stringValue = param.value as string;
         // if string length is greater than 15, use TextArea

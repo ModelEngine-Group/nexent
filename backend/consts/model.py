@@ -87,7 +87,6 @@ class SingleModelConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     llm: SingleModelConfig
-    llmSecondary: SingleModelConfig
     embedding: SingleModelConfig
     multiEmbedding: SingleModelConfig
     rerank: SingleModelConfig
@@ -189,6 +188,7 @@ class OpinionRequest(BaseModel):
 class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
+    model_id: int
 
 
 class GenerateTitleRequest(BaseModel):

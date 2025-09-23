@@ -705,6 +705,17 @@ export const conversationService = {
         signal,
       });
 
+      // Check if the response is successful
+      if (!response.ok) {
+        // Handle specific HTTP status codes with error codes for internationalization
+        if (response.status === 413) {
+          throw new Error('REQUEST_ENTITY_TOO_LARGE');
+        } else {
+          throw new Error('FILE_PARSING_FAILED');
+        
+        }
+      }
+
       if (!response.body) {
         throw new Error("Response body is null");
       }
@@ -713,8 +724,7 @@ export const conversationService = {
     } catch (error) {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === 'AbortError') {
-        log.log('文件预处理请求已被取消');
-        throw new Error('请求已被取消');
+        throw new Error('Request has been aborted');
       }
       // Other errors are thrown normally
       throw error;

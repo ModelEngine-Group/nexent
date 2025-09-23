@@ -78,29 +78,22 @@ When you need to edit model configurations or delete models you no longer use, f
 
 ## ⚙️ Configure System Models
 
-After adding models, you also need to properly configure system main/secondary models, embedding models, and multimodal models. These system models will be used in subsequent agents.
+After adding models, you need to configure the system base model, which will be used for basic functions such as title generation and real-time file reading. When agents are running, you can specify specific models for each agent.
 
-### Large Language Models
+### Base Model Configuration
+The system base model is used for core platform functions, including:
+- Title generation
+- Real-time file reading
+- Basic text processing
 
-The system supports configuring main and secondary models for handling tasks of different complexity. The main model should be powerful, responsive, and capable to ensure core business performance. The secondary model can be cost-effective for less critical tasks.
-- Click the main model dropdown to select a model from the added LLMs.
-- Click the secondary model dropdown to select a model from the added LLMs.
+**Configuration Steps:**
+- Click the base model dropdown to select a model from the added large language models as the system base model.
 
-### Embedding Models
-
-Embedding models are mainly used for vectorizing text, images, and other data in the knowledge base, enabling efficient search and semantic understanding. Properly configuring embedding models can significantly improve search accuracy and multimodal data processing.
-- Click the embedding model dropdown to select a model from the added embedding models.
-
-### Multimodal Models
-
-Multimodal models combine vision and language capabilities, enabling complex scenarios involving text, images, etc. For example, when uploading images in the chat page, the system will automatically use a multimodal model for content analysis and intelligent conversation.
-- Click the vision-language model dropdown to select a model from the added multimodal models.
-
-<div style="display: flex; gap: 8px;">
-  <img src="./assets/model/select-model-1.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model/select-model-2.png" style="width: 30%; height: 100%;" />
-  <img src="./assets/model/select-model-3.png" style="width: 30%; height: 100%;" />
-</div>
+### Agent Model Configuration
+When creating and configuring agents, you can specify specific models for each agent:
+- Each agent can independently select the large language model to use
+- Support configuring different models for different agents to meet various business needs
+- Agent model configuration will be set in the agent configuration page
 
 ## ✅ Check Model Connectivity
 

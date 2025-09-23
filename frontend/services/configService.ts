@@ -24,8 +24,7 @@ export class ConfigService {
         return false;
       }
 
-      // TODO: What is this await for?
-      const result = await response.json();
+      await response.json();
       return true;
     } catch (error) {
       log.error('Save configuration request exception:', error);

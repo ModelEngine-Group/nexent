@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Badge, Input, App } from "antd";
+import { Modal, Badge, Input, App, Dropdown, Button } from "antd";
 import {
   ThunderboltOutlined,
   LoadingOutlined,
@@ -14,6 +14,8 @@ import {
   ExpandEditModalProps,
 } from "@/types/agentConfig";
 import { updateAgent } from "@/services/agentConfigService";
+import { modelService } from "@/services/modelService";
+import { ModelOption } from "@/types/modelConfig";
 
 import AgentConfigModal from "./agent/AgentConfigModal";
 
@@ -198,7 +200,7 @@ export interface PromptManagerProps {
   onAgentDisplayNameChange?: (displayName: string) => void;
   onModelChange?: (value: string) => void;
   onMaxStepChange?: (value: number | null) => void;
-  onGenerateAgent?: () => void;
+  onGenerateAgent?: (model: ModelOption) => void;
   onSaveAgent?: () => void;
   onDebug?: () => void;
   onExportAgent?: () => void;
@@ -208,6 +210,10 @@ export interface PromptManagerProps {
 
   // Agent being edited
   editingAgent?: any;
+
+  // Model selection callbacks
+  onModelSelect?: (model: ModelOption | null) => void;
+  selectedGenerateModel?: ModelOption | null;
 }
 
 export default function PromptManager({
@@ -242,6 +248,7 @@ export default function PromptManager({
   onDeleteSuccess,
   getButtonTitle,
   editingAgent,
+  onModelSelect,
 }: PromptManagerProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -249,6 +256,61 @@ export default function PromptManager({
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandIndex, setExpandIndex] = useState(0);
+
+  // Model selection states
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+
+  // Load available models on component mount
+  useEffect(() => {
+    loadAvailableModels();
+  }, []);
+
+  const loadAvailableModels = async () => {
+    setLoadingModels(true);
+    try {
+      const models = await modelService.getLLMModels();
+      setAvailableModels(models);
+    } catch (error) {
+      log.error("Failed to load available models:", error);
+      message.error(t("businessLogic.config.error.loadModelsFailed"));
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  // Handle model selection and auto-generate
+  const handleModelSelect = (model: ModelOption) => {
+    onModelSelect?.(model);
+    setShowModelDropdown(false);
+
+    // Auto-trigger generation after model selection
+    if (onGenerateAgent) {
+      onGenerateAgent(model);
+    }
+  };
+
+  // Handle generate button click - show model dropdown
+  const handleGenerateClick = () => {
+    if (availableModels.length === 0) {
+      message.warning(t("businessLogic.config.error.noAvailableModels"));
+      return;
+    }
+
+    setShowModelDropdown(true);
+  };
+
+  // Create dropdown items with disabled state for unavailable models
+  const modelDropdownItems = availableModels.map((model) => {
+    const isAvailable = model.connect_status === 'available';
+    return {
+      key: model.id,
+      label: model.displayName || model.name,
+      disabled: !isAvailable,
+      onClick: () => handleModelSelect(model),
+    };
+  });
 
   // Handle expand edit
   const handleExpandCard = (index: number) => {
@@ -356,56 +418,71 @@ export default function PromptManager({
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col border-t pt-2 system-prompt-container overflow-hidden">
-        {/* Business logic description section */}
-        <div className="flex-shrink-0 mb-4">
-          <div className="mb-2">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">
-              {t("businessLogic.title")}
-            </h3>
-          </div>
-          <div className="relative">
-            <Input.TextArea
-              value={businessLogic}
-              onChange={(e) => onBusinessLogicChange?.(e.target.value)}
-              placeholder={t("businessLogic.placeholder")}
-              className="w-full resize-none p-3 text-sm transition-all duration-300 system-prompt-business-logic"
-              style={{
-                minHeight: "120px",
-                maxHeight: "200px",
-                paddingRight: "12px",
-                paddingBottom: "40px", // Reserve space for button
-              }}
-              autoSize={{
-                minRows: 3,
-                maxRows: 5,
-              }}
-              disabled={!isEditingMode}
-            />
-            {/* Generate button */}
-            <div className="absolute bottom-2 right-2">
-              <button
-                onClick={onGenerateAgent}
-                disabled={isGeneratingAgent}
-                className="px-3 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ border: "none" }}
-              >
+        {/* Main content */}
+        <div className="flex-1 flex flex-col border-t pt-2 system-prompt-container overflow-hidden">
+          {/* Business logic description section */}
+          <div className="flex-shrink-0 mb-4">
+            <div className="mb-2">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">
+                {t("businessLogic.title")}
+              </h3>
+            </div>
+            <div className="relative">
+              <Input.TextArea
+                value={businessLogic}
+                onChange={(e) => onBusinessLogicChange?.(e.target.value)}
+                placeholder={t("businessLogic.placeholder")}
+                className="w-full resize-none p-3 text-sm transition-all duration-300 system-prompt-business-logic"
+                style={{
+                  minHeight: "120px",
+                  maxHeight: "200px",
+                  paddingRight: "12px",
+                  paddingBottom: "40px", // Reserve space for button
+                }}
+                autoSize={{
+                  minRows: 3,
+                  maxRows: 5,
+                }}
+                disabled={!isEditingMode}
+              />
+              {/* Generate button */}
+              <div className="absolute bottom-2 right-2">
                 {isGeneratingAgent ? (
-                  <>
+                  <button
+                    disabled={true}
+                    className="px-3 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ border: "none" }}
+                  >
                     <LoadingOutlined spin className="mr-1" />
                     {t("businessLogic.config.button.generating")}
-                  </>
+                  </button>
                 ) : (
-                  <>
-                    <ThunderboltOutlined className="mr-1" />
-                    {t("businessLogic.config.button.generatePrompt")}
-                  </>
+                  <Dropdown
+                    menu={{ items: modelDropdownItems }}
+                    open={showModelDropdown}
+                    onOpenChange={setShowModelDropdown}
+                    disabled={loadingModels || availableModels.length === 0}
+                    placement="bottomRight"
+                    trigger={['click']}
+                  >
+                    <button
+                      onClick={handleGenerateClick}
+                      disabled={loadingModels || availableModels.length === 0}
+                      className="px-3 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ border: "none" }}
+                    >
+                      {loadingModels ? (
+                        <LoadingOutlined className="mr-1" />
+                      ) : (
+                        <ThunderboltOutlined className="mr-1" />
+                      )}
+                      {t("businessLogic.config.button.generatePrompt")}
+                    </button>
+                  </Dropdown>
                 )}
-              </button>
+              </div>
             </div>
           </div>
-        </div>
 
         {/* Agent configuration section */}
         <div className="flex-1 min-h-0 system-prompt-content">

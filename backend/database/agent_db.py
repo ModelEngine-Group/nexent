@@ -79,7 +79,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "tenant_id": tenant_id,
         "created_by": user_id,
         "updated_by": user_id,
-        "model_name": "main_model",
         "max_steps": 5
     })
     with get_db_session() as session:

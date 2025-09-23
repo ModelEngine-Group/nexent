@@ -23,6 +23,7 @@ async def generate_and_save_system_prompt_api(
             authorization, http_request)
         return StreamingResponse(gen_system_prompt_streamable(
             agent_id=prompt_request.agent_id,
+            model_id=prompt_request.model_id,
             task_description=prompt_request.task_description,
             user_id=user_id,
             tenant_id=tenant_id,

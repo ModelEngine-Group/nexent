@@ -38,6 +38,7 @@ from services.model_management_service import (
     batch_update_models_for_tenant,
     delete_model_for_tenant,
     list_models_for_tenant,
+    list_llm_models_for_tenant,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -256,6 +257,22 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
         logging.error(f"Failed to list models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Failed to retrieve model list")
+
+
+@router.get("/llm_list")
+async def get_llm_model_list(authorization: Optional[str] = Header(None)):
+    """Get list of LLM models for the current tenant."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        llm_list = await list_llm_models_for_tenant(tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved LLM list",
+            "data": jsonable_encoder(llm_list)
+        })
+    except Exception as e:
+        logging.error(f"Failed to retrieve LLM list: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Failed to retrieve LLM list")
 
 
 @router.post("/healthcheck")

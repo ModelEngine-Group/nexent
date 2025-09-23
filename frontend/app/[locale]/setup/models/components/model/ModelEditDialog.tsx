@@ -124,7 +124,7 @@ export const ModelEditDialog = ({ isOpen, model, onClose, onSuccess }: ModelEdit
       if (isEmbeddingModel) maxTokensValue = 0
       
       await modelService.updateSingleModel({
-        model_id: model.id, // Use model name as ID
+        model_id: model.id.toString(),
         displayName: form.displayName,
         url: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
