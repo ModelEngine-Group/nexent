@@ -314,3 +314,29 @@ class MemoryAgentShareMode(str, Enum):
     @classmethod
     def default(cls) -> "MemoryAgentShareMode":
         return cls.NEVER
+
+
+# Voice Service Data Models
+# ---------------------------------------------------------------------------
+class VoiceConnectivityRequest(BaseModel):
+    """Request model for voice service connectivity check"""
+    model_type: str = Field(..., description="Type of model to check ('stt' or 'tts')")
+
+
+class VoiceConnectivityResponse(BaseModel):
+    """Response model for voice service connectivity check"""
+    connected: bool = Field(..., description="Whether the service is connected")
+    model_type: str = Field(..., description="Type of model checked")
+    message: str = Field(..., description="Status message")
+
+
+class TTSRequest(BaseModel):
+    """Request model for TTS text-to-speech conversion"""
+    text: str = Field(..., min_length=1, description="Text to convert to speech")
+    stream: bool = Field(True, description="Whether to stream the audio")
+
+
+class TTSResponse(BaseModel):
+    """Response model for TTS conversion"""
+    status: str = Field(..., description="Status of the TTS conversion")
+    message: Optional[str] = Field(None, description="Additional message")

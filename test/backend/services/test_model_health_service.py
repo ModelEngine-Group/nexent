@@ -35,9 +35,9 @@ sys.modules['nexent.core.agents.agent_model'] = MockModule()
 sys.modules['nexent.core.models'] = MockModule()
 sys.modules['nexent.core.models.embedding_model'] = MockModule()
 
-# Mock apps packages
-sys.modules['apps'] = MockModule()
-sys.modules['apps.voice_app'] = MockModule()
+# Mock services packages
+sys.modules['services'] = MockModule()
+sys.modules['services.voice_service'] = MockModule()
 
 # Define the ModelConnectStatusEnum for testing
 class ModelConnectStatusEnum:
@@ -88,8 +88,8 @@ with mock.patch.dict('sys.modules', {
     'utils.auth_utils': mock.MagicMock(),
     'utils.config_utils': mock.MagicMock(),
     'utils.model_name_utils': mock.MagicMock(),
-    'apps': mock.MagicMock(),
-    'apps.voice_app': mock.MagicMock(),
+    'services': mock.MagicMock(),
+    'services.voice_service': mock.MagicMock(),
     'consts.model': mock.MagicMock(),
     'consts.const': mock.MagicMock(),
     'consts.provider': mock.MagicMock()
@@ -243,13 +243,13 @@ async def test_perform_connectivity_check_vlm():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_tts():
     # Setup
-    with mock.patch("backend.services.model_health_service.VoiceService") as mock_voice_service:
+    with mock.patch("backend.services.model_health_service.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
-        # Fix: make check_connectivity return an awaitable coroutine instead of a bool
+        # Fix: make check_voice_connectivity return an awaitable coroutine instead of a bool
         async_mock = mock.AsyncMock()
         async_mock.return_value = True
-        mock_service_instance.check_connectivity = async_mock
-        mock_voice_service.return_value = mock_service_instance
+        mock_service_instance.check_voice_connectivity = async_mock
+        mock_get_voice_service.return_value = mock_service_instance
 
         # Execute
         result = await _perform_connectivity_check(
@@ -261,19 +261,19 @@ async def test_perform_connectivity_check_tts():
 
         # Assert
         assert result is True
-        mock_service_instance.check_connectivity.assert_called_once_with("tts")
+        mock_service_instance.check_voice_connectivity.assert_called_once_with("tts")
 
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_stt():
     # Setup
-    with mock.patch("backend.services.model_health_service.VoiceService") as mock_voice_service:
+    with mock.patch("backend.services.model_health_service.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
-        # Fix: make check_connectivity return an awaitable coroutine instead of a bool
+        # Fix: make check_voice_connectivity return an awaitable coroutine instead of a bool
         async_mock = mock.AsyncMock()
         async_mock.return_value = True
-        mock_service_instance.check_connectivity = async_mock
-        mock_voice_service.return_value = mock_service_instance
+        mock_service_instance.check_voice_connectivity = async_mock
+        mock_get_voice_service.return_value = mock_service_instance
 
         # Execute
         result = await _perform_connectivity_check(
@@ -285,7 +285,7 @@ async def test_perform_connectivity_check_stt():
 
         # Assert
         assert result is True
-        mock_service_instance.check_connectivity.assert_called_once_with("stt")
+        mock_service_instance.check_voice_connectivity.assert_called_once_with("stt")
 
 
 @pytest.mark.asyncio

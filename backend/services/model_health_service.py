@@ -7,7 +7,7 @@ from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding
 
-from apps.voice_app import VoiceService
+from services.voice_service import get_voice_service
 from consts.const import MODEL_ENGINE_APIKEY, MODEL_ENGINE_HOST, LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.exceptions import MEConnectionException, TimeoutException
 from consts.model import ModelConnectStatusEnum
@@ -108,7 +108,8 @@ async def _perform_connectivity_check(
             api_key=model_api_key
         ).check_connectivity()
     elif model_type in ["tts", "stt"]:
-        connectivity = await VoiceService().check_connectivity(model_type)
+        voice_service = get_voice_service()
+        connectivity = await voice_service.check_voice_connectivity(model_type)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
