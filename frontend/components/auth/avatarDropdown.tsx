@@ -7,6 +7,8 @@ import {
   UserOutlined,
   LogoutOutlined,
   LoginOutlined,
+  PoweroffOutlined,
+  CloseCircleFilled,
   UserAddOutlined,
 } from "@ant-design/icons";
 import type { ItemType } from "antd/es/menu/interface";
@@ -15,7 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { getRoleColor } from "@/lib/auth";
 
 export function AvatarDropdown() {
-  const { user, isLoading, logout, openLoginModal, openRegisterModal } =
+  const { user, isLoading, logout, revoke, openLoginModal, openRegisterModal } =
     useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
@@ -94,7 +96,7 @@ export function AvatarDropdown() {
           <div className="font-medium">{user.email}</div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
-              {t(user.role === "admin" ? "role_admin" : "role_user")}
+              {t(user.role === "admin" ? "auth.admin" : "auth.user")}
             </Tag>
           </div>
         </div>
@@ -122,6 +124,35 @@ export function AvatarDropdown() {
             logout();
           },
         });
+      },
+    },
+    {
+      key: "revoke",
+      icon: <PoweroffOutlined />,
+      label: t("auth.revoke"),
+      // danger: true,
+      className:
+        "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
+      onClick: () => {
+        if (user.role === "admin") {
+          modal.error({
+            title: t("auth.refuseRevoke"),
+            content: t("auth.refuseRevokePrompt"),
+            okText: t("auth.confirm"),
+          });
+        } else {
+          modal.confirm({
+            title: t("auth.confirmRevoke"),
+            content: t("auth.confirmRevokePrompt"),
+            icon: <CloseCircleFilled style={{ color: "red" }} />,
+            okText: t("auth.confirmRevokeOk"),
+            cancelText: t("auth.cancel"),
+            okButtonProps: { danger: true },
+            onOk: () => {
+              revoke();
+            },
+          });
+        }
       },
     },
   ];

@@ -66,3 +66,29 @@ def insert_user_tenant(user_id: str, tenant_id: str):
             updated_by=user_id
         )
         session.add(user_tenant)
+
+
+def soft_delete_user_tenant_by_user_id(user_id: str, actor: Optional[str] = None) -> bool:
+    """
+    Soft delete user-tenant relationship(s) for the specified user.
+
+    Args:
+        user_id: User ID
+        actor: Updated_by field value
+
+    Returns:
+        bool: Whether any rows were affected
+    """
+    with get_db_session() as session:
+        # Build soft-delete update
+        update_data: Dict[str, Any] = {"delete_flag": "Y"}
+        if actor:
+            update_data["updated_by"] = actor
+
+        result = (
+            session.query(UserTenant)
+            .filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
+            .update(update_data, synchronize_session=False)
+        )
+
+        return result > 0

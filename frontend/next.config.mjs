@@ -21,6 +21,9 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
+  // Optimize resource preloading
+  optimizeCss: true,
+  compress: true,
 }
 
 mergeConfig(nextConfig, userConfig)

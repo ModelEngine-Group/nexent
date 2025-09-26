@@ -68,7 +68,26 @@ jobs:
             echo "✅ All tests passed successfully."
           fi
 
-      - name: Upload coverage to Codecov
+      # Detect architecture
+      - name: Detect architecture
+        id: arch
+        run: echo "arch=$(uname -m)" >> $GITHUB_OUTPUT
+
+      # Use Python uploader on ARM
+      - name: Upload coverage to Codecov (Python uploader on ARM)
+        if: startsWith(steps.arch.outputs.arch, 'arm') || startsWith(steps.arch.outputs.arch, 'aarch64')
+        run: |
+          pip install --upgrade codecov
+          codecov \
+            -t ${{ secrets.CODECOV_TOKEN }} \
+            -f test/coverage.xml \
+            -F unittests \
+            -n codecov-umbrella \
+            -v
+
+      # Use official action on x86
+      - name: Upload coverage to Codecov (Official Action on x86)
+        if: steps.arch.outputs.arch == 'x86_64'
         uses: codecov/codecov-action@v4
         with:
           files: test/coverage.xml

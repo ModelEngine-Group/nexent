@@ -224,6 +224,30 @@ def test_get_supabase_client_failure(monkeypatch):
     assert result is None
 
 
+def test_get_supabase_admin_client_success(monkeypatch):
+    """Test successful Supabase admin client creation using SERVICE_ROLE_KEY"""
+    mock_client = MagicMock()
+    monkeypatch.setattr(au, "create_client", lambda url, key: mock_client)
+    monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
+    monkeypatch.setattr(au, "SERVICE_ROLE_KEY", "svc_key")
+
+    result = au.get_supabase_admin_client()
+    assert result == mock_client
+
+
+def test_get_supabase_admin_client_failure(monkeypatch):
+    """Test Supabase admin client creation failure"""
+    def mock_create_client(url, key):
+        raise Exception("Connection failed")
+
+    monkeypatch.setattr(au, "create_client", mock_create_client)
+    monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
+    monkeypatch.setattr(au, "SERVICE_ROLE_KEY", "svc_key")
+
+    result = au.get_supabase_admin_client()
+    assert result is None
+
+
 def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     """Test unexpected error during AK/SK authentication"""
     def mock_verify_aksk_signature(*args):

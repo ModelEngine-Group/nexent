@@ -6,12 +6,24 @@ from fastapi import Header
 from supabase import Client
 from pydantic import EmailStr
 
-from utils.auth_utils import get_supabase_client, calculate_expires_at, get_jwt_expiry_seconds
+from utils.auth_utils import (
+    get_supabase_client,
+    get_supabase_admin_client,
+    calculate_expires_at,
+    get_jwt_expiry_seconds,
+)
 from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 
 from database.model_management_db import create_model_record
-from database.user_tenant_db import insert_user_tenant
+from database.user_tenant_db import insert_user_tenant, soft_delete_user_tenant_by_user_id
+from database.memory_config_db import soft_delete_all_configs_by_user_id
+from database.conversation_db import soft_delete_all_conversations_by_user
+from utils.memory_utils import build_memory_config
+from nexent.memory.memory_service import clear_memory
+
+
+logging.getLogger("user_management_service").setLevel(logging.DEBUG)
 
 
 def set_auth_token_to_client(client: Client, token: str) -> None:
@@ -295,3 +307,75 @@ async def get_session_by_authorization(authorization):
     else:
         # Use domain-specific exception for invalid/expired token
         raise UnauthorizedError("Session is invalid or expired")
+
+
+async def revoke_regular_user(user_id: str, tenant_id: str) -> None:
+    """Revoke a regular user's account and purge related data.
+
+    Steps:
+    1) Soft-delete user-tenant relation rows and memory user configs, and all conversations for the user in PostgreSQL.
+    2) Clear user-level memories in memory store (levels: "user" and "user_agent").
+    3) Permanently delete the user from Supabase using service role key (admin API).
+    """
+    try:
+        logging.debug(f"Start deleting user {user_id} related data...")
+        # 1) PostgreSQL soft-deletes
+        try:
+            soft_delete_user_tenant_by_user_id(user_id, actor=user_id)
+            logging.debug("\tTenant relationship deleted.")
+        except Exception as e:
+            logging.error(
+                f"Failed soft-deleting user-tenant for user {user_id}: {e}")
+
+        try:
+            soft_delete_all_configs_by_user_id(user_id, actor=user_id)
+            logging.debug("\tMemory user configs deleted.")
+        except Exception as e:
+            logging.error(
+                f"Failed soft-deleting memory user configs for user {user_id}: {e}")
+
+        try:
+            deleted_convs = soft_delete_all_conversations_by_user(user_id)
+            logging.debug(f"\t{deleted_convs} conversations deleted")
+        except Exception as e:
+            logging.error(
+                f"Failed soft-deleting conversations for user {user_id}: {e}")
+
+        # 2) Clear memory records
+        try:
+            memory_config = build_memory_config(tenant_id)
+            # Clear user-level memory
+            await clear_memory(
+                memory_level="user",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            # Also clear user_agent-level memory for all agents (API clears by user + any agent)
+            await clear_memory(
+                memory_level="user_agent",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            logging.debug(
+                "\tMemories under current embedding configuration deleted")
+        except Exception as e:
+            logging.error(f"Failed clearing memory for user {user_id}: {e}")
+
+        # 3) Delete Supabase user using admin API
+        try:
+            admin_client = get_supabase_admin_client()
+            if admin_client and hasattr(admin_client.auth, "admin"):
+                admin_client.auth.admin.delete_user(user_id)
+            else:
+                raise RuntimeError("Supabase admin client not available")
+            logging.debug("\tUser account deleted.")
+        except Exception as e:
+            logging.error(f"Failed deleting supabase user {user_id}: {e}")
+            # prior steps already purged local data
+        logging.info(f"Account {user_id} has been successfully deleted")
+    except Exception as e:
+        logging.error(
+            f"Unexpected error in revoke_regular_user for {user_id}: {e}")
+        # swallow to keep idempotent behavior

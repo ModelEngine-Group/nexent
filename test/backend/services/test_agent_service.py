@@ -2410,7 +2410,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
         is_debug=True,  # avoid persisting messages to focus on error path
     )
 
-    async def failing_agent_run(*_, **__):
+    def failing_agent_run(*_, **__):
         raise Exception("oops")
 
     monkeypatch.setattr(

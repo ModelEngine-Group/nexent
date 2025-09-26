@@ -11,7 +11,7 @@ from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user, signin_user, refresh_user_token, \
-    get_session_by_authorization
+    get_session_by_authorization, revoke_regular_user
 from consts.exceptions import UnauthorizedError
 from utils.auth_utils import get_current_user_id
 
@@ -69,7 +69,7 @@ async def signup(request: UserSignUpRequest):
                             detail="EMAIL_ALREADY_EXISTS")
     except AuthWeakPasswordError as e:
         logging.error(f"User registration failed by weak password: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
                             detail="WEAK_PASSWORD")
     except Exception as e:
         logging.error(f"User registration failed, unknown error: {str(e)}")
@@ -87,7 +87,7 @@ async def signin(request: UserSignInRequest):
                             content=signin_content)
     except AuthApiError as e:
         logging.error(f"User login failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                             detail="Email or password error")
     except Exception as e:
         logging.error(f"User login failed, unknown error: {str(e)}")
@@ -200,3 +200,48 @@ async def get_user_id(request: Request):
         logging.error(f"Get user ID failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Get user ID failed")
+
+
+@router.post("/revoke")
+async def revoke_user_account(request: Request):
+    """Delete current regular user's account and purge related data.
+
+    Notes:
+    - Tenant admin (role=admin) is not allowed to be revoked via this endpoint.
+    - Idempotent: local deletions are soft deletes; Supabase deletion may already have occurred.
+    """
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="No authorization token provided")
+    try:
+        # Identify current user and tenant
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        # Determine role via token validation
+        is_valid, user = validate_token(authorization.replace("Bearer ", ""))
+        if not is_valid or not user:
+            raise UnauthorizedError("User not logged in or session invalid")
+
+        # Extract role from user metadata
+        user_role = "user"
+        if getattr(user, "user_metadata", None) and 'role' in user.user_metadata:
+            user_role = user.user_metadata['role']
+
+        # Disallow admin revocation by this endpoint
+        if user_role == "admin":
+            raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                                detail="Admin account cannot be deleted via this endpoint")
+
+        # Orchestrate revoke for regular user
+        await revoke_regular_user(user_id=user_id, tenant_id=tenant_id)
+
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User account revoked"})
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"User revoke failed: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")

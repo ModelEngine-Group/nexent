@@ -12,36 +12,34 @@ formatter = logging.Formatter('%(message)s')
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-def install_required_packages():
-    """Install required packages if not available"""
-    packages_to_install = []
+def check_required_packages():
+    """Check if required packages are available"""
+    missing_packages = []
     
     # Check for pytest-cov
     try:
         import pytest_cov
     except ImportError:
-        packages_to_install.append("pytest-cov")
+        missing_packages.append("pytest-cov")
     
     # Check for coverage
     try:
         import coverage
     except ImportError:
-        packages_to_install.append("coverage")
+        missing_packages.append("coverage")
     
     # Check for pytest-asyncio
     try:
         import pytest_asyncio
     except ImportError:
-        packages_to_install.append("pytest-asyncio")
+        missing_packages.append("pytest-asyncio")
     
-    if packages_to_install:
-        logger.info(f"Installing required packages: {', '.join(packages_to_install)}")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install"] + packages_to_install)
-            return True
-        except subprocess.CalledProcessError:
-            logger.error(f"Failed to install packages: {', '.join(packages_to_install)}")
-            return False
+    if missing_packages:
+        logger.error(f"Missing required packages: {', '.join(missing_packages)}")
+        logger.error("Please install them using: pip install " + " ".join(missing_packages))
+        sys.exit(1)
+    
+    logger.info("All required packages are available")
     return True
 
 
@@ -89,10 +87,8 @@ def run_tests():
     # Change to project root directory
     os.chdir(project_root)
     
-    # Install required packages
-    if not install_required_packages():
-        logger.error("Failed to install required packages. Exiting.")
-        return False
+    # Check required packages
+    check_required_packages()
     
     # Coverage data file path
     coverage_data_file = os.path.join(current_dir, '.coverage')
@@ -116,19 +112,6 @@ def run_tests():
     backend_source = os.path.join(project_root, 'backend')
     sdk_source = os.path.join(project_root, 'sdk')
     
-    # Define coverage omit patterns
-    omit_patterns = [
-        '*/test*',
-        '*/tests/*',
-        '*/__pycache__/*',
-        '*/venv/*',
-        '*/env/*',
-        '*/.venv/*',
-        '*/__init__.py'
-    ]
-    
-    # Generate command line arguments for pytest-cov
-    omit_args = ",".join(omit_patterns)
     
     # Run each test file with pytest-cov
     for test_file in test_files:
@@ -137,8 +120,8 @@ def run_tests():
         # Replace backslashes with forward slashes for pytest
         rel_path = rel_path.replace("\\", "/")
         
-        logger.info(f"\nRunning tests in {rel_path}")
-        logger.info("-" * 50)
+        # Display running message without newline using print, then flush
+        print(f"{rel_path:60}\t\t", end='', flush=True)
         
         # Run the test using pytest with coverage from project root
         # Use --cov to specify both backend and sdk directories
@@ -147,16 +130,16 @@ def run_tests():
             "-m", 
             "pytest", 
             rel_path, 
-            "-v", 
+            "-q",  # Quiet mode for cleaner output
             f"--cov={backend_source}", 
             f"--cov={sdk_source}",
             f"--cov-report=", 
             "--cov-append",
             "--cov-branch",  # Enable branch coverage
             "--cov-config=test/.coveragerc",  # Use the config file
+            "--disable-warnings" # Disable warnings
         ]
         
-        # Add omit patterns through environment variable to avoid command line length issues
         env = os.environ.copy()
         env["PYTHONPATH"] = f"{project_root}:{env.get('PYTHONPATH', '')}"
         # For Windows systems, adjust path separator
@@ -167,11 +150,28 @@ def run_tests():
         
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         
-        # Print the output
-        logger.info(result.stdout)
-        if result.stderr:
-            logger.error("Errors:")
-            logger.error(result.stderr)
+        # First, capture warnings and errors to display separately
+        capture_warnings = False
+        capture_errors = False
+        warning_lines = []
+        error_lines = []
+        
+        for line in result.stdout.split('\n'):
+            if "warnings summary" in line.lower():
+                capture_warnings = True
+                capture_errors = False
+                warning_lines.append(line)
+            elif line.strip().startswith("=") and ("ERROR" in line or "FAIL" in line):
+                capture_errors = True
+                capture_warnings = False
+                error_lines.append(line)
+            elif capture_warnings and not line.strip().startswith("=== "):
+                warning_lines.append(line)
+            elif capture_errors:
+                error_lines.append(line)
+            elif line.strip().startswith("=== ") and ("short test summary" in line or "warnings summary" not in line):
+                capture_warnings = False
+                capture_errors = False
         
         # Check if any tests actually failed (not just warnings)
         test_failed = False
@@ -182,14 +182,6 @@ def run_tests():
                            "ERROR " in result.stdout or 
                            "ImportError" in result.stdout or 
                            "ModuleNotFoundError" in result.stdout)
-        
-        # Count tests and results
-        test_info = {
-            'file': rel_path,
-            'success': result.returncode == 0 or (not test_failed),  # Success if returncode is 0 or only warnings
-            'output': result.stdout
-        }
-        test_results.append(test_info)
         
         # Parse pytest output to get test counts
         file_total = file_passed = file_failed = 0
@@ -246,6 +238,58 @@ def run_tests():
                 except Exception:
                     # If counting fails, stick with the default of 1
                     pass
+
+        # Generate the summary line for this test file
+        execution_time = ""
+        for line in result.stdout.split('\n'):
+            if " passed" in line and " in " in line:
+                parts = line.strip().split()
+                for i, part in enumerate(parts):
+                    if part == "in" and i < len(parts) - 1:
+                        execution_time = parts[i+1]
+                        break
+                break
+        
+        # Format and print the summary line
+        if file_passed > 0 or file_failed > 0:
+            if file_failed > 0:
+                temp_result = f" {file_passed} passed, {file_failed} failed"
+                summary = f"{execution_time:6} | {temp_result:20}"
+            else:
+                temp_result = f" {file_passed} passed"
+                summary = f"{execution_time:6} | {temp_result:20}"
+        else:
+            summary = "No tests collected or execution failed"
+        
+        # Complete the line started earlier
+        print(summary)
+        
+        # Log warnings if any
+        if warning_lines:
+            logger.warning("Warnings detected:")
+            for line in warning_lines:
+                if line.strip():  # Only log non-empty lines
+                    logger.warning(line)
+        
+        # Log errors if any
+        if error_lines:
+            logger.error("Errors detected:")
+            for line in error_lines:
+                if line.strip():  # Only log non-empty lines
+                    logger.error(line)
+        
+        # Log stderr if present
+        if result.stderr:
+            logger.error("Standard error output:")
+            logger.error(result.stderr)
+
+        # Count tests and results
+        test_info = {
+            'file': rel_path,
+            'success': result.returncode == 0,  # Success only if returncode is 0
+            'output': result.stdout
+        }
+        test_results.append(test_info)
 
         total_tests += file_total
         passed_tests += file_passed

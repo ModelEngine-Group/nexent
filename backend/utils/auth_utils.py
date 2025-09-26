@@ -9,7 +9,7 @@ import jwt
 from fastapi import Request
 from supabase import create_client
 
-from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_URL, SUPABASE_KEY, DEBUG_JWT_EXPIRE_SECONDS, LANGUAGE
+from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_URL, SUPABASE_KEY, SERVICE_ROLE_KEY, DEBUG_JWT_EXPIRE_SECONDS, LANGUAGE
 from consts.exceptions import LimitExceededError, SignatureValidationError, UnauthorizedError
 from database.user_tenant_db import get_user_tenant_by_user_id
 
@@ -196,11 +196,20 @@ def validate_aksk_authentication(headers: dict, request_body: str = "") -> bool:
 
 
 def get_supabase_client():
-    """Get Supabase client instance with service key for admin operations"""
+    """Get Supabase client instance with regular key (user-context operations)."""
     try:
         return create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
         logging.error(f"Failed to create Supabase client: {str(e)}")
+        return None
+
+
+def get_supabase_admin_client():
+    """Get Supabase client instance with service role key for admin operations."""
+    try:
+        return create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
+    except Exception as e:
+        logging.error(f"Failed to create Supabase admin client: {str(e)}")
         return None
 
 

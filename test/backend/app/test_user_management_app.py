@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -223,7 +223,7 @@ class TestUserSignup:
                 }
             )
 
-            assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+            assert response.status_code == HTTPStatus.NOT_ACCEPTABLE
             data = response.json()
             assert data["detail"] == "WEAK_PASSWORD"
 
@@ -288,7 +288,7 @@ class TestUserSignin:
                 }
             )
 
-            assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+            assert response.status_code == HTTPStatus.UNAUTHORIZED
             data = response.json()
             assert data["detail"] == "Email or password error"
 
@@ -568,6 +568,77 @@ class TestGetCurrentUserId:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
         assert data["detail"] == "Get user ID failed"
+
+
+class TestRevokeUserAccount:
+    """Tests for the /user/revoke endpoint"""
+
+    @patch('apps.user_management_app.revoke_regular_user', new_callable=AsyncMock)
+    @patch('apps.user_management_app.validate_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_revoke_success_regular_user(self, mock_get_ids, mock_validate, mock_revoke):
+        mock_get_ids.return_value = ("user123", "tenant456")
+        user = MagicMock()
+        user.user_metadata = {"role": "user"}
+        mock_validate.return_value = (True, user)
+
+        response = client.post(
+            "/user/revoke", headers={"Authorization": "Bearer token"})
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "User account revoked"
+        mock_revoke.assert_awaited_once_with(
+            user_id="user123", tenant_id="tenant456")
+
+    @patch('apps.user_management_app.validate_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_revoke_forbidden_admin(self, mock_get_ids, mock_validate):
+        mock_get_ids.return_value = ("admin123", "tenant456")
+        user = MagicMock()
+        user.user_metadata = {"role": "admin"}
+        mock_validate.return_value = (True, user)
+
+        response = client.post(
+            "/user/revoke", headers={"Authorization": "Bearer token"})
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        assert response.json()[
+            "detail"] == "Admin account cannot be deleted via this endpoint"
+
+    def test_revoke_no_authorization(self):
+        response = client.post("/user/revoke")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert response.json()["detail"] == "No authorization token provided"
+
+    @patch('apps.user_management_app.validate_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_revoke_invalid_session(self, mock_get_ids, mock_validate):
+        mock_get_ids.return_value = ("user123", "tenant456")
+        mock_validate.return_value = (False, None)
+
+        response = client.post(
+            "/user/revoke", headers={"Authorization": "Bearer invalid"})
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert response.json()[
+            "detail"] == "User not logged in or session invalid"
+
+    @patch('apps.user_management_app.revoke_regular_user', new_callable=AsyncMock)
+    @patch('apps.user_management_app.validate_token')
+    @patch('apps.user_management_app.get_current_user_id')
+    def test_revoke_error(self, mock_get_ids, mock_validate, mock_revoke):
+        mock_get_ids.return_value = ("user123", "tenant456")
+        user = MagicMock()
+        user.user_metadata = {"role": "user"}
+        mock_validate.return_value = (True, user)
+        mock_revoke.side_effect = Exception("boom")
+
+        response = client.post(
+            "/user/revoke", headers={"Authorization": "Bearer token"})
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "User revoke failed"
 
 
 class TestIntegration:

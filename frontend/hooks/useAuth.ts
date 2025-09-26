@@ -324,6 +324,25 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
     }
   }
 
+  const revoke = async () => {
+    try {
+      setIsLoading(true);
+      await authService.revoke();
+      setUser(null);
+      setShouldCheckSession(false);
+      message.success(t("auth.revokeSuccess"));
+      // Manually trigger storage event
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "session", newValue: null })
+      );
+    } catch (error: any) {
+      log.error("Revoke failed:", error?.message || error);
+      message.error(t("auth.revokeFailed"));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const contextValue: AuthContextType = {
     user,
     isLoading,
@@ -341,6 +360,7 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
     login,
     register,
     logout,
+    revoke,
   };
 
   return children(contextValue);

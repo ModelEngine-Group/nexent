@@ -67,7 +67,8 @@ sys.modules['backend.consts.exceptions'] = exceptions_mock
 from backend.database.user_tenant_db import (
     get_user_tenant_by_user_id,
     insert_user_tenant,
-    get_all_tenant_ids
+    get_all_tenant_ids,
+    soft_delete_user_tenant_by_user_id,
 )
 
 class MockUserTenant:
@@ -349,3 +350,41 @@ def test_get_all_tenant_ids_with_existing_tenants(monkeypatch, mock_session):
     assert "default_tenant" in result  # DEFAULT_TENANT_ID from consts_mock
     # Should not duplicate DEFAULT_TENANT_ID
     assert result.count("default_tenant") == 1
+
+
+def test_soft_delete_user_tenant_by_user_id_success(monkeypatch, mock_session):
+    """Test soft deletion updates rows for the given user"""
+    session, _ = mock_session
+
+    # Setup query filter().update() chain
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 2
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_user_tenant_by_user_id("user123", actor="actor1")
+    assert ok is True
+    mock_query.filter.assert_called_once()
+    mock_query.filter.return_value.update.assert_called_once()
+
+
+def test_soft_delete_user_tenant_by_user_id_no_rows(monkeypatch, mock_session):
+    """Test soft deletion when no rows match"""
+    session, _ = mock_session
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 0
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_user_tenant_by_user_id("none")
+    assert ok is False

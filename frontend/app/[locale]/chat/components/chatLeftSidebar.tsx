@@ -621,7 +621,7 @@ export function ChatSidebar({
                           color={getRoleColor(userRole)}
                           className="mt-1 cursor-auto w-fit"
                         >
-                          {t(userRole === "admin" ? "role_admin" : "role_user")}
+                          {t(userRole === "admin" ? "auth.admin" : "auth.user")}
                         </Tag>
                       )}
                     </div>

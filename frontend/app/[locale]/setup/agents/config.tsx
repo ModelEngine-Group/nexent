@@ -189,7 +189,7 @@ export default function AgentConfig() {
         );
       }
     } catch (error) {
-      log.error(t("debug.log.exportAgentFailed"), error);
+      log.error(t("agentConfig.agents.exportFailed"), error);
       message.error(t("businessLogic.config.error.agentExportFailed"));
     }
   };
@@ -228,7 +228,7 @@ export default function AgentConfig() {
         );
       }
     } catch (error) {
-      log.error(t("debug.log.deleteAgentFailed"), error);
+      log.error(t("agentConfig.agents.deleteFailed"), error);
       message.error(t("businessLogic.config.message.agentDeleteFailed"));
     }
   };
@@ -398,7 +398,7 @@ export default function AgentConfig() {
         message.error(t("agentConfig.tools.refreshFailed"));
       }
     } catch (error) {
-      log.error(t("agentConfig.debug.refreshToolsFailed"), error);
+      log.error(t("agentConfig.tools.refreshFailedDebug"), error);
       message.error(t("agentConfig.tools.refreshFailed"));
     }
   };

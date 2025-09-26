@@ -25,6 +25,9 @@ from utils.model_name_utils import (
     split_repo_name,
     sort_models_by_id,
 )
+from utils.memory_utils import build_memory_config as build_memory_config_for_tenant
+from services.elasticsearch_service import get_es_core
+from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")
 
@@ -227,11 +230,42 @@ async def delete_model_for_tenant(user_id: str, tenant_id: str, display_name: st
 
         deleted_types: List[str] = []
         if model.get("model_type") in ["embedding", "multi_embedding"]:
+            # Fetch both variants once to avoid repeated lookups
+            models_by_type: Dict[str, Dict[str, Any]] = {}
             for t in ["embedding", "multi_embedding"]:
                 m = get_model_by_display_name(display_name, tenant_id)
                 if m and m.get("model_type") == t:
-                    delete_model_record(m["model_id"], user_id, tenant_id)
-                    deleted_types.append(t)
+                    models_by_type[t] = m
+
+            # Best-effort memory cleanup using the fetched variants
+            try:
+                es_core = get_es_core()
+                base_memory_config = build_memory_config_for_tenant(tenant_id)
+                for t, m in models_by_type.items():
+                    try:
+                        await clear_model_memories(
+                            es_core=es_core,
+                            model_repo=m.get("model_repo", ""),
+                            model_name=m.get("model_name", ""),
+                            embedding_dims=int(m.get("max_tokens") or 0),
+                            base_memory_config=base_memory_config,
+                        )
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Best-effort clear_model_memories failed for %s/%s dims=%s: %s",
+                            m.get("model_repo", ""),
+                            m.get("model_name", ""),
+                            m.get("max_tokens"),
+                            cleanup_exc,
+                        )
+            except Exception as outer_cleanup_exc:
+                logger.warning(
+                    "Memory cleanup preparation failed: %s", outer_cleanup_exc)
+
+            # Delete the fetched variants
+            for t, m in models_by_type.items():
+                delete_model_record(m["model_id"], user_id, tenant_id)
+                deleted_types.append(t)
         else:
             delete_model_record(model["model_id"], user_id, tenant_id)
             deleted_types.append(model.get("model_type", "unknown"))

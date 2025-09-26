@@ -452,3 +452,219 @@ def test_filter_by_memory_level_variants():
     with pytest.raises(ValueError):
         memory_service._filter_by_memory_level("bad", data)
 
+
+# ---------------------------------------------------------------------------
+# Additional coverage for error paths and clear_model_memories
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_memory_in_levels_ignores_failing_levels(monkeypatch):
+    async def _fake_add(messages, memory_level, memory_config, tenant_id, user_id, agent_id, infer):  # noqa: ARG001
+        if memory_level == "agent":
+            raise RuntimeError("boom")
+        return {"results": [{"id": memory_level, "event": "ADD"}]}
+
+    monkeypatch.setattr(memory_service, "add_memory", _fake_add)
+
+    out = await memory_service.add_memory_in_levels(
+        messages="hi",
+        memory_config={},
+        tenant_id="t1",
+        user_id="u1",
+        agent_id="a1",
+        memory_levels=["agent", "user"],
+    )
+    # agent failed and returns [], user succeeded
+    assert [r["id"] for r in out["results"]] == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_search_memory_in_levels_ignores_failing_levels_and_preserves_order(monkeypatch):
+    async def _fake_search(query_text, memory_level, memory_config, tenant_id, user_id, agent_id, top_k, threshold):  # noqa: ARG001
+        if memory_level == "user":
+            raise RuntimeError("fail user")
+        return {"results": [{"id": f"ok-{memory_level}", "memory": "m", "score": 0.9}]}
+
+    monkeypatch.setattr(memory_service, "search_memory", _fake_search)
+
+    levels = ["tenant", "user", "agent"]
+    out = await memory_service.search_memory_in_levels(
+        query_text="q",
+        memory_config={},
+        tenant_id="t1",
+        user_id="u1",
+        agent_id="a1",
+        top_k=2,
+        threshold=0.6,
+        memory_levels=levels,
+    )
+    # Only tenant and agent appear, in their relative order
+    got_ids = [r["id"] for r in out["results"]]
+    assert got_ids == ["ok-tenant", "ok-agent"]
+
+
+@pytest.mark.asyncio
+async def test_list_memory_non_coroutine_results(monkeypatch):
+    class Mem:
+        async def get_all(self, *, user_id, agent_id=None):  # noqa: ANN001
+            return {"results": [
+                {"id": "1", "memory": "x"},
+                {"id": "2", "memory": "a", "agent_id": agent_id or "a1"},
+            ]}
+
+    async def _gm(_: Dict[str, Any]):
+        return Mem()
+
+    monkeypatch.setattr(memory_service, "get_memory_instance", _gm)
+
+    # user level -> only items without agent_id
+    out = await memory_service.list_memory(
+        memory_level="user",
+        memory_config={},
+        tenant_id="t1",
+        user_id="u1",
+    )
+    assert out == {"items": [{"id": "1", "memory": "x"}], "total": 1}
+
+
+# ---------------------------- clear_model_memories ---------------------------
+
+
+class _DummyESCore:
+    def __init__(self, exists_behavior=None, delete_raises=False):
+        if exists_behavior is None:
+            def exists_behavior(index):  # noqa: ANN001
+                return True
+        self._exists_behavior = exists_behavior
+        indices = types.SimpleNamespace(exists=self._exists_behavior)
+        self.client = types.SimpleNamespace(indices=indices)
+        self._delete_raises = delete_raises
+        self.deleted = []
+
+    def delete_index(self, index_name: str):
+        self.deleted.append(index_name)
+        if self._delete_raises:
+            raise RuntimeError("delete failed")
+
+
+@pytest.mark.asyncio
+async def test_clear_model_memories_early_exit_when_index_missing(monkeypatch):
+    es = _DummyESCore(exists_behavior=lambda index: False)
+
+    # Ensure reset is not called when index missing
+    called = {"reset": False}
+
+    async def _reset(cfg):  # noqa: ANN001
+        called["reset"] = True
+        return True
+
+    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
+
+    ok = await memory_service.clear_model_memories(
+        es_core=es,
+        model_repo="jina-ai",
+        model_name="jina-embeddings-v2-base-en",
+        embedding_dims=768,
+        base_memory_config={"vector_store": {
+            "config": {}}, "embedder": {"config": {}}},
+    )
+    assert ok is True
+    assert called["reset"] is False
+    assert es.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_clear_model_memories_success_and_config_adjustment_with_repo(monkeypatch):
+    es = _DummyESCore(exists_behavior=lambda index: True)
+    seen_config: Dict[str, Any] = {}
+
+    async def _reset(cfg):  # noqa: ANN001
+        seen_config.update(cfg)
+        return True
+
+    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
+
+    ok = await memory_service.clear_model_memories(
+        es_core=es,
+        model_repo="jina-ai",
+        model_name="jina-embeddings-v2-base-en",
+        embedding_dims=1024,
+        base_memory_config={
+            "vector_store": {"config": {"collection_name": "ignored", "embedding_model_dims": 0}},
+            "embedder": {"config": {"embedding_dims": 0}},
+        },
+    )
+    assert ok is True
+
+    # Index name should include repo and dims
+    assert es.deleted == ["mem0_jina-ai_jina-embeddings-v2-base-en_1024"]
+    # Config passed to reset should be adjusted (without mutating base)
+    assert seen_config["vector_store"]["config"]["collection_name"] == "mem0_jina-ai_jina-embeddings-v2-base-en_1024"
+    assert seen_config["vector_store"]["config"]["embedding_model_dims"] == 1024
+    assert seen_config["embedder"]["config"]["embedding_dims"] == 1024
+
+
+@pytest.mark.asyncio
+async def test_clear_model_memories_handles_es_exists_exception(monkeypatch):
+    def _exists_raises(index):  # noqa: ANN001
+        raise RuntimeError("exists failed")
+
+    es = _DummyESCore(exists_behavior=_exists_raises)
+
+    # reset is called despite exists() failing
+    called = {"reset": 0}
+
+    async def _reset(cfg):  # noqa: ANN001
+        called["reset"] += 1
+        return True
+
+    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
+
+    ok = await memory_service.clear_model_memories(
+        es_core=es,
+        model_repo="",
+        model_name="m",
+        embedding_dims=128,
+        base_memory_config={"vector_store": {
+            "config": {}}, "embedder": {"config": {}}},
+    )
+    assert ok is True
+    assert called["reset"] == 1
+    assert es.deleted == ["mem0_m_128"]
+
+
+@pytest.mark.asyncio
+async def test_clear_model_memories_swallow_failures_and_no_repo(monkeypatch):
+    es = _DummyESCore(exists_behavior=lambda index: True, delete_raises=True)
+
+    async def _reset(_: Dict[str, Any]):
+        raise RuntimeError("reset failed")
+
+    monkeypatch.setattr(memory_service, "reset_all_memory", _reset)
+
+    ok = await memory_service.clear_model_memories(
+        es_core=es,
+        model_repo=None,
+        model_name="Model",
+        embedding_dims=256,
+        base_memory_config={"vector_store": {
+            "config": {}}, "embedder": {"config": {}}},
+    )
+    # Even with reset and delete failures, function reports best-effort True
+    assert ok is True
+    assert es.deleted == ["mem0_model_256"]
+
+
+@pytest.mark.asyncio
+async def test_clear_model_memories_invalid_model_name():
+    es = _DummyESCore(exists_behavior=lambda index: True)
+    ok = await memory_service.clear_model_memories(
+        es_core=es,
+        model_repo="any",
+        model_name="",
+        embedding_dims=512,
+        base_memory_config={"vector_store": {
+            "config": {}}, "embedder": {"config": {}}},
+    )
+    assert ok is False

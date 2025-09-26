@@ -1,8 +1,5 @@
 # Nexent Contributing Guide ✨
 
-[![English](https://img.shields.io/badge/English-README-blue)](CONTRIBUTING.md)
-[![中文](https://img.shields.io/badge/中文-README-green)](CONTRIBUTING_CN.md)
-
 Thank you for considering contributing to Nexent! From code to docs to sharing your experience, every bit helps make Nexent better for everyone. It also helps us if you share Nexent with others, or simply ⭐️ the repo. Thanks a million! 💛 Let's build something amazing together! 🎉
 
 In terms of licensing, please take a minute to read our short [License and Contributor Agreement](https://modelengine-group.github.io/nexent/en/license). The community also adheres to the [code of conduct](https://modelengine-group.github.io/nexent/en/code-of-conduct).

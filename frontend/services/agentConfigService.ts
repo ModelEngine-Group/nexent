@@ -49,7 +49,7 @@ export const fetchTools = async () => {
     return {
       success: false,
       data: [],
-      message: "agentConfig.error.fetchToolsFailed",
+      message: "agentConfig.tools.fetchFailed",
     };
   }
 };
@@ -87,7 +87,7 @@ export const fetchAgentList = async () => {
     return {
       success: false,
       data: [],
-      message: "agentConfig.error.fetchAgentListFailed",
+      message: "agentConfig.agents.listFetchFailed",
     };
   }
 };
@@ -132,7 +132,7 @@ export const getCreatingSubAgentId = async () => {
     return {
       success: false,
       data: null,
-      message: "agentConfig.error.fetchCreatingSubAgentIdFailed",
+      message: "agentConfig.agents.createSubAgentIdFailed",
     };
   }
 };
@@ -467,7 +467,7 @@ export const searchAgentInfo = async (agentId: number) => {
     return {
       success: false,
       data: null,
-      message: "agentConfig.error.fetchAgentDetailsFailed",
+      message: "agentConfig.agents.detailsFetchFailed",
     };
   }
 };
@@ -505,7 +505,7 @@ export const fetchAllAgents = async () => {
     return {
       success: false,
       data: [],
-      message: "agentConfig.error.fetchAgentListFailed",
+      message: "agentConfig.agents.listFetchFailed",
     };
   }
 };
@@ -628,7 +628,7 @@ export const fetchAgentCallRelationship = async (agentId: number) => {
     return {
       success: false,
       data: null,
-      message: 'agentConfig.error.fetchAgentCallRelationshipFailed'
+      message: 'agentConfig.agents.callRelationshipFetchFailed'
     };
   }
 };

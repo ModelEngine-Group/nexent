@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, App, Tabs, Tooltip } from "antd";
+import { Button, App, Tabs } from "antd";
 import {
   SettingOutlined,
   LoadingOutlined,
@@ -13,7 +13,7 @@ import {
 
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import {
-  Tooltip as CustomTooltip,
+  Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
@@ -151,6 +151,7 @@ function ToolPool({
       const embeddingBlocked =
         tool.name === "knowledge_base_search" && !isEmbeddingConfigured;
       if (embeddingBlocked) {
+        message.warning(t("embedding.agentToolDisableTooltip.content"));
         return;
       }
 
@@ -340,7 +341,7 @@ function ToolPool({
         );
       }
     } catch (error) {
-      log.error(t("debug.log.refreshToolsFailed"), error);
+      log.error(t("agentConfig.tools.refreshFailedDebug"), error);
       message.error(t("toolManagement.message.refreshFailedRetry"));
     } finally {
       setIsRefreshing(false);
@@ -387,10 +388,6 @@ function ToolPool({
     const isEffectivelyAvailable = isAvailable && !isEmbeddingBlocked;
     const isDisabled = localIsGenerating || !isEditingMode || isGeneratingAgent; // Disable only during generation or view-only
 
-    const kbUnavailableTip = isEmbeddingBlocked
-      ? "您尚未配置 Embedding 模型，无法使用依赖向量化能力的 Agent 工具。"
-      : undefined;
-
     const item = (
       <div
         className={`border-2 rounded-md p-2 flex items-center transition-all duration-300 ease-in-out min-h-[45px] shadow-sm ${
@@ -410,12 +407,17 @@ function ToolPool({
         }`}
         onClick={(e) => {
           if (isDisabled) {
+            if (!isEditingMode) {
+              message.warning(t("toolPool.message.viewOnlyMode"));
+            }
             return;
           }
           if (!isEffectivelyAvailable && !isSelected) {
-            if (!isEmbeddingBlocked) {
-              message.warning(t("toolPool.message.unavailable"));
-            }
+            message.warning(
+              isEmbeddingBlocked
+                ? t("embedding.agentToolDisableTooltip.content")
+                : t("toolPool.message.unavailable")
+            );
             return;
           }
           handleToolSelect(tool, !isSelected, e);
@@ -423,7 +425,7 @@ function ToolPool({
       >
         {/* Tool name left */}
         <div className="flex-1 overflow-hidden">
-        <div
+          <div
                 className={`font-medium text-sm truncate transition-colors duration-300 ${
                   !isEffectivelyAvailable && !isSelected ? "text-gray-400" : ""
                 }`}
@@ -437,8 +439,7 @@ function ToolPool({
                 }}
               >
                 {tool.name}
-              </div>
-
+          </div>
         </div>
         {/* Settings button right - Tag removed */}
         <div className="flex items-center gap-2 ml-2">
@@ -454,9 +455,11 @@ function ToolPool({
                   message.warning(t("toolPool.message.viewOnlyMode"));
                   return;
                 } else {
-                  if (!isEmbeddingBlocked) {
-                    message.warning(t("toolPool.message.unavailable"));
-                  }
+                  message.warning(
+                    isEmbeddingBlocked
+                      ? t("embedding.agentToolDisableTooltip.content")
+                      : t("toolPool.message.unavailable")
+                  );
                 }
                 return;
               }
@@ -480,13 +483,7 @@ function ToolPool({
       </div>
     );
 
-    return kbUnavailableTip ? (
-      <Tooltip title={kbUnavailableTip} placement="top">
-        {item}
-      </Tooltip>
-    ) : (
-      item
-    );
+    return item;
   });
 
   // Generate Tabs configuration

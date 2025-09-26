@@ -14,6 +14,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { useAuth } from "@/hooks/useAuth";
 import { conversationService } from "@/services/conversationService";
 import { storageService } from "@/services/storageService";
+import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -68,18 +69,10 @@ export function ChatInterface() {
   }>({});
   const [isSwitchedConversation, setIsSwitchedConversation] = useState(false); // Add conversation switching tracking state
   const [isLoading, setIsLoading] = useState(false);
-  const initialized = useRef(false);
   const { t } = useTranslation("common");
-  const [conversationTitle, setConversationTitle] = useState(
-    t("chatInterface.newConversation")
-  );
-  const [conversationId, setConversationId] = useState<number>(0);
-  const [conversationList, setConversationList] = useState<
-    ConversationListItem[]
-  >([]);
-  const [selectedConversationId, setSelectedConversationId] = useState<
-    number | null
-  >(null);
+  
+  // Use conversation management hook
+  const conversationManagement = useConversationManagement();
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const { appConfig } = useConfig();
 
@@ -96,15 +89,15 @@ export function ChatInterface() {
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
   // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content
-  const currentMessages = selectedConversationId
-    ? sessionMessages[selectedConversationId] || []
+  const currentMessages = conversationManagement.selectedConversationId
+    ? sessionMessages[conversationManagement.selectedConversationId] || []
     : [];
 
   // Monitor changes in currentMessages
   // Calculate if the current conversation is streaming
   const isCurrentConversationStreaming =
-    conversationId && conversationId !== -1
-      ? streamingConversations.has(conversationId)
+    conversationManagement.conversationId && conversationManagement.conversationId !== -1
+      ? streamingConversations.has(conversationManagement.conversationId)
       : false;
 
   const [viewingImage, setViewingImage] = useState<string | null>(null);
@@ -120,17 +113,9 @@ export function ChatInterface() {
   // Add sidebar state control
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Add a new state for new conversation status
-  const [isNewConversation, setIsNewConversation] = useState(true);
-
   // Add a state to track if we're loading a historical conversation
   const [isLoadingHistoricalConversation, setIsLoadingHistoricalConversation] =
     useState(false);
-
-  // Add a state to track conversation loading errors
-  const [conversationLoadError, setConversationLoadError] = useState<{
-    [conversationId: number]: string;
-  }>({});
 
   // Add a state to track completed conversations that haven't been viewed yet
   const [completedConversations, setCompletedConversations] = useState<
@@ -199,11 +184,11 @@ export function ChatInterface() {
   };
 
   useEffect(() => {
-    if (!initialized.current) {
-      initialized.current = true;
+    if (!conversationManagement.initialized.current) {
+      conversationManagement.initialized.current = true;
 
       // Get conversation history list, but don't auto-select the latest conversation
-      fetchConversationList()
+      conversationManagement.fetchConversationList()
         .then((dialogData) => {
           // Create new conversation by default regardless of history
           handleNewConversation();
@@ -221,12 +206,8 @@ export function ChatInterface() {
     // Ensure right sidebar is reset to closed state whenever conversation ID changes
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
-  }, [conversationId]);
+  }, [conversationManagement.conversationId]);
 
-  // Ensure currentSelectedConversationRef is synchronized with selectedConversationId
-  useEffect(() => {
-    currentSelectedConversationRef.current = selectedConversationId;
-  }, [selectedConversationId]);
 
   // Clear all timers and requests when component unmounts
   useEffect(() => {
@@ -254,8 +235,8 @@ export function ChatInterface() {
     let shouldResetButtonStates = true;
 
     // If in new conversation state, switch to conversation state after sending message
-    if (isNewConversation) {
-      setIsNewConversation(false);
+    if (conversationManagement.isNewConversation) {
+      conversationManagement.setIsNewConversation(false);
     }
 
     // Ensure right sidebar doesn't auto-expand when sending new message
@@ -267,11 +248,11 @@ export function ChatInterface() {
     const userMessageContent = input.trim();
 
     // Get current conversation ID
-    let currentConversationId = conversationId;
+    let currentConversationId = conversationManagement.conversationId;
 
     // Ensure ref reflects the current conversation state
     if (currentConversationId && currentConversationId !== -1) {
-      currentSelectedConversationRef.current = currentConversationId;
+      conversationManagement.currentSelectedConversationRef.current = currentConversationId;
     }
 
     // Prepare attachment information
@@ -341,11 +322,11 @@ export function ChatInterface() {
           currentConversationId = createData.conversation_id;
 
           // Update current session state
-          setConversationId(currentConversationId);
-          setSelectedConversationId(currentConversationId);
+          conversationManagement.setConversationId(currentConversationId);
+          conversationManagement.setSelectedConversationId(currentConversationId);
           // Update ref to track current selected conversation
-          currentSelectedConversationRef.current = currentConversationId;
-          setConversationTitle(
+          conversationManagement.currentSelectedConversationRef.current = currentConversationId;
+          conversationManagement.setConversationTitle(
             createData.conversation_title || t("chatInterface.newConversation")
           );
 
@@ -358,12 +339,12 @@ export function ChatInterface() {
 
           // Refresh conversation list
           try {
-            const dialogList = await fetchConversationList();
+            const dialogList = await conversationManagement.fetchConversationList();
             const newDialog = dialogList.find(
               (dialog) => dialog.conversation_id === currentConversationId
             );
             if (newDialog) {
-              setSelectedConversationId(currentConversationId);
+              conversationManagement.setSelectedConversationId(currentConversationId);
             }
           } catch (error) {
             log.error(
@@ -629,10 +610,8 @@ export function ChatInterface() {
               } else if (result.error === 'FILE_PARSING_FAILED') {
                 errorMessage = t("chatInterface.fileParsingFailed");
               } else {
-                // For any other error, show a generic message without exposing technical details
-                errorMessage = t("chatInterface.fileProcessingFailed", {
-                  error: "Unknown error"
-                });
+                // For any other error, show a simple message
+                errorMessage = t("chatInterface.fileProcessingStopped");
               }
               
               lastMsg.content = errorMessage;
@@ -781,9 +760,9 @@ export function ChatInterface() {
         resetTimeout,
         stepIdCounter,
         setIsSwitchedConversation,
-        isNewConversation,
-        setConversationTitle,
-        fetchConversationList,
+        conversationManagement.isNewConversation,
+        conversationManagement.setConversationTitle,
+        conversationManagement.fetchConversationList,
         currentConversationId,
         conversationService,
         false, // isDebug: false for normal chat mode
@@ -922,14 +901,10 @@ export function ChatInterface() {
     // Reset all states
     setInput("");
     setIsLoading(false);
-    setConversationId(-1);
     setIsSwitchedConversation(false);
-    setConversationTitle(t("chatInterface.newConversation"));
-    setSelectedConversationId(null);
-
-    // Update ref to track current selected conversation
-    currentSelectedConversationRef.current = null;
-    setIsNewConversation(true); // Ensure set to new conversation state
+    
+    // Use conversation management hook
+    conversationManagement.handleNewConversation();
     setIsLoadingHistoricalConversation(false); // Ensure not loading historical conversation
 
     // Reset streaming state
@@ -957,36 +932,16 @@ export function ChatInterface() {
     setShouldScrollToBottom(true);
   };
 
-  const fetchConversationList = async () => {
-    try {
-      const dialogHistory = await conversationService.getList();
-      // Sort by creation time, newest first
-      dialogHistory.sort((a, b) => b.create_time - a.create_time);
-      setConversationList(dialogHistory);
-      return dialogHistory;
-    } catch (error) {
-      log.error(t("chatInterface.errorFetchingConversationList"), error);
-      throw error;
-    }
-  };
 
   // When switching conversation, automatically load messages
   const handleDialogClick = async (dialog: ConversationListItem) => {
     // When switching conversation, keep all SSE connections active
     // Do not cancel any conversation requests, let them continue running in the background
 
-    // Immediately set conversation state, avoid flashing new conversation interface
-    setSelectedConversationId(dialog.conversation_id);
-    setConversationId(dialog.conversation_id);
-    setConversationTitle(dialog.conversation_title);
-
-    // Update ref to track current selected conversation
-    currentSelectedConversationRef.current = dialog.conversation_id;
+    // Use conversation management hook
+    conversationManagement.handleConversationSelect(dialog);
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
-
-    // Set not new conversation state
-    setIsNewConversation(false);
 
     // When user views conversation, clear completed state
     setCompletedConversations((prev) => {
@@ -998,7 +953,7 @@ export function ChatInterface() {
     // Check if there are cached messages
     const hasCachedMessages =
       sessionMessages[dialog.conversation_id] !== undefined;
-    const isCurrentActive = dialog.conversation_id === conversationId;
+    const isCurrentActive = dialog.conversation_id === conversationManagement.conversationId;
 
     // Log: click conversation
     // If there are cached messages, ensure not to show loading state
@@ -1081,11 +1036,7 @@ export function ChatInterface() {
             }));
 
             // Clear any previous error for this conversation
-            setConversationLoadError((prev) => {
-              const newErrors = { ...prev };
-              delete newErrors[dialog.conversation_id];
-              return newErrors;
-            });
+            conversationManagement.clearConversationLoadError(dialog.conversation_id);
 
             // Asynchronously load all attachment URLs
             loadAttachmentUrls(formattedMessages, dialog.conversation_id);
@@ -1099,7 +1050,7 @@ export function ChatInterface() {
             }, 1000);
 
             // Refresh history list
-            fetchConversationList().catch((err) => {
+            conversationManagement.fetchConversationList().catch((err) => {
               log.error(
                 t("chatInterface.refreshDialogListFailedButContinue"),
                 err
@@ -1107,11 +1058,10 @@ export function ChatInterface() {
             });
           } else {
             // No longer empty cache, only prompt no history messages
-            setConversationLoadError((prev) => ({
-              ...prev,
-              [dialog.conversation_id]:
-                t("chatStreamMain.noHistory") || "该会话无历史消息",
-            }));
+            conversationManagement.setConversationLoadErrorForId(
+              dialog.conversation_id,
+              t("chatStreamMain.noHistory") || "该会话无历史消息"
+            );
           }
         } catch (error) {
           log.error(
@@ -1121,10 +1071,7 @@ export function ChatInterface() {
           // if error, don't set empty array, keep existing state to avoid showing new conversation interface
           // Instead, we can show an error message or retry mechanism
 
-          setConversationLoadError((prev) => ({
-            ...prev,
-            [dialog.conversation_id]: "Failed to load conversation",
-          }));
+          conversationManagement.setConversationLoadErrorForId(dialog.conversation_id, "Failed to load conversation");
         } finally {
           // ensure loading state is cleared
           setIsLoading(false);
@@ -1221,11 +1168,7 @@ export function ChatInterface() {
           }));
 
           // Clear any previous error for this conversation
-          setConversationLoadError((prev) => {
-            const newErrors = { ...prev };
-            delete newErrors[dialog.conversation_id];
-            return newErrors;
-          });
+          conversationManagement.clearConversationLoadError(dialog.conversation_id);
 
           // Asynchronously load all attachment URLs
           loadAttachmentUrls(formattedMessages, dialog.conversation_id);
@@ -1239,7 +1182,7 @@ export function ChatInterface() {
           }, 1000);
 
           // Refresh history list
-          fetchConversationList().catch((err) => {
+          conversationManagement.fetchConversationList().catch((err) => {
             log.error(
               t("chatInterface.refreshDialogListFailedButContinue"),
               err
@@ -1247,11 +1190,10 @@ export function ChatInterface() {
           });
         } else {
           // No longer empty cache, only prompt no history messages
-          setConversationLoadError((prev) => ({
-            ...prev,
-            [dialog.conversation_id]:
-              t("chatStreamMain.noHistory") || "该会话无历史消息",
-          }));
+          conversationManagement.setConversationLoadErrorForId(
+            dialog.conversation_id,
+            t("chatStreamMain.noHistory") || "该会话无历史消息"
+          );
         }
       } catch (error) {
         log.error(
@@ -1261,10 +1203,7 @@ export function ChatInterface() {
         // if error, don't set empty array, keep existing state to avoid showing new conversation interface
         // Instead, we can show an error message or retry mechanism
 
-        setConversationLoadError((prev) => ({
-          ...prev,
-          [dialog.conversation_id]: "Failed to load conversation",
-        }));
+        conversationManagement.setConversationLoadErrorForId(dialog.conversation_id, "Failed to load conversation");
       } finally {
         // ensure loading state is cleared
         setIsLoading(false);
@@ -1281,7 +1220,7 @@ export function ChatInterface() {
     // Create a copy to avoid directly modifying parameters
     const updatedMessages = [...messages];
     let hasUpdates = false;
-    const conversationIdToUse = targetConversationId || conversationId;
+    const conversationIdToUse = targetConversationId || conversationManagement.conversationId;
 
     // Process attachments for each message
     for (const message of updatedMessages) {
@@ -1323,10 +1262,10 @@ export function ChatInterface() {
   const handleConversationRename = async (dialogId: number, title: string) => {
     try {
       await conversationService.rename(dialogId, title);
-      await fetchConversationList();
+      await conversationManagement.fetchConversationList();
 
-      if (selectedConversationId === dialogId) {
-        setConversationTitle(title);
+      if (conversationManagement.selectedConversationId === dialogId) {
+        conversationManagement.setConversationTitle(title);
       }
     } catch (error) {
       log.error(t("chatInterface.renameFailed"), error);
@@ -1338,9 +1277,9 @@ export function ChatInterface() {
     try {
       // If deleting the currently active conversation, stop conversation first
       if (
-        selectedConversationId === dialogId &&
+        conversationManagement.selectedConversationId === dialogId &&
         isStreaming &&
-        conversationId === dialogId
+        conversationManagement.conversationId === dialogId
       ) {
         // Cancel current ongoing request first
         if (abortControllerRef.current) {
@@ -1375,13 +1314,13 @@ export function ChatInterface() {
       }
 
       await conversationService.delete(dialogId);
-      await fetchConversationList();
+      await conversationManagement.fetchConversationList();
 
-      if (selectedConversationId === dialogId) {
-        setSelectedConversationId(null);
+      if (conversationManagement.selectedConversationId === dialogId) {
+        conversationManagement.setSelectedConversationId(null);
         // Update ref to track current selected conversation
-        currentSelectedConversationRef.current = null;
-        setConversationTitle(t("chatInterface.newConversation"));
+        conversationManagement.currentSelectedConversationRef.current = null;
+        conversationManagement.setConversationTitle(t("chatInterface.newConversation"));
         handleNewConversation();
       }
     } catch (error) {
@@ -1397,7 +1336,7 @@ export function ChatInterface() {
     setSessionMessages((prev) => {
       const newMessages = { ...prev };
       const lastMsg =
-        newMessages[conversationId]?.[newMessages[conversationId].length - 1];
+        newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
 
       if (lastMsg && lastMsg.role === ROLE_ASSISTANT && lastMsg.images) {
         // Filter out failed images
@@ -1417,21 +1356,21 @@ export function ChatInterface() {
   const handleStop = async () => {
     // Stop agent_run of current conversation
     const currentController =
-      conversationControllersRef.current.get(conversationId);
+      conversationControllersRef.current.get(conversationManagement.conversationId);
     if (currentController) {
       try {
         currentController.abort(t("chatInterface.userManuallyStopped"));
       } catch (error) {
         log.error(t("chatInterface.errorCancelingRequest"), error);
       }
-      conversationControllersRef.current.delete(conversationId);
+      conversationControllersRef.current.delete(conversationManagement.conversationId);
     }
 
     // Clear timeout timer for current conversation
-    const currentTimeout = conversationTimeoutsRef.current.get(conversationId);
+    const currentTimeout = conversationTimeoutsRef.current.get(conversationManagement.conversationId);
     if (currentTimeout) {
       clearTimeout(currentTimeout);
-      conversationTimeoutsRef.current.delete(conversationId);
+      conversationTimeoutsRef.current.delete(conversationManagement.conversationId);
     }
 
     // Immediately update frontend state
@@ -1439,19 +1378,19 @@ export function ChatInterface() {
     setIsLoading(false);
 
     // If no valid conversation ID, just reset frontend state
-    if (!conversationId || conversationId === -1) {
+    if (!conversationManagement.conversationId || conversationManagement.conversationId === -1) {
       return;
     }
 
     try {
       // Call backend stop API - this will stop both agent run and preprocess tasks
-      await conversationService.stop(conversationId);
+      await conversationService.stop(conversationManagement.conversationId);
 
       // Manually update messages, clear thinking state
       setSessionMessages((prev) => {
         const newMessages = { ...prev };
         const lastMsg =
-          newMessages[conversationId]?.[newMessages[conversationId].length - 1];
+          newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
         if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -1481,16 +1420,16 @@ export function ChatInterface() {
       // remove from streaming list
       setStreamingConversations((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(conversationId);
+        newSet.delete(conversationManagement.conversationId);
         return newSet;
       });
 
       // when conversation is stopped, only add to completed conversations list when user is not in current conversation interface
       const currentUserConversation = currentSelectedConversationRef.current;
-      if (currentUserConversation !== conversationId) {
+      if (currentUserConversation !== conversationManagement.conversationId) {
         setCompletedConversations((prev) => {
           const newSet = new Set(prev);
-          newSet.add(conversationId);
+          newSet.add(conversationManagement.conversationId);
           return newSet;
         });
       }
@@ -1501,7 +1440,7 @@ export function ChatInterface() {
       setSessionMessages((prev) => {
         const newMessages = { ...prev };
         const lastMsg =
-          newMessages[conversationId]?.[newMessages[conversationId].length - 1];
+          newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
         if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -1516,11 +1455,9 @@ export function ChatInterface() {
 
   // Top title rename function
   const handleTitleRename = async (newTitle: string) => {
-    if (selectedConversationId && newTitle !== conversationTitle) {
+    if (conversationManagement.selectedConversationId && newTitle !== conversationManagement.conversationTitle) {
       try {
-        await conversationService.rename(selectedConversationId, newTitle);
-        await fetchConversationList();
-        setConversationTitle(newTitle);
+        await conversationManagement.updateConversationTitle(conversationManagement.selectedConversationId, newTitle);
       } catch (error) {
         log.error(t("chatInterface.renameFailed"), error);
       }
@@ -1578,7 +1515,7 @@ export function ChatInterface() {
   // Add event listener for conversation list updates
   useEffect(() => {
     const handleConversationListUpdate = () => {
-      fetchConversationList().catch((err) => {
+      conversationManagement.fetchConversationList().catch((err) => {
         log.error(t("chatInterface.failedToUpdateConversationList"), err);
       });
     };
@@ -1600,8 +1537,8 @@ export function ChatInterface() {
     <>
       <div className="flex h-screen">
         <ChatSidebar
-          conversationList={conversationList}
-          selectedConversationId={selectedConversationId}
+          conversationList={conversationManagement.conversationList}
+          selectedConversationId={conversationManagement.selectedConversationId}
           openDropdownId={openDropdownId}
           streamingConversations={streamingConversations}
           completedConversations={completedConversations}
@@ -1630,7 +1567,7 @@ export function ChatInterface() {
           <div className="flex flex-1 overflow-hidden">
             <div className="flex-1 flex flex-col">
               <ChatHeader
-                title={conversationTitle}
+                title={conversationManagement.conversationTitle}
                 onRename={handleTitleRename}
               />
 
@@ -1643,7 +1580,7 @@ export function ChatInterface() {
                   isLoadingHistoricalConversation
                 }
                 conversationLoadError={
-                  conversationLoadError[selectedConversationId || 0]
+                  conversationManagement.conversationLoadError[conversationManagement.selectedConversationId || 0]
                 }
                 onInputChange={(value: string) => setInput(value)}
                 onSend={handleSend}
@@ -1657,7 +1594,7 @@ export function ChatInterface() {
                 onFileUpload={handleFileUpload}
                 onImageUpload={handleImageUpload}
                 onOpinionChange={handleOpinionChange}
-                currentConversationId={conversationId}
+                currentConversationId={conversationManagement.conversationId}
                 shouldScrollToBottom={shouldScrollToBottom}
                 selectedAgentId={selectedAgentId}
                 onAgentSelect={setSelectedAgentId}

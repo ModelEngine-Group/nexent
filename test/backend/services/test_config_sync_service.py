@@ -858,7 +858,6 @@ class TestLoadConfigImpl:
                 f"Failed to load config for tenant {tenant_id}: Database connection failed"
             )
 
-    @pytest.mark.asyncio
     def test_build_models_config_partial_success(self, service_mocks):
         """Test build_models_config with some successful and some failed configs"""
         # Setup

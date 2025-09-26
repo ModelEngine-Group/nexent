@@ -116,7 +116,7 @@ export default function AgentSetupOrchestrator({
         );
       }
     } catch (error) {
-      log.error(t("debug.log.fetchAgentListFailed"), error);
+      log.error(t("agentConfig.agents.listFetchFailedDebug"), error);
       message.error(t("businessLogic.config.error.agentListFailed"));
     } finally {
       setIsLoadingTools(false);
@@ -573,7 +573,7 @@ export default function AgentSetupOrchestrator({
         setEnabledToolIds([]);
       }
     } catch (error) {
-      log.error(t("debug.log.loadAgentDetailsFailed"), error);
+      log.error(t("agentConfig.agents.detailsLoadFailed"), error);
       message.error(t("businessLogic.config.error.agentDetailFailed"));
       // If error occurs, reset editing state
       setIsEditingAgent(false);
@@ -653,7 +653,7 @@ export default function AgentSetupOrchestrator({
           );
         }
       } catch (error) {
-        log.error(t("debug.log.importAgentFailed"), error);
+        log.error(t("agentConfig.agents.importFailed"), error);
         message.error(t("businessLogic.config.error.agentImportFailed"));
       } finally {
         setIsImporting(false);
@@ -683,7 +683,7 @@ export default function AgentSetupOrchestrator({
         );
       }
     } catch (error) {
-      log.error(t("debug.log.deleteAgentFailed"), error);
+      log.error(t("agentConfig.agents.deleteFailed"), error);
       message.error(t("businessLogic.config.error.agentDeleteFailed"));
     } finally {
       setIsDeleteConfirmOpen(false);

@@ -66,3 +66,23 @@ class NotFoundException(Exception):
 class MEConnectionException(Exception):
     """Raised when not found exception occurs."""
     pass
+
+
+class VoiceServiceException(Exception):
+    """Raised when voice service fails."""
+    pass
+
+
+class STTConnectionException(Exception):
+    """Raised when STT service connection fails."""
+    pass
+
+
+class TTSConnectionException(Exception):
+    """Raised when TTS service connection fails."""
+    pass
+
+
+class VoiceConfigException(Exception):
+    """Raised when voice configuration is invalid."""
+    pass

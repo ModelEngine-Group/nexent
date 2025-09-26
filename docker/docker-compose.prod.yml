@@ -23,15 +23,15 @@ services:
       xpack.security.http.ssl.enabled: "false"
       xpack.security.transport.ssl.enabled: "false"
       # JVM memory settings
-      ES_JAVA_OPTS: -Xms1g -Xmx1g
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS}
       # Node name
       node.name: es01
       # Memory lock setting
       bootstrap.memory_lock: "false"
       # Disk watermark settings
-      cluster.routing.allocation.disk.watermark.low: "5gb"
-      cluster.routing.allocation.disk.watermark.high: "3gb"
-      cluster.routing.allocation.disk.watermark.flood_stage: "2gb"
+      cluster.routing.allocation.disk.watermark.low: "${ES_DISK_WATERMARK_LOW}"
+      cluster.routing.allocation.disk.watermark.high: "${ES_DISK_WATERMARK_HIGH}"
+      cluster.routing.allocation.disk.watermark.flood_stage: "${ES_DISK_WATERMARK_FLOOD_STAGE}"
     volumes:
       - ${ROOT_DIR}/elasticsearch:/usr/share/elasticsearch/data
     networks:

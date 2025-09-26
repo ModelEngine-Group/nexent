@@ -1254,8 +1254,8 @@ export function ChatInput({
                 {t("chatInput.helloIm", { appName: appConfig.appName })}
               </h1>
             </div>
-            <p className="h-6 text-center text-muted-foreground">
-              {t("chatInput.introMessage")}
+            <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+              {appConfig.appDescription || t("chatInput.introMessage")}
             </p>
           </div>
           <div

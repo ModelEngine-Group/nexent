@@ -10,10 +10,11 @@ import {motion} from "framer-motion";
 import {useAuth} from "@/hooks/useAuth";
 import modelEngineService from "@/services/modelEngineService";
 import {configStore} from "@/lib/config";
+import { configService } from "@/services/configService";
 import {
   CONNECTION_STATUS,
   ConnectionStatus,
-  MODEL_STATUS
+  MODEL_STATUS,
 } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
@@ -72,6 +73,20 @@ export default function ModelSetupPage() {
     }
   };
 
+  // Centralized behavior: save current config and navigate to next page
+  const saveAndNavigateNext = async () => {
+    try {
+      const currentConfig = configStore.getConfig();
+      const ok = await configService.saveConfigToBackend(currentConfig as any);
+      if (!ok) {
+        message.error(t("setup.page.error.saveConfig"));
+      }
+    } catch (e) {
+      message.error(t("setup.page.error.saveConfig"));
+    }
+    router.push("/setup/knowledges");
+  };
+
   // Handle next button click
   const handleNext = async () => {
     try {
@@ -116,7 +131,7 @@ export default function ModelSetupPage() {
         return;
       }
 
-      router.push("/setup/knowledges");
+      await saveAndNavigateNext();
     } catch (error) {
       log.error(t("setup.page.error.systemError"), error);
       message.error(t("setup.page.error.systemError"));
@@ -127,7 +142,7 @@ export default function ModelSetupPage() {
     setEmbeddingModalOpen(false);
     if (pendingJump) {
       setPendingJump(false);
-      router.push("/setup/knowledges");
+      await saveAndNavigateNext();
     }
   };
 
@@ -163,7 +178,7 @@ export default function ModelSetupPage() {
       } catch (e) {
         message.error(t("setup.page.error.saveConfig"));
       }
-      router.push("/setup/knowledges");
+      await saveAndNavigateNext();
     }
   };
 
@@ -210,7 +225,9 @@ export default function ModelSetupPage() {
       >
         <AppModelConfig
           onSelectedModelsChange={(selected) => setLiveSelectedModels(selected)}
-          onEmbeddingConnectivityChange={(status) => setEmbeddingConnectivity(status)}
+          onEmbeddingConnectivityChange={(status) =>
+            setEmbeddingConnectivity(status)
+          }
           forwardedRef={modelConfigSectionRef}
         />
       </motion.div>

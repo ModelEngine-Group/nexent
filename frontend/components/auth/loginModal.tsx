@@ -84,8 +84,8 @@ export function LoginModal() {
             value: values.password,
           },
         ]);
-      } else if (httpStatusCode === 422) {
-        // HTTP 422 Unprocessable Entity - Invalid credentials
+      } else if (httpStatusCode === 401) {
+        // HTTP 401 Unauthorized - Invalid credentials
         form.setFields([
           {
             name: "email",

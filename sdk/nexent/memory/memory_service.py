@@ -290,3 +290,93 @@ async def reset_all_memory(memory_config: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Failed to reset all memory: {e}")
         return False
+
+
+async def clear_model_memories(
+    es_core: Any,
+    model_repo: str,
+    model_name: str,
+    embedding_dims: int,
+    base_memory_config: Dict[str, Any],
+) -> bool:
+    """Clear all memories and drop ES index for a specific embedding model configuration.
+
+    This helper follows the index naming and configuration logic used by the backend's
+    memory utilities, while remaining SDK-only and transport-agnostic.
+
+    Args:
+        es_core: An initialized Elasticsearch core instance (must expose ``client.indices`` and ``delete_index``).
+        model_repo: Optional repository/namespace of the embedding model (e.g., "jina-ai"). Empty if none.
+        model_name: The embedding model name (e.g., "jina-embeddings-v2-base-en").
+        embedding_dims: The embedding vector dimension for this model configuration.
+        base_memory_config: A fully-validated memory config to use as a template. This function will not mutate it,
+            but will derive an adjusted config with the correct collection name and embedding dims for the operation.
+
+    Returns:
+        True if the cleanup completed (or nothing needed to be done). False on hard failures.
+    """
+    try:
+        repo_part = (model_repo or "").strip().lower()
+        name_part = (model_name or "").strip().lower()
+        if not name_part:
+            raise ValueError("model_name is required to clear model memories")
+
+        # Follow backend/utils/memory_utils.py naming: mem0_{repo}_{name}_{dims} or mem0_{name}_{dims}
+        if repo_part:
+            index_name = f"mem0_{repo_part}_{name_part}_{embedding_dims}"
+        else:
+            index_name = f"mem0_{name_part}_{embedding_dims}"
+
+        # 1) If index does not exist in ES, nothing to do
+        try:
+            es_exists = es_core.client.indices.exists(index=index_name)
+        except Exception:
+            # If existence check fails, proceed defensively to attempt cleanup via mem0 then ES delete
+            es_exists = True
+
+        if not es_exists:
+            return True
+
+        # 2) Build a config bound to this index and embedding dims without mutating the base config
+        #    Ensure required keys exist; get_memory_instance will validate again
+        memory_config: Dict[str, Any] = {
+            **base_memory_config,
+            "embedder": {
+                **base_memory_config.get("embedder", {}),
+                "provider": base_memory_config.get("embedder", {}).get("provider", "openai"),
+                "config": {
+                    **base_memory_config.get("embedder", {}).get("config", {}),
+                    # Keep model/base_url/api_key from base, only adjust dims to match the index
+                    "embedding_dims": embedding_dims,
+                },
+            },
+            "vector_store": {
+                **base_memory_config.get("vector_store", {}),
+                "provider": "elasticsearch",
+                "config": {
+                    **base_memory_config.get("vector_store", {}).get("config", {}),
+                    "collection_name": index_name,
+                    "embedding_model_dims": embedding_dims,
+                },
+            },
+        }
+
+        # 3) Reset all memory for this config via mem0
+        try:
+            logger.debug(f"Start to clear all memories in {model_repo}")
+            await reset_all_memory(memory_config)
+        except Exception:
+            # Keep going to ensure ES index is dropped even if mem0 reset had issues
+            pass
+
+        # 4) Drop ES index
+        try:
+            es_core.delete_index(index_name)
+        except Exception:
+            # Swallow delete errors and report as best-effort
+            pass
+
+        return True
+    except Exception as e:
+        logger.error(f"clear_model_memories failed: {e}")
+        return False

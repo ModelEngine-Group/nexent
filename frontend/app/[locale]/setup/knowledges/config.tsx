@@ -789,7 +789,7 @@ function DataConfig({ isActive }: DataConfigProps) {
             <div className="flex items-center">
               <WarningFilled className="text-yellow-500 mt-1 mr-2 text-3xl" />
               <div className="ml-3 mt-2">
-                <div className="text-base text-gray-800 font-semibold whitespace-nowrap">
+                <div className="text-base text-gray-800 font-semibold">
                   {t("embedding.knowledgeBaseDisabledWarningModal.title")}
                 </div>
               </div>

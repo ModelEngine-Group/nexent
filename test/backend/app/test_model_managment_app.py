@@ -14,9 +14,21 @@ def client(mocker):
     """Create test client with mocked dependencies."""
     # Mock boto3 and MinioClient before importing
     mocker.patch('boto3.client')
-    mocker.patch('database.client.MinioClient')
+    # Patch MinioClient at both possible import paths
+    mocker.patch('backend.database.client.MinioClient')
+    # Stub services.elasticsearch_service to avoid real ES initialization
+    import types
+    import sys as _sys
+    if "services.elasticsearch_service" not in _sys.modules:
+        services_es_mod = types.ModuleType("services.elasticsearch_service")
+
+        def _get_es_core():  # minimal stub
+            return object()
+
+        services_es_mod.get_es_core = _get_es_core
+        _sys.modules["services.elasticsearch_service"] = services_es_mod
     
-    # Import after mocking
+    # Import after mocking (only backend path is required by app imports)
     from apps.model_managment_app import router
     
     # Create test client

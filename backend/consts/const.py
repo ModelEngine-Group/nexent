@@ -37,6 +37,7 @@ UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 # Supabase Configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
 
 
 # ===== To be migrated to frontend configuration =====
