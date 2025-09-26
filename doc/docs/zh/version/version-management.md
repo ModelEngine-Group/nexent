@@ -21,20 +21,33 @@ Nexent 使用语义化版本控制：
 
 ### 版本信息位置
 
-前端版本信息存储在 `frontend/const/version.ts` 文件中：
+前端版本信息从 `frontend/package.json` 文件中读取：
+
+```json
+{
+  "name": "nexent",
+  "version": "v1.0.0",
+  "private": true
+}
+```
+
+版本信息在 `frontend/components/ui/versionDisplay.tsx` 组件中自动读取：
 
 ```typescript
-// Application version configuration
-export const APP_VERSION = "v1.0.0";
+import packageJson from "../../package.json";
+
+const version = `${packageJson.version}`;
 ```
 
 ### 版本更新流程
 
-1. **更新版本常量**
+1. **更新 package.json 版本**
 
    ```bash
-   # 编辑 frontend/const/version.ts，修改 APP_VERSION 的值
-   export const APP_VERSION = "v1.1.0";
+   # 编辑 frontend/package.json，修改 version 字段的值
+   {
+     "version": "v1.0.0"
+   }
    ```
 
 2. **验证版本显示**

@@ -21,20 +21,33 @@ Nexent uses Semantic Versioning:
 
 ### Version Information Location
 
-Frontend version information is stored in the `frontend/const/version.ts` file:
+Frontend version information is read from the `frontend/package.json` file:
+
+```json
+{
+  "name": "nexent",
+  "version": "v1.0.0",
+  "private": true
+}
+```
+
+Version information is automatically read in the `frontend/components/ui/versionDisplay.tsx` component:
 
 ```typescript
-// Application version configuration
-export const APP_VERSION = "v1.0.0";
+import packageJson from "../../package.json";
+
+const version = `${packageJson.version}`;
 ```
 
 ### Version Update Process
 
-1. **Update Version Constant**
+1. **Update package.json version**
 
    ```bash
-   # Edit frontend/const/version.ts, modify the value of APP_VERSION
-   export const APP_VERSION = "v1.1.0";
+   # Edit frontend/package.json, modify the version field value
+   {
+     "version": "v1.1.0"
+   }
    ```
 
 2. **Verify Version Display**

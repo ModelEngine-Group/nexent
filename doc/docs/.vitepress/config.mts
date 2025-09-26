@@ -1,4 +1,6 @@
 ﻿// https://vitepress.dev/reference/site-config
+import { defineConfig } from "vitepress";
+
 export default defineConfig({
   base: "/doc/",
   title: "Nexent Doc",
