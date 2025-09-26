@@ -196,7 +196,8 @@ class CoreAgent(CodeAgent):
             raise AgentExecutionError(error_msg, self.logger)
 
         truncated_output = truncate_content(str(output))
-        observation += "Last output from code snippet:\n" + truncated_output
+        if output is not None:
+            observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
 
         execution_outputs_console += [

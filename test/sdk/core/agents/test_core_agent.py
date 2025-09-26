@@ -965,6 +965,45 @@ def test_step_stream_execution_error_without_print_outputs(core_agent_instance):
             list(core_agent_instance._step_stream(mock_memory_step))
 
 
+def test_step_stream_execution_with_none_output(core_agent_instance):
+    """Test _step_stream method when execution returns None output."""
+    # Setup
+    mock_memory_step = MagicMock()
+    mock_chat_message = MagicMock()
+    mock_chat_message.content = "```<RUN>\nprint('hello')\n```<END_CODE>"
+
+    # Set all required attributes on the instance
+    core_agent_instance.agent_name = "test_agent"
+    core_agent_instance.step_number = 1
+    core_agent_instance.grammar = None
+    core_agent_instance.logger = MagicMock()
+    core_agent_instance.memory = MagicMock()
+    core_agent_instance.memory.steps = []
+
+    with patch.object(core_agent_module, 'parse_code_blobs', return_value="print('hello')"), \
+            patch.object(core_agent_module, 'fix_final_answer_code', return_value="print('hello')"):
+
+        # Mock the methods directly on the instance
+        core_agent_instance.write_memory_to_messages = MagicMock(
+            return_value=[])
+        core_agent_instance.model = MagicMock(return_value=mock_chat_message)
+        # Mock python_executor to return None output
+        core_agent_instance.python_executor = MagicMock(
+            return_value=(None, "Execution logs", False))
+
+        # Execute
+        result = list(core_agent_instance._step_stream(mock_memory_step))
+
+        # Assertions
+        # Should yield None when is_final_answer is False
+        assert result[0] is None
+        assert mock_memory_step.observations is not None
+        # Check that observations was set but should not contain "Last output from code snippet"
+        # since output is None
+        observations_str = str(mock_memory_step.observations)
+        assert "Execution logs:" in observations_str
+        assert "Last output from code snippet:" not in observations_str
+
 # ----------------------------------------------------------------------------
 # Tests for run method (lines 229-263)
 # ----------------------------------------------------------------------------
