@@ -1,8 +1,14 @@
+import os
 import sys
 import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
+
+# Dynamically determine the backend path - MUST BE FIRST
+current_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.abspath(os.path.join(current_dir, "../../backend"))
+sys.path.insert(0, backend_dir)
 
 # Mock boto3 before importing the module under test
 boto3_mock = MagicMock()
