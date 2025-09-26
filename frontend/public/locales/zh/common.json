@@ -922,5 +922,7 @@
   "agentCallRelationship.description": "此流程图显示了 {{name}} 及其所有工具和协作Agent的调用关系",
   "agentCallRelationship.noData": "暂无调用关系数据",
   "businessLogic.config.error.loadModelsFailed": "加载可用模型失败",
-  "businessLogic.config.error.noAvailableModels": "暂无可用的模型"
+  "businessLogic.config.error.noAvailableModels": "暂无可用的模型",
+
+  "app.version": "应用版本"
 }

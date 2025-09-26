@@ -1,15 +1,17 @@
+from services.tool_configuration_service import initialize_tools_on_startup
+from utils.logging_utils import configure_logging, configure_elasticsearch_logging
+from apps.base_app import app
+from dotenv import load_dotenv
 import uvicorn
 import logging
 import warnings
 import asyncio
+
+from consts.const import APP_VERSION
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
-from dotenv import load_dotenv
 load_dotenv()
-
-from apps.base_app import app
-from utils.logging_utils import configure_logging, configure_elasticsearch_logging
-from services.tool_configuration_service import initialize_tools_on_startup
 
 
 configure_logging(logging.INFO)
@@ -22,7 +24,7 @@ async def startup_initialization():
     Perform initialization tasks during server startup
     """
     logger.info("Starting server initialization...")
-    
+    logger.info(f"APP version is: {APP_VERSION}")
     try:
         # Initialize tools on startup - service layer handles detailed logging
         await initialize_tools_on_startup()

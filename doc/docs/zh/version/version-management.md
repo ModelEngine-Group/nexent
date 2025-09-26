@@ -1,0 +1,105 @@
+# 版本信息管理
+
+Nexent 项目采用统一的版本管理策略，确保前端和后端版本信息的一致性。本文档介绍如何管理和更新项目版本信息。
+
+## 版本号格式
+
+Nexent 使用语义化版本控制：
+
+- **格式**: `vMAJOR.MINOR.PATCH` 或 `vMAJOR.MINOR.PATCH.BUILD` (例如：v1.1.0 或 v1.1.0.1)
+- **MAJOR**: 不兼容的 API 修改
+- **MINOR**: 向下兼容的功能性新增
+- **PATCH**: 向下兼容的问题修正
+- **BUILD**: 可选的小版本号，用于更细粒度的 bugfix 版本
+
+### 版本号示例
+
+- `v1.2.0` - 功能更新版本
+- `v1.2.0.1` - 包含小版本号的 bugfix 版本
+
+## 前端版本管理
+
+### 版本信息位置
+
+前端版本信息存储在 `frontend/const/version.ts` 文件中：
+
+```typescript
+// Application version configuration
+export const APP_VERSION = "v1.0.0";
+```
+
+### 版本更新流程
+
+1. **更新版本常量**
+
+   ```bash
+   # 编辑 frontend/const/version.ts，修改 APP_VERSION 的值
+   export const APP_VERSION = "v1.1.0";
+   ```
+
+2. **验证版本显示**
+
+   ```bash
+   # 启动前端服务
+   cd frontend
+   npm run dev
+
+   # 检查页面底部应用版本显示
+   ```
+
+### 版本显示
+
+前端版本信息在以下位置显示：
+
+- 位置：页面底部导航栏，位于"使用条款"、"联系我们"、"关于我们"的右侧
+- 显示方式：鼠标悬浮在"应用版本"上可查看详细版本信息
+- 版本格式：`v1.1.0`
+
+## 后端版本管理
+
+### 版本信息位置
+
+后端版本信息通过环境变量 `APP_VERSION` 管理：
+
+```python
+# backend/consts/const.py
+APP_VERSION = os.getenv("APP_VERSION", "v1.0.0")
+```
+
+### 版本配置
+
+版本信息在环境变量中配置：
+
+```bash
+# .env 或 .env.example
+APP_VERSION=v1.0.0
+```
+
+### 版本显示
+
+后端启动时会在日志中打印版本信息：
+
+```python
+# backend/main_service.py
+logger.info(f"APP version is: {APP_VERSION}")
+```
+
+### 版本更新流程
+
+1. **更新环境变量**
+
+   ```bash
+   # 编辑 .env 文件，修改 APP_VERSION 的值
+   APP_VERSION=v1.1.0
+   ```
+
+2. **验证版本显示**
+
+   ```bash
+   # 启动后端服务
+   cd backend
+   python main_service.py
+
+   # 查看启动日志中的版本信息
+   # 输出示例：APP version is: v1.1.0
+   ```

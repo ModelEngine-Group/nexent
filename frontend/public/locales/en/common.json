@@ -922,5 +922,7 @@
   "agentCallRelationship.description": "This flowchart shows the call relationship of {{name}} and all its tools and collaborative agents",
   "agentCallRelationship.noData": "No call relationship data available",
   "businessLogic.config.error.loadModelsFailed": "Failed to load available models",
-  "businessLogic.config.error.noAvailableModels": "No available models"
+  "businessLogic.config.error.noAvailableModels": "No available models",
+
+  "app.version": "App Version"
 }

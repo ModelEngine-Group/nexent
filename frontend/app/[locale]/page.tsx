@@ -24,6 +24,7 @@ import { languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
 import { HEADER_CONFIG, FOOTER_CONFIG } from "@/const/layoutConstants";
 import { DownOutlined } from "@ant-design/icons";
+import { VersionDisplay } from "@/components/ui/versionDisplay";
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -354,6 +355,7 @@ export default function Home() {
                 >
                   {t("page.aboutUs")}
                 </Link>
+                <VersionDisplay />
               </div>
             </div>
           </div>
