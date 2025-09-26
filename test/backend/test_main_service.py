@@ -27,6 +27,14 @@ sys.modules.setdefault("backend", backend_pkg)
 sys.modules["backend.apps"] = apps_pkg
 sys.modules["backend.apps.base_app"] = base_app_mod
 
+# Also stub non-namespaced imports used by the application
+apps_pkg_flat = types.ModuleType("apps")
+base_app_mod_flat = types.ModuleType("apps.base_app")
+base_app_mod_flat.app = MagicMock()
+sys.modules["apps"] = apps_pkg_flat
+sys.modules["apps.base_app"] = base_app_mod_flat
+setattr(apps_pkg_flat, "base_app", base_app_mod_flat)
+
 # Wire package attributes
 setattr(backend_pkg, "apps", apps_pkg)
 setattr(apps_pkg, "base_app", base_app_mod)
