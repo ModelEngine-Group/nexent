@@ -21,33 +21,81 @@ Nexent uses Semantic Versioning:
 
 ### Version Information Location
 
-Frontend version information is read from the `frontend/package.json` file:
+Frontend version information is fetched from the backend via API.
 
-```json
-{
-  "name": "nexent",
-  "version": "v1.0.0",
-  "private": true
+- **Endpoint**: `GET /api/tenant_config/deployment_version`
+- **Service**: `frontend/services/versionService.ts`
+
+```startLine:endLine:nexent/frontend/services/versionService.ts
+import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
+import log from "@/lib/logger";
+
+export interface DeploymentVersionResponse {
+  app_version?: string;
+  content?: {
+    app_version?: string;
+  };
 }
+
+export class VersionService {
+  /**
+   * Get application version from deployment API
+   * @returns Promise<string> App version number
+   */
+  async getAppVersion(): Promise<string> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.tenantConfig.deploymentVersion
+      );
+
+      if (response.status !== 200) {
+        log.warn("Failed to fetch app version, using fallback");
+        return "v1.0.0"; // Fallback version
+      }
+
+      const data: DeploymentVersionResponse = await response.json();
+
+      // Extract app_version from response
+      const version = data.app_version || data.content?.app_version;
+
+      if (version) {
+        return version;
+      }
+
+      log.warn("App version not found in response, using fallback");
+      return "v1.0.0"; // Fallback version
+    } catch (error) {
+      log.error("Error fetching app version:", error);
+      return "v1.0.0"; // Fallback version
+    }
+  }
+}
+
+// Export singleton instance
+export const versionService = new VersionService();
 ```
 
-Version information is automatically read in the `frontend/components/ui/versionDisplay.tsx` component:
+The version is displayed in the footer, falling back to `APP_VERSION` if the API fails:
 
-```typescript
-import packageJson from "../../package.json";
+```startLine:endLine:nexent/frontend/app/[locale]/page.tsx
+<span className="ml-1">· {appVersion || APP_VERSION}</span>
+```
 
-const version = `${packageJson.version}`;
+`APP_VERSION` default value is defined at:
+
+```startLine:endLine:nexent/frontend/const/constants.ts
+export const APP_VERSION = "v1.0.0";
 ```
 
 ### Version Update Process
 
-1. **Update package.json version**
+1. **Update backend environment variable**
+
+   The frontend now reflects the backend deployment version. Update the backend `APP_VERSION` to change the displayed version:
 
    ```bash
-   # Edit frontend/package.json, modify the version field value
-   {
-     "version": "v1.1.0"
-   }
+   # .env or .env.example
+   APP_VERSION=v1.1.0
    ```
 
 2. **Verify Version Display**
@@ -57,7 +105,7 @@ const version = `${packageJson.version}`;
    cd frontend
    npm run dev
 
-   # Check the application version display at the bottom of the page
+   # Check the application version displayed at the bottom of the page
    ```
 
 ### Version Display

@@ -21,33 +21,81 @@ Nexent 使用语义化版本控制：
 
 ### 版本信息位置
 
-前端版本信息从 `frontend/package.json` 文件中读取：
+前端版本信息通过接口从后端获取。
 
-```json
-{
-  "name": "nexent",
-  "version": "v1.0.0",
-  "private": true
+- **接口**: `GET /api/tenant_config/deployment_version`
+- **服务**: `frontend/services/versionService.ts`
+
+```startLine:endLine:nexent/frontend/services/versionService.ts
+import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
+import log from "@/lib/logger";
+
+export interface DeploymentVersionResponse {
+  app_version?: string;
+  content?: {
+    app_version?: string;
+  };
 }
+
+export class VersionService {
+  /**
+   * Get application version from deployment API
+   * @returns Promise<string> App version number
+   */
+  async getAppVersion(): Promise<string> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.tenantConfig.deploymentVersion
+      );
+
+      if (response.status !== 200) {
+        log.warn("Failed to fetch app version, using fallback");
+        return "v1.0.0"; // Fallback version
+      }
+
+      const data: DeploymentVersionResponse = await response.json();
+
+      // Extract app_version from response
+      const version = data.app_version || data.content?.app_version;
+
+      if (version) {
+        return version;
+      }
+
+      log.warn("App version not found in response, using fallback");
+      return "v1.0.0"; // Fallback version
+    } catch (error) {
+      log.error("Error fetching app version:", error);
+      return "v1.0.0"; // Fallback version
+    }
+  }
+}
+
+// Export singleton instance
+export const versionService = new VersionService();
 ```
 
-版本信息在 `frontend/components/ui/versionDisplay.tsx` 组件中自动读取：
+底部页脚显示版本号，若接口失败则回退为 `APP_VERSION`：
 
-```typescript
-import packageJson from "../../package.json";
+```startLine:endLine:nexent/frontend/app/[locale]/page.tsx
+<span className="ml-1">· {appVersion || APP_VERSION}</span>
+```
 
-const version = `${packageJson.version}`;
+`APP_VERSION` 默认值定义在：
+
+```startLine:endLine:nexent/frontend/const/constants.ts
+export const APP_VERSION = "v1.0.0";
 ```
 
 ### 版本更新流程
 
-1. **更新 package.json 版本**
+1. **更新后端环境变量**
+
+   前端展示的版本号随后端部署版本同步。通过更新后端 `APP_VERSION` 来变更展示的版本：
 
    ```bash
-   # 编辑 frontend/package.json，修改 version 字段的值
-   {
-     "version": "v1.0.0"
-   }
+   # .env 或 .env.example
+   APP_VERSION=v1.1.0
    ```
 
 2. **验证版本显示**
@@ -57,7 +105,7 @@ const version = `${packageJson.version}`;
    cd frontend
    npm run dev
 
-   # 检查页面底部应用版本显示
+   # 在页面底部检查应用版本显示
    ```
 
 ### 版本显示
