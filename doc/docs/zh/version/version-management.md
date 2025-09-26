@@ -28,14 +28,14 @@ Nexent 使用语义化版本控制：
 
 ### 版本更新流程
 
-1. **更新后端环境变量**
+1. **在代码中更新后端版本**
 
-   前端展示的版本号随后端部署版本同步。通过更新后端 `APP_VERSION` 来变更展示的版本：
+编辑 `backend/consts/const.py` 更新 `APP_VERSION`：
 
-   ```bash
-   # .env 或 .env.example
-   APP_VERSION=v1.1.0
-   ```
+```python
+# backend/consts/const.py
+APP_VERSION="v1.1.0"
+```
 
 2. **验证版本显示**
 
@@ -58,21 +58,16 @@ Nexent 使用语义化版本控制：
 
 ### 版本信息位置
 
-后端版本信息通过环境变量 `APP_VERSION` 管理：
+后端版本信息在 `backend/consts/const.py` 中以代码形式定义：
 
 ```python
 # backend/consts/const.py
-APP_VERSION = os.getenv("APP_VERSION", "v1.0.0")
+APP_VERSION = "v1.0.0"
 ```
 
 ### 版本配置
 
-版本信息在环境变量中配置：
-
-```bash
-# .env 或 .env.example
-APP_VERSION=v1.0.0
-```
+版本通过直接修改 `backend/consts/const.py` 中的 `APP_VERSION` 配置。
 
 ### 版本显示
 
@@ -85,12 +80,12 @@ logger.info(f"APP version is: {APP_VERSION}")
 
 ### 版本更新流程
 
-1. **更新环境变量**
+1. **在代码中更新版本**
 
-   ```bash
-   # 编辑 .env 文件，修改 APP_VERSION 的值
-   APP_VERSION=v1.1.0
-   ```
+```python
+# 编辑 backend/consts/const.py
+APP_VERSION="v1.1.0"
+```
 
 2. **验证版本显示**
 

@@ -260,4 +260,4 @@ LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
     os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))  # tokens per second
 
 # APP Version
-APP_VERSION = os.getenv("APP_VERSION", "v1.0.0")
+APP_VERSION = "v1.7.4"

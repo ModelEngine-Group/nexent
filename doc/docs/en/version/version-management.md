@@ -28,14 +28,14 @@ Frontend version information is fetched from the backend via API.
 
 ### Version Update Process
 
-1. **Update backend environment variable**
+1. **Update backend version in code**
 
-   The frontend now reflects the backend deployment version. Update the backend `APP_VERSION` to change the displayed version:
+Edit `backend/consts/const.py` to update `APP_VERSION`:
 
-   ```bash
-   # .env or .env.example
-   APP_VERSION=v1.1.0
-   ```
+```python
+# backend/consts/const.py
+APP_VERSION="v1.1.0"
+```
 
 2. **Verify Version Display**
 
@@ -58,21 +58,16 @@ Frontend version information is displayed at the following location:
 
 ### Version Information Location
 
-Backend version information is managed through the environment variable `APP_VERSION`:
+Backend version information is defined in code in `backend/consts/const.py`:
 
 ```python
 # backend/consts/const.py
-APP_VERSION = os.getenv("APP_VERSION", "v1.0.0")
+APP_VERSION = "v1.0.0"
 ```
 
 ### Version Configuration
 
-Version information is configured in environment variables:
-
-```bash
-# .env or .env.example
-APP_VERSION=v1.0.0
-```
+Version is configured directly in `backend/consts/const.py`.
 
 ### Version Display
 
@@ -85,12 +80,12 @@ logger.info(f"APP version is: {APP_VERSION}")
 
 ### Version Update Process
 
-1. **Update Environment Variable**
+1. **Update Version in Code**
 
-   ```bash
-   # Edit .env file, modify the value of APP_VERSION
-   APP_VERSION=v1.1.0
-   ```
+```python
+# Edit backend/consts/const.py
+APP_VERSION="v1.1.0"
+```
 
 2. **Verify Version Display**
 
