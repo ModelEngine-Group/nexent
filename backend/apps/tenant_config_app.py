@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Body, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from consts.const import DEPLOYMENT_VERSION
+from consts.const import DEPLOYMENT_VERSION, APP_VERSION
 from services.tenant_config_service import get_selected_knowledge_list, update_selected_knowledge
 from utils.auth_utils import get_current_user_id
 
@@ -22,6 +22,7 @@ def get_deployment_version():
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"deployment_version": DEPLOYMENT_VERSION,
+                     "app_version": APP_VERSION,
                      "status": "success"}
         )
     except Exception as e:

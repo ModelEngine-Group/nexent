@@ -20,10 +20,12 @@ import { RegisterModal } from "@/components/auth/registerModal";
 import { useAuth } from "@/hooks/useAuth";
 import { Modal, ConfigProvider, Dropdown } from "antd";
 import { motion } from "framer-motion";
-import { languageOptions } from "@/const/constants";
+import {APP_VERSION, languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
 import { HEADER_CONFIG, FOOTER_CONFIG } from "@/const/layoutConstants";
 import { DownOutlined } from "@ant-design/icons";
+import { versionService } from "@/services/versionService";
+import log from "@/lib/logger";
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -56,6 +58,22 @@ export default function Home() {
     const [loginPromptOpen, setLoginPromptOpen] = useState(false);
     const [adminRequiredPromptOpen, setAdminRequiredPromptOpen] =
       useState(false);
+    const [appVersion, setAppVersion] = useState<string>("");
+
+    // Get app version on mount
+    useEffect(() => {
+      const fetchAppVersion = async () => {
+        try {
+          const version = await versionService.getAppVersion();
+          setAppVersion(version);
+        } catch (error) {
+          log.error("Failed to fetch app version:", error);
+          setAppVersion(APP_VERSION); // Fallback
+        }
+      };
+
+      fetchAppVersion();
+    }, []);
 
     // Handle operations that require login
     const handleAuthRequired = (e: React.MouseEvent) => {
@@ -333,6 +351,7 @@ export default function Home() {
               <div className="flex items-center gap-8">
                 <span className="text-sm text-slate-900 dark:text-white">
                   {t("page.copyright", { year: new Date().getFullYear() })}
+                  <span className="ml-1">· {appVersion || APP_VERSION}</span>
                 </span>
               </div>
               <div className="flex items-center gap-6">
@@ -350,7 +369,7 @@ export default function Home() {
                 </Link>
                 <Link
                   href="http://nexent.tech/about"
-                  className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors"
+                  className="text-sm text-slate-600 dark:text-slate-300 dark:hover:text-white transition-colors"
                 >
                   {t("page.aboutUs")}
                 </Link>
