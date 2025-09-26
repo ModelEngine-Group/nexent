@@ -64,8 +64,7 @@ const version = `${packageJson.version}`;
 
 Frontend version information is displayed at the following location:
 
-- **Location**: Bottom navigation bar of the page, located on the right side of "Terms of Use", "Contact Us", "About Us"
-- **Display Method**: Hover over "Application Version" to view detailed version information
+- **Location**: Bottom navigation bar, located at the bottom left corner of the page.
 - **Version Format**: `v1.1.0`
 
 ## Backend Version Management
