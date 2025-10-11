@@ -53,9 +53,10 @@ jobs:
 
       - name: Temporarily modify base path for GitHub Pages
         run: |
-          sed -E "s|base:[[:space:]]*['\"]?/doc/['\"]?|base: '/nexent/'|g" docs/.vitepress/config.mts > docs/.vitepress/config.github.mts
+          echo "base: '/nexent/'" > docs/.vitepress/config.temp.mts
+          cat docs/.vitepress/config.mts >> docs/.vitepress/config.temp.mts
           mv docs/.vitepress/config.mts docs/.vitepress/config.original.mts
-          mv docs/.vitepress/config.github.mts docs/.vitepress/config.mts
+          mv docs/.vitepress/config.temp.mts docs/.vitepress/config.mts
 
       - name: Build with VitePress
         run: npm run docs:build
