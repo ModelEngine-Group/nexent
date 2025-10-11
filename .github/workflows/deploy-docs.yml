@@ -36,39 +36,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Not needed if lastUpdated is not enabled
-      
+          fetch-depth: 0
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: ./doc/package-lock.json
-      
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Temporarily modify base path for GitHub Pages
         run: |
-          # Create a temporary config file, changing base from '/doc/' to '/nexent/' for GitHub Pages
-          sed 's|base: '"'"'/doc/'"'"'|base: '"'"'/nexent/'"'"'|g' docs/.vitepress/config.mts > docs/.vitepress/config.github.mts
+          sed -E "s|base:[[:space:]]*['\"]?/doc/['\"]?|base: '/nexent/'|g" docs/.vitepress/config.mts > docs/.vitepress/config.github.mts
           mv docs/.vitepress/config.mts docs/.vitepress/config.original.mts
           mv docs/.vitepress/config.github.mts docs/.vitepress/config.mts
-      
+
       - name: Build with VitePress
         run: npm run docs:build
-        
+
       - name: Restore original config
-        run: |
-          mv docs/.vitepress/config.original.mts docs/.vitepress/config.mts
-      
+        run: mv docs/.vitepress/config.original.mts docs/.vitepress/config.mts
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: doc/docs/.vitepress/dist
+          path: ./doc/docs/.vitepress/dist
 
   # Deploy job
   deploy:
