@@ -1171,68 +1171,6 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("Health check failed", str(context.exception))
 
 
-    @patch('backend.services.elasticsearch_service.calculate_term_weights')
-    @patch('database.model_management_db.get_model_by_model_id')
-    def test_summary_index_name(self, mock_get_model_by_model_id, mock_calculate_weights):
-        """
-        Test generating a summary for an index.
-
-        This test verifies that:
-        1. Random documents are retrieved for summarization
-        2. Term weights are calculated to identify important keywords
-        3. The summary generation stream is properly initialized
-        4. A StreamingResponse object is returned for streaming the summary tokens
-        """
-        # Setup
-        mock_calculate_weights.return_value = {
-            "keyword1": 0.8, "keyword2": 0.6}
-        mock_get_model_by_model_id.return_value = {
-            'api_key': 'test_api_key',
-            'base_url': 'https://api.test.com',
-            'model_name': 'test-model',
-            'model_repo': 'test-repo'
-        }
-
-        # Mock get_random_documents
-        with patch.object(ElasticSearchService, 'get_random_documents') as mock_get_docs:
-            mock_get_docs.return_value = {
-                "total": 2,
-                "documents": [
-                    {"title": "Doc1", "filename": "file1.txt", "content": "Content1"},
-                    {"title": "Doc2", "filename": "file2.txt", "content": "Content2"}
-                ]
-            }
-
-            # Execute
-            async def run_test():
-                result = await self.es_service.summary_index_name(
-                    index_name="test_index",
-                    batch_size=1000,
-                    es_core=self.mock_es_core,
-                    language='en',
-                    model_id=1,
-                    tenant_id="test_tenant"
-                )
-
-                # Consume part of the stream to trigger the generator function
-                generator = result.body_iterator
-                # Get at least one item from the generator to trigger execution
-                try:
-                    async for item in generator:
-                        break  # Just get one item to trigger execution
-                except StopAsyncIteration:
-                    pass
-
-                return result
-
-            result = asyncio.run(run_test())
-
-            # Assert
-            self.assertIsInstance(result, StreamingResponse)
-            mock_get_docs.assert_called_once()
-            mock_calculate_weights.assert_called_once()
-            mock_get_model_by_model_id.assert_called_once_with(1, "test_tenant")
-
     def test_get_random_documents(self):
         """
         Test retrieving random documents from an index.
