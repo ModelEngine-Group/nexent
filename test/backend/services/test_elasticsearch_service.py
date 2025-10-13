@@ -1196,6 +1196,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Mock get_random_documents
         with patch.object(ElasticSearchService, 'get_random_documents') as mock_get_docs:
             mock_get_docs.return_value = {
+                "total": 2,
                 "documents": [
                     {"title": "Doc1", "filename": "file1.txt", "content": "Content1"},
                     {"title": "Doc2", "filename": "file2.txt", "content": "Content2"}

@@ -11,10 +11,11 @@ import numpy as np
 # Mock external dependencies before importing backend modules
 sys.modules['boto3'] = MagicMock()
 
-with patch('backend.database.client.MinioClient') as minio_mock, \
-     patch('elasticsearch.Elasticsearch', return_value=MagicMock()) as es_mock:
-    minio_mock.return_value = MagicMock()
-    
+# Mock backend modules that have import issues in CI environment
+with patch.dict('sys.modules', {
+    'backend.database.client': MagicMock(),
+    'elasticsearch': MagicMock()
+}):
     from backend.utils.async_knowledge_summary_utils import (
         AsyncLLMClient,
         DocumentClusterer,
@@ -37,24 +38,19 @@ class TestAsyncLLMClient:
             'model_repo': ''
         }
     
-    @patch('backend.utils.async_knowledge_summary_utils.get_async_knowledge_summary_prompt_template')
-    def test_client_initialization(self, mock_get_prompts, model_config):
+    def test_client_initialization(self, model_config):
         """Test client initialization with prompt template loading"""
-        # Mock prompt templates
-        mock_prompts = {
-            'SUMMARY_GENERATION_PROMPT': 'Test summary prompt',
-            'KEYWORD_EXTRACTION_PROMPT': 'Test keyword prompt',
-            'CLUSTER_INTEGRATION_PROMPT': 'Test cluster prompt',
-            'GLOBAL_INTEGRATION_PROMPT': 'Test global prompt'
-        }
-        mock_get_prompts.return_value = mock_prompts
-        
         client = AsyncLLMClient(model_config, language='zh')
         assert client.model_config == model_config
         assert client.model_name == 'test-model'
         assert client.language == 'zh'
-        assert client.prompts == mock_prompts
-        mock_get_prompts.assert_called_once_with('zh')
+        # Verify prompts are loaded (any prompts, from real YAML)
+        assert hasattr(client, 'prompts')
+        assert isinstance(client.prompts, dict)
+        assert 'SUMMARY_GENERATION_PROMPT' in client.prompts
+        assert 'KEYWORD_EXTRACTION_PROMPT' in client.prompts
+        assert 'CLUSTER_INTEGRATION_PROMPT' in client.prompts
+        assert 'GLOBAL_INTEGRATION_PROMPT' in client.prompts
     
 
 
@@ -210,17 +206,8 @@ class TestAsyncVectorizeBatch:
 class TestPromptTemplateUsage:
     """Test prompt template usage in async knowledge summary"""
     
-    @patch('backend.utils.async_knowledge_summary_utils.get_async_knowledge_summary_prompt_template')
-    def test_summary_uses_template(self, mock_get_prompts):
+    def test_summary_uses_template(self):
         """Test that summary generation uses YAML templates"""
-        mock_prompts = {
-            'SUMMARY_GENERATION_PROMPT': 'Generate summary for: {{ text }}',
-            'KEYWORD_EXTRACTION_PROMPT': 'Extract keywords',
-            'CLUSTER_INTEGRATION_PROMPT': 'Integrate clusters',
-            'GLOBAL_INTEGRATION_PROMPT': 'Generate global summary'
-        }
-        mock_get_prompts.return_value = mock_prompts
-        
         model_config = {
             'api_key': 'test-key',
             'base_url': 'http://test.com',
@@ -228,11 +215,20 @@ class TestPromptTemplateUsage:
             'model_repo': ''
         }
         
-        client = AsyncLLMClient(model_config, language='zh')
+        # Test with Chinese language
+        client_zh = AsyncLLMClient(model_config, language='zh')
+        assert 'SUMMARY_GENERATION_PROMPT' in client_zh.prompts
+        assert 'KEYWORD_EXTRACTION_PROMPT' in client_zh.prompts
+        assert 'CLUSTER_INTEGRATION_PROMPT' in client_zh.prompts
+        assert 'GLOBAL_INTEGRATION_PROMPT' in client_zh.prompts
         
-        # Verify prompts are loaded
-        assert client.prompts == mock_prompts
-        assert 'SUMMARY_GENERATION_PROMPT' in client.prompts
+        # Test with English language
+        client_en = AsyncLLMClient(model_config, language='en')
+        assert 'SUMMARY_GENERATION_PROMPT' in client_en.prompts
+        assert 'KEYWORD_EXTRACTION_PROMPT' in client_en.prompts
+        
+        # Verify that different languages load different templates
+        assert client_zh.prompts != client_en.prompts
 
 
 if __name__ == "__main__":
