@@ -359,6 +359,13 @@
   "toolConfig.input.string.placeholder": "Please enter {{name}}",
   "toolConfig.input.array.placeholder": "Please enter JSON array",
   "toolConfig.input.object.placeholder": "Please enter JSON object",
+  "toolConfig.toolTest.toolInfo": "Tool Information",
+  "toolConfig.toolTest.configParams": "Parameter Configuration",
+  "toolConfig.toolTest.inputParams": "Parameter Input",
+  "toolConfig.toolTest.executing": "Testing...",
+  "toolConfig.toolTest.execute": "Execute Test",
+  "toolConfig.toolTest.result": "Test Result",
+  "toolConfig.button.testTool": "Test Tool",
 
   "toolPool.title": "Select tools",
   "toolPool.loading": "Loading...",
@@ -391,6 +398,7 @@
   "common.button.close": "Close",
   "common.button.cancel": "Cancel",
   "common.button.save": "Save",
+  "common.button.saving": "Saving",
   "common.button.editConfig": "Edit Configuration",
   "common.message.refreshSuccess": "Refresh successful",
   "common.message.refreshFailed": "Refresh failed",
@@ -758,7 +766,6 @@
   "toolManagement.message.refreshSuccess": "Tools list refreshed successfully",
   "toolManagement.message.refreshFailed": "Failed to refresh tools list",
   "toolManagement.message.refreshFailedRetry": "Failed to refresh tools list, please try again later",
-
 
   "mcpConfig.modal.title": "MCP Server Configuration",
   "mcpConfig.modal.close": "Close",

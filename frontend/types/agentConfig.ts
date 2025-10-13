@@ -26,23 +26,19 @@ export interface Agent {
 export interface Tool {
   id: string;
   name: string;
+  origin_name?: string;
   description: string;
   source: "local" | "mcp" | "langchain";
   initParams: ToolParam[];
   is_available?: boolean;
   create_time?: string;
   usage?: string;
+  inputs?: string;
 }
 
 export interface ToolParam {
   name: string;
-  type:
-    | "string"
-    | "number"
-    | "boolean"
-    | "array"
-    | "object"
-    | "Optional";
+  type: "string" | "number" | "boolean" | "array" | "object" | "Optional";
   required: boolean;
   value?: any;
   description?: string;
@@ -179,6 +175,7 @@ export interface ToolConfigModalProps {
   tool: Tool | null;
   mainAgentId: number;
   selectedTools?: Tool[];
+  isEditingMode?: boolean;
 }
 
 // ExpandEditModal component props interface

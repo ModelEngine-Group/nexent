@@ -167,6 +167,7 @@ class ToolInfo(TableBase):
 
     tool_id = Column(Integer, primary_key=True, nullable=False, doc="ID")
     name = Column(String(100), doc="Unique key name")
+    origin_name = Column(String(100), doc="Original name")
     class_name = Column(
         String(100), doc="Tool class name, used when the tool is instantiated")
     description = Column(String(2048), doc="Prompt tool description")

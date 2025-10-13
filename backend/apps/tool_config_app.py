@@ -5,14 +5,15 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import MCPConnectionError
-from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest
+from consts.exceptions import MCPConnectionError, TimeoutException, NotFoundException
+from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 from services.tool_configuration_service import (
     search_tool_info_impl,
     update_tool_info_impl,
     update_tool_list,
     list_all_tools,
     load_last_tool_config_impl,
+    validate_tool_impl,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -81,6 +82,7 @@ async def scan_and_update_tool(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to update tool")
 
+
 @router.get("/load_config/{tool_id}")
 async def load_last_tool_config(tool_id: int, authorization: Optional[str] = Header(None)):
     try:
@@ -98,3 +100,37 @@ async def load_last_tool_config(tool_id: int, authorization: Optional[str] = Hea
         logger.error(f"Failed to load tool config: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to load tool config")
+
+
+@router.post("/validate")
+async def validate_tool(
+    request: ToolValidateRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Validate specific tool based on source type"""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = await validate_tool_impl(request, tenant_id)
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content=result
+        )
+    except MCPConnectionError as e:
+        logger.error(f"MCP connection failed: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
+    except NotFoundException as e:
+        logger.error(f"Tool not found: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Failed to validate tool: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to validate tool: {str(e)}"
+        )

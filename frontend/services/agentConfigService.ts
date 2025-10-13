@@ -6,6 +6,45 @@ import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 
 /**
+ * Parse tool inputs string to extract parameter information
+ * @param inputsString The inputs string from tool data
+ * @returns Parsed inputs object with parameter names and descriptions
+ */
+export const parseToolInputs = (inputsString: string): Record<string, any> => {
+  if (!inputsString || typeof inputsString !== "string") {
+    return {};
+  }
+
+  try {
+    return JSON.parse(inputsString);
+  } catch (error) {
+    try {
+      const normalizedString = inputsString
+        .replace(/"/g, "`")
+        .replace(/'/g, '"')
+        .replace(/\bTrue\b/g, "true")
+        .replace(/\bFalse\b/g, "false")
+        .replace(/\bNone\b/g, "null");
+      return JSON.parse(normalizedString);
+    } catch (error) {
+      log.warn("Failed to parse tool inputs:", inputsString, error);
+      return {};
+    }
+  }
+};
+
+/**
+ * Extract parameter names from parsed inputs
+ * @param parsedInputs Parsed inputs object
+ * @returns Array of parameter names
+ */
+export const extractParameterNames = (
+  parsedInputs: Record<string, any>
+): string[] => {
+  return Object.keys(parsedInputs);
+};
+
+/**
  * get tool list from backend
  * @returns converted tool list
  */
@@ -23,11 +62,13 @@ export const fetchTools = async () => {
     const formattedTools = data.map((tool: any) => ({
       id: String(tool.tool_id),
       name: tool.name,
+      origin_name: tool.origin_name,
       description: tool.description,
       source: tool.source,
       is_available: tool.is_available,
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
+      inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
           name: param.name,
@@ -731,4 +772,52 @@ export const checkAgentDisplayName = async (
   excludeAgentId?: number
 ): Promise<{ status: string; action?: string }> => {
   return checkAgentField(displayName, "display_name", excludeAgentId);
+};
+
+/**
+ * Validate tool using /tool/validate endpoint
+ * @param name tool name
+ * @param source tool source
+ * @param usage tool usage URL
+ * @param inputs tool inputs
+ * @param params tool configuration parameters
+ * @returns validation result
+ */
+export const validateTool = async (
+  name: string,
+  source: string,
+  usage: string,
+  inputs: Record<string, any> | null = null,
+  params: Record<string, any> | null = null
+) => {
+  try {
+    const requestBody = {
+      name: name,
+      source: source,
+      usage: usage,
+      inputs: inputs,
+      params: params,
+    };
+
+    const response = await fetch(API_ENDPOINTS.tool.validate, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const data = await response.json();
+
+    // Return the raw backend response directly
+    return data;
+  } catch (error) {
+    log.error("Tool validation failed:", error);
+    return {
+      valid: false,
+      message: "Network error occurred during validation",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 };

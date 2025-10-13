@@ -2,13 +2,14 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
-  base: "/doc/",
+  // Set base path for GitHub Pages deployment
+  base: (globalThis as any).process?.env?.GITHUB_PAGES ? '/nexent/' : '/',
   title: "Nexent Doc",
   description:
     "A zero-code platform for auto-generating agents  no orchestration, no complex drag-and-drop required.",
 
   // Add favicon to head
-  head: [["link", { rel: "icon", href: "/doc/favicon.ico" }]],
+  head: [["link", { rel: "icon", href: (globalThis as any).process?.env?.GITHUB_PAGES ? "/nexent/favicon.ico" : "/doc/favicon.ico" }]],
 
   // Ignore localhost links as they are meant for local deployment access
   ignoreDeadLinks: [

@@ -67,17 +67,43 @@ Open a new issue in our [GitHub Issues](https://github.com/ModelEngine-Group/nex
 
 ## 🌟 Quick Memorial Wall Contribution
 
-Want to leave your mark on the Open Source Memorial Wall? Here's a simplified process designed especially for beginners:
+Want to leave your mark on the Open Source Memorial Wall? Here's a detailed step-by-step process designed especially for beginners:
 
-### Super Simple Three Steps
-1. **Edit Online**: Click the ✏️ edit button on the [Memorial Wall file](https://github.com/ModelEngine-Group/nexent/blob/develop/doc/docs/en/opensource-memorial-wall.md) directly on GitHub
-2. **Add Your Message**: Add your message in the "Community Messages" section using this format:
-   ```markdown
-   ::: info Your Name - 2024-01-15
-   Share your open source story or experience with Nexent!
-   :::
-   ```
-3. **Submit PR**: Click "Propose changes" at the bottom, then "Create pull request"
+### Step 1: Edit the Memorial Wall File
+
+![Step 1](./assets/contribute_step_1.png)
+
+**Instructions:** Click the ✏️ edit button on the [Memorial Wall file](https://github.com/ModelEngine-Group/nexent/blob/develop/doc/docs/en/opensource-memorial-wall.md) directly on GitHub
+
+---
+
+### Step 2: Add Your Message
+
+![Step 2](./assets/contribute_step_2.png)
+
+**Instructions:** Add your message in the "Community Messages" section using this format, then click "Commit changes":
+
+```markdown
+::: info Your Name - 2024-01-15
+Share your open source story or experience with Nexent!
+:::
+```
+
+---
+
+### Step 3: Propose Changes
+
+![Step 3](./assets/contribute_step_3.png)
+
+**Instructions:** Click "Propose changes" and wait for the merge to complete!
+
+---
+
+### Step 4: Success!
+
+![Step 4](./assets/contribute_step_4.png)
+
+**Instructions:** After successful merge, it will be displayed on the GitHub homepage~ Congratulations on becoming one of Nexent's co-creators! 🎉
 
 That's it! We'll review and merge your contribution as soon as possible. ✨
 
