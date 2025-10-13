@@ -33,10 +33,19 @@ from database.knowledge_db import (
     get_knowledge_record,
     update_knowledge_record, get_knowledge_info_by_tenant_id, update_model_name_by_index_name,
 )
+from database.model_management_db import get_model_by_model_id
 from services.redis_service import get_redis_service
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
 from utils.prompt_template_utils import get_knowledge_summary_prompt_template
+from utils.async_knowledge_summary_utils import (
+    AsyncLLMClient,
+    ChunkClusterer,
+    KnowledgeIntegrator,
+    async_vectorize_batch
+)
+import numpy as np
+import json
 
 # Configure logging
 logger = logging.getLogger("elasticsearch_service")
@@ -871,7 +880,7 @@ class ElasticSearchService:
                                  model_id: Optional[int] = None
                                  ):
         """
-        Generate a summary for the specified index based on its content
+        Generate a summary for the specified index based on its content using async pipeline
 
         Args:
             index_name: Name of the index to summarize
@@ -879,44 +888,283 @@ class ElasticSearchService:
             es_core: ElasticSearchCore instance
             tenant_id: ID of the tenant
             language: Language of the summary (default: 'zh')
+            model_id: Optional model ID for LLM
 
         Returns:
             StreamingResponse containing the generated summary
         """
         try:
-            # Get all documents
+            # Validate tenant ID
             if not tenant_id:
-                raise Exception(
-                    "Tenant ID is required for summary generation.")
+                raise Exception("Tenant ID is required for summary generation.")
+            
+            # Get documents from Elasticsearch
             all_documents = ElasticSearchService.get_random_documents(
                 index_name, batch_size, es_core)
-            all_chunks = self._clean_chunks_for_summary(all_documents)
-            keywords_dict = calculate_term_weights(all_chunks)
-            keywords_for_summary = ""
-            for _, key in enumerate(keywords_dict):
-                keywords_for_summary = keywords_for_summary + ", " + key
-
-            async def generate_summary():
-                token_join = []
+            
+            total_docs = all_documents.get('total', 0)
+            documents_list = all_documents.get('documents', [])
+            
+            # Check if index has any documents
+            if total_docs == 0:
+                error_msg = (
+                    f"No indexed content found in knowledge base '{index_name}' (total indexed documents: 0). "
+                    f"Possible reasons:\n"
+                    f"1. Documents are still being processed (check file processing status)\n"
+                    f"2. Document processing failed (check logs for errors)\n"
+                    f"3. No documents have been uploaded yet\n"
+                    f"Please ensure documents are fully processed before generating a summary."
+                )
+                logger.error(error_msg)
+                raise Exception(error_msg)
+            
+            if not documents_list:
+                raise Exception(f"Failed to retrieve documents from index {index_name}")
+            
+            logger.info(f"Retrieved {len(documents_list)} documents from index {index_name} (total in index: {total_docs})")
+            
+            # Get model configuration
+            if model_id:
                 try:
-                    for new_token in generate_knowledge_summary_stream(keywords_for_summary, language, tenant_id, model_id):
-                        if new_token == "END":
-                            break
-                        else:
-                            token_join.append(new_token)
-                            yield f"data: {{\"status\": \"success\", \"message\": \"{new_token}\"}}\n\n"
-                        await asyncio.sleep(0.1)
+                    model_config = get_model_by_model_id(model_id, tenant_id)
+                    if not model_config:
+                        logger.warning(f"Model {model_id} not found, using default LLM")
+                        model_config = tenant_config_manager.get_model_config(
+                            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
                 except Exception as e:
-                    yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
-
-            # Return the flow response
+                    logger.warning(f"Failed to get model {model_id}, using default: {e}")
+                    model_config = tenant_config_manager.get_model_config(
+                        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+            else:
+                model_config = tenant_config_manager.get_model_config(
+                    key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+            
+            # Get embedding model
+            embedding_model = get_embedding_model(tenant_id)
+            if not embedding_model:
+                raise Exception("Failed to get embedding model")
+            
+            # Async summary generation stream
+            async def generate_summary_stream():
+                summary_parts = []
+                try:
+                    # Note: ES stores chunks, not original documents
+                    # Each item in documents_list is already a processed chunk
+                    chunks = documents_list
+                    
+                    # Progress: Step 1 - Document reconstruction and clustering
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"document_clustering\", \"message\": \"Reconstructing documents and performing document-level clustering...\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Reconstruct documents from chunks
+                    documents = self._reconstruct_documents_from_chunks(chunks)
+                    logger.info(f"Reconstructed {len(documents)} documents from {len(chunks)} chunks")
+                    
+                    # Vectorize documents for document-level clustering
+                    doc_texts = [doc.get('content', '') for doc in documents]
+                    doc_vectors = await async_vectorize_batch(doc_texts, embedding_model, batch_size=20)
+                    
+                    # Document-level clustering
+                    from utils.async_knowledge_summary_utils import DocumentClusterer
+                    doc_clusterer = DocumentClusterer(max_clusters=10)
+                    doc_cluster_result = doc_clusterer.cluster_documents(doc_vectors)
+                    
+                    if doc_cluster_result is None:
+                        # Fallback: treat all documents as one cluster
+                        import numpy as np
+                        doc_cluster_labels = np.zeros(len(documents), dtype=int)
+                        n_doc_clusters = 1
+                    else:
+                        doc_cluster_labels = doc_cluster_result['cluster_labels']
+                        n_doc_clusters = doc_cluster_result['n_clusters']
+                    
+                    logger.info(f"Document clustering completed: {n_doc_clusters} document clusters")
+                    
+                    # Progress: Step 2 - Chunk vectorization and clustering within document clusters
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"chunk_clustering\", \"message\": \"Performing chunk-level clustering within document clusters...\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Reorganize chunks by document clusters
+                    chunks_by_doc_cluster = self._organize_chunks_by_document_clusters(chunks, documents, doc_cluster_labels)
+                    
+                    # Vectorize chunks for chunk-level clustering
+                    chunk_texts = [chunk.get('content', '') for chunk in chunks]
+                    chunk_vectors = await async_vectorize_batch(chunk_texts, embedding_model, batch_size=20)
+                    
+                    # Cluster chunks with document-cluster awareness
+                    chunk_clusterer = ChunkClusterer(similarity_threshold=0.70, min_cluster_size=1)
+                    chunk_cluster_result = chunk_clusterer.cluster_chunks_with_document_clusters(chunk_vectors, chunks, chunks_by_doc_cluster)
+                    
+                    n_clusters = chunk_cluster_result['n_clusters']
+                    logger.info(f"Chunk clustering completed: {n_clusters} clusters from {len(chunks)} chunks")
+                    
+                    # Fallback strategy: if no clusters formed, treat all chunks as one cluster
+                    if n_clusters == 0 and len(chunks) > 0:
+                        logger.warning("No clusters formed, using fallback: treating all chunks as single cluster")
+                        chunk_cluster_result['chunk_clusters'] = [{
+                            'cluster_id': 0,
+                            'chunks': chunks,
+                            'size': len(chunks),
+                            'avg_similarity': 0.5
+                        }]
+                        n_clusters = 1
+                        chunk_cluster_result['n_clusters'] = 1
+                    
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"chunk_clustering\", \"message\": \"Organized into {n_clusters} topic clusters\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Progress: Step 2 - Knowledge card generation
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"card_generation\", \"message\": \"Generating knowledge cards...\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Initialize LLM client and integrator
+                    llm_client = AsyncLLMClient(model_config, language=language)
+                    knowledge_integrator = KnowledgeIntegrator(llm_client)
+                    
+                    # Generate knowledge cards for each chunk cluster
+                    cards_data = [
+                        {
+                            'chunk_cluster': chunk_cluster,
+                            'parent_cluster_id': idx
+                        }
+                        for idx, chunk_cluster in enumerate(chunk_cluster_result['chunk_clusters'])
+                    ]
+                    
+                    knowledge_cards = await llm_client.batch_generate_cards_async(cards_data)
+                    knowledge_cards = [card for card in knowledge_cards if card is not None]
+                    total_cards = len(knowledge_cards)
+                    
+                    logger.info(f"Generated {total_cards} knowledge cards")
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"card_generation\", \"message\": \"Generated {total_cards} knowledge cards\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Progress: Step 3 - Knowledge integration
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"integration\", \"message\": \"Integrating knowledge cards...\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Group cards by document cluster for integration (ensure 1:1 mapping)
+                    doc_cluster_knowledge_cards = {}
+                    for card in knowledge_cards:
+                        # Get document cluster ID from chunk cluster
+                        chunk_cluster_id = card.get('parent_cluster', 0)
+                        doc_cluster_id = None
+                        for chunk_cluster in chunk_cluster_result['chunk_clusters']:
+                            if chunk_cluster.get('cluster_id') == chunk_cluster_id:
+                                doc_cluster_id = chunk_cluster.get('document_cluster_id', 0)
+                                break
+                        
+                        if doc_cluster_id not in doc_cluster_knowledge_cards:
+                            doc_cluster_knowledge_cards[doc_cluster_id] = []
+                        doc_cluster_knowledge_cards[doc_cluster_id].append(card)
+                    
+                    # Integrate within each document cluster (1:1 mapping)
+                    cluster_integrations = []
+                    for doc_cluster_id, cards in doc_cluster_knowledge_cards.items():
+                        if cards:
+                            integration = await knowledge_integrator.integrate_cluster_cards(cards, doc_cluster_id)
+                            if integration:
+                                cluster_integrations.append(integration)
+                    
+                    logger.info(f"Integrated {len(cluster_integrations)} document clusters from {len(knowledge_cards)} knowledge cards")
+                    
+                    # Progress: Step 4 - Global integration
+                    yield f"data: {{\"status\": \"progress\", \"step\": \"global_integration\", \"message\": \"Generating final knowledge base summary...\"}}\n\n"
+                    await asyncio.sleep(0.1)
+                    
+                    # Global integration
+                    global_integration = await knowledge_integrator.integrate_all_clusters(cluster_integrations)
+                    
+                    if global_integration:
+                        # Stream the final summary
+                        final_summary = global_integration['global_summary']
+                        
+                        # Stream summary character by character to preserve line breaks
+                        for char in final_summary:
+                            summary_parts.append(char)
+                            # Escape special characters for JSON, but preserve newlines
+                            if char == '\n':
+                                # Send newline as literal \n in JSON (will be interpreted as newline)
+                                yield f"data: {{\"status\": \"success\", \"message\": \"\\n\"}}\n\n"
+                            elif char == '"':
+                                # Escape quotes
+                                yield f"data: {{\"status\": \"success\", \"message\": \"\\\"\"}}\n\n"
+                            else:
+                                yield f"data: {{\"status\": \"success\", \"message\": \"{char}\"}}\n\n"
+                            await asyncio.sleep(0.01)
+                        
+                        # Send completion metadata
+                        metadata = {
+                            "total_clusters": global_integration['cluster_count'],
+                            "total_cards": global_integration['total_cards'],
+                            "confidence": global_integration['avg_confidence'],
+                            "keywords": global_integration['global_keywords'][:10]
+                        }
+                        yield f"data: {{\"status\": \"complete\", \"metadata\": {json.dumps(metadata)}}}\n\n"
+                        
+                        logger.info(f"Knowledge summary generated successfully: {len(final_summary)} characters")
+                    else:
+                        raise Exception("Global integration failed")
+                
+                except Exception as e:
+                    logger.error(f"Error in async summary generation: {e}", exc_info=True)
+                    error_msg = str(e).replace('"', '\\"').replace('\n', '\\n')
+                    yield f"data: {{\"status\": \"error\", \"message\": \"{error_msg}\"}}\n\n"
+            
+            # Return streaming response
             return StreamingResponse(
-                generate_summary(),
+                generate_summary_stream(),
                 media_type="text/event-stream"
             )
-
+            
         except Exception as e:
-            raise Exception(f"{str(e)}")
+            logger.error(f"Failed to initialize summary generation: {e}", exc_info=True)
+            raise Exception(f"Failed to generate knowledge summary: {str(e)}")
+    
+    def _reconstruct_documents_from_chunks(self, chunks: List[dict]) -> List[dict]:
+        """Reconstruct documents from chunks"""
+        documents = {}
+        
+        for chunk in chunks:
+            doc_id = chunk.get('filename', chunk.get('source_doc', 'unknown'))
+            
+            if doc_id not in documents:
+                documents[doc_id] = {
+                    'doc_id': doc_id,
+                    'content': '',
+                    'chunks': [],
+                    'metadata': chunk.get('metadata', {})
+                }
+            
+            documents[doc_id]['content'] += chunk.get('content', '') + ' '
+            documents[doc_id]['chunks'].append(chunk)
+        
+        # Convert to list and clean content
+        doc_list = []
+        for doc_id, doc_info in documents.items():
+            doc_info['content'] = doc_info['content'].strip()
+            doc_list.append(doc_info)
+        
+        return doc_list
+    
+    def _organize_chunks_by_document_clusters(self, chunks: List[dict], documents: List[dict], doc_cluster_labels: np.ndarray) -> Dict[int, List[dict]]:
+        """Organize chunks by their document clusters"""
+        chunks_by_doc_cluster = {}
+        
+        # Create mapping from doc_id to cluster_id
+        doc_to_cluster = {}
+        for i, doc in enumerate(documents):
+            doc_to_cluster[doc['doc_id']] = doc_cluster_labels[i]
+        
+        # Group chunks by document cluster
+        for chunk in chunks:
+            doc_id = chunk.get('filename', chunk.get('source_doc', 'unknown'))
+            cluster_id = doc_to_cluster.get(doc_id, 0)
+            
+            if cluster_id not in chunks_by_doc_cluster:
+                chunks_by_doc_cluster[cluster_id] = []
+            chunks_by_doc_cluster[cluster_id].append(chunk)
+        
+        return chunks_by_doc_cluster
 
     @staticmethod
     def _clean_chunks_for_summary(all_documents):

@@ -1,0 +1,115 @@
+# Async Knowledge Summary Prompt Templates (English)
+# 异步知识库总结提示词模板（英文版）
+
+# Summary Generation Prompt
+SUMMARY_GENERATION_PROMPT: |-
+  ### You are a【Knowledge Summary Expert】responsible for generating concise and accurate knowledge summaries.
+  
+  Please generate a concise knowledge summary (no more than {{ max_length }} characters) for the following content:
+  
+  Content:
+  {{ text }}
+  
+  ### Requirements:
+  1. Extract core viewpoints and key information
+  2. Use concise and clear language
+  3. Maintain objectivity and accuracy
+  4. Highlight important content
+  5. Do not use markdown format symbols (such as #, *, -, etc.)
+  6. Output the summary directly without additional explanation
+  
+  Knowledge Summary:
+
+# Keyword Extraction Prompt
+KEYWORD_EXTRACTION_PROMPT: |-
+  ### You are a【Keyword Extraction Expert】responsible for extracting core keywords from text.
+  
+  Please extract {{ max_keywords }} most important keywords from the following text:
+  
+  {{ text }}
+  
+  ### Requirements:
+  1. Keywords should accurately reflect the text theme
+  2. Prioritize proper nouns and core concepts
+  3. Separate each keyword with a comma
+  4. Output only keywords, no other content
+  
+  Keywords:
+
+# Knowledge Card Generation Prompt
+KNOWLEDGE_CARD_GENERATION_PROMPT: |-
+  ### You are a【Knowledge Card Generation Expert】responsible for refining text content into structured knowledge cards.
+  
+  Please generate a knowledge card for the following content, including summary and keywords:
+  
+  Content:
+  {{ text }}
+  
+  ### Requirements:
+  1. Summary section:
+     - No more than 200 characters
+     - Refine core content and key information
+     - Use concise and clear language with coherent logic
+     - Do not use markdown format symbols
+  
+  2. Keywords section:
+     - Extract 5-10 core keywords
+     - Separate with commas
+     - Reflect content theme
+  
+  3. Output format:
+     - First line: Summary content
+     - Second line: Keywords (with "Keywords:" prefix)
+  
+  Please output directly without additional explanation.
+
+# Cluster Integration Prompt
+CLUSTER_INTEGRATION_PROMPT: |-
+  ### You are a【Knowledge Integration Expert】responsible for integrating multiple knowledge cards into coherent cluster summaries.
+  
+  Please integrate the following knowledge cards into a coherent and complete cluster summary:
+  
+  {{ summaries_text }}
+  
+  ### Requirements:
+  1. Integrate core information from all cards into a unified theme
+  2. Adjust weight based on content importance and relevance, describe important content in detail, mention secondary content briefly
+  3. Maintain clear logic and complete structure, ensure all information is represented
+  4. Control word count within 200 words
+  5. Use concise and clear language
+  6. Do not omit any information, only adjust description weight
+  7. Do not use markdown format symbols
+  8. Output plain text content directly
+  
+  Cluster Integration Summary:
+
+# Global Integration Prompt
+GLOBAL_INTEGRATION_PROMPT: |-
+  ### You are a【Knowledge Base Summary Expert】responsible for generating clear and explicit overall knowledge base summaries.
+  
+  Please integrate the following {{ cluster_count }} cluster summaries into a clear and explicit knowledge base content summary:
+  
+  {{ summaries_text }}
+  
+  ### Requirements:
+  
+  #### 1. Content Integration Requirements:
+  - Analyze content similarity and relevance of {{ cluster_count }} cluster summaries
+  - Merge similar or related content into the same point
+  - Final number of points must not exceed {{ cluster_count }} (i.e., ≤{{ cluster_count }} points)
+  - If content is very different, keep {{ cluster_count }} independent points
+  
+  #### 2. Content Requirements:
+  - Summary should be clear, complete, without missing key information
+  - Each point highlights core viewpoints and key data
+  - Language is concise and clear, easy for large models to identify query intent
+  - Maintain logical coherence and thematic relevance
+  
+  #### 3. Output Requirements:
+  - Use plain text format, do not use Markdown markup
+  - Use numbered points like "1.", "2.", etc.
+  - Separate each point with blank lines
+  - Output content directly without additional explanation
+  
+  Knowledge Base Content Summary:
+
