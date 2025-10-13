@@ -605,6 +605,7 @@ function ToolPool({
         tool={currentTool}
         mainAgentId={parseInt(mainAgentId || "0")}
         selectedTools={selectedTools}
+        isEditingMode={isEditingMode}
       />
 
       <McpConfigModal

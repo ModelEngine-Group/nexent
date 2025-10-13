@@ -18,10 +18,10 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         search_tool_info_impl,
         update_tool_info_impl,
         list_all_tools,
-        load_last_tool_config_impl
-    )
-from consts.model import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest
-from consts.exceptions import MCPConnectionError
+        load_last_tool_config_impl, validate_tool_impl
+)
+from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from consts.model import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest
 
 
 class TestPythonTypeToJsonSchema:
@@ -238,10 +238,12 @@ class TestUpdateToolInfoImpl:
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
 
-        result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
+        result = update_tool_info_impl(
+            mock_request, "test_tenant", "test_user")
 
         assert result["tool_instance"] == mock_tool_instance
-        mock_create_update.assert_called_once_with(mock_request, "test_tenant", "test_user")
+        mock_create_update.assert_called_once_with(
+            mock_request, "test_tenant", "test_user")
 
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
     def test_update_tool_info_impl_database_error(self, mock_create_update):
@@ -656,7 +658,8 @@ class TestUpdateToolList:
         """Test scenario with no tools"""
         mock_get_local_tools.return_value = []
         mock_get_mcp_tools.return_value = []
-        mock_get_langchain_tools.return_value = []  # Ensure LangChain tools also return empty list
+        # Ensure LangChain tools also return empty list
+        mock_get_langchain_tools.return_value = []
 
         from backend.services.tool_configuration_service import update_tool_list
 
@@ -917,13 +920,14 @@ class TestInitializeToolsOnStartup:
         """Test initialize_tools_on_startup when no tenants are found"""
         # Mock get_all_tenant_ids to return empty list
         mock_get_tenants.return_value = []
-        
+
         # Import and call the function
         from backend.services.tool_configuration_service import initialize_tools_on_startup
         await initialize_tools_on_startup()
-        
+
         # Verify warning was logged
-        mock_logger.warning.assert_called_with("No tenants found in database, skipping tool initialization")
+        mock_logger.warning.assert_called_with(
+            "No tenants found in database, skipping tool initialization")
         mock_update_tool_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service.get_all_tenant_ids')
@@ -935,27 +939,28 @@ class TestInitializeToolsOnStartup:
         # Mock tenant IDs
         tenant_ids = ["tenant_1", "tenant_2", "default_tenant"]
         mock_get_tenants.return_value = tenant_ids
-        
+
         # Mock update_tool_list to succeed
         mock_update_tool_list.return_value = None
-        
+
         # Mock query_all_tools to return mock tools
         mock_tools = [
             {"tool_id": "tool_1", "name": "Test Tool 1"},
             {"tool_id": "tool_2", "name": "Test Tool 2"}
         ]
         mock_query_tools.return_value = mock_tools
-        
+
         # Import and call the function
         from backend.services.tool_configuration_service import initialize_tools_on_startup
         await initialize_tools_on_startup()
-        
+
         # Verify update_tool_list was called for each tenant
         assert mock_update_tool_list.call_count == len(tenant_ids)
-        
+
         # Verify success logging
         mock_logger.info.assert_any_call("Tool initialization completed!")
-        mock_logger.info.assert_any_call("Total tools available across all tenants: 6")  # 2 tools * 3 tenants
+        mock_logger.info.assert_any_call(
+            "Total tools available across all tenants: 6")  # 2 tools * 3 tenants
         mock_logger.info.assert_any_call("Successfully processed: 3/3 tenants")
 
     @patch('backend.services.tool_configuration_service.get_all_tenant_ids')
@@ -965,19 +970,19 @@ class TestInitializeToolsOnStartup:
         """Test tool initialization timeout scenario"""
         tenant_ids = ["tenant_1", "tenant_2"]
         mock_get_tenants.return_value = tenant_ids
-        
+
         # Mock update_tool_list to timeout
         mock_update_tool_list.side_effect = asyncio.TimeoutError()
-        
+
         # Import and call the function
         from backend.services.tool_configuration_service import initialize_tools_on_startup
         await initialize_tools_on_startup()
-        
+
         # Verify timeout error was logged for each tenant
         assert mock_logger.error.call_count == len(tenant_ids)
         for call in mock_logger.error.call_args_list:
             assert "timed out" in str(call)
-        
+
         # Verify failed tenants were logged
         mock_logger.warning.assert_called_once()
         warning_call = mock_logger.warning.call_args[0][0]
@@ -992,20 +997,21 @@ class TestInitializeToolsOnStartup:
         """Test tool initialization with exception during processing"""
         tenant_ids = ["tenant_1", "tenant_2"]
         mock_get_tenants.return_value = tenant_ids
-        
+
         # Mock update_tool_list to raise exception
-        mock_update_tool_list.side_effect = Exception("Database connection failed")
-        
+        mock_update_tool_list.side_effect = Exception(
+            "Database connection failed")
+
         # Import and call the function
         from backend.services.tool_configuration_service import initialize_tools_on_startup
         await initialize_tools_on_startup()
-        
+
         # Verify exception error was logged for each tenant
         assert mock_logger.error.call_count == len(tenant_ids)
         for call in mock_logger.error.call_args_list:
             assert "Tool initialization failed" in str(call)
             assert "Database connection failed" in str(call)
-        
+
         # Verify failed tenants were logged
         mock_logger.warning.assert_called_once()
         warning_call = mock_logger.warning.call_args[0][0]
@@ -1019,16 +1025,17 @@ class TestInitializeToolsOnStartup:
         """Test tool initialization when get_all_tenant_ids raises exception"""
         # Mock get_all_tenant_ids to raise exception
         mock_get_tenants.side_effect = Exception("Database connection failed")
-        
+
         # Import and call the function
         from backend.services.tool_configuration_service import initialize_tools_on_startup
-        
+
         # Should raise the exception
         with pytest.raises(Exception, match="Database connection failed"):
             await initialize_tools_on_startup()
-        
+
         # Verify critical error was logged
-        mock_logger.error.assert_called_with("❌ Tool initialization failed: Database connection failed")
+        mock_logger.error.assert_called_with(
+            "❌ Tool initialization failed: Database connection failed")
 
     @patch('backend.services.tool_configuration_service.get_all_tenant_ids')
     @patch('backend.services.tool_configuration_service.update_tool_list')
@@ -1038,7 +1045,7 @@ class TestInitializeToolsOnStartup:
         """Test tool initialization with mixed success and failure results"""
         tenant_ids = ["tenant_1", "tenant_2", "tenant_3"]
         mock_get_tenants.return_value = tenant_ids
-        
+
         # Mock update_tool_list with mixed results
         def side_effect(*args, **kwargs):
             tenant_id = kwargs.get('tenant_id')
@@ -1048,22 +1055,23 @@ class TestInitializeToolsOnStartup:
                 raise asyncio.TimeoutError()  # Timeout
             else:  # tenant_3
                 raise Exception("Connection error")  # Exception
-        
+
         mock_update_tool_list.side_effect = side_effect
-        
+
         # Mock query_all_tools for successful tenant
         mock_tools = [{"tool_id": "tool_1", "name": "Test Tool"}]
         mock_query_tools.return_value = mock_tools
-        
+
         # Import and call the function
         from backend.services.tool_configuration_service import initialize_tools_on_startup
         await initialize_tools_on_startup()
-        
+
         # Verify mixed results logging
         mock_logger.info.assert_any_call("Tool initialization completed!")
-        mock_logger.info.assert_any_call("Total tools available across all tenants: 1")
+        mock_logger.info.assert_any_call(
+            "Total tools available across all tenants: 1")
         mock_logger.info.assert_any_call("Successfully processed: 1/3 tenants")
-        
+
         # Verify failed tenants were logged
         mock_logger.warning.assert_called_once()
         warning_call = mock_logger.warning.call_args[0][0]
@@ -1089,7 +1097,8 @@ class TestLoadLastToolConfigImpl:
         result = load_last_tool_config_impl(123, "tenant1", "user1")
 
         assert result == {"param1": "value1", "param2": "value2"}
-        mock_search_tool_instance.assert_called_once_with(123, "tenant1", "user1")
+        mock_search_tool_instance.assert_called_once_with(
+            123, "tenant1", "user1")
 
     @patch('backend.services.tool_configuration_service.search_last_tool_instance_by_tool_id')
     def test_load_last_tool_config_impl_not_found(self, mock_search_tool_instance):
@@ -1099,7 +1108,8 @@ class TestLoadLastToolConfigImpl:
         with pytest.raises(ValueError, match="Tool configuration not found for tool ID: 123"):
             load_last_tool_config_impl(123, "tenant1", "user1")
 
-        mock_search_tool_instance.assert_called_once_with(123, "tenant1", "user1")
+        mock_search_tool_instance.assert_called_once_with(
+            123, "tenant1", "user1")
 
     @patch('backend.services.tool_configuration_service.search_last_tool_instance_by_tool_id')
     def test_load_last_tool_config_impl_empty_params(self, mock_search_tool_instance):
@@ -1115,7 +1125,406 @@ class TestLoadLastToolConfigImpl:
         result = load_last_tool_config_impl(123, "tenant1", "user1")
 
         assert result == {}
-        mock_search_tool_instance.assert_called_once_with(123, "tenant1", "user1")
+        mock_search_tool_instance.assert_called_once_with(
+            123, "tenant1", "user1")
+
+    @patch('backend.services.tool_configuration_service.Client')
+    async def test_call_mcp_tool_success(self, mock_client_cls):
+        """Test successful MCP tool call"""
+        # Mock client
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.is_connected.return_value = True
+
+        # Mock tool result
+        mock_result = Mock()
+        mock_result.text = "test result"
+        mock_client.call_tool.return_value = [mock_result]
+
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.tool_configuration_service import _call_mcp_tool
+
+        result = await _call_mcp_tool("http://test-server.com", "test_tool", {"param": "value"})
+
+        assert result == "test result"
+        mock_client_cls.assert_called_once_with("http://test-server.com")
+        mock_client.call_tool.assert_called_once_with(
+            name="test_tool", arguments={"param": "value"})
+
+    @patch('backend.services.tool_configuration_service.Client')
+    async def test_call_mcp_tool_connection_failed(self, mock_client_cls):
+        """Test MCP tool call when connection fails"""
+        # Mock client with proper async context manager setup
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.is_connected = Mock(return_value=False)
+
+        mock_client_cls.return_value = mock_client
+
+        from backend.services.tool_configuration_service import _call_mcp_tool
+
+        with pytest.raises(MCPConnectionError, match="Failed to connect to MCP server"):
+            await _call_mcp_tool("http://test-server.com", "test_tool", {"param": "value"})
+
+        # Verify client was created and connection was checked
+        mock_client_cls.assert_called_once_with("http://test-server.com")
+        mock_client.is_connected.assert_called_once()
+
+    @patch('backend.services.tool_configuration_service.urljoin')
+    @patch('backend.services.tool_configuration_service._call_mcp_tool')
+    async def test_validate_mcp_tool_nexent_success(self, mock_call_tool, mock_urljoin):
+        """Test successful nexent MCP tool validation"""
+        mock_urljoin.return_value = "http://nexent-server.com/sse"
+        mock_call_tool.return_value = "nexent result"
+
+        from backend.services.tool_configuration_service import _validate_mcp_tool_nexent
+
+        result = await _validate_mcp_tool_nexent("test_tool", {"param": "value"})
+
+        assert result == "nexent result"
+        mock_urljoin.assert_called_once()
+        mock_call_tool.assert_called_once_with(
+            "http://nexent-server.com/sse", "test_tool", {"param": "value"})
+
+    @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
+    @patch('backend.services.tool_configuration_service._call_mcp_tool')
+    async def test_validate_mcp_tool_remote_success(self, mock_call_tool, mock_get_server):
+        """Test successful remote MCP tool validation"""
+        mock_get_server.return_value = "http://remote-server.com"
+        mock_call_tool.return_value = "validation result"
+
+        from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+
+        result = await _validate_mcp_tool_remote("test_tool", {"param": "value"}, "test_server", "tenant1")
+
+        assert result == "validation result"
+        mock_get_server.assert_called_once_with("test_server", "tenant1")
+        mock_call_tool.assert_called_once_with(
+            "http://remote-server.com", "test_tool", {"param": "value"})
+
+    @patch('backend.services.tool_configuration_service.get_mcp_server_by_name_and_tenant')
+    async def test_validate_mcp_tool_remote_server_not_found(self, mock_get_server):
+        """Test remote MCP tool validation when server not found"""
+        mock_get_server.return_value = None
+
+        from backend.services.tool_configuration_service import _validate_mcp_tool_remote
+
+        with pytest.raises(NotFoundException, match="MCP server not found for name: test_server"):
+            await _validate_mcp_tool_remote("test_tool", {"param": "value"}, "test_server", "tenant1")
+
+    @patch('backend.services.tool_configuration_service.importlib.import_module')
+    def test_get_tool_class_by_name_success(self, mock_import):
+        """Test successfully getting tool class by name"""
+        # Create a real class that will pass inspect.isclass() check
+        class TestToolClass:
+            name = "test_tool"
+            description = "Test tool description"
+            inputs = {}
+            output_type = "string"
+
+        # Create a custom mock package class that properly handles getattr
+        class MockPackage:
+            def __init__(self):
+                self.__name__ = 'nexent.core.tools'
+                self.test_tool = TestToolClass
+                self.other_class = Mock()
+
+            def __dir__(self):
+                return ['test_tool', 'other_class']
+
+            def __getattr__(self, name):
+                if name == 'test_tool':
+                    return TestToolClass
+                elif name == 'other_class':
+                    return Mock()
+                else:
+                    raise AttributeError(f"'{name}' not found")
+
+        mock_package = MockPackage()
+        mock_import.return_value = mock_package
+
+        from backend.services.tool_configuration_service import _get_tool_class_by_name
+
+        result = _get_tool_class_by_name("test_tool")
+
+        assert result == TestToolClass
+        mock_import.assert_called_once_with('nexent.core.tools')
+
+    @patch('backend.services.tool_configuration_service.importlib.import_module')
+    def test_get_tool_class_by_name_not_found(self, mock_import):
+        """Test getting tool class when tool not found"""
+        # Create mock package without the target tool
+        mock_package = Mock()
+        mock_package.__name__ = 'nexent.core.tools'
+        mock_package.__dir__ = Mock(return_value=['other_class'])
+
+        mock_import.return_value = mock_package
+
+        from backend.services.tool_configuration_service import _get_tool_class_by_name
+
+        result = _get_tool_class_by_name("nonexistent_tool")
+
+        assert result is None
+
+    @patch('backend.services.tool_configuration_service.importlib.import_module')
+    def test_get_tool_class_by_name_import_error(self, mock_import):
+        """Test getting tool class when import fails"""
+        mock_import.side_effect = ImportError("Module not found")
+
+        from backend.services.tool_configuration_service import _get_tool_class_by_name
+
+        result = _get_tool_class_by_name("test_tool")
+
+        assert result is None
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_success(self, mock_signature, mock_get_class):
+        """Test successful local tool validation"""
+        # Mock tool class
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "validation result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature without observer parameter
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "test_tool", {"input": "value"}, {"param": "config"})
+
+        assert result == "validation result"
+        mock_get_class.assert_called_once_with("test_tool")
+        mock_tool_class.assert_called_once_with(param="config")
+        mock_tool_instance.forward.assert_called_once_with(input="value")
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_with_observer(self, mock_signature, mock_get_class):
+        """Test local tool validation with observer parameter"""
+        # Mock tool class
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "validation result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature with observer parameter
+        mock_sig = Mock()
+        mock_observer_param = Mock()
+        mock_sig.parameters = {'observer': mock_observer_param}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "test_tool", {"input": "value"}, {"param": "config"})
+
+        assert result == "validation result"
+        mock_tool_class.assert_called_once_with(param="config", observer=None)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    def test_validate_local_tool_class_not_found(self, mock_get_class):
+        """Test local tool validation when class not found"""
+        mock_get_class.return_value = None
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException, match="Local tool test_tool validation failed: Tool class not found for test_tool"):
+            _validate_local_tool("test_tool", {"input": "value"}, {
+                                 "param": "config"})
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    def test_validate_local_tool_execution_error(self, mock_signature, mock_get_class):
+        """Test local tool validation when execution fails"""
+        # Mock tool class
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.side_effect = Exception("Execution failed")
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature
+        mock_sig = Mock()
+        mock_sig.parameters = {}
+        mock_signature.return_value = mock_sig
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException, match="Local tool test_tool validation failed"):
+            _validate_local_tool("test_tool", {"input": "value"}, {
+                                 "param": "config"})
+
+    @patch('utils.langchain_utils.discover_langchain_modules')
+    def test_validate_langchain_tool_success(self, mock_discover):
+        """Test successful LangChain tool validation"""
+        # Mock LangChain tool
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.invoke.return_value = "validation result"
+
+        mock_discover.return_value = [(mock_tool, "test_tool.py")]
+
+        from backend.services.tool_configuration_service import _validate_langchain_tool
+
+        result = _validate_langchain_tool("test_tool", {"input": "value"})
+
+        assert result == "validation result"
+        mock_tool.invoke.assert_called_once_with({"input": "value"})
+
+    @patch('utils.langchain_utils.discover_langchain_modules')
+    def test_validate_langchain_tool_not_found(self, mock_discover):
+        """Test LangChain tool validation when tool not found"""
+        mock_discover.return_value = []
+
+        from backend.services.tool_configuration_service import _validate_langchain_tool
+
+        with pytest.raises(ToolExecutionException, match="LangChain tool 'test_tool' validation failed: Tool 'test_tool' not found in LangChain tools"):
+            _validate_langchain_tool("test_tool", {"input": "value"})
+
+    @patch('utils.langchain_utils.discover_langchain_modules')
+    def test_validate_langchain_tool_execution_error(self, mock_discover):
+        """Test LangChain tool validation when execution fails"""
+        # Mock LangChain tool
+        mock_tool = Mock()
+        mock_tool.name = "test_tool"
+        mock_tool.invoke.side_effect = Exception("Execution failed")
+
+        mock_discover.return_value = [(mock_tool, "test_tool.py")]
+
+        from backend.services.tool_configuration_service import _validate_langchain_tool
+
+        with pytest.raises(ToolExecutionException, match="LangChain tool 'test_tool' validation failed"):
+            _validate_langchain_tool("test_tool", {"input": "value"})
+
+    @patch('backend.services.tool_configuration_service._validate_mcp_tool_nexent')
+    async def test_validate_tool_nexent(self, mock_validate_nexent):
+        """Test MCP tool validation using nexent server"""
+        mock_validate_nexent.return_value = "nexent result"
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            source=ToolSourceEnum.MCP.value,
+            usage="nexent",
+            inputs={"param": "value"}
+        )
+
+        result = await validate_tool_impl(request, "tenant1")
+
+        assert result == "nexent result"
+        mock_validate_nexent.assert_called_once_with(
+            "test_tool", {"param": "value"})
+
+    @patch('backend.services.tool_configuration_service._validate_mcp_tool_remote')
+    async def test_validate_tool_remote(self, mock_validate_remote):
+        """Test MCP tool validation using remote server"""
+        mock_validate_remote.return_value = "remote result"
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            source=ToolSourceEnum.MCP.value,
+            usage="remote_server",
+            inputs={"param": "value"}
+        )
+
+        result = await validate_tool_impl(request, "tenant1")
+
+        assert result == "remote result"
+        mock_validate_remote.assert_called_once_with(
+            "test_tool", {"param": "value"}, "remote_server", "tenant1")
+
+    @patch('backend.services.tool_configuration_service._validate_local_tool')
+    async def test_validate_tool_local(self, mock_validate_local):
+        """Test local tool validation"""
+        mock_validate_local.return_value = "local result"
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            source=ToolSourceEnum.LOCAL.value,
+            usage=None,
+            inputs={"param": "value"},
+            params={"config": "value"}
+        )
+
+        result = await validate_tool_impl(request, "tenant1")
+
+        assert result == "local result"
+        mock_validate_local.assert_called_once_with(
+            "test_tool", {"param": "value"}, {"config": "value"})
+
+    @patch('backend.services.tool_configuration_service._validate_langchain_tool')
+    async def test_validate_tool_langchain(self, mock_validate_langchain):
+        """Test LangChain tool validation"""
+        mock_validate_langchain.return_value = "langchain result"
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            source=ToolSourceEnum.LANGCHAIN.value,
+            usage=None,
+            inputs={"param": "value"}
+        )
+
+        result = await validate_tool_impl(request, "tenant1")
+
+        assert result == "langchain result"
+        mock_validate_langchain.assert_called_once_with(
+            "test_tool", {"param": "value"})
+
+    async def test_validate_tool_unsupported_source(self):
+        """Test validation with unsupported tool source"""
+        request = ToolValidateRequest(
+            name="test_tool",
+            source="unsupported",
+            usage=None,
+            inputs={"param": "value"}
+        )
+
+        with pytest.raises(ToolExecutionException, match="Validate Tool failed"):
+            await validate_tool_impl(request, "tenant1")
+
+    @patch('backend.services.tool_configuration_service._validate_mcp_tool_nexent')
+    async def test_validate_tool_nexent_connection_error(self, mock_validate_nexent):
+        """Test MCP tool validation when connection fails"""
+        mock_validate_nexent.side_effect = MCPConnectionError(
+            "Connection failed")
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            source=ToolSourceEnum.MCP.value,
+            usage="nexent",
+            inputs={"param": "value"}
+        )
+
+        with pytest.raises(MCPConnectionError, match="MCP connection failed: Connection failed"):
+            await validate_tool_impl(request, "tenant1")
+
+    @patch('backend.services.tool_configuration_service._validate_local_tool')
+    async def test_validate_tool_local_execution_error(self, mock_validate_local):
+        """Test local tool validation when execution fails"""
+        mock_validate_local.side_effect = Exception("Execution failed")
+
+        request = ToolValidateRequest(
+            name="test_tool",
+            source=ToolSourceEnum.LOCAL.value,
+            usage=None,
+            inputs={"param": "value"},
+            params={"config": "value"}
+        )
+
+        with pytest.raises(ToolExecutionException, match="Validate Tool failed"):
+            await validate_tool_impl(request, "tenant1")
 
 
 if __name__ == '__main__':

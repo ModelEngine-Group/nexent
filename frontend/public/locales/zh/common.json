@@ -360,6 +360,13 @@
   "toolConfig.input.string.placeholder": "请输入{{name}}",
   "toolConfig.input.array.placeholder": "请输入JSON数组",
   "toolConfig.input.object.placeholder": "请输入JSON对象",
+  "toolConfig.toolTest.toolInfo": "工具信息",
+  "toolConfig.toolTest.configParams": "配置参数",
+  "toolConfig.toolTest.inputParams": "输入参数",
+  "toolConfig.toolTest.executing": "测试中...",
+  "toolConfig.toolTest.execute": "执行测试",
+  "toolConfig.toolTest.result": "测试结果",
+  "toolConfig.button.testTool": "工具测试",
 
   "toolPool.title": "选择 Agent 的工具",
   "toolPool.loading": "加载中...",
@@ -390,6 +397,7 @@
   "common.delete": "删除",
   "common.button.cancel": "取消",
   "common.button.save": "保存",
+  "common.button.saving": "保存中",
   "common.notice": "注意",
   "common.button.close": "关闭",
   "common.button.editConfig": "修改配置",
@@ -758,8 +766,6 @@
   "toolManagement.message.refreshSuccess": "工具列表已刷新",
   "toolManagement.message.refreshFailed": "刷新工具列表失败",
   "toolManagement.message.refreshFailedRetry": "刷新工具列表失败，请稍后重试",
-
-  
 
   "mcpConfig.modal.title": "MCP服务器配置",
   "mcpConfig.modal.close": "关闭",

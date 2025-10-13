@@ -86,3 +86,8 @@ class TTSConnectionException(Exception):
 class VoiceConfigException(Exception):
     """Raised when voice configuration is invalid."""
     pass
+
+
+class ToolExecutionException(Exception):
+    """Raised when mcp tool execution failed."""
+    pass

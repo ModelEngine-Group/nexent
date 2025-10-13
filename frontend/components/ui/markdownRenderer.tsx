@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
 // @ts-ignore
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -11,7 +12,6 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { SearchResult } from "@/types/chat";
-
 import {
   Tooltip,
   TooltipContent,
@@ -324,12 +324,36 @@ const HoverableText = ({
   );
 };
 
+/**
+ * Convert LaTeX delimiters to markdown math delimiters
+ *
+ * Converts:
+ * - \( ... \) to $ ... $
+ * - \[ ... \] to $$ ... $$
+ */
+const convertLatexDelimiters = (content: string): string => {
+  // Quick check: only process if LaTeX delimiters are present
+  if (!content.includes('\\(') && !content.includes('\\[')) {
+    return content;
+  }
+  
+  return content
+    // Convert \( ... \) to $ ... $ (inline math)
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$1$')
+    // Convert \[ ... \] to $$ ... $$ (display math)
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$1$$\n');
+};
+
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   content,
   className,
   searchResults = [],
 }) => {
   const { t } = useTranslation("common");
+
+  // Convert LaTeX delimiters to markdown math delimiters
+  const processedContent = convertLatexDelimiters(content);
+
   // Customize code block style with light gray background
   const customStyle = {
     ...oneLight,
@@ -430,145 +454,196 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     return children;
   };
 
+  class MarkdownErrorBoundary extends React.Component<
+    { children: React.ReactNode; rawContent: string },
+    { hasError: boolean }
+  > {
+    constructor(props: { children: React.ReactNode; rawContent: string }) {
+      super(props);
+      this.state = { hasError: false };
+    }
+    static getDerivedStateFromError() {
+      return { hasError: true };
+    }
+    componentDidCatch(error: unknown) {}
+    render() {
+      if (this.state.hasError) {
+        return (
+          <div className="markdown-body">
+            <pre className="whitespace-pre-wrap break-words text-sm">
+              {this.props.rawContent}
+            </pre>
+          </div>
+        );
+      }
+      return this.props.children as React.ReactElement;
+    }
+  }
+
   return (
     <>
       <div className={`markdown-body ${className || ""}`}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex as any]}
-          components={{
-            // Heading components - now using CSS classes
-            h1: ({ children }: any) => (
-              <h1 className="markdown-h1">
-                <TextWrapper>{children}</TextWrapper>
-              </h1>
-            ),
-            h2: ({ children }: any) => (
-              <h2 className="markdown-h2">
-                <TextWrapper>{children}</TextWrapper>
-              </h2>
-            ),
-            h3: ({ children }: any) => (
-              <h3 className="markdown-h3">
-                <TextWrapper>{children}</TextWrapper>
-              </h3>
-            ),
-            h4: ({ children }: any) => (
-              <h4 className="markdown-h4">
-                <TextWrapper>{children}</TextWrapper>
-              </h4>
-            ),
-            h5: ({ children }: any) => (
-              <h5 className="markdown-h5">
-                <TextWrapper>{children}</TextWrapper>
-              </h5>
-            ),
-            h6: ({ children }: any) => (
-              <h6 className="markdown-h6">
-                <TextWrapper>{children}</TextWrapper>
-              </h6>
-            ),
-            // Paragraph
-            p: ({ children }: any) => (
-              <p className="markdown-paragraph">
-                <TextWrapper>{children}</TextWrapper>
-              </p>
-            ),
-            // List item
-            li: ({ children }: any) => (
-              <li className="markdown-li">
-                <TextWrapper>{children}</TextWrapper>
-              </li>
-            ),
-            // Blockquote
-            blockquote: ({ children }: any) => (
-              <blockquote className="markdown-blockquote">
-                <TextWrapper>{children}</TextWrapper>
-              </blockquote>
-            ),
-            // Table components
-            td: ({ children }: any) => (
-              <td className="markdown-td">
-                <TextWrapper>{children}</TextWrapper>
-              </td>
-            ),
-            th: ({ children }: any) => (
-              <th className="markdown-th">
-                <TextWrapper>{children}</TextWrapper>
-              </th>
-            ),
-            // Emphasis components
-            strong: ({ children }: any) => (
-              <strong className="markdown-strong">
-                <TextWrapper>{children}</TextWrapper>
-              </strong>
-            ),
-            em: ({ children }: any) => (
-              <em className="markdown-em">
-                <TextWrapper>{children}</TextWrapper>
-              </em>
-            ),
-            // Strikethrough
-            del: ({ children }: any) => (
-              <del className="markdown-del">
-                <TextWrapper>{children}</TextWrapper>
-              </del>
-            ),
-            // Link
-            a: ({ href, children, ...props }: any) => (
-              <a href={href} className="markdown-link" {...props}>
-                <TextWrapper>{children}</TextWrapper>
-              </a>
-            ),
-            pre: ({ children }: any) => <>{children}</>,
-            // Code blocks and inline code
-            code({ node, inline, className, children, ...props }: any) {
-              const match = /language-(\w+)/.exec(className || "");
-              const codeContent = String(children).replace(/^\n+|\n+$/g, "");
-              return !inline && match ? (
-                <div className="code-block-container group">
-                  <div className="code-block-header">
-                    <span
-                      className="code-language-label"
-                      data-language={match[1]}
-                    >
-                      {match[1]}
-                    </span>
-                    <CopyButton
-                      content={codeContent}
-                      variant="code-block"
-                      className="header-copy-button"
-                      tooltipText={{
-                        copy: t("chatStreamMessage.copyContent"),
-                        copied: t("chatStreamMessage.copied"),
-                      }}
-                    />
-                  </div>
-                  <div className="code-block-content">
-                    <SyntaxHighlighter
-                      style={customStyle}
-                      language={match[1]}
-                      PreTag="div"
-                      {...props}
-                    >
-                      {codeContent}
-                    </SyntaxHighlighter>
-                  </div>
-                </div>
-              ) : (
-                <code className="markdown-code" {...props}>
+        <MarkdownErrorBoundary rawContent={processedContent}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath] as any}
+            rehypePlugins={
+              [
+                [
+                  rehypeKatex,
+                  {
+                    throwOnError: false,
+                    strict: false,
+                    trust: true,
+                  },
+                ],
+                rehypeRaw,
+              ] as any
+            }
+            skipHtml={false}
+            components={{
+              // Heading components - now using CSS classes
+              h1: ({ children }: any) => (
+                <h1 className="markdown-h1">
                   <TextWrapper>{children}</TextWrapper>
-                </code>
-              );
-            },
-            // Image
-            img: ({ src, alt }: any) => (
-              <img src={src} alt={alt} className="markdown-img" />
-            ),
-          }}
-        >
-          {content}
-        </ReactMarkdown>
+                </h1>
+              ),
+              h2: ({ children }: any) => (
+                <h2 className="markdown-h2">
+                  <TextWrapper>{children}</TextWrapper>
+                </h2>
+              ),
+              h3: ({ children }: any) => (
+                <h3 className="markdown-h3">
+                  <TextWrapper>{children}</TextWrapper>
+                </h3>
+              ),
+              h4: ({ children }: any) => (
+                <h4 className="markdown-h4">
+                  <TextWrapper>{children}</TextWrapper>
+                </h4>
+              ),
+              h5: ({ children }: any) => (
+                <h5 className="markdown-h5">
+                  <TextWrapper>{children}</TextWrapper>
+                </h5>
+              ),
+              h6: ({ children }: any) => (
+                <h6 className="markdown-h6">
+                  <TextWrapper>{children}</TextWrapper>
+                </h6>
+              ),
+              // Paragraph
+              p: ({ children }: any) => (
+                <p className="markdown-paragraph">
+                  <TextWrapper>{children}</TextWrapper>
+                </p>
+              ),
+              // List item
+              li: ({ children }: any) => (
+                <li className="markdown-li">
+                  <TextWrapper>{children}</TextWrapper>
+                </li>
+              ),
+              // Blockquote
+              blockquote: ({ children }: any) => (
+                <blockquote className="markdown-blockquote">
+                  <TextWrapper>{children}</TextWrapper>
+                </blockquote>
+              ),
+              // Table components
+              td: ({ children }: any) => (
+                <td className="markdown-td">
+                  <TextWrapper>{children}</TextWrapper>
+                </td>
+              ),
+              th: ({ children }: any) => (
+                <th className="markdown-th">
+                  <TextWrapper>{children}</TextWrapper>
+                </th>
+              ),
+              // Emphasis components
+              strong: ({ children }: any) => (
+                <strong className="markdown-strong">
+                  <TextWrapper>{children}</TextWrapper>
+                </strong>
+              ),
+              em: ({ children }: any) => (
+                <em className="markdown-em">
+                  <TextWrapper>{children}</TextWrapper>
+                </em>
+              ),
+              // Strikethrough
+              del: ({ children }: any) => (
+                <del className="markdown-del">
+                  <TextWrapper>{children}</TextWrapper>
+                </del>
+              ),
+              // Link
+              a: ({ href, children, ...props }: any) => (
+                <a href={href} className="markdown-link" {...props}>
+                  <TextWrapper>{children}</TextWrapper>
+                </a>
+              ),
+              pre: ({ children }: any) => <>{children}</>,
+              // Code blocks and inline code
+              code({ node, inline, className, children, ...props }: any) {
+                try {
+                  const match = /language-(\w+)/.exec(className || "");
+                  const raw = Array.isArray(children)
+                    ? children.join("")
+                    : children ?? "";
+                  const codeContent = String(raw).replace(/^\n+|\n+$/g, "");
+                  if (!inline && match && match[1]) {
+                    return (
+                      <div className="code-block-container group">
+                        <div className="code-block-header">
+                          <span
+                            className="code-language-label"
+                            data-language={match[1]}
+                          >
+                            {match[1]}
+                          </span>
+                          <CopyButton
+                            content={codeContent}
+                            variant="code-block"
+                            className="header-copy-button"
+                            tooltipText={{
+                              copy: t("chatStreamMessage.copyContent"),
+                              copied: t("chatStreamMessage.copied"),
+                            }}
+                          />
+                        </div>
+                        <div className="code-block-content">
+                          <SyntaxHighlighter
+                            style={customStyle}
+                            language={match[1]}
+                            PreTag="div"
+                            {...props}
+                          >
+                            {codeContent}
+                          </SyntaxHighlighter>
+                        </div>
+                      </div>
+                    );
+                  }
+                } catch (error) {
+                  // Handle error silently
+                }
+                return (
+                  <code className="markdown-code" {...props}>
+                    <TextWrapper>{children}</TextWrapper>
+                  </code>
+                );
+              },
+              // Image
+              img: ({ src, alt }: any) => (
+                <img src={src} alt={alt} className="markdown-img" />
+              ),
+            }}
+          >
+            {processedContent}
+          </ReactMarkdown>
+        </MarkdownErrorBoundary>
       </div>
     </>
   );

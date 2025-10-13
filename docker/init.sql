@@ -228,6 +228,7 @@ COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_info_t (
     tool_id SERIAL PRIMARY KEY NOT NULL,
     name VARCHAR(100),
+    origin_name VARCHAR(100),
     class_name VARCHAR(100),
     description VARCHAR,
     source VARCHAR(100),

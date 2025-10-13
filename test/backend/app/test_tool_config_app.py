@@ -9,18 +9,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.modules['boto3'] = MagicMock()
 
 # Import exception classes
-from consts.exceptions import MCPConnectionError
+from consts.exceptions import MCPConnectionError, NotFoundException
 
 # Mock dependencies before importing the actual app - using the same pattern as test_remote_mcp_app.py
 with patch('database.client.MinioClient', MagicMock()):
     import pytest
     from fastapi.testclient import TestClient
     from http import HTTPStatus
-    
+
     # Create a test client with a fresh FastAPI app
     from apps.tool_config_app import router
     from fastapi import FastAPI
-    
+
     # Patch exception classes to ensure tests use correct exceptions
     import apps.tool_config_app as tool_config_app
     tool_config_app.MCPConnectionError = MCPConnectionError
@@ -39,7 +39,7 @@ class TestListToolsAPI:
         """Test successful retrieval of tool list"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_list_all_tools.return_value = [
-            {"id": 1, "name": "Tool1"}, 
+            {"id": 1, "name": "Tool1"},
             {"id": 2, "name": "Tool2"}
         ]
 
@@ -87,7 +87,8 @@ class TestSearchToolInfoAPI:
     def test_search_tool_info_success(self, mock_search_tool_info, mock_get_user_id):
         """Test successful tool information search"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_search_tool_info.return_value = {"tool": "info", "config": {"key": "value"}}
+        mock_search_tool_info.return_value = {
+            "tool": "info", "config": {"key": "value"}}
 
         response = client.post(
             "/tool/search",
@@ -127,14 +128,16 @@ class TestUpdateToolInfoAPI:
     def test_update_tool_info_success(self, mock_update_tool_info, mock_get_user_id):
         """Test successful tool information update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_update_tool_info.return_value = {"updated": True, "tool_id": "tool456"}
+        mock_update_tool_info.return_value = {
+            "updated": True, "tool_id": "tool456"}
 
         response = client.post(
             "/tool/update",
             json={
                 "agent_id": 123,  # Changed to int
                 "tool_id": 456,   # Changed to int
-                "params": {"key": "value"},  # Changed from "configuration" to "params"
+                # Changed from "configuration" to "params"
+                "params": {"key": "value"},
                 "enabled": True  # Added required field
             }
         )
@@ -163,7 +166,8 @@ class TestUpdateToolInfoAPI:
             json={
                 "agent_id": 123,  # Changed to int
                 "tool_id": 456,   # Changed to int
-                "params": {"key": "value"},  # Changed from "configuration" to "params"
+                # Changed from "configuration" to "params"
+                "params": {"key": "value"},
                 "enabled": True  # Added required field
             }
         )
@@ -191,14 +195,16 @@ class TestScanAndUpdateToolAPI:
         assert "Successfully update tool" in data["message"]
 
         mock_get_user_id.assert_called_once_with(None)
-        mock_update_tool_list.assert_called_once_with(tenant_id="tenant456", user_id="user123")
+        mock_update_tool_list.assert_called_once_with(
+            tenant_id="tenant456", user_id="user123")
 
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.update_tool_list')
     def test_scan_and_update_tool_mcp_error(self, mock_update_tool_list, mock_get_user_id):
         """Test MCP connection error during tool scan"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_update_tool_list.side_effect = MCPConnectionError("MCP connection failed")
+        mock_update_tool_list.side_effect = MCPConnectionError(
+            "MCP connection failed")
 
         response = client.get("/tool/scan_tool")
 
@@ -227,8 +233,8 @@ class TestIntegration:
     @patch('apps.tool_config_app.list_all_tools')
     @patch('apps.tool_config_app.search_tool_info_impl')
     @patch('apps.tool_config_app.update_tool_info_impl')
-    def test_full_tool_lifecycle(self, mock_update_tool_info, mock_search_tool_info, 
-                                mock_list_all_tools, mock_get_user_id):
+    def test_full_tool_lifecycle(self, mock_update_tool_info, mock_search_tool_info,
+                                 mock_list_all_tools, mock_get_user_id):
         """Test complete tool configuration lifecycle"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -254,7 +260,8 @@ class TestIntegration:
             json={
                 "agent_id": 123,  # Changed to int
                 "tool_id": 1,     # Changed to int
-                "params": {"new_key": "new_value"},  # Changed from "configuration" to "params"
+                # Changed from "configuration" to "params"
+                "params": {"new_key": "new_value"},
                 "enabled": True   # Added required field
             }
         )
@@ -295,6 +302,172 @@ class TestErrorHandling:
 
         # Test missing parameters for update
         response = client.post("/tool/update", json={})
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.validate_tool_impl')
+    def test_validate_tool_success(self, mock_validate_tool, mock_get_user_id):
+        """Test successful tool validation"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_validate_tool.return_value = {
+            "status": "valid", "result": "test_result"}
+
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "test_tool",
+                "source": "local",
+                "usage": None,
+                "inputs": {"param1": "value1"},
+                "params": {"config": "value"}
+            }
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "valid"
+        assert data["result"] == "test_result"
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_validate_tool.assert_called_once()
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.validate_tool_impl')
+    def test_validate_tool_mcp_connection_error(self, mock_validate_tool, mock_get_user_id):
+        """Test MCP connection error during tool validation"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_validate_tool.side_effect = MCPConnectionError(
+            "MCP connection failed")
+
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "test_tool",
+                "source": "mcp",
+                "usage": "nexent",
+                "inputs": {"param1": "value1"}
+            }
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "MCP connection failed" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_validate_tool.assert_called_once()
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.validate_tool_impl')
+    def test_validate_tool_not_found_error(self, mock_validate_tool, mock_get_user_id):
+        """Test tool not found error during validation"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_validate_tool.side_effect = NotFoundException("Tool not found")
+
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "nonexistent_tool",
+                "source": "local",
+                "usage": None,
+                "inputs": {"param1": "value1"}
+            }
+        )
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert "Tool not found" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_validate_tool.assert_called_once()
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.validate_tool_impl')
+    def test_validate_tool_general_error(self, mock_validate_tool, mock_get_user_id):
+        """Test general error during tool validation"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_validate_tool.side_effect = Exception("General validation error")
+
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "test_tool",
+                "source": "local",
+                "usage": None,
+                "inputs": {"param1": "value1"}
+            }
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to validate tool: General validation error" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+        mock_validate_tool.assert_called_once()
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_validate_tool_auth_error(self, mock_get_user_id):
+        """Test authentication error during tool validation"""
+        mock_get_user_id.side_effect = Exception("Auth error")
+
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "test_tool",
+                "source": "local",
+                "usage": None,
+                "inputs": {"param1": "value1"}
+            }
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to validate tool: Auth error" in data["detail"]
+
+        mock_get_user_id.assert_called_once_with(None)
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.validate_tool_impl')
+    def test_validate_tool_with_authorization_header(self, mock_validate_tool, mock_get_user_id):
+        """Test tool validation with authorization header"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_validate_tool.return_value = {"status": "valid"}
+
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "test_tool",
+                "source": "mcp",
+                "usage": "nexent",
+                "inputs": {"param1": "value1"}
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_get_user_id.assert_called_with("Bearer test_token")
+
+    def test_validate_tool_missing_required_fields(self):
+        """Test tool validation with missing required fields"""
+        # Missing name field
+        response = client.post(
+            "/tool/validate",
+            json={
+                "source": "local",
+                "usage": None,
+                "inputs": {"param1": "value1"}
+            }
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+        # Missing source field
+        response = client.post(
+            "/tool/validate",
+            json={
+                "name": "test_tool",
+                "usage": None,
+                "inputs": {"param1": "value1"}
+            }
+        )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
@@ -373,7 +546,8 @@ class TestEdgeCases:
         )
 
         # FastAPI should still parse it correctly
-        assert response.status_code in [HTTPStatus.OK, HTTPStatus.UNPROCESSABLE_ENTITY, HTTPStatus.INTERNAL_SERVER_ERROR]
+        assert response.status_code in [
+            HTTPStatus.OK, HTTPStatus.UNPROCESSABLE_ENTITY, HTTPStatus.INTERNAL_SERVER_ERROR]
 
     @patch('apps.tool_config_app.get_current_user_id')
     def test_auth_with_invalid_token_format(self, mock_get_user_id):
@@ -409,7 +583,8 @@ class TestLoadLastToolConfigAPI:
     def test_load_last_tool_config_success(self, mock_load_config, mock_get_user_id):
         """Test successful loading of last tool configuration"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_load_config.return_value = {"param1": "value1", "param2": "value2"}
+        mock_load_config.return_value = {
+            "param1": "value1", "param2": "value2"}
 
         response = client.get("/tool/load_config/123")
 
@@ -426,7 +601,8 @@ class TestLoadLastToolConfigAPI:
     def test_load_last_tool_config_not_found(self, mock_load_config, mock_get_user_id):
         """Test loading tool config when not found"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_load_config.side_effect = ValueError("Tool configuration not found for tool ID: 123")
+        mock_load_config.side_effect = ValueError(
+            "Tool configuration not found for tool ID: 123")
 
         response = client.get("/tool/load_config/123")
 
@@ -491,7 +667,8 @@ class TestDataValidation:
         )
 
         # Should still pass validation but may fail in business logic
-        assert response.status_code in [HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR]
+        assert response.status_code in [
+            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR]
 
     def test_update_tool_invalid_data_types(self):
         """Test update with invalid data types"""

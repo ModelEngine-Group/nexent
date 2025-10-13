@@ -47,6 +47,7 @@ export const API_ENDPOINTS = {
     update: `${API_BASE_URL}/tool/update`,
     search: `${API_BASE_URL}/tool/search`,
     updateTool: `${API_BASE_URL}/tool/scan_tool`,
+    validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) => `${API_BASE_URL}/tool/load_config/${toolId}`,
   },
   prompt: {

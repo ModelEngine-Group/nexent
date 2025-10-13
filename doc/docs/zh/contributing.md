@@ -70,19 +70,40 @@ Gitflow 是一种结构化的 Git 分支管理模型，为软件开发提供了�
 
 ## 🌟 开源纪念墙快速贡献
 
-想要在开源纪念墙上留下您的印记吗？这是一个专门为初学者设计的简化流程：
+想要在开源纪念墙上留下您的印记吗？这是一个专门为初学者设计的详细步骤流程：
 
-### 超简单的三步走
-1. **在线编辑**：直接在 GitHub 网页上点击 [开源纪念墙文件](https://github.com/ModelEngine-Group/nexent/blob/develop/doc/docs/zh/opensource-memorial-wall.md) 右上角的 ✏️ 编辑按钮
-2. **添加留言**：在"社区留言"部分添加您的消息，使用以下格式：
-   ```markdown
-   ::: info 您的姓名 - 2024-01-15
-   分享您的开源故事或对 Nexent 的使用体验！
-   :::
-   ```
-3. **提交 PR**：点击页面底部"Propose changes"，然后"Create pull request"
+### 步骤 1：编辑纪念墙文件
+
+![步骤1](./assets/contribute_step_1.png)
+
+**说明：** 在 GitHub 网页上点击开源纪念墙文件右上角的✏️编辑按钮
+
+---
+
+### 步骤 2：添加您的留言
+
+![步骤2](./assets/contribute_step_2.png)
+
+**说明：** 在文档末尾留言后点击 Commit changes
+
+---
+
+### 步骤 3：提交更改
+
+![步骤3](./assets/contribute_step_3.png)
+
+**说明：** 点击 Propose changes 等待合入就可以啦！
+
+---
+
+### 步骤 4：成功！
+
+![步骤4](./assets/contribute_step_4.png)
+
+**说明：** 合入成功后会在 GitHub 首页显示~ 恭喜您成为Nexent 共创者之一~ 🎉
 
 就这么简单！我们会尽快审核并合并您的贡献。✨
+
 
 ### 纪念墙贡献示例
 ```markdown

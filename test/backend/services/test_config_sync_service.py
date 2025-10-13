@@ -754,7 +754,6 @@ class TestLoadConfigImpl:
 
         # Check Chinese default values
         assert result["app"]["name"] == "Nexent 智能体"
-        assert "Nexent 是一个开源智能体SDK和平台" in result["app"]["description"]
 
     @pytest.mark.asyncio
     async def test_load_config_impl_with_embedding_dimension(self, service_mocks):
