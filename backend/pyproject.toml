@@ -20,11 +20,12 @@ dependencies = [
 
 [project.optional-dependencies]
 data-process = [
-    "ray[default]>=2.9.3",
+    "ray[default]>=2.8.0,<2.10.0",
     "celery>=5.3.6",
     "flower>=2.0.1",
     "nest_asyncio>=1.5.6",
-    "unstructured[csv,docx,pdf,pptx,xlsx,md]"
+    "unstructured[csv,docx,pdf,pptx,xlsx,md]",
+    "pydantic>=2.0.0,<3.0.0"
 ]
 test = [
     "pytest",
