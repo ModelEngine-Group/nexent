@@ -953,7 +953,8 @@ class ElasticSearchService:
                     chunks = documents_list
                     
                     # Progress: Step 1 - Document reconstruction and clustering
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"document_clustering\", \"message\": \"Reconstructing documents and performing document-level clustering...\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "document_clustering", "message": "Reconstructing documents and performing document-level clustering..."}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Reconstruct documents from chunks
@@ -981,7 +982,8 @@ class ElasticSearchService:
                     logger.info(f"Document clustering completed: {n_doc_clusters} document clusters")
                     
                     # Progress: Step 2 - Chunk vectorization and clustering within document clusters
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"chunk_clustering\", \"message\": \"Performing chunk-level clustering within document clusters...\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "chunk_clustering", "message": "Performing chunk-level clustering within document clusters..."}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Reorganize chunks by document clusters
@@ -1010,11 +1012,13 @@ class ElasticSearchService:
                         n_clusters = 1
                         chunk_cluster_result['n_clusters'] = 1
                     
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"chunk_clustering\", \"message\": \"Organized into {n_clusters} topic clusters\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "chunk_clustering", "message": f"Organized into {n_clusters} topic clusters"}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Progress: Step 2 - Knowledge card generation
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"card_generation\", \"message\": \"Generating knowledge cards...\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "card_generation", "message": "Generating knowledge cards..."}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Initialize LLM client and integrator
@@ -1035,11 +1039,13 @@ class ElasticSearchService:
                     total_cards = len(knowledge_cards)
                     
                     logger.info(f"Generated {total_cards} knowledge cards")
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"card_generation\", \"message\": \"Generated {total_cards} knowledge cards\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "card_generation", "message": f"Generated {total_cards} knowledge cards"}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Progress: Step 3 - Knowledge integration
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"integration\", \"message\": \"Integrating knowledge cards...\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "integration", "message": "Integrating knowledge cards..."}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Group cards by document cluster for integration (ensure 1:1 mapping)
@@ -1068,7 +1074,8 @@ class ElasticSearchService:
                     logger.info(f"Integrated {len(cluster_integrations)} document clusters from {len(knowledge_cards)} knowledge cards")
                     
                     # Progress: Step 4 - Global integration
-                    yield f"data: {{\"status\": \"progress\", \"step\": \"global_integration\", \"message\": \"Generating final knowledge base summary...\"}}\n\n"
+                    progress_data = {"status": "progress", "step": "global_integration", "message": "Generating final knowledge base summary..."}
+                    yield f"data: {json.dumps(progress_data)}\n\n"
                     await asyncio.sleep(0.1)
                     
                     # Global integration
@@ -1081,15 +1088,9 @@ class ElasticSearchService:
                         # Stream summary character by character to preserve line breaks
                         for char in final_summary:
                             summary_parts.append(char)
-                            # Escape special characters for JSON, but preserve newlines
-                            if char == '\n':
-                                # Send newline as literal \n in JSON (will be interpreted as newline)
-                                yield f"data: {{\"status\": \"success\", \"message\": \"\\n\"}}\n\n"
-                            elif char == '"':
-                                # Escape quotes
-                                yield f"data: {{\"status\": \"success\", \"message\": \"\\\"\"}}\n\n"
-                            else:
-                                yield f"data: {{\"status\": \"success\", \"message\": \"{char}\"}}\n\n"
+                            # Use json.dumps for proper JSON formatting
+                            message_data = {"status": "success", "message": char}
+                            yield f"data: {json.dumps(message_data)}\n\n"
                             await asyncio.sleep(0.01)
                         
                         # Send completion metadata
@@ -1099,7 +1100,8 @@ class ElasticSearchService:
                             "confidence": global_integration['avg_confidence'],
                             "keywords": global_integration['global_keywords'][:10]
                         }
-                        yield f"data: {{\"status\": \"complete\", \"metadata\": {json.dumps(metadata)}}}\n\n"
+                        complete_data = {"status": "complete", "metadata": metadata}
+                        yield f"data: {json.dumps(complete_data)}\n\n"
                         
                         logger.info(f"Knowledge summary generated successfully: {len(final_summary)} characters")
                     else:
@@ -1107,8 +1109,8 @@ class ElasticSearchService:
                 
                 except Exception as e:
                     logger.error(f"Error in async summary generation: {e}", exc_info=True)
-                    error_msg = str(e).replace('"', '\\"').replace('\n', '\\n')
-                    yield f"data: {{\"status\": \"error\", \"message\": \"{error_msg}\"}}\n\n"
+                    error_data = {"status": "error", "message": str(e)}
+                    yield f"data: {json.dumps(error_data)}\n\n"
             
             # Return streaming response
             return StreamingResponse(

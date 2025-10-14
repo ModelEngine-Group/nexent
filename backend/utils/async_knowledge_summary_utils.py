@@ -5,6 +5,7 @@ Provides async pipeline for knowledge base summarization with clustering and int
 
 import asyncio
 import logging
+import re
 import time
 from collections import Counter
 from typing import Dict, List, Optional
@@ -167,7 +168,7 @@ class AsyncLLMClient:
         
         response = await self.chat_async(
             messages=messages,
-            max_tokens=max_length,  # 减少token数量，强制简洁
+            max_tokens=max_length,  # Reduce token count and enforce conciseness
             temperature=0.3
         )
         
@@ -216,9 +217,24 @@ class AsyncLLMClient:
         return ' '.join(texts)
     
     def _calculate_confidence(self, chunk_cluster: Dict) -> float:
-        """Calculate confidence score"""
+        """Calculate confidence score based on cluster size and similarity
+        
+        The confidence score is a weighted combination of:
+        - Size score (40%): Normalized cluster size, capped at 1.0 for clusters >= 10 chunks
+        - Similarity score (60%): Average similarity within the cluster
+        
+        Weights are chosen to prioritize semantic similarity over raw size,
+        as a small but highly similar cluster is more reliable than a large but diverse one.
+        """
+        # Normalize cluster size: divide by 10 and cap at 1.0
+        # Clusters with >= 10 chunks get full size score (1.0)
         size_score = min(chunk_cluster['size'] / 10.0, 1.0)
+        
+        # Get average similarity within cluster (0.0 if not available)
         similarity_score = chunk_cluster.get('avg_similarity', 0.0)
+        
+        # Weighted combination: 40% size + 60% similarity
+        # This emphasizes semantic coherence over raw quantity
         confidence = 0.4 * size_score + 0.6 * similarity_score
         return round(confidence, 3)
     
@@ -249,8 +265,6 @@ class AsyncLLMClient:
     
     def _fallback_keyword_extraction(self, text: str) -> List[str]:
         """Fallback keyword extraction"""
-        import re
-        
         words = re.findall(r'[\u4e00-\u9fa5]+', text)
         stop_words = {'的', '了', '和', '是', '在', '有', '个', '等', '与', '及'}
         words = [w for w in words if len(w) >= 2 and w not in stop_words]
@@ -262,8 +276,6 @@ class AsyncLLMClient:
     
     def _clean_markdown_symbols(self, text: str) -> str:
         """Clean markdown symbols from text"""
-        import re
-        
         # Remove markdown headers
         text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
         # Remove markdown bold/italic
@@ -464,8 +476,6 @@ class ChunkDivider:
     
     def _split_sentences(self, text: str) -> List[str]:
         """Simple sentence splitting"""
-        import re
-        
         if len(text) < self.min_chunk_length:
             return [text] if text.strip() else []
         
@@ -845,7 +855,7 @@ class KnowledgeIntegrator:
         
         response = await self.llm_client.chat_async(
             messages=messages,
-            max_tokens=300,  # 减少token数量
+            max_tokens=300,  # Reduce token count
             temperature=0.3
         )
         
@@ -883,8 +893,6 @@ class KnowledgeIntegrator:
     
     def _clean_markdown_symbols(self, text: str) -> str:
         """Clean markdown symbols from text"""
-        import re
-        
         # Remove markdown headers
         text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
         # Remove markdown bold/italic
@@ -903,8 +911,6 @@ class KnowledgeIntegrator:
     
     def _format_final_summary(self, text: str) -> str:
         """Format final summary for better readability with dynamic numbered points"""
-        import re
-        
         # Split into lines and clean
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         
@@ -929,7 +935,6 @@ class KnowledgeIntegrator:
         formatted_text = '\n\n'.join(formatted_lines)
         
         # Ensure each point has proper spacing and clear structure
-        import re
         # Clean up any extra spaces and ensure consistent formatting
         formatted_text = re.sub(r'\n\s*\n\s*\n', '\n\n', formatted_text)  # Remove excessive line breaks
         formatted_text = re.sub(r'([一二三四五六七八九十]+、[^一-十\n]+)(?=\n|$)', r'\1', formatted_text)  # Ensure proper ending

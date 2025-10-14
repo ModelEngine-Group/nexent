@@ -1,9 +1,8 @@
 # Async Knowledge Summary Prompt Templates (English)
-# 异步知识库总结提示词模板（英文版）
 
 # Summary Generation Prompt
 SUMMARY_GENERATION_PROMPT: |-
-  ### You are a【Knowledge Summary Expert】responsible for generating concise and accurate knowledge summaries.
+  ### You are a [Knowledge Summary Expert] responsible for generating concise and accurate knowledge summaries.
   
   Please generate a concise knowledge summary (no more than {{ max_length }} characters) for the following content:
   
