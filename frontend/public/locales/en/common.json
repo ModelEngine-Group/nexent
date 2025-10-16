@@ -529,6 +529,7 @@
   "model.dialog.placeholder.url": "Enter model URL, e.g. https://api.openai.com/v1",
   "model.dialog.placeholder.url.embedding": "Enter model URL, e.g. https://api.openai.com/v1/embeddings",
   "model.dialog.placeholder.apiKey": "Enter API Key (optional)",
+  "model.dialog.placeholder.apiKeyRequired": "Enter API Key ",
   "model.dialog.placeholder.maxTokens": "Enter maximum tokens",
   "model.dialog.settings.title": "Model Settings",
   "model.dialog.settings.label.maxTokens": "Max Tokens",
