@@ -292,10 +292,30 @@ export default function PromptManager({
         if (configuredModel) {
           setBusinessLogicModel(configuredModel.displayName);
           setBusinessLogicModelId(configuredModel.id);
+          
+          // Also update the main agent model to keep them in sync
+          if (onModelChange && !mainAgentModel) {
+            onModelChange(configuredModel.displayName, configuredModel.id);
+          }
         }
       }
     }
-  }, [availableModels, modelConfig.llm, businessLogicModel]);
+  }, [availableModels, modelConfig.llm, businessLogicModel, mainAgentModel, onModelChange]);
+
+  // Sync business logic model with main agent model when mainAgentModel changes
+  useEffect(() => {
+    if (mainAgentModel && availableModels.length > 0 && mainAgentModel !== businessLogicModel) {
+      // Find the corresponding model in the list
+      const model = availableModels.find(m => 
+        m.displayName === mainAgentModel || m.name === mainAgentModel
+      );
+      if (model) {
+        // Update business logic model to match main agent model
+        setBusinessLogicModel(model.displayName);
+        setBusinessLogicModelId(model.id);
+      }
+    }
+  }, [mainAgentModel, availableModels, businessLogicModel]);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -315,6 +335,10 @@ export default function PromptManager({
     onModelSelect?.(model);
     setShowModelDropdown(false);
 
+    // Update business logic model to match the selected model
+    setBusinessLogicModel(model.displayName);
+    setBusinessLogicModelId(model.id);
+
     // Auto-trigger generation after model selection
     if (onGenerateAgent) {
       onGenerateAgent(model);
@@ -326,6 +350,11 @@ export default function PromptManager({
     const modelId = option && 'key' in option ? Number(option.key) : undefined;
     setBusinessLogicModel(value);
     setBusinessLogicModelId(modelId || null);
+    
+    // Also update the main agent model to keep them in sync
+    if (onModelChange) {
+      onModelChange(value, modelId || undefined);
+    }
   };
 
   // Handle generate button click - show model dropdown

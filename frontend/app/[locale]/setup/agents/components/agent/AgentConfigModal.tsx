@@ -153,7 +153,6 @@ export default function AgentConfigModal({
       } catch (error) {
         log.error("Failed to load LLM models:", error);
         setLlmModels([]);
-      } finally {
       }
     };
 
