@@ -28,6 +28,7 @@ import DocumentStatus from "./DocumentStatus";
 import UploadArea from "../upload/UploadArea";
 import { useKnowledgeBaseContext } from "../../contexts/KnowledgeBaseContext";
 import { useDocumentContext } from "../../contexts/DocumentContext";
+import { useConfig } from "@/hooks/useConfig";
 
 interface DocumentListProps {
   documents: Document[];
@@ -134,6 +135,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const {} = useKnowledgeBaseContext();
     const { t } = useTranslation();
+    const { modelConfig } = useConfig();
 
     // Reset showDetail state when knowledge base name changes
     React.useEffect(() => {
@@ -148,9 +150,26 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           try {
             const models = await modelService.getLLMModels();
             setAvailableModels(models);
-            // Set first available model as default
+            
+            // Try to find and select the user's configured LLM model first
             if (models.length > 0) {
-              setSelectedModel(models[0].id);
+              const configuredLLMName = modelConfig.llm?.modelName;
+              if (configuredLLMName) {
+                // Find model by display name or model name
+                const configuredModel = models.find(model => 
+                  model.displayName === configuredLLMName || 
+                  model.name === configuredLLMName
+                );
+                if (configuredModel) {
+                  setSelectedModel(configuredModel.id);
+                } else {
+                  // Fallback to first available model if configured model not found
+                  setSelectedModel(models[0].id);
+                }
+              } else {
+                // No configured model, use first available model
+                setSelectedModel(models[0].id);
+              }
             } else {
               message.warning(t("businessLogic.config.error.noAvailableModels"));
             }
@@ -163,7 +182,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         }
       };
       loadModels();
-    }, [showDetail]);
+    }, [showDetail, modelConfig.llm]);
 
     // Get summary when showing detailed content
     React.useEffect(() => {

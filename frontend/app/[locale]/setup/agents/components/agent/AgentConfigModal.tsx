@@ -15,6 +15,7 @@ import {
 import log from "@/lib/logger";
 import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
+import { useConfig } from "@/hooks/useConfig";
 import {
   checkAgentName,
   checkAgentDisplayName,
@@ -92,6 +93,7 @@ export default function AgentConfigModal({
   getButtonTitle,
 }: AgentConfigModalProps) {
   const { t } = useTranslation("common");
+  const { modelConfig } = useConfig();
 
   // Add local state to track content of three sections
   const [localDutyContent, setLocalDutyContent] = useState(dutyContent || "");
@@ -133,6 +135,21 @@ export default function AgentConfigModal({
       try {
         const models = await modelService.getLLMModels();
         setLlmModels(models);
+        
+        // Try to find and select the user's configured LLM model first
+        if (models.length > 0 && !mainAgentModel) {
+          const configuredLLMName = modelConfig.llm?.modelName;
+          if (configuredLLMName) {
+            // Find model by display name or model name
+            const configuredModel = models.find(model => 
+              model.displayName === configuredLLMName || 
+              model.name === configuredLLMName
+            );
+            if (configuredModel && onModelChange) {
+              onModelChange(configuredModel.displayName, configuredModel.id);
+            }
+          }
+        }
       } catch (error) {
         log.error("Failed to load LLM models:", error);
         setLlmModels([]);
@@ -141,7 +158,7 @@ export default function AgentConfigModal({
     };
 
     loadLLMModels();
-  }, []);
+  }, [modelConfig.llm, mainAgentModel, onModelChange]);
 
   // Agent name validation function
   const validateAgentName = useCallback(

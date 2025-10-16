@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Badge, Input, App, Dropdown, Button } from "antd";
+import { Modal, Badge, Input, App, Dropdown, Button, Select } from "antd";
 import {
   ThunderboltOutlined,
   LoadingOutlined,
@@ -16,6 +16,7 @@ import {
 import { updateAgent } from "@/services/agentConfigService";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
+import { useConfig } from "@/hooks/useConfig";
 
 import AgentConfigModal from "./agent/AgentConfigModal";
 
@@ -258,6 +259,7 @@ export default function PromptManager({
 }: PromptManagerProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { modelConfig } = useConfig();
 
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
@@ -267,11 +269,33 @@ export default function PromptManager({
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  
+  // Business logic model selection state
+  const [businessLogicModel, setBusinessLogicModel] = useState<string>("");
+  const [businessLogicModelId, setBusinessLogicModelId] = useState<number | null>(null);
 
   // Load available models on component mount
   useEffect(() => {
     loadAvailableModels();
   }, []);
+
+  // Initialize business logic model selection with user's configured model
+  useEffect(() => {
+    if (availableModels.length > 0 && !businessLogicModel) {
+      const configuredLLMName = modelConfig.llm?.modelName;
+      if (configuredLLMName) {
+        // Find model by display name or model name
+        const configuredModel = availableModels.find(model => 
+          model.displayName === configuredLLMName || 
+          model.name === configuredLLMName
+        );
+        if (configuredModel) {
+          setBusinessLogicModel(configuredModel.displayName);
+          setBusinessLogicModelId(configuredModel.id);
+        }
+      }
+    }
+  }, [availableModels, modelConfig.llm, businessLogicModel]);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -295,6 +319,13 @@ export default function PromptManager({
     if (onGenerateAgent) {
       onGenerateAgent(model);
     }
+  };
+
+  // Handle business logic model selection
+  const handleBusinessLogicModelChange = (value: string, option: any) => {
+    const modelId = option && 'key' in option ? Number(option.key) : undefined;
+    setBusinessLogicModel(value);
+    setBusinessLogicModelId(modelId || null);
   };
 
   // Handle generate button click - show model dropdown
@@ -444,7 +475,7 @@ export default function PromptManager({
                   minHeight: "120px",
                   maxHeight: "200px",
                   paddingRight: "12px",
-                  paddingBottom: "40px", // Reserve space for button
+                  paddingBottom: "40px", // Reserve space for controls
                 }}
                 autoSize={{
                   minRows: 3,
@@ -452,8 +483,36 @@ export default function PromptManager({
                 }}
                 disabled={!isEditingMode}
               />
-              {/* Generate button */}
-              <div className="absolute bottom-2 right-2">
+              {/* Model selection and Generate button */}
+              <div className="absolute bottom-2 right-2 flex items-center gap-2">
+                {/* Model selection dropdown */}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-600 whitespace-nowrap">
+                    {t("businessLogic.config.model")}:
+                  </span>
+                  <Select
+                    value={businessLogicModel || undefined}
+                    onChange={handleBusinessLogicModelChange}
+                    size="small"
+                    disabled={!isEditingMode}
+                    style={{ minWidth: "120px" }}
+                    placeholder={t("businessLogic.config.modelPlaceholder")}
+                  >
+                    {availableModels.map((model) => (
+                      <Select.Option 
+                        key={model.id} 
+                        value={model.displayName}
+                        disabled={model.connect_status !== "available"}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>{model.displayName}</span>
+                        </div>
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </div>
+                
+                {/* Generate button */}
                 {isGeneratingAgent ? (
                   <button
                     disabled={true}
