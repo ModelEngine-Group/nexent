@@ -18,6 +18,7 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             - 'prompt_generate': Prompt generation template
             - 'agent': Agent template including manager and managed agents
             - 'knowledge_summary': Knowledge summary template
+            - 'async_knowledge_summary': Async knowledge summary template
             - 'analyze_file': File analysis template
             - 'generate_title': Title generation template
             - 'file_processing_messages': File processing messages template
@@ -49,6 +50,10 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
         'knowledge_summary': {
             LANGUAGE["ZH"]: 'backend/prompts/knowledge_summary_agent.yaml',
             LANGUAGE["EN"]: 'backend/prompts/knowledge_summary_agent_en.yaml'
+        },
+        'async_knowledge_summary': {
+            LANGUAGE["ZH"]: 'backend/prompts/async_knowledge_summary.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/async_knowledge_summary_en.yaml'
         },
         'analyze_file': {
             LANGUAGE["ZH"]: 'backend/prompts/analyze_file.yaml',
@@ -164,3 +169,16 @@ def get_file_processing_messages_template(language: str = 'zh') -> Dict[str, Any
         dict: Loaded file processing messages configuration
     """
     return get_prompt_template('file_processing_messages', language)
+
+
+def get_async_knowledge_summary_prompt_template(language: str = 'zh') -> Dict[str, Any]:
+    """
+    Get async knowledge summary prompt template
+
+    Args:
+        language: Language code ('zh' or 'en')
+
+    Returns:
+        dict: Loaded async knowledge summary prompt template configuration
+    """
+    return get_prompt_template('async_knowledge_summary', language)
