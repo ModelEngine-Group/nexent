@@ -8,6 +8,8 @@ from typing import Optional
 from pydantic import Field
 from smolagents.tools import Tool
 
+from ..utils.tools_common_message import ToolCategory
+
 logger = logging.getLogger("send_email_tool")
 class SendEmailTool(Tool):
     name = "send_email"
@@ -22,6 +24,7 @@ class SendEmailTool(Tool):
         "bcc": {"type": "string", "description": "BCC email address, multiple BCCs separated by commas, optional",
                 "nullable": True}}
     output_type = "string"
+    category = ToolCategory.EMAIL.value
 
     def __init__(self, smtp_server: str=Field(description="SMTP Server Address"),
                  smtp_port: int=Field(description="SMTP server port"), 

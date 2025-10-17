@@ -237,6 +237,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tool_info_t (
     params JSON,
     inputs VARCHAR,
     output_type VARCHAR(100),
+    category VARCHAR(100),
     is_available BOOLEAN DEFAULT FALSE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,

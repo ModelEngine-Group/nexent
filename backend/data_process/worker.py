@@ -311,7 +311,8 @@ def start_worker():
         f'--hostname={worker_name}@%h',
         f'--concurrency={concurrency}',
         '--pool=threads',
-        '--task-events'
+        '--task-events',
+        '-Ofair'
     ]
 
     try:

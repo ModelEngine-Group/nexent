@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, App, Tabs } from "antd";
+import { Button, App, Tabs, Collapse } from "antd";
 import {
   SettingOutlined,
   LoadingOutlined,
@@ -12,13 +12,13 @@ import {
 } from "@ant-design/icons";
 
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
 import log from "@/lib/logger";
-import { Tool, ToolPoolProps, ToolGroup } from "@/types/agentConfig";
+import {
+  Tool,
+  ToolPoolProps,
+  ToolGroup,
+  ToolSubGroup,
+} from "@/types/agentConfig";
 import {
   fetchTools,
   searchToolConfig,
@@ -56,6 +56,9 @@ function ToolPool({
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState<string>("");
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set()
+  );
 
   // Use useMemo to cache tool grouping
   const toolGroups = useMemo(() => {
@@ -100,6 +103,37 @@ function ToolPool({
         return a.create_time.localeCompare(b.create_time);
       });
 
+      // Create secondary grouping for local tools
+      let subGroups: ToolSubGroup[] | undefined;
+      if (key === TOOL_SOURCE_TYPES.LOCAL) {
+        const categoryMap = new Map<string, Tool[]>();
+
+        sortedTools.forEach((tool) => {
+          const category =
+            tool.category && tool.category.trim() !== ""
+              ? tool.category
+              : t("toolPool.category.other");
+          if (!categoryMap.has(category)) {
+            categoryMap.set(category, []);
+          }
+          categoryMap.get(category)!.push(tool);
+        });
+
+        subGroups = Array.from(categoryMap.entries())
+          .map(([category, categoryTools]) => ({
+            key: category,
+            label: category,
+            tools: categoryTools.sort((a, b) => a.name.localeCompare(b.name)), // Sort by name alphabetically
+          }))
+          .sort((a, b) => {
+            // Put "Other" category at the end
+            const otherKey = t("toolPool.category.other");
+            if (a.key === otherKey) return 1;
+            if (b.key === otherKey) return -1;
+            return a.label.localeCompare(b.label); // Sort other categories alphabetically
+          });
+      }
+
       groups.push({
         key,
         label: key.startsWith("mcp-")
@@ -110,6 +144,7 @@ function ToolPool({
           ? t("toolPool.group.langchain")
           : key,
         tools: sortedTools,
+        subGroups,
       });
     });
 
@@ -390,7 +425,7 @@ function ToolPool({
 
     const item = (
       <div
-        className={`border-2 rounded-md p-2 flex items-center transition-all duration-300 ease-in-out min-h-[45px] shadow-sm ${
+        className={`border-2 rounded-md p-2 flex items-center transition-all duration-300 ease-in-out min-h-[52px] shadow-sm ${
           !isEffectivelyAvailable
             ? isSelected
               ? "bg-blue-100 border-blue-400 opacity-60"
@@ -511,17 +546,75 @@ function ToolPool({
       ),
       children: (
         <div
-          className="flex flex-col gap-3 pr-2"
+          className="flex h-full flex-col sm:flex-row"
           style={{
             height: "100%",
-            overflowY: "auto",
-            padding: "8px 0",
-            maxHeight: "100%",
+            overflow: "hidden",
           }}
         >
-          {group.tools.map((tool) => (
-            <ToolItem key={tool.id} tool={tool} />
-          ))}
+          {group.subGroups ? (
+            <>
+              {/* Collapsible categories using Ant Design Collapse */}
+              <div className="flex-1 overflow-y-auto p-1">
+                <Collapse
+                  activeKey={Array.from(expandedCategories)}
+                  onChange={(keys) => {
+                    const newSet = new Set(
+                      typeof keys === "string" ? [keys] : keys
+                    );
+                    setExpandedCategories(newSet);
+                  }}
+                  ghost
+                  size="small"
+                  className="tool-categories-collapse mt-1"
+                >
+                  {group.subGroups.map((subGroup, index) => (
+                    <Collapse.Panel
+                      key={subGroup.key}
+                      header={
+                        <span
+                          className="text-gray-700 font-medium"
+                          style={{
+                            paddingTop: "8px",
+                            paddingBottom: "8px",
+                            display: "block",
+                            minHeight: "36px",
+                            lineHeight: "20px",
+                          }}
+                        >
+                          {subGroup.label}
+                        </span>
+                      }
+                      className={`tool-category-panel ${
+                        index === 0 ? "mt-1" : "mt-3"
+                      }`}
+                    >
+                      <div className="space-y-3 pt-3">
+                        {subGroup.tools.map((tool) => (
+                          <ToolItem key={tool.id} tool={tool} />
+                        ))}
+                      </div>
+                    </Collapse.Panel>
+                  ))}
+                </Collapse>
+              </div>
+            </>
+          ) : (
+            // Regular layout for non-local tools
+            <div
+              className="flex flex-col gap-3 pr-2 flex-1"
+              style={{
+                height: "100%",
+                overflowY: "auto",
+                padding: "8px 0",
+                maxHeight: "100%",
+              }}
+            >
+              {group.tools.map((tool) => (
+                <ToolItem key={tool.id} tool={tool} />
+              ))}
+            </div>
+          )}
         </div>
       ),
     };

@@ -68,6 +68,7 @@ export const fetchTools = async () => {
       is_available: tool.is_available,
       create_time: tool.create_time,
       usage: tool.usage, // New: handle usage field
+      category: tool.category,
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -520,6 +521,7 @@ export const searchAgentInfo = async (agentId: number) => {
               source: tool.source,
               is_available: tool.is_available,
               usage: tool.usage, // New: handle usage field
+              category: tool.category,
               initParams: Array.isArray(params)
                 ? params.map((param: any) => ({
                     name: param.name,

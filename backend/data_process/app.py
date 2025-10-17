@@ -61,7 +61,7 @@ app.conf.update(
     result_backend_always_retry=True,  # Always retry backend operations
     result_backend_max_retries=10,  # Max retries for backend operations
     task_time_limit=3600,      # 1 hour time limit per task
-    worker_prefetch_multiplier=4,  # Allow prefetching for better throughput
+    worker_prefetch_multiplier=1,  # Fair scheduling; avoid batchy prefetch
     worker_max_tasks_per_child=1000,  # Reduce restart frequency
     # Important for task chains
     task_acks_late=True,       # Tasks are acknowledged after completion

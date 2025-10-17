@@ -16,6 +16,19 @@ boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
+# Mock nexent modules before importing modules that use them
+nexent_mock = MagicMock()
+sys.modules['nexent'] = nexent_mock
+sys.modules['nexent.core'] = MagicMock()
+sys.modules['nexent.core.models'] = MagicMock()
+sys.modules['nexent.core.models.embedding_model'] = MagicMock()
+sys.modules['nexent.core.nlp'] = MagicMock()
+sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
+sys.modules['nexent.vector_database'] = MagicMock()
+sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
+sys.modules['nexent.core.agents'] = MagicMock()
+sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+
 # Pre-inject a stubbed base_app to avoid import side effects
 backend_pkg = types.ModuleType("backend")
 apps_pkg = types.ModuleType("backend.apps")
@@ -40,7 +53,9 @@ setattr(backend_pkg, "apps", apps_pkg)
 setattr(apps_pkg, "base_app", base_app_mod)
 
 # Mock external dependencies before importing backend modules
-with patch('database.client.MinioClient', return_value=minio_client_mock):
+with patch('database.client.MinioClient', return_value=minio_client_mock), \
+        patch('elasticsearch.Elasticsearch', return_value=MagicMock()), \
+        patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=MagicMock()):
     # Mock dotenv before importing main_service
     with patch('dotenv.load_dotenv'):
         # Mock logging configuration

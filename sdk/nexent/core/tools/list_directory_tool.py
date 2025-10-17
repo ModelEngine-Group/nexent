@@ -6,7 +6,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import ToolSign
+from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("list_directory_tool")
 
@@ -26,6 +26,7 @@ class ListDirectoryTool(Tool):
         "show_size": {"type": "boolean", "description": "Whether to show file sizes", "default": True, "nullable": True}
     }
     output_type = "string"
+    category = ToolCategory.FILE.value
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 

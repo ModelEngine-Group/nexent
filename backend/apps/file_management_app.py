@@ -34,13 +34,15 @@ async def upload_files(
         destination: str = Form(...,
                                 description="Upload destination: 'local' or 'minio'"),
         folder: str = Form(
-            "attachments", description="Storage folder path for MinIO (optional)")
+            "attachments", description="Storage folder path for MinIO (optional)"),
+        index_name: Optional[str] = Form(
+            None, description="Knowledge base index for conflict resolution")
 ):
     if not file:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail="No files in the request")
 
-    errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(destination, file, folder)
+    errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(destination, file, folder, index_name)
 
     if uploaded_file_paths:
         return JSONResponse(

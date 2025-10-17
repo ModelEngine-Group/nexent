@@ -6,7 +6,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import ToolSign
+from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("create_directory_tool")
 
@@ -25,6 +25,7 @@ class CreateDirectoryTool(Tool):
         "permissions": {"type": "string", "description": "Directory permissions in octal format (e.g., '755')", "default": "755", "nullable": True}
     }
     output_type = "string"
+    category = ToolCategory.FILE.value
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 

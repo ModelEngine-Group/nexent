@@ -93,9 +93,11 @@ Share your open source story or experience with Nexent!
 
 ### Step 3: Propose Changes
 
-![Step 3](./assets/contribute_step_3.png)
+![Step 3-1](./assets/contribute_step_3-1.png)
 
-**Instructions:** Click "Propose changes" and wait for the merge to complete!
+![Step 3-2](./assets/contribute_step_3-2.png)
+
+**Instructions:** Click "Propose changes" and then "Create pull request" to open a PR. Then wait for it to be merged in!
 
 ---
 

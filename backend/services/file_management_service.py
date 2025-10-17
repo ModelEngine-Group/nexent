@@ -20,6 +20,7 @@ from database.attachment_db import (
     list_files
 )
 from utils.attachment_utils import convert_image_to_text, convert_long_text_to_text
+from services.elasticsearch_service import ElasticSearchService, get_es_core
 from utils.prompt_template_utils import get_file_processing_messages_template
 from utils.file_management_utils import save_upload_file
 
@@ -31,7 +32,7 @@ upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
 logger = logging.getLogger("file_management_service")
 
 
-async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None) -> tuple:
+async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
 
@@ -74,6 +75,45 @@ async def upload_files_impl(destination: str, file: List[UploadFile], folder: st
                 file_name = result.get('file_name')
                 error_msg = result.get('error', 'Unknown error')
                 errors.append(f"Failed to upload {file_name}: {error_msg}")
+
+        # Resolve filename conflicts against existing KB documents by renaming (e.g., name -> name_1)
+        if index_name:
+            try:
+                es_core = get_es_core()
+                existing = await ElasticSearchService.list_files(index_name, include_chunks=False, es_core=es_core)
+                existing_files = existing.get(
+                    "files", []) if isinstance(existing, dict) else []
+                # Prefer 'file' field; fall back to 'filename' if present
+                existing_names = set()
+                for item in existing_files:
+                    name = (item.get("file") or item.get(
+                        "filename") or "").strip()
+                    if name:
+                        existing_names.add(name.lower())
+
+                def make_unique_names(original_names: List[str], taken_lower: set) -> List[str]:
+                    unique_list: List[str] = []
+                    local_taken = set(taken_lower)
+                    for original in original_names:
+                        base, ext = os.path.splitext(original or "")
+                        candidate = original or ""
+                        if not candidate:
+                            unique_list.append(candidate)
+                            continue
+                        suffix = 1
+                        # Ensure case-insensitive uniqueness
+                        while candidate.lower() in local_taken:
+                            candidate = f"{base}_{suffix}{ext}"
+                            suffix += 1
+                        unique_list.append(candidate)
+                        local_taken.add(candidate.lower())
+                    return unique_list
+
+                uploaded_filenames[:] = make_unique_names(
+                    uploaded_filenames, existing_names)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to resolve filename conflicts for index '{index_name}': {str(e)}")
     else:
         raise Exception("Invalid destination. Must be 'local' or 'minio'.")
     return errors, uploaded_file_paths, uploaded_filenames

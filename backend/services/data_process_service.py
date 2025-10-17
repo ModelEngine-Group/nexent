@@ -14,14 +14,14 @@ import aiohttp
 import redis
 import torch
 from PIL import Image
-from celery import states
+from celery import states, chain
 from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
 
 from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
 from consts.model import BatchTaskRequest
 from data_process.app import app as celery_app
-from data_process.tasks import process_and_forward
+from data_process.tasks import process, forward
 from data_process.utils import get_task_info, get_all_task_ids_from_redis
 
 # Configure logging
@@ -467,15 +467,25 @@ class DataProcessService:
                     f"Missing required field 'index_name' in source config: {source_config}")
                 continue
 
-            # Create individual task for this source
-            task_result = process_and_forward.delay(
-                source=source,
-                source_type=source_type,
-                chunking_strategy=chunking_strategy,
-                index_name=index_name,
-                original_filename=original_filename,
-                authorization=authorization
+            # Create and submit a chain: process -> forward
+            task_chain = chain(
+                process.s(
+                    source=source,
+                    source_type=source_type,
+                    chunking_strategy=chunking_strategy,
+                    index_name=index_name,
+                    original_filename=original_filename
+                ).set(queue='process_q'),
+                forward.s(
+                    index_name=index_name,
+                    source=source,
+                    source_type=source_type,
+                    original_filename=original_filename,
+                    authorization=authorization
+                ).set(queue='forward_q')
             )
+
+            task_result = task_chain.apply_async()
 
             task_ids.append(task_result.id)
             logger.debug(f"Created task {task_result.id} for source: {source}")

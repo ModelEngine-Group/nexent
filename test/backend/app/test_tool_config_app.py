@@ -12,7 +12,8 @@ sys.modules['boto3'] = MagicMock()
 from consts.exceptions import MCPConnectionError, NotFoundException
 
 # Mock dependencies before importing the actual app - using the same pattern as test_remote_mcp_app.py
-with patch('database.client.MinioClient', MagicMock()):
+with patch('database.client.MinioClient', MagicMock()), \
+     patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     import pytest
     from fastapi.testclient import TestClient
     from http import HTTPStatus
@@ -399,7 +400,7 @@ class TestErrorHandling:
 
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
-        assert "Failed to validate tool: General validation error" in data["detail"]
+        assert "General validation error" in data["detail"]
 
         mock_get_user_id.assert_called_once_with(None)
         mock_validate_tool.assert_called_once()
@@ -421,7 +422,7 @@ class TestErrorHandling:
 
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
-        assert "Failed to validate tool: Auth error" in data["detail"]
+        assert "Auth error" in data["detail"]
 
         mock_get_user_id.assert_called_once_with(None)
 

@@ -92,6 +92,13 @@ REDIS_URL = os.getenv("REDIS_URL")
 REDIS_BACKEND_URL = os.getenv("REDIS_BACKEND_URL")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
+DP_REDIS_CHUNKS_WAIT_TIMEOUT_S = int(
+    os.getenv("DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", "30"))
+DP_REDIS_CHUNKS_POLL_INTERVAL_MS = int(
+    os.getenv("DP_REDIS_CHUNKS_POLL_INTERVAL_MS", "200"))
+FORWARD_REDIS_RETRY_DELAY_S = int(
+    os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
+FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
 # Ray Configuration
@@ -258,4 +265,4 @@ LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
     os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))  # tokens per second
 
 # APP Version
-APP_VERSION = "v1.7.4"
+APP_VERSION = "v1.7.4.1"

@@ -6,7 +6,7 @@ import requests
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import SearchResultTextMessage, ToolSign
+from ..utils.tools_common_message import SearchResultTextMessage, ToolSign, ToolCategory
 from pydantic import Field
 from ...vector_database.elasticsearch_core import ElasticSearchCore
 from ..models.embedding_model import BaseEmbedding
@@ -28,6 +28,7 @@ class KnowledgeBaseSearchTool(Tool):
                               "default": "hybrid", "nullable": True},
               "index_names": {"type": "array", "description": "The list of knowledge base index names to search. If not provided, will search all available knowledge bases.", "nullable": True}}
     output_type = "string"
+    category = ToolCategory.SEARCH.value
 
     tool_sign = ToolSign.KNOWLEDGE_BASE.value  # Used to distinguish different index sources for summaries
 
@@ -57,12 +58,13 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
 
-    def forward(self, query: str, search_mode: str= "hybrid", index_names: List[str] = None) -> str:
+    def forward(self, query: str, search_mode: str = "hybrid", index_names: List[str] = None) -> str:
         # Send tool run message
-        running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
-        self.observer.add_message("", ProcessType.TOOL, running_prompt)
-        card_content = [{"icon": "search", "text": query}]
-        self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
+        if self.observer:
+            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            self.observer.add_message("", ProcessType.TOOL, running_prompt)
+            card_content = [{"icon": "search", "text": query}]
+            self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
         # Use provided index_names if available, otherwise use default
         search_index_names = index_names if index_names is not None else self.index_names

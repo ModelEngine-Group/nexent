@@ -4,8 +4,10 @@ These tests verify the behavior of file upload, download, and management operati
 without actual file system or MinIO connections.
 All external services and dependencies are mocked to isolate the tests.
 """
+import importlib
 import os
 import sys
+import types
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
@@ -17,7 +19,7 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
 # Apply critical patches before importing any modules
-# This prevents real AWS/MinIO calls during import
+# This prevents real AWS/MinIO/Elasticsearch calls during import
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
 
 # Create a full mock for MinioClient to avoid initialization issues
@@ -28,19 +30,43 @@ patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.boto3.client', return_value=MagicMock()).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 
-# Import the service functions after mocking
-from backend.services.file_management_service import (
-    upload_files_impl,
-    upload_to_minio,
-    get_file_url_impl,
-    get_file_stream_impl,
-    delete_file_impl,
-    list_files_impl,
-    preprocess_files_generator,
-    process_image_file,
-    process_text_file,
-    get_file_description
-)
+# Stub Elasticsearch service module to avoid initializing real client during import
+services_stub = types.ModuleType('services')
+services_stub.__path__ = []  # Mark as package
+sys.modules.setdefault('services', services_stub)
+
+es_stub = types.ModuleType('services.elasticsearch_service')
+
+
+class _StubElasticSearchService:
+    @staticmethod
+    async def list_files(index_name, include_chunks=False, es_core=None):
+        return {"files": []}
+
+
+def _stub_get_es_core():
+    return None
+
+
+es_stub.ElasticSearchService = _StubElasticSearchService
+es_stub.get_es_core = _stub_get_es_core
+sys.modules['services.elasticsearch_service'] = es_stub
+setattr(services_stub, 'elasticsearch_service', es_stub)
+
+# Import the service module after mocking external dependencies
+file_management_service = importlib.import_module(
+    'backend.services.file_management_service')
+
+upload_files_impl = file_management_service.upload_files_impl
+upload_to_minio = file_management_service.upload_to_minio
+get_file_url_impl = file_management_service.get_file_url_impl
+get_file_stream_impl = file_management_service.get_file_stream_impl
+delete_file_impl = file_management_service.delete_file_impl
+list_files_impl = file_management_service.list_files_impl
+preprocess_files_generator = file_management_service.preprocess_files_generator
+process_image_file = file_management_service.process_image_file
+process_text_file = file_management_service.process_text_file
+get_file_description = file_management_service.get_file_description
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_patches():
@@ -249,6 +275,96 @@ class TestUploadFilesImpl:
             assert len(uploaded_names) == 1
             assert uploaded_names[0] == "test1.txt"
             assert uploaded_paths[0] == "folder/test1.txt"
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_conflict_resolution(self):
+        """When index_name is provided, filenames should be made unique against existing ES docs."""
+        # Create mock UploadFiles
+        mock_file1 = MagicMock()
+        mock_file1.filename = "test.txt"
+        mock_file2 = MagicMock()
+        mock_file2.filename = "doc.pdf"
+
+        # uploaded results echo original names
+        minio_return = [
+            {"success": True, "file_name": "test.txt",
+                "object_name": "folder/test.txt"},
+            {"success": True, "file_name": "doc.pdf",
+                "object_name": "folder/doc.pdf"},
+        ]
+
+        existing = {
+            "files": [
+                {"file": "test.txt"},
+                {"filename": "doc.pdf"},
+            ]
+        }
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=minio_return)) as mock_upload, \
+                patch('backend.services.file_management_service.get_es_core', MagicMock()) as mock_es_core, \
+                patch('backend.services.file_management_service.ElasticSearchService.list_files', AsyncMock(return_value=existing)) as mock_list:
+
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file1, mock_file2], folder="folder", index_name="kb1")
+
+            assert errors == []
+            assert uploaded_paths == ["folder/test.txt", "folder/doc.pdf"]
+            # Both collide; expect suffixed names
+            assert uploaded_names == ["test_1.txt", "doc_1.pdf"]
+            mock_upload.assert_called_once()
+            mock_list.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_conflict_resolution_case_insensitive_duplicates(self):
+        """Case-insensitive uniqueness across existing and within-batch duplicates."""
+        mock_file1 = MagicMock()
+        mock_file1.filename = "DOC.PDF"
+        mock_file2 = MagicMock()
+        mock_file2.filename = "doc.pdf"
+
+        minio_return = [
+            {"success": True, "file_name": "DOC.PDF",
+                "object_name": "folder/DOC.PDF"},
+            {"success": True, "file_name": "doc.pdf",
+                "object_name": "folder/doc.pdf"},
+        ]
+
+        existing = {"files": [{"file": "doc.pdf"}]}
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=minio_return)), \
+                patch('backend.services.file_management_service.get_es_core', MagicMock()), \
+                patch('backend.services.file_management_service.ElasticSearchService.list_files', AsyncMock(return_value=existing)):
+
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file1, mock_file2], folder="folder", index_name="kb1")
+
+            assert errors == []
+            assert uploaded_paths == ["folder/DOC.PDF", "folder/doc.pdf"]
+            # First collides with existing -> _1; second collides with both existing and first -> _2
+            assert uploaded_names == ["DOC_1.PDF", "doc_2.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_upload_files_impl_minio_conflict_resolution_es_exception(self):
+        """If ES lookup fails, service should warn and leave names unchanged."""
+        mock_file = MagicMock()
+        mock_file.filename = "a.txt"
+
+        minio_return = [
+            {"success": True, "file_name": "a.txt", "object_name": "folder/a.txt"},
+        ]
+
+        with patch('backend.services.file_management_service.upload_to_minio', AsyncMock(return_value=minio_return)), \
+                patch('backend.services.file_management_service.get_es_core', MagicMock()), \
+                patch('backend.services.file_management_service.ElasticSearchService.list_files', AsyncMock(side_effect=Exception("boom"))), \
+                patch('backend.services.file_management_service.logger') as mock_logger:
+
+            errors, uploaded_paths, uploaded_names = await upload_files_impl(
+                destination="minio", file=[mock_file], folder="folder", index_name="kb1")
+
+            assert errors == []
+            assert uploaded_paths == ["folder/a.txt"]
+            assert uploaded_names == ["a.txt"]
+            mock_logger.warning.assert_called()
 
 
 class TestUploadToMinio:

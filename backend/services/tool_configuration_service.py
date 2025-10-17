@@ -2,7 +2,6 @@ import asyncio
 import importlib
 import inspect
 import json
-import keyword
 import logging
 from typing import Any, List, Optional, Dict
 from urllib.parse import urljoin
@@ -24,6 +23,8 @@ from database.tool_db import (
     search_last_tool_instance_by_tool_id
 )
 from database.user_tenant_db import get_all_tenant_ids
+from services.elasticsearch_service import get_embedding_model, elastic_core
+from services.tenant_config_service import get_selected_knowledge_list
 
 logger = logging.getLogger("tool_configuration_service")
 
@@ -102,6 +103,7 @@ def get_local_tools() -> List[ToolInfo]:
             inputs=json.dumps(getattr(tool_class, 'inputs'),
                               ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
+            category=getattr(tool_class, 'category'),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -162,7 +164,8 @@ def _build_tool_info_from_langchain(obj) -> ToolInfo:
         output_type=output_type,
         class_name=tool_name,
         usage=None,
-        origin_name=tool_name
+        origin_name=tool_name,
+        category=None
     )
     return tool_info
 
@@ -298,7 +301,8 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
                                      output_type="string",
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
-                                     origin_name=tool.name)
+                                     origin_name=tool.name,
+                                     category=None)
                 tools_info.append(tool_info)
             return tools_info
     except Exception as e:
@@ -351,7 +355,8 @@ async def list_all_tools(tenant_id: str):
             "create_time": tool.get("create_time"),
             "usage": tool.get("usage"),
             "params": tool.get("params", []),
-            "inputs": tool.get("inputs", {})
+            "inputs": tool.get("inputs", {}),
+            "category": tool.get("category")
         }
         formatted_tools.append(formatted_tool)
 
@@ -464,7 +469,7 @@ async def _call_mcp_tool(
             name=tool_name,
             arguments=inputs
         )
-        return result[0].text
+        return result.content[0].text
 
 
 async def _validate_mcp_tool_nexent(
@@ -543,7 +548,9 @@ def _get_tool_class_by_name(tool_name: str) -> Optional[type]:
 def _validate_local_tool(
     tool_name: str,
     inputs: Optional[Dict[str, Any]] = None,
-    params: Optional[Dict[str, Any]] = None
+    params: Optional[Dict[str, Any]] = None,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Validate local tool by actually instantiating and calling it.
@@ -552,6 +559,8 @@ def _validate_local_tool(
         tool_name: Name of the tool to test
         inputs: Parameters to pass to the tool's forward method
         params: Configuration parameters for tool initialization
+        tenant_id: Tenant ID for knowledge base tools (optional)
+        user_id: User ID for knowledge base tools (optional)
 
     Returns:
         Dict[str, Any]: The actual result returned by the tool's forward method, 
@@ -567,15 +576,45 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
-        # Instantiate tool with provided params or default parameters
+        # Parse instantiation parameters first
         instantiation_params = params or {}
-        # Check if the tool constructor expects an observer parameter
+        # Get signature and extract default values for all parameters
         sig = inspect.signature(tool_class.__init__)
-        if 'observer' in sig.parameters and 'observer' not in instantiation_params:
-            instantiation_params['observer'] = None
-        tool_instance = tool_class(**instantiation_params)
 
-        # Call forward method with provided parameters
+        # Extract default values for all parameters not provided in instantiation_params
+        for param_name, param in sig.parameters.items():
+            if param_name == "self":
+                continue
+
+            # If parameter not provided, extract default value
+            if param_name not in instantiation_params:
+                if param.default is PydanticUndefined:
+                    continue
+                elif hasattr(param.default, 'default'):
+                    # This is a Field object, extract its default value
+                    if param.default.default is not PydanticUndefined:
+                        instantiation_params[param_name] = param.default.default
+                else:
+                    instantiation_params[param_name] = param.default
+
+        if tool_name == "knowledge_base_search":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+            knowledge_info_list = get_selected_knowledge_list(
+                tenant_id=tenant_id, user_id=user_id)
+            index_names = [knowledge_info.get("index_name")
+                           for knowledge_info in knowledge_info_list]
+            embedding_model = get_embedding_model(tenant_id=tenant_id)
+            params = {
+                **instantiation_params,
+                'index_names': index_names,
+                'es_core': elastic_core,
+                'embedding_model': embedding_model
+            }
+            tool_instance = tool_class(**params)
+        else:
+            tool_instance = tool_class(**instantiation_params)
+
         result = tool_instance.forward(**(inputs or {}))
         return result
     except Exception as e:
@@ -630,7 +669,8 @@ def _validate_langchain_tool(
 
 async def validate_tool_impl(
     request: ToolValidateRequest,
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Validate a tool from various sources (MCP, local, or LangChain).
@@ -638,6 +678,7 @@ async def validate_tool_impl(
     Args:
         request: Tool validation request containing tool details
         tenant_id: Tenant ID for database queries (optional)
+        user_id: User ID for database queries (optional)
 
     Returns:
         Dict containing validation result - success returns tool result, failure returns error message
@@ -657,7 +698,7 @@ async def validate_tool_impl(
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
         elif source == ToolSourceEnum.LOCAL.value:
-            return _validate_local_tool(tool_name, inputs, params)
+            return _validate_local_tool(tool_name, inputs, params, tenant_id, user_id)
         elif source == ToolSourceEnum.LANGCHAIN.value:
             return _validate_langchain_tool(tool_name, inputs)
         else:
@@ -665,10 +706,10 @@ async def validate_tool_impl(
 
     except NotFoundException as e:
         logger.error(f"Tool not found: {e}")
-        raise NotFoundException(f"Tool not found: {str(e)}")
+        raise NotFoundException(str(e))
     except MCPConnectionError as e:
         logger.error(f"MCP connection failed: {e}")
-        raise MCPConnectionError(f"MCP connection failed: {str(e)}")
+        raise MCPConnectionError(str(e))
     except Exception as e:
         logger.error(f"Validate Tool failed: {e}")
-        raise ToolExecutionException(f"Validate Tool failed: {str(e)}")
+        raise ToolExecutionException(str(e))

@@ -382,6 +382,7 @@
   "toolPool.group.local": "本地工具",
   "toolPool.group.langchain": "LangChain",
   "toolPool.group.other": "其他工具",
+  "toolPool.category.other": "其他",
   "toolPool.noTools": "暂无可用工具",
   "toolPool.error.requiredFields": "以下必填字段未填写: {{fields}}",
 
@@ -529,8 +530,7 @@
   "model.dialog.placeholder.displayName": "请输入模型的展示名称",
   "model.dialog.placeholder.url": "请输入模型URL, 例如: https://api.openai.com/v1",
   "model.dialog.placeholder.url.embedding": "请输入模型URL, 例如: https://api.openai.com/v1/embeddings",
-  "model.dialog.placeholder.apiKey": "请输入API Key（可选）",
-  "model.dialog.placeholder.apiKeyRequired": "请输入API Key",
+  "model.dialog.placeholder.apiKey": "请输入API Key",
   "model.dialog.placeholder.maxTokens": "请输入最大Token数",
   "model.dialog.settings.title": "模型设置",
   "model.dialog.settings.label.maxTokens": "最大Token数",

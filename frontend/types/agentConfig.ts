@@ -34,6 +34,7 @@ export interface Tool {
   create_time?: string;
   usage?: string;
   inputs?: string;
+  category?: string;
 }
 
 export interface ToolParam {
@@ -54,6 +55,14 @@ export interface AgentConfigDataResponse {
 
 // Tool group interface
 export interface ToolGroup {
+  key: string;
+  label: string;
+  tools: Tool[];
+  subGroups?: ToolSubGroup[];
+}
+
+// Tool sub-group interface for secondary grouping
+export interface ToolSubGroup {
   key: string;
   label: string;
   tools: Tool[];

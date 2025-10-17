@@ -6,7 +6,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import ToolSign
+from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("delete_file_tool")
 
@@ -24,6 +24,7 @@ class DeleteFileTool(Tool):
         "file_path": {"type": "string", "description": "Relative path of the file to delete (e.g., 'documents/file.txt')"}
     }
     output_type = "string"
+    category = ToolCategory.FILE.value
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 

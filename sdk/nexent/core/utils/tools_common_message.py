@@ -27,6 +27,14 @@ TOOL_SIGN_MAPPING = {
 REVERSE_TOOL_SIGN_MAPPING = {v: k for k, v in TOOL_SIGN_MAPPING.items()}
 
 
+class ToolCategory(Enum):
+    """Enumeration for MCP tool categories"""
+    SEARCH = "search"
+    FILE = "file"
+    EMAIL = "email"
+    TERMINAL = "terminal"
+
+
 @dataclass
 class SearchResultTextMessage:
     """

@@ -322,6 +322,9 @@ def test_jina_get_multimodal_embeddings_parses_embeddings(jina_embedding_instanc
 
         assert result == [[0.11, 0.22], [0.33, 0.44]]
         mock_post.assert_called_once()
+        # Assert truncate flag is included in request payload
+        call_kwargs = mock_post.call_args.kwargs
+        assert call_kwargs["json"].get("truncate") is True
 
 
 def test_jina_get_multimodal_embeddings_with_metadata(jina_embedding_instance):
@@ -338,11 +341,15 @@ def test_jina_get_multimodal_embeddings_with_metadata(jina_embedding_instance):
     mock_resp.raise_for_status = Mock()
     mock_resp.json = Mock(return_value=fake_response)
 
-    with patch("embedding_model_under_test.requests.post", return_value=mock_resp):
+    with patch("embedding_model_under_test.requests.post", return_value=mock_resp) as mock_post:
         inputs = [{"text": "t"}]
         result = jina_embedding_instance.get_multimodal_embeddings(
             inputs, with_metadata=True, timeout=4
         )
+        # Validate response and truncate flag usage
+        assert result == fake_response
+        call_kwargs = mock_post.call_args.kwargs
+        assert call_kwargs["json"].get("truncate") is True
 
 
 def test_jina_get_multimodal_embeddings_timeout_retry_succeeds(jina_embedding_instance):
@@ -354,11 +361,14 @@ def test_jina_get_multimodal_embeddings_timeout_retry_succeeds(jina_embedding_in
         ]
     }
 
+    captured_jsons = []
+
     def side_effect(url, headers=None, json=None, timeout=None):
         calls = side_effect.calls
         side_effect.calls += 1
         if calls == 0:
             raise requests.exceptions.Timeout()
+        captured_jsons.append(json)
         mock_resp = Mock()
         mock_resp.raise_for_status = Mock()
         mock_resp.json = Mock(return_value=fake_response)
@@ -378,6 +388,8 @@ def test_jina_get_multimodal_embeddings_timeout_retry_succeeds(jina_embedding_in
         timeouts = [call.kwargs.get("timeout")
                     for call in mock_post.call_args_list]
         assert timeouts == [2, 4]
+        # Ensure truncate flag present in at least one request body
+        assert any(j.get("truncate") is True for j in captured_jsons)
 
 
 def test_jina_get_multimodal_embeddings_timeout_exhausts_raises(

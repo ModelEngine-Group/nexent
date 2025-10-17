@@ -12,11 +12,17 @@ from typing import Any, Dict, Optional
 import aiohttp
 import ray
 from celery import Task, chain, states
+from celery.exceptions import Retry
 
 from consts.const import ELASTICSEARCH_SERVICE
 from utils.file_management_utils import get_file_size
 from .app import app
 from .ray_actors import DataProcessorRayActor
+from consts.const import (
+    REDIS_BACKEND_URL,
+    FORWARD_REDIS_RETRY_DELAY_S,
+    FORWARD_REDIS_RETRY_MAX,
+)
 
 
 logger = logging.getLogger("data_process.tasks")
@@ -195,6 +201,9 @@ def process(
                 f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
 
             # The unified actor call, mapping 'file' source_type to 'local' destination
+            # Submit Ray work and do not block here
+            logger.debug(
+                f"[{self.request.id}] PROCESS TASK: Submitting Ray processing for source='{source}', strategy='{chunking_strategy}', destination='{source_type}'")
             chunks_ref = actor.process_file.remote(
                 source,
                 chunking_strategy,
@@ -202,8 +211,11 @@ def process(
                 task_id=task_id,
                 **params
             )
-
-            chunks = ray.get(chunks_ref)
+            # Persist chunks into Redis via Ray to decouple Celery
+            redis_key = f"dp:{task_id}:chunks"
+            actor.store_chunks_in_redis.remote(redis_key, chunks_ref)
+            logger.debug(
+                f"[{self.request.id}] PROCESS TASK: Scheduled store_chunks_in_redis for key '{redis_key}'")
 
             end_time = time.time()
             elapsed_time = end_time - start_time
@@ -217,6 +229,8 @@ def process(
                 f"[{self.request.id}] PROCESS TASK: Processing from URL: {source}")
 
             # For URL source, core.py expects a non-local destination to trigger URL fetching
+            logger.debug(
+                f"[{self.request.id}] PROCESS TASK: Submitting Ray processing for URL='{source}', strategy='{chunking_strategy}', destination='{source_type}'")
             chunks_ref = actor.process_file.remote(
                 source,
                 chunking_strategy,
@@ -224,7 +238,11 @@ def process(
                 task_id=task_id,
                 **params
             )
-            chunks = ray.get(chunks_ref)
+            # Persist chunks into Redis via Ray to decouple Celery
+            redis_key = f"dp:{task_id}:chunks"
+            actor.store_chunks_in_redis.remote(redis_key, chunks_ref)
+            logger.debug(
+                f"[{self.request.id}] PROCESS TASK: Scheduled store_chunks_in_redis for key '{redis_key}'")
             end_time = time.time()
             elapsed_time = end_time - start_time
             logger.info(
@@ -235,11 +253,11 @@ def process(
             raise NotImplementedError(
                 f"Source type '{source_type}' not yet supported")
 
-        # Update task state to SUCCESS with metadata
+        # Update task state to SUCCESS with metadata (without materializing chunks here)
         self.update_state(
             state=states.SUCCESS,
             meta={
-                'chunks_count': len(chunks),
+                'chunks_count': None,
                 'processing_time': elapsed_time,
                 'source': source,
                 'index_name': index_name,
@@ -252,11 +270,12 @@ def process(
         )
 
         logger.info(
-            f"[{self.request.id}] PROCESS TASK: Successfully processed {len(chunks)} chunks in {elapsed_time:.2f}s")
+            f"[{self.request.id}] PROCESS TASK: Submitted for Ray processing; result will be fetched by forward")
 
-        # Prepare data for the next task in the chain
+        # Prepare data for the next task in the chain; pass redis_key
         returned_data = {
-            'chunks': chunks,
+            'redis_key': f"dp:{task_id}:chunks",
+            'chunks': None,
             'source': source,
             'index_name': index_name,
             'original_filename': original_filename,
@@ -329,6 +348,60 @@ def forward(
 
     try:
         chunks = processed_data.get('chunks')
+        # If chunks are not in payload, try loading from Redis via the redis_key
+        if (not chunks) and processed_data.get('redis_key'):
+            redis_key = processed_data.get('redis_key')
+            if not REDIS_BACKEND_URL:
+                raise Exception(json.dumps({
+                    "message": "REDIS_BACKEND_URL not configured to retrieve chunks",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": filename
+                }, ensure_ascii=False))
+            try:
+                import redis
+                client = redis.Redis.from_url(
+                    REDIS_BACKEND_URL, decode_responses=True)
+                cached = client.get(redis_key)
+                if cached:
+                    try:
+                        logger.debug(
+                            f"[{self.request.id}] FORWARD TASK: Retrieved Redis key '{redis_key}', payload_length={len(cached)}")
+                        chunks = json.loads(cached)
+                    except json.JSONDecodeError as jde:
+                        # Log raw prefix to help diagnose incorrect writes
+                        raw_preview = cached[:120] if isinstance(
+                            cached, str) else str(type(cached))
+                        logger.error(
+                            f"[{self.request.id}] FORWARD TASK: JSON decode error for key '{redis_key}': {str(jde)}; raw_prefix={raw_preview!r}")
+                        raise
+                else:
+                    # No busy-wait: release the worker slot and retry later
+                    retry_num = getattr(self.request, 'retries', 0)
+                    logger.info(
+                        f"[{self.request.id}] FORWARD TASK: Chunks not yet available for key {redis_key}. Retry {retry_num + 1}/{FORWARD_REDIS_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
+                    raise self.retry(
+                        countdown=FORWARD_REDIS_RETRY_DELAY_S,
+                        max_retries=FORWARD_REDIS_RETRY_MAX,
+                        exc=Exception(json.dumps({
+                            "message": "Chunks not ready in Redis; will retry",
+                            "index_name": original_index_name,
+                            "task_name": "forward",
+                            "source": original_source,
+                            "original_filename": filename
+                        }, ensure_ascii=False))
+                    )
+            except Retry:
+                raise
+            except Exception as exc:
+                raise Exception(json.dumps({
+                    "message": f"Failed to retrieve chunks from Redis: {str(exc)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": filename
+                }, ensure_ascii=False))
         if processed_data.get('source'):
             original_source = processed_data.get('source')
         if processed_data.get('index_name'):
@@ -357,7 +430,7 @@ def forward(
                 "index_name": original_index_name,
                 "task_name": "forward",
                 "source": original_source,
-                "original_filename": filename
+                "original_filename": original_filename
             }, ensure_ascii=False))
         if len(chunks) == 0:
             logger.warning(

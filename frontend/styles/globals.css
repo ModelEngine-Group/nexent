@@ -88,11 +88,40 @@
   padding-right: 0 !important;
 }
 
-.ant-collapse-item-active>.ant-collapse-header {
+.ant-collapse-item-active > .ant-collapse-header {
   @apply shadow-md;
 }
-.ant-collapse-item-disabled>.ant-collapse-header {
+.ant-collapse-item-disabled > .ant-collapse-header {
   @apply cursor-default;
+}
+
+/* Remove border radius from first and last collapse panels */
+.tool-categories-collapse .ant-collapse-item:first-child .ant-collapse-header {
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
+
+.tool-categories-collapse .ant-collapse-item:last-child .ant-collapse-header {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+.tool-categories-collapse .ant-collapse-item:first-child .ant-collapse-content {
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
+
+.tool-categories-collapse .ant-collapse-item:last-child .ant-collapse-content {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+/* Ensure collapse panel headers have proper height */
+.tool-categories-collapse .ant-collapse-header {
+  min-height: 36px !important;
+  padding: 8px 16px !important;
+  display: flex !important;
+  align-items: center !important;
 }
 
 /* Styles for the List component inside MemoryManageModal */

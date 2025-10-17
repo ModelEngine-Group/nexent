@@ -6,7 +6,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import ToolSign
+from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("create_file_tool")
 
@@ -27,6 +27,7 @@ class CreateFileTool(Tool):
         "encoding": {"type": "string", "description": "File encoding, defaults to utf-8", "default": "utf-8", "nullable": True}
     }
     output_type = "string"
+    category = ToolCategory.FILE.value
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 

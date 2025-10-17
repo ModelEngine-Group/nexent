@@ -1,9 +1,10 @@
 import logging
+import json
 from typing import Any, Dict, List, Optional
 
 import ray
 
-from consts.const import RAY_ACTOR_NUM_CPUS
+from consts.const import RAY_ACTOR_NUM_CPUS, REDIS_BACKEND_URL
 from database.attachment_db import get_file_stream
 from nexent.data_process import DataProcessCore
 
@@ -47,7 +48,7 @@ class DataProcessorRayActor:
             List[Dict[str, Any]]: A list of dictionaries representing the processed chunks.
         """
         logger.info(
-            f"[RayActor] Processing file: {source}, destination: {destination}")
+            f"[RayActor] Processing start: source='{source}', destination='{destination}', strategy='{chunking_strategy}', task_id='{task_id}'")
 
         if task_id:
             params['task_id'] = task_id
@@ -69,11 +70,63 @@ class DataProcessorRayActor:
             **params
         )
 
-        if not chunks:
+        if chunks is None:
             logger.warning(
-                f"[RayActor] file_process returned no chunks for {source}")
+                f"[RayActor] file_process returned None for source='{source}'")
+            return []
+        if not isinstance(chunks, list):
+            logger.error(
+                f"[RayActor] file_process returned non-list type {type(chunks)} for source='{source}'")
+            return []
+        if len(chunks) == 0:
+            logger.warning(
+                f"[RayActor] file_process returned empty list for source='{source}'")
             return []
 
-        logger.debug(
-            f"[RayActor] file_process returned {len(chunks)} chunks, returning as is.")
+        logger.info(
+            f"[RayActor] Processing done: produced {len(chunks)} chunks for source='{source}'")
         return chunks
+
+    def store_chunks_in_redis(self, redis_key: str, chunks: List[Dict[str, Any]]) -> bool:
+        """
+        Store processed chunks into Redis under a given key.
+
+        This is used to decouple Celery task execution from Ray processing, allowing
+        Celery to submit work and return immediately while Ray persists results for
+        a subsequent step to retrieve.
+        """
+        if not REDIS_BACKEND_URL:
+            logger.error(
+                "REDIS_BACKEND_URL is not configured; cannot store chunks.")
+            return False
+        try:
+            import redis
+            client = redis.Redis.from_url(
+                REDIS_BACKEND_URL, decode_responses=True)
+            # Use a compact JSON for storage
+            if chunks is None:
+                logger.error(
+                    f"[RayActor] store_chunks_in_redis received None chunks for key '{redis_key}'")
+                serialized = json.dumps([])
+            else:
+                try:
+                    serialized = json.dumps(chunks, ensure_ascii=False)
+                except Exception as ser_exc:
+                    logger.error(
+                        f"[RayActor] JSON serialization failed for key '{redis_key}': {ser_exc}")
+                    # Fallback to empty list to avoid poisoning Redis with invalid data
+                    serialized = json.dumps([])
+            client.set(redis_key, serialized)
+            # Optionally set an expiration to avoid leaks (e.g., 2 hours)
+            client.expire(redis_key, 2 * 60 * 60)
+            try:
+                count_logged = len(chunks) if isinstance(chunks, list) else 0
+            except Exception:
+                count_logged = 0
+            logger.info(
+                f"[RayActor] Stored {count_logged} chunks in Redis at key '{redis_key}', value_len={len(serialized)}")
+            return True
+        except Exception as exc:
+            logger.error(
+                f"Failed to store chunks in Redis at key {redis_key}: {exc}")
+            return False

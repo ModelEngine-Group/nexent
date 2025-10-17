@@ -76,7 +76,7 @@ Gitflow 是一种结构化的 Git 分支管理模型，为软件开发提供了�
 
 ![步骤1](./assets/contribute_step_1.png)
 
-**说明：** 在 GitHub 网页上点击开源纪念墙文件右上角的✏️编辑按钮
+**说明：** 在 GitHub 网页上点击 [开源纪念墙文件](https://github.com/ModelEngine-Group/nexent/blob/develop/doc/docs/zh/opensource-memorial-wall.md) 右上角的✏️编辑按钮
 
 ---
 
@@ -90,9 +90,11 @@ Gitflow 是一种结构化的 Git 分支管理模型，为软件开发提供了�
 
 ### 步骤 3：提交更改
 
-![步骤3](./assets/contribute_step_3.png)
+![步骤3-1](./assets/contribute_step_3-1.png)
 
-**说明：** 点击 Propose changes 等待合入就可以啦！
+![步骤3-2](./assets/contribute_step_3-2.png)
+
+**说明：** 点击 Propose changes 后再点击 Create pull request 创建PR，然后等待合入就可以啦！
 
 ---
 

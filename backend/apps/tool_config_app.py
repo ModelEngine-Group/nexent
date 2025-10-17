@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import MCPConnectionError, TimeoutException, NotFoundException
+from consts.exceptions import MCPConnectionError, NotFoundException
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 from services.tool_configuration_service import (
     search_tool_info_impl,
@@ -109,8 +109,8 @@ async def validate_tool(
 ):
     """Validate specific tool based on source type"""
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        result = await validate_tool_impl(request, tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = await validate_tool_impl(request, tenant_id, user_id)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -132,5 +132,5 @@ async def validate_tool(
         logger.error(f"Failed to validate tool: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to validate tool: {str(e)}"
+            detail=str(e)
         )

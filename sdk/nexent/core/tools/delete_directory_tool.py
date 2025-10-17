@@ -7,7 +7,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import ToolSign
+from ..utils.tools_common_message import ToolSign, ToolCategory
 
 logger = logging.getLogger("delete_directory_tool")
 
@@ -25,6 +25,7 @@ class DeleteDirectoryTool(Tool):
         "directory_path": {"type": "string", "description": "Relative path of the directory to delete (e.g., 'documents/subfolder')"}
     }
     output_type = "string"
+    category = ToolCategory.FILE.value
 
     tool_sign = ToolSign.FILE_OPERATION.value  # File operation tool identifier
 

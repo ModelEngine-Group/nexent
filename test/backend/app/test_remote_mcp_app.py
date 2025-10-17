@@ -9,8 +9,9 @@ sys.modules['boto3'] = MagicMock()
 # Import exception classes
 from consts.exceptions import MCPConnectionError, MCPNameIllegal
 
-# Import the modules we need with MinioClient mocked  
-with patch('database.client.MinioClient', MagicMock()):
+# Import the modules we need with MinioClient and Elasticsearch mocked  
+with patch('database.client.MinioClient', MagicMock()), \
+     patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     import pytest
     from fastapi.testclient import TestClient
     from http import HTTPStatus

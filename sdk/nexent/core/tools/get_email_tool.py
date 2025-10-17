@@ -9,6 +9,8 @@ from typing import List
 from smolagents.tools import Tool
 from pydantic import Field
 
+from ..utils.tools_common_message import ToolCategory
+
 logger = logging.getLogger("get_email_tool")
 
 class GetEmailTool(Tool):
@@ -24,6 +26,7 @@ class GetEmailTool(Tool):
         "max_emails": {"type": "integer", "description": "Maximum number of emails to retrieve, default is 10",
                        "default": 10, "nullable": True}}
     output_type = "string"
+    category = ToolCategory.EMAIL.value
 
     def __init__(self, imap_server: str=Field(description="IMAP Server Address"),
                  imap_port: int=Field(description="IMAP Server Port"), 

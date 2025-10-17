@@ -1528,9 +1528,11 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(service2, mock_service)
         self.assertEqual(service1, service2)
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_success(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_success(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing successful batch task creation.
 
@@ -1541,12 +1543,26 @@ class TestDataProcessService(unittest.TestCase):
         3. Task IDs are collected and returned
         4. All valid source configurations are processed
         """
-        # Setup mock task results
-        mock_task1 = MagicMock()
-        mock_task1.id = "task_id_1"
-        mock_task2 = MagicMock()
-        mock_task2.id = "task_id_2"
-        mock_delay.side_effect = [mock_task1, mock_task2]
+        # Setup Celery signature mocks
+        process_sig_1 = MagicMock()
+        process_sig_1.set.return_value = process_sig_1
+        process_sig_2 = MagicMock()
+        process_sig_2.set.return_value = process_sig_2
+        forward_sig_1 = MagicMock()
+        forward_sig_1.set.return_value = forward_sig_1
+        forward_sig_2 = MagicMock()
+        forward_sig_2.set.return_value = forward_sig_2
+
+        # process.s returns different sig objects per call
+        mock_process.s.side_effect = [process_sig_1, process_sig_2]
+        mock_forward.s.side_effect = [forward_sig_1, forward_sig_2]
+
+        # chain(...).apply_async() returns result with id
+        chain_inst_1 = MagicMock()
+        chain_inst_1.apply_async.return_value = MagicMock(id="task_id_1")
+        chain_inst_2 = MagicMock()
+        chain_inst_2.apply_async.return_value = MagicMock(id="task_id_2")
+        mock_chain.side_effect = [chain_inst_1, chain_inst_2]
 
         # Create test request
         from consts.model import BatchTaskRequest
@@ -1577,32 +1593,59 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(result[0], "task_id_1")
         self.assertEqual(result[1], "task_id_2")
 
-        # Verify process_and_forward.delay was called correctly
-        self.assertEqual(mock_delay.call_count, 2)
+        # Verify chain was invoked for each source
+        self.assertEqual(mock_chain.call_count, 2)
 
-        # Check first call
-        first_call = mock_delay.call_args_list[0]
-        self.assertEqual(first_call[1]['source'],
-                         'http://example.com/doc1.pdf')
-        self.assertEqual(first_call[1]['source_type'], 'url')
-        self.assertEqual(first_call[1]['chunking_strategy'], 'semantic')
-        self.assertEqual(first_call[1]['index_name'], 'test_index_1')
-        self.assertEqual(first_call[1]['original_filename'], 'doc1.pdf')
-        self.assertEqual(first_call[1]['authorization'], 'Bearer test_token')
+        # Verify process.s and forward.s were called with correct params
+        expected_process_calls = [
+            {
+                'source': 'http://example.com/doc1.pdf',
+                'source_type': 'url',
+                'chunking_strategy': 'semantic',
+                'index_name': 'test_index_1',
+                'original_filename': 'doc1.pdf'
+            },
+            {
+                'source': 'http://example.com/doc2.pdf',
+                'source_type': 'url',
+                'chunking_strategy': 'fixed',
+                'index_name': 'test_index_2',
+                'original_filename': 'doc2.pdf'
+            }
+        ]
+        actual_process_calls = [kwargs for args,
+                                kwargs in mock_process.s.call_args_list]
+        self.assertEqual(actual_process_calls, expected_process_calls)
+        process_sig_1.set.assert_called_once_with(queue='process_q')
+        process_sig_2.set.assert_called_once_with(queue='process_q')
 
-        # Check second call
-        second_call = mock_delay.call_args_list[1]
-        self.assertEqual(second_call[1]['source'],
-                         'http://example.com/doc2.pdf')
-        self.assertEqual(second_call[1]['source_type'], 'url')
-        self.assertEqual(second_call[1]['chunking_strategy'], 'fixed')
-        self.assertEqual(second_call[1]['index_name'], 'test_index_2')
-        self.assertEqual(second_call[1]['original_filename'], 'doc2.pdf')
-        self.assertEqual(second_call[1]['authorization'], 'Bearer test_token')
+        expected_forward_calls = [
+            {
+                'index_name': 'test_index_1',
+                'source': 'http://example.com/doc1.pdf',
+                'source_type': 'url',
+                'original_filename': 'doc1.pdf',
+                'authorization': 'Bearer test_token'
+            },
+            {
+                'index_name': 'test_index_2',
+                'source': 'http://example.com/doc2.pdf',
+                'source_type': 'url',
+                'original_filename': 'doc2.pdf',
+                'authorization': 'Bearer test_token'
+            }
+        ]
+        actual_forward_calls = [kwargs for args,
+                                kwargs in mock_forward.s.call_args_list]
+        self.assertEqual(actual_forward_calls, expected_forward_calls)
+        forward_sig_1.set.assert_called_once_with(queue='forward_q')
+        forward_sig_2.set.assert_called_once_with(queue='forward_q')
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_missing_source(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_missing_source(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing batch task creation with missing source field.
 
@@ -1613,10 +1656,16 @@ class TestDataProcessService(unittest.TestCase):
         3. Only valid source configurations are processed
         4. The method continues processing other sources
         """
-        # Setup mock task result
-        mock_task = MagicMock()
-        mock_task.id = "task_id_1"
-        mock_delay.return_value = mock_task
+        # Setup signature mocks
+        process_sig = MagicMock()
+        process_sig.set.return_value = process_sig
+        forward_sig = MagicMock()
+        forward_sig.set.return_value = forward_sig
+        mock_process.s.return_value = process_sig
+        mock_forward.s.return_value = forward_sig
+        chain_inst = MagicMock()
+        chain_inst.apply_async.return_value = MagicMock(id="task_id_1")
+        mock_chain.return_value = chain_inst
 
         # Create test request with missing source
         from consts.model import BatchTaskRequest
@@ -1646,15 +1695,20 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], "task_id_1")
 
-        # Verify process_and_forward.delay was called only once (for the valid source)
-        mock_delay.assert_called_once()
-        call_args = mock_delay.call_args
-        self.assertEqual(call_args[1]['source'], 'http://example.com/doc2.pdf')
-        self.assertEqual(call_args[1]['index_name'], 'test_index_2')
+        # Verify chain called once with built signatures
+        mock_chain.assert_called_once()
+        mock_process.s.assert_called_once()
+        mock_forward.s.assert_called_once()
+        self.assertEqual(
+            mock_process.s.call_args[1]['source'], 'http://example.com/doc2.pdf')
+        self.assertEqual(
+            mock_process.s.call_args[1]['index_name'], 'test_index_2')
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_missing_index_name(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_missing_index_name(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing batch task creation with missing index_name field.
 
@@ -1665,10 +1719,16 @@ class TestDataProcessService(unittest.TestCase):
         3. Only valid source configurations are processed
         4. The method continues processing other sources
         """
-        # Setup mock task result
-        mock_task = MagicMock()
-        mock_task.id = "task_id_1"
-        mock_delay.return_value = mock_task
+        # Setup signature mocks
+        process_sig = MagicMock()
+        process_sig.set.return_value = process_sig
+        forward_sig = MagicMock()
+        forward_sig.set.return_value = forward_sig
+        mock_process.s.return_value = process_sig
+        mock_forward.s.return_value = forward_sig
+        chain_inst = MagicMock()
+        chain_inst.apply_async.return_value = MagicMock(id="task_id_1")
+        mock_chain.return_value = chain_inst
 
         # Create test request with missing index_name
         from consts.model import BatchTaskRequest
@@ -1698,15 +1758,20 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], "task_id_1")
 
-        # Verify process_and_forward.delay was called only once (for the valid source)
-        mock_delay.assert_called_once()
-        call_args = mock_delay.call_args
-        self.assertEqual(call_args[1]['source'], 'http://example.com/doc2.pdf')
-        self.assertEqual(call_args[1]['index_name'], 'test_index_2')
+        # Verify chain called once with built signatures
+        mock_chain.assert_called_once()
+        mock_process.s.assert_called_once()
+        mock_forward.s.assert_called_once()
+        self.assertEqual(
+            mock_process.s.call_args[1]['source'], 'http://example.com/doc2.pdf')
+        self.assertEqual(
+            mock_process.s.call_args[1]['index_name'], 'test_index_2')
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_missing_both_required_fields(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_missing_both_required_fields(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing batch task creation with both required fields missing.
 
@@ -1742,12 +1807,16 @@ class TestDataProcessService(unittest.TestCase):
         # Verify result - no tasks should be created
         self.assertEqual(len(result), 0)
 
-        # Verify process_and_forward.delay was never called
-        mock_delay.assert_not_called()
+        # Verify no chain created
+        mock_chain.assert_not_called()
+        mock_process.s.assert_not_called()
+        mock_forward.s.assert_not_called()
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_empty_sources(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_empty_sources(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing batch task creation with empty sources list.
 
@@ -1767,12 +1836,16 @@ class TestDataProcessService(unittest.TestCase):
         # Verify result - no tasks should be created
         self.assertEqual(len(result), 0)
 
-        # Verify process_and_forward.delay was never called
-        mock_delay.assert_not_called()
+        # Verify no chain created
+        mock_chain.assert_not_called()
+        mock_process.s.assert_not_called()
+        mock_forward.s.assert_not_called()
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_optional_fields(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_optional_fields(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing batch task creation with optional fields.
 
@@ -1782,10 +1855,16 @@ class TestDataProcessService(unittest.TestCase):
         2. Optional fields are passed as None when not provided
         3. The method processes all valid sources regardless of optional field presence
         """
-        # Setup mock task result
-        mock_task = MagicMock()
-        mock_task.id = "task_id_1"
-        mock_delay.return_value = mock_task
+        # Setup signature mocks
+        process_sig = MagicMock()
+        process_sig.set.return_value = process_sig
+        forward_sig = MagicMock()
+        forward_sig.set.return_value = forward_sig
+        mock_process.s.return_value = process_sig
+        mock_forward.s.return_value = forward_sig
+        chain_inst = MagicMock()
+        chain_inst.apply_async.return_value = MagicMock(id="task_id_1")
+        mock_chain.return_value = chain_inst
 
         # Create test request with minimal required fields only
         from consts.model import BatchTaskRequest
@@ -1806,19 +1885,24 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], "task_id_1")
 
-        # Verify process_and_forward.delay was called with None for optional fields
-        mock_delay.assert_called_once()
-        call_args = mock_delay.call_args
-        self.assertEqual(call_args[1]['source'], 'http://example.com/doc1.pdf')
-        self.assertEqual(call_args[1]['index_name'], 'test_index_1')
-        self.assertIsNone(call_args[1]['source_type'])
-        self.assertIsNone(call_args[1]['chunking_strategy'])
-        self.assertIsNone(call_args[1]['original_filename'])
-        self.assertEqual(call_args[1]['authorization'], 'Bearer test_token')
+        # Verify signatures built with None optional fields for process, and authorization on forward
+        mock_process.s.assert_called_once()
+        proc_kwargs = mock_process.s.call_args[1]
+        self.assertEqual(proc_kwargs['source'], 'http://example.com/doc1.pdf')
+        self.assertEqual(proc_kwargs['index_name'], 'test_index_1')
+        self.assertIsNone(proc_kwargs['source_type'])
+        self.assertIsNone(proc_kwargs['chunking_strategy'])
+        self.assertIsNone(proc_kwargs['original_filename'])
 
-    @patch('backend.services.data_process_service.process_and_forward.delay')
+        mock_forward.s.assert_called_once()
+        fwd_kwargs = mock_forward.s.call_args[1]
+        self.assertEqual(fwd_kwargs['authorization'], 'Bearer test_token')
+
+    @patch('backend.services.data_process_service.chain')
+    @patch('backend.services.data_process_service.forward')
+    @patch('backend.services.data_process_service.process')
     @pytest.mark.asyncio
-    async def async_test_create_batch_tasks_impl_no_authorization(self, mock_delay):
+    async def async_test_create_batch_tasks_impl_no_authorization(self, mock_process, mock_forward, mock_chain):
         """
         Async implementation for testing batch task creation without authorization.
 
@@ -1828,10 +1912,16 @@ class TestDataProcessService(unittest.TestCase):
         2. None is passed as authorization parameter
         3. The method processes all valid sources
         """
-        # Setup mock task result
-        mock_task = MagicMock()
-        mock_task.id = "task_id_1"
-        mock_delay.return_value = mock_task
+        # Setup signature mocks
+        process_sig = MagicMock()
+        process_sig.set.return_value = process_sig
+        forward_sig = MagicMock()
+        forward_sig.set.return_value = forward_sig
+        mock_process.s.return_value = process_sig
+        mock_forward.s.return_value = forward_sig
+        chain_inst = MagicMock()
+        chain_inst.apply_async.return_value = MagicMock(id="task_id_1")
+        mock_chain.return_value = chain_inst
 
         # Create test request
         from consts.model import BatchTaskRequest
@@ -1854,12 +1944,12 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], "task_id_1")
 
-        # Verify process_and_forward.delay was called with None authorization
-        mock_delay.assert_called_once()
-        call_args = mock_delay.call_args
-        self.assertEqual(call_args[1]['source'], 'http://example.com/doc1.pdf')
-        self.assertEqual(call_args[1]['index_name'], 'test_index_1')
-        self.assertIsNone(call_args[1]['authorization'])
+        # Verify forward.s called with None authorization
+        mock_forward.s.assert_called_once()
+        fwd_kwargs = mock_forward.s.call_args[1]
+        self.assertEqual(fwd_kwargs['source'], 'http://example.com/doc1.pdf')
+        self.assertEqual(fwd_kwargs['index_name'], 'test_index_1')
+        self.assertIsNone(fwd_kwargs['authorization'])
 
     def test_create_batch_tasks_impl(self):
         """

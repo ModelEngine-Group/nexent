@@ -59,3 +59,7 @@ international student here, docs are really well written. multimodal support is 
 ::: info lurker123 - 2025-08-05
 just dropping by to say nice work 👍 starred the repo
 :::
+
+::: info IPM - 2025-10-15
+Really impressed by Nexent — smooth interface and powerful agent framework. Great work!
+:::

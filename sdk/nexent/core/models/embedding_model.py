@@ -150,7 +150,7 @@ class JinaEmbedding(MultimodalEmbedding):
 
     def _prepare_multimodal_input(self, inputs: List[Dict[str, str]]) -> Dict[str, Any]:
         """Prepare the input data for the API request."""
-        return {"model": self.model, "input": inputs}
+        return {"model": self.model, "input": inputs, "truncate": True}
 
     def _make_request(self, data: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
         """

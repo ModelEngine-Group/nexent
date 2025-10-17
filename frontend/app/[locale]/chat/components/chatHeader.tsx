@@ -185,7 +185,7 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
               <Badge dot={embeddingConfigured && hasNewMemory} offset={[-4, 4]}>
                 <ButtonUI
                   variant="ghost"
-                  className={`h-6 w-5 mr-4 rounded-full ${
+                  className={`mr-4 rounded-full px-2 py-1 h-7 flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800 ${
                     !embeddingConfigured ? "opacity-50" : ""
                   }`}
                   onClick={() => {
@@ -200,6 +200,9 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
                     className="size-5"
                     stroke="url(#brainCogGradient)"
                   />
+                  <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                    {t("memoryManageModal.title")}
+                  </span>
                 </ButtonUI>
               </Badge>
             </div>

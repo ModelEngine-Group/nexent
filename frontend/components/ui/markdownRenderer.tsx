@@ -336,12 +336,14 @@ const convertLatexDelimiters = (content: string): string => {
   if (!content.includes('\\(') && !content.includes('\\[')) {
     return content;
   }
-  
-  return content
-    // Convert \( ... \) to $ ... $ (inline math)
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$1$')
-    // Convert \[ ... \] to $$ ... $$ (display math)
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$1$$\n');
+
+  return (
+    content
+      // Convert \( ... \) to $ ... $ (inline math)
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_match, inner) => `$${inner}$`)
+      // Convert \[ ... \] to $$ ... $$ (display math)
+      .replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => `$$${inner}$$\n`)
+  );
 };
 
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({

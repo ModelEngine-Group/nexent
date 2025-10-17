@@ -29,6 +29,7 @@ import {
   extractParameterNames,
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
+import { useModalPosition } from "@/hooks/useModalPosition";
 
 export default function ToolConfigModal({
   isOpen,
@@ -51,6 +52,8 @@ export default function ToolConfigModal({
   const [parsedInputs, setParsedInputs] = useState<Record<string, any>>({});
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [dynamicInputParams, setDynamicInputParams] = useState<string[]>([]);
+  const { windowWidth, mainModalTop, mainModalRight } =
+    useModalPosition(isOpen);
 
   // load tool config
   useEffect(() => {
@@ -572,8 +575,11 @@ export default function ToolConfigModal({
             className="tool-test-panel"
             style={{
               position: "fixed",
-              top: "10vh",
-              right: "5vw",
+              top: mainModalTop > 0 ? `${mainModalTop}px` : "10vh", // Align with main modal top or fallback to 10vh
+              left:
+                mainModalRight > 0
+                  ? `${mainModalRight + windowWidth * 0.05}px`
+                  : "calc(50% + 300px + 5vw)", // Position to the right of main modal with 5% viewport width gap
               width: "500px",
               height: "auto",
               maxHeight: "80vh",
