@@ -23,6 +23,7 @@ import { Document } from "@/types/knowledgeBase";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize, sortByStatusAndDate } from "@/lib/utils";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 import DocumentStatus from "./DocumentStatus";
 import UploadArea from "../upload/UploadArea";
@@ -85,6 +86,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const { message } = App.useApp();
     const uploadAreaRef = useRef<any>(null);
     const { state: docState } = useDocumentContext();
+    const { modelConfig } = useConfig();
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -148,9 +150,57 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           try {
             const models = await modelService.getLLMModels();
             setAvailableModels(models);
-            // Set first available model as default
-            if (models.length > 0) {
-              setSelectedModel(models[0].id);
+
+            // Determine initial selection order:
+            // 1) Knowledge base's own configured model (server-side config)
+            // 2) Globally configured default LLM from quick setup (create mode or no KB model)
+            // 3) First available model
+
+            let initialModelId: number | null = null;
+
+            // 1) Knowledge base model (if provided)
+            if (knowledgeBaseModel) {
+              const matchedByName = models.find((m) => m.name === knowledgeBaseModel);
+              const matchedByDisplay = matchedByName
+                ? null
+                : models.find((m) => m.displayName === knowledgeBaseModel);
+              if (matchedByName) {
+                initialModelId = matchedByName.id;
+              } else if (matchedByDisplay) {
+                initialModelId = matchedByDisplay.id;
+              }
+            }
+
+            // 2) Fallback to globally configured default LLM
+            if (initialModelId === null) {
+              const configuredDisplayName = modelConfig?.llm?.displayName || "";
+              const configuredModelName = modelConfig?.llm?.modelName || "";
+
+              const matchedByDisplay = models.find(
+                (m) => m.displayName === configuredDisplayName && configuredDisplayName !== ""
+              );
+              const matchedByName = matchedByDisplay
+                ? null
+                : models.find(
+                    (m) => m.name === configuredModelName && configuredModelName !== ""
+                  );
+
+              if (matchedByDisplay) {
+                initialModelId = matchedByDisplay.id;
+              } else if (matchedByName) {
+                initialModelId = matchedByName.id;
+              }
+            }
+
+            // 3) Final fallback to first available model
+            if (initialModelId === null) {
+              if (models.length > 0) {
+                initialModelId = models[0].id;
+              }
+            }
+
+            if (initialModelId !== null) {
+              setSelectedModel(initialModelId);
             } else {
               message.warning(t("businessLogic.config.error.noAvailableModels"));
             }
