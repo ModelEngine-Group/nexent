@@ -101,6 +101,15 @@
   color: var(--color-nord0);
 }
 
+/* Horizontal Rule Styles */
+.markdown-hr {
+  border: none;
+  height: 2px;
+  background-color: #e5e7eb;
+  margin: 1.5rem 0;
+  border-radius: 1px;
+}
+
 /* List Item Styles */
 .markdown-li {
   margin-bottom: 0.25rem;

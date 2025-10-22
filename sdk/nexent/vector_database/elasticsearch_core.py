@@ -70,10 +70,12 @@ class ElasticSearchCore:
         self._settings_lock = threading.Lock()
         self._operation_counter = 0
 
-        # Embedding API limits
-        self.max_texts_per_batch = 2048
+        # Embedding API limits - Conservative settings for stability
+        # Different APIs have different limits, so we use a conservative approach
+        self.max_texts_per_batch = 50   # Very conservative for stability
         self.max_tokens_per_text = 8192
         self.max_total_tokens = 100000
+        self.max_retries = 3  # Number of retries for failed embedding batches
     
     # ---- INDEX MANAGEMENT ----
     
@@ -422,21 +424,35 @@ class ElasticSearchCore:
                 # Store documents and their embeddings for this Elasticsearch batch
                 doc_embedding_pairs = []
 
-                # Sub-batch for embedding API
+                # Sub-batch for embedding API with retry mechanism
                 embedding_batch_size = self.max_texts_per_batch
                 for j in range(0, len(es_batch), embedding_batch_size):
                     embedding_sub_batch = es_batch[j:j + embedding_batch_size]
                     
-                    try:
-                        inputs = [doc[content_field] for doc in embedding_sub_batch]
-                        embeddings = embedding_model.get_embeddings(inputs)
-                        
-                        for doc, embedding in zip(embedding_sub_batch, embeddings):
-                            doc_embedding_pairs.append((doc, embedding))
-
-                    except Exception as e:
-                        logger.error(f"Embedding API error: {e}, ES batch num: {es_batch_num}, sub-batch start: {j}, size: {len(embedding_sub_batch)}")
-                        continue
+                    # Retry mechanism for embedding API calls
+                    success = False
+                    for retry_attempt in range(self.max_retries):
+                        try:
+                            inputs = [doc[content_field] for doc in embedding_sub_batch]
+                            embeddings = embedding_model.get_embeddings(inputs)
+                            
+                            for doc, embedding in zip(embedding_sub_batch, embeddings):
+                                doc_embedding_pairs.append((doc, embedding))
+                            success = True
+                            break
+                            
+                        except Exception as e:
+                            if retry_attempt < self.max_retries - 1:
+                                logger.warning(f"Embedding API error (attempt {retry_attempt + 1}/{self.max_retries}): {e}, ES batch num: {es_batch_num}, sub-batch start: {j}, size: {len(embedding_sub_batch)}")
+                                # Reduce batch size for retry
+                                if len(embedding_sub_batch) > 10:
+                                    embedding_sub_batch = embedding_sub_batch[:len(embedding_sub_batch)//2]
+                                    continue
+                            else:
+                                logger.error(f"Embedding API error (final attempt): {e}, ES batch num: {es_batch_num}, sub-batch start: {j}, size: {len(embedding_sub_batch)}")
+                    
+                    if not success:
+                        logger.error(f"Failed to get embeddings for sub-batch after {self.max_retries} attempts, skipping {len(embedding_sub_batch)} documents")
                 
                 # Perform a single bulk insert for the entire Elasticsearch batch
                 if not doc_embedding_pairs:
