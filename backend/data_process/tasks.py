@@ -375,6 +375,12 @@ def forward(
                             cached, str) else str(type(cached))
                         logger.error(
                             f"[{self.request.id}] FORWARD TASK: JSON decode error for key '{redis_key}': {str(jde)}; raw_prefix={raw_preview!r}")
+                        # Try to clean up corrupted Redis data
+                        try:
+                            client.delete(redis_key)
+                            logger.info(f"[{self.request.id}] FORWARD TASK: Deleted corrupted Redis key '{redis_key}'")
+                        except Exception as cleanup_e:
+                            logger.warning(f"[{self.request.id}] FORWARD TASK: Failed to cleanup corrupted Redis key: {cleanup_e}")
                         raise
                 else:
                     # No busy-wait: release the worker slot and retry later

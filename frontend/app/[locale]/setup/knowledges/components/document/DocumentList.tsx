@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { Input, Button, App, Select } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 
 import {
   UI_CONFIG,
@@ -362,11 +363,11 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   </Button>
                 </div>
               </div>
-              <Input.TextArea
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                className="flex-1 min-h-0 mb-5 resize-none text-lg leading-[1.7] p-5"
-              />
+              <div className="flex-1 min-h-0 mb-5 border border-gray-300 rounded-md overflow-auto">
+                <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
+                  <MarkdownRenderer content={summary} />
+                </div>
+              </div>
               <div className="flex gap-3 justify-end">
                 <Button
                   type="primary"

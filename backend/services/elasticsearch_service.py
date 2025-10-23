@@ -18,14 +18,11 @@ from typing import Any, Dict, Generator, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
-from jinja2 import Template, StrictUndefined
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
 from nexent.core.nlp.tokenizer import calculate_term_weights
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
-from openai import OpenAI
-from openai.types.chat import ChatCompletionMessageParam
 
-from consts.const import ES_API_KEY, ES_HOST, LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, KNOWLEDGE_SUMMARY_MAX_TOKENS_ZH, KNOWLEDGE_SUMMARY_MAX_TOKENS_EN
+from consts.const import ES_API_KEY, ES_HOST, LANGUAGE
 from database.attachment_db import delete_file
 from database.knowledge_db import (
     create_knowledge_record,
@@ -36,7 +33,6 @@ from database.knowledge_db import (
 from services.redis_service import get_redis_service
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
-from utils.prompt_template_utils import get_knowledge_summary_prompt_template
 
 # Configure logging
 logger = logging.getLogger("elasticsearch_service")
@@ -44,89 +40,8 @@ logger = logging.getLogger("elasticsearch_service")
 
 
 
-def generate_knowledge_summary_stream(keywords: str, language: str, tenant_id: str, model_id: Optional[int] = None) -> Generator:
-    """
-    Generate a knowledge base summary based on keywords
-
-    Args:
-        keywords: Keywords that frequently appear in the knowledge base content
-        language: Language of the knowledge base content
-        tenant_id: The tenant ID for configuration
-
-    Returns:
-        str:  Generate a knowledge base summary
-    """
-    # Load prompt words based on language
-    prompts = get_knowledge_summary_prompt_template(language)
-
-    # Render templates using Jinja2
-    system_prompt = Template(
-        prompts['system_prompt'], undefined=StrictUndefined).render({})
-    user_prompt = Template(prompts['user_prompt'], undefined=StrictUndefined).render(
-        {'content': keywords})
-
-    # Build messages
-    messages: List[ChatCompletionMessageParam] = [
-        {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
-        {"role": MESSAGE_ROLE["USER"], "content": user_prompt}
-    ]
-
-    # Get model configuration
-    if model_id:
-        try:
-            from database.model_management_db import get_model_by_model_id
-            model_info = get_model_by_model_id(model_id, tenant_id)
-            if model_info:
-                model_config = {
-                    'api_key': model_info.get('api_key', ''),
-                    'base_url': model_info.get('base_url', ''),
-                    'model_name': model_info.get('model_name', ''),
-                    'model_repo': model_info.get('model_repo', '')
-                }
-            else:
-                # Fallback to default model if specified model not found
-                logger.warning(f"Specified model {model_id} not found, falling back to default LLM.")
-                model_config = tenant_config_manager.get_model_config(
-                    key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-        except Exception as e:
-            logger.warning(f"Failed to get model {model_id}, using default model: {e}")
-            model_config = tenant_config_manager.get_model_config(
-                key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    else:
-        # Use default model configuration
-        model_config = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-
-    # initialize OpenAI client
-    client = OpenAI(api_key=model_config.get('api_key', ""),
-                    base_url=model_config.get('base_url', ""))
-
-    try:
-        # Create stream chat completion request
-        max_tokens = KNOWLEDGE_SUMMARY_MAX_TOKENS_ZH if language == LANGUAGE[
-            "ZH"] else KNOWLEDGE_SUMMARY_MAX_TOKENS_EN
-        # Get model name for the request
-        model_name_for_request = model_config.get("model_name", "")
-        if model_config.get("model_repo"):
-            model_name_for_request = f"{model_config['model_repo']}/{model_name_for_request}"
-
-        stream = client.chat.completions.create(
-            model=model_name_for_request,
-            messages=messages,
-            max_tokens=max_tokens,  # add max_tokens limit
-            stream=True  # enable stream output
-        )
-
-        # Iterate through stream response
-        for chunk in stream:
-            new_token = chunk.choices[0].delta.content
-            if new_token is not None:
-                yield new_token
-        yield "END"
-
-    except Exception as e:
-        logger.error(f"Error occurred: {str(e)}")
-        yield f"Error: {str(e)}"
+# Old keyword-based summary method removed - replaced with Map-Reduce approach
+# See utils/document_vector_utils.py for new implementation
 
 
 # Initialize ElasticSearchCore instance with HTTPS support
@@ -871,62 +786,85 @@ class ElasticSearchService:
                                  model_id: Optional[int] = None
                                  ):
         """
-        Generate a summary for the specified index based on its content
+        Generate a summary for the specified index using advanced Map-Reduce approach
+        
+        New implementation:
+        1. Get documents and cluster them by semantic similarity
+        2. Map: Summarize each document individually
+        3. Reduce: Merge document summaries into cluster summaries
+        4. Return: Combined knowledge base summary
 
         Args:
             index_name: Name of the index to summarize
-            batch_size: Number of documents to process per batch
+            batch_size: Number of documents to sample (default: 1000)
             es_core: ElasticSearchCore instance
             tenant_id: ID of the tenant
             language: Language of the summary (default: 'zh')
+            model_id: Model ID for LLM summarization
 
         Returns:
             StreamingResponse containing the generated summary
         """
         try:
-            # Get all documents
+            from utils.document_vector_utils import (
+                process_documents_for_clustering,
+                kmeans_cluster_documents,
+                summarize_clusters_map_reduce,
+                merge_cluster_summaries
+            )
+            
             if not tenant_id:
-                raise Exception(
-                    "Tenant ID is required for summary generation.")
-            all_documents = ElasticSearchService.get_random_documents(
-                index_name, batch_size, es_core)
-            all_chunks = self._clean_chunks_for_summary(all_documents)
-            keywords_dict = calculate_term_weights(all_chunks)
-            keywords_for_summary = ""
-            for _, key in enumerate(keywords_dict):
-                keywords_for_summary = keywords_for_summary + ", " + key
-
+                raise Exception("Tenant ID is required for summary generation.")
+            
+            # Use new Map-Reduce approach
+            sample_count = min(batch_size // 5, 200)  # Sample reasonable number of documents
+            
+            # Step 1: Get documents and calculate embeddings
+            document_samples, doc_embeddings = process_documents_for_clustering(
+                index_name=index_name,
+                es_core=es_core,
+                sample_doc_count=sample_count
+            )
+            
+            if not document_samples:
+                raise Exception("No documents found in index.")
+            
+            # Step 2: Cluster documents
+            clusters = kmeans_cluster_documents(doc_embeddings, k=None)
+            
+            # Step 3: Map-Reduce summarization
+            cluster_summaries = summarize_clusters_map_reduce(
+                document_samples=document_samples,
+                clusters=clusters,
+                language=language,
+                doc_max_words=100,
+                cluster_max_words=150,
+                model_id=model_id,
+                tenant_id=tenant_id
+            )
+            
+            # Step 4: Merge into final summary
+            final_summary = merge_cluster_summaries(cluster_summaries)
+            
+            # Stream the result
             async def generate_summary():
-                token_join = []
                 try:
-                    for new_token in generate_knowledge_summary_stream(keywords_for_summary, language, tenant_id, model_id):
-                        if new_token == "END":
-                            break
-                        else:
-                            token_join.append(new_token)
-                            yield f"data: {{\"status\": \"success\", \"message\": \"{new_token}\"}}\n\n"
-                        await asyncio.sleep(0.1)
+                    # Stream the summary character by character
+                    for char in final_summary:
+                        yield f"data: {{\"status\": \"success\", \"message\": \"{char}\"}}\n\n"
+                        await asyncio.sleep(0.01)
+                    yield f"data: {{\"status\": \"completed\"}}\n\n"
                 except Exception as e:
                     yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
-
-            # Return the flow response
+            
             return StreamingResponse(
                 generate_summary(),
                 media_type="text/event-stream"
             )
-
+            
         except Exception as e:
-            raise Exception(f"{str(e)}")
-
-    @staticmethod
-    def _clean_chunks_for_summary(all_documents):
-        # Only use these three fields for summarization
-        all_chunks = ""
-        for _, chunk in enumerate(all_documents['documents']):
-            all_chunks = all_chunks + "\n" + \
-                chunk["title"] + "\n" + chunk["filename"] + \
-                "\n" + chunk["content"]
-        return all_chunks
+            logger.error(f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
+            raise Exception(f"Failed to generate summary: {str(e)}")
 
     @staticmethod
     def get_random_documents(

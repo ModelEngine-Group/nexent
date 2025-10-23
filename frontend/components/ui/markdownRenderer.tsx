@@ -540,6 +540,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                   <TextWrapper>{children}</TextWrapper>
                 </p>
               ),
+              // Horizontal rule
+              hr: () => (
+                <hr className="markdown-hr" />
+              ),
               // List item
               li: ({ children }: any) => (
                 <li className="markdown-li">
