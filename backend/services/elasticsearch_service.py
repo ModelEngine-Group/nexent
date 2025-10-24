@@ -843,16 +843,39 @@ class ElasticSearchService:
                 tenant_id=tenant_id
             )
             
-            # Step 4: Merge into final summary
-            final_summary = merge_cluster_summaries(cluster_summaries)
-            
-            # Stream the result
+            # Stream the result by clusters (themes)
             async def generate_summary():
                 try:
-                    # Stream the summary character by character
-                    for char in final_summary:
-                        yield f"data: {{\"status\": \"success\", \"message\": \"{char}\"}}\n\n"
-                        await asyncio.sleep(0.01)
+                    # Stream each cluster summary as a complete theme
+                    for cluster_id, cluster_summary in cluster_summaries.items():
+                        # Add cluster header
+                        cluster_header = f"\n## 主题 {cluster_id + 1}\n\n"
+                        yield f"data: {{\"status\": \"success\", \"message\": \"{cluster_header}\"}}\n\n"
+                        await asyncio.sleep(0.1)
+                        
+                        # Stream the cluster summary content
+                        import re
+                        # Split by sentences for better readability
+                        sentences = re.split(r'([.!?]+\s*|\n\s*)', cluster_summary)
+                        
+                        current_chunk = ""
+                        for sentence in sentences:
+                            if sentence.strip():
+                                current_chunk += sentence
+                                # Send chunks of reasonable size
+                                if len(current_chunk) >= 100 or sentence.endswith(('.', '!', '?', '\n')):
+                                    yield f"data: {{\"status\": \"success\", \"message\": \"{current_chunk}\"}}\n\n"
+                                    current_chunk = ""
+                                    await asyncio.sleep(0.03)  # Shorter delay for better flow
+                        
+                        # Send any remaining content for this cluster
+                        if current_chunk.strip():
+                            yield f"data: {{\"status\": \"success\", \"message\": \"{current_chunk}\"}}\n\n"
+                        
+                        # Add spacing between clusters
+                        yield f"data: {{\"status\": \"success\", \"message\": \"\\n\\n\"}}\n\n"
+                        await asyncio.sleep(0.2)  # Pause between themes
+                    
                     yield f"data: {{\"status\": \"completed\"}}\n\n"
                 except Exception as e:
                     yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
