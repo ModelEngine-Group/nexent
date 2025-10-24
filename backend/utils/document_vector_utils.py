@@ -237,11 +237,6 @@ def kmeans_cluster_documents(doc_embeddings: Dict[str, np.ndarray], k: Optional[
         doc_ids = list(doc_embeddings.keys())
         embeddings_array = np.array([doc_embeddings[doc_id] for doc_id in doc_ids])
         
-        # Handle single document case
-        if len(doc_ids) == 1:
-            logger.info("Single document detected, returning single cluster")
-            return {0: doc_ids}
-        
         # Determine K value
         if k is None:
             k = auto_determine_k(embeddings_array)

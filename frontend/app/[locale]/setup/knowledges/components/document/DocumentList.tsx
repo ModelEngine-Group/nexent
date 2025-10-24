@@ -262,7 +262,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
-
     // Handle save summary
     const handleSaveSummary = async () => {
       if (!knowledgeBaseName) {
@@ -402,7 +401,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       }))}
                     />
                   </div>
-                  
                   <Button
                     type="default"
                     onClick={handleAutoSummary}
@@ -416,7 +414,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               </div>
               <div className="flex-1 min-h-0 mb-5 border border-gray-300 rounded-md overflow-auto">
-                <div className="p-5 text-lg leading-[1.7] prose prose-lg max-w-none">
+                <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
                   <MarkdownRenderer content={summary} />
                 </div>
               </div>
