@@ -145,6 +145,20 @@ class TestKMeansClustering:
         clusters = kmeans_cluster_documents(doc_embeddings)
         
         assert clusters == {}
+    
+    def test_kmeans_cluster_documents_single_document(self):
+        """Test handling of single document - should skip clustering"""
+        doc_embeddings = {
+            'doc1': np.array([1.0, 1.0, 1.0])
+        }
+        
+        clusters = kmeans_cluster_documents(doc_embeddings)
+        
+        # Should return a single cluster with the document
+        assert len(clusters) == 1
+        assert 0 in clusters
+        assert clusters[0] == ['doc1']
+        assert len(clusters[0]) == 1
 
 
 class TestExtractRepresentativeChunksSmart:

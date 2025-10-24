@@ -58,6 +58,30 @@ class TestSummaryFormatting:
         result = merge_cluster_summaries({})
         assert result == ""
     
+    def test_single_document_summary_flow(self):
+        """Test the complete flow for single document summary generation"""
+        from utils.document_vector_utils import kmeans_cluster_documents, merge_cluster_summaries
+        import numpy as np
+        
+        # Simulate single document case
+        doc_embeddings = {
+            'doc1': np.array([1.0, 1.0, 1.0, 1.0])
+        }
+        
+        # Test clustering - should return single cluster
+        clusters = kmeans_cluster_documents(doc_embeddings)
+        assert len(clusters) == 1
+        assert 0 in clusters
+        assert clusters[0] == ['doc1']
+        
+        # Test summary merging for single cluster
+        cluster_summaries = {
+            0: "这是单个文档的总结内容，包含重要信息。"
+        }
+        
+        result = merge_cluster_summaries(cluster_summaries)
+        assert "<p>这是单个文档的总结内容，包含重要信息。</p>" == result
+    
     def test_merge_cluster_summaries_order(self):
         """Test that clusters are merged in correct order"""
         cluster_summaries = {

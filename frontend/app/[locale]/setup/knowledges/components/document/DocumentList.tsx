@@ -414,8 +414,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               </div>
               <div className="flex-1 min-h-0 mb-5 border border-gray-300 rounded-md overflow-auto">
-                <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
-                  <MarkdownRenderer content={summary} />
+                <div className="p-5 text-lg leading-[1.7]">
+                  <div className="whitespace-pre-wrap break-words">
+                    <MarkdownRenderer content={summary} />
+                  </div>
                 </div>
               </div>
               <div className="flex gap-3 justify-end">
