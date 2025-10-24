@@ -1,0 +1,143 @@
+# ===== Necessary Configs (Neccessary till now, will be migrated to frontend page) =====
+
+# Voice Service Config
+APPID=app_id
+TOKEN=token
+
+# ===== Non-essential Configs (Modify if you know what you are doing) =====
+
+CLUSTER=volcano_tts
+VOICE_TYPE=zh_male_jieshuonansheng_mars_bigtts
+SPEED_RATIO=1.3
+
+# ===== Proxy Configuration (Optional) =====
+
+# HTTP_PROXY=http://proxy-server:port
+# HTTPS_PROXY=http://proxy-server:port
+# NO_PROXY=localhost,127.0.0.1
+
+# ===== Backend Configuration (No need to modify at all) =====
+
+# Model Path Config
+CLIP_MODEL_PATH=/opt/models/clip-vit-base-patch32
+NLTK_DATA=/opt/models/nltk_data
+
+# Elasticsearch Service
+ELASTICSEARCH_HOST=http://nexent-elasticsearch:9200
+ELASTIC_PASSWORD=nexent@2025
+
+# Elasticsearch Memory Configuration
+ES_JAVA_OPTS="-Xms1g -Xmx1g"
+
+# Elasticsearch Disk Watermark Configuration
+ES_DISK_WATERMARK_LOW=85%
+ES_DISK_WATERMARK_HIGH=90%
+ES_DISK_WATERMARK_FLOOD_STAGE=95%
+
+# Main Services
+ELASTICSEARCH_SERVICE=http://nexent:5010/api
+NEXENT_MCP_SERVER=http://nexent:5011
+DATA_PROCESS_SERVICE=http://nexent-data-process:5012/api
+NORTHBOUND_API_SERVER=http://nexent:5013/api
+
+# Postgres Config
+POSTGRES_HOST=nexent-postgresql
+POSTGRES_USER=root
+NEXENT_POSTGRES_PASSWORD=nexent@4321
+POSTGRES_DB=nexent
+POSTGRES_PORT=5432
+
+# Minio Config
+MINIO_ENDPOINT=http://nexent-minio:9000
+MINIO_ROOT_USER=nexent
+MINIO_ROOT_PASSWORD=nexent@4321
+MINIO_REGION=cn-north-1
+MINIO_DEFAULT_BUCKET=nexent
+
+# Redis Config
+REDIS_URL=redis://redis:6379/0
+REDIS_BACKEND_URL=redis://redis:6379/1
+
+# Model Engine Config
+MODEL_ENGINE_HOST=https://localhost:30555
+MODEL_ENGINE_APIKEY=
+
+# Supabase Config
+DASHBOARD_USERNAME=supabase
+DASHBOARD_PASSWORD=Huawei123
+
+# Supabase db Config
+SUPABASE_POSTGRES_PASSWORD=Huawei123
+SUPABASE_POSTGRES_HOST=db
+SUPABASE_POSTGRES_DB=supabase
+SUPABASE_POSTGRES_PORT=5436
+
+# Supabase Auth Config
+SITE_URL=http://localhost:3011
+SUPABASE_URL=http://supabase-kong-mini:8000
+API_EXTERNAL_URL=http://supabase-kong-mini:8000
+DISABLE_SIGNUP=false
+JWT_EXPIRY=3600
+DEBUG_JWT_EXPIRE_SECONDS=0
+
+# Supabase Configuration
+ENABLE_EMAIL_SIGNUP=true
+ENABLE_EMAIL_AUTOCONFIRM=true
+ENABLE_ANONYMOUS_USERS=false
+
+# Supabase Phone Config
+ENABLE_PHONE_SIGNUP=false
+ENABLE_PHONE_AUTOCONFIRM=false
+
+MAILER_URLPATHS_CONFIRMATION="/auth/v1/verify"
+MAILER_URLPATHS_INVITE="/auth/v1/verify"
+MAILER_URLPATHS_RECOVERY="/auth/v1/verify"
+MAILER_URLPATHS_EMAIL_CHANGE="/auth/v1/verify"
+
+INVITE_CODE=nexent2025
+
+# Terminal Tool SSH Key Path
+SSH_PRIVATE_KEY_PATH=/path/to/openssh-server/ssh-keys/openssh_server_key
+
+# ===== Data Processing Service Configuration =====
+
+# Redis Port
+REDIS_PORT=6379
+
+# Flower Monitoring
+FLOWER_PORT=5555
+
+# Ray Configuration
+RAY_ACTOR_NUM_CPUS=2
+RAY_DASHBOARD_PORT=8265
+RAY_DASHBOARD_HOST=0.0.0.0
+RAY_NUM_CPUS=
+RAY_PLASMA_DIRECTORY=/tmp
+RAY_OBJECT_STORE_MEMORY_GB=2.0
+RAY_TEMP_DIR=/tmp/ray
+RAY_LOG_LEVEL=INFO
+
+# Service Control Flags
+DISABLE_RAY_DASHBOARD=false
+DISABLE_CELERY_FLOWER=false
+DOCKER_ENVIRONMENT=false
+
+# Celery Configuration
+CELERY_WORKER_PREFETCH_MULTIPLIER=1
+CELERY_TASK_TIME_LIMIT=3600
+ELASTICSEARCH_REQUEST_TIMEOUT=30
+
+# Worker Configuration
+QUEUES=process_q,forward_q
+WORKER_NAME=
+WORKER_CONCURRENCY=4
+
+
+# Telemetry and Monitoring Configuration
+ENABLE_TELEMETRY=false
+SERVICE_NAME=nexent-backend
+JAEGER_ENDPOINT=http://localhost:14268/api/traces
+PROMETHEUS_PORT=8000
+TELEMETRY_SAMPLE_RATE=1.0
+LLM_SLOW_REQUEST_THRESHOLD_SECONDS=5.0
+LLM_SLOW_TOKEN_RATE_THRESHOLD=10.0
