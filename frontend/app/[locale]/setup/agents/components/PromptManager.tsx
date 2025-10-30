@@ -541,26 +541,32 @@ export default function PromptManager({
               {t("businessLogic.title")}
             </h3>
           </div>
-          <div className="relative">
-            <Input.TextArea
-              value={businessLogic}
-              onChange={(e) => onBusinessLogicChange?.(e.target.value)}
-              placeholder={t("businessLogic.placeholder")}
-              className="w-full resize-none p-3 text-sm transition-all duration-300 system-prompt-business-logic"
-              style={{
-                minHeight: "120px",
-                maxHeight: "200px",
-                paddingRight: "12px",
-                paddingBottom: "40px", // Reserve space for button
-              }}
-              autoSize={{
-                minRows: 3,
-                maxRows: 5,
-              }}
-              disabled={!isEditingMode}
-            />
-            {/* Generate button */}
-            <div className="absolute bottom-2 right-2">
+          
+          {/* 重新设计的容器：分为文本区域和控件区域 */}
+          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm" style={{ minHeight: "120px", maxHeight: "200px" }}>
+            {/* 文本内容区域 */}
+            <div className="px-2 pt-2 pb-1 overflow-hidden" style={{ minHeight: "80px", maxHeight: "160px" }}>
+              <Input.TextArea
+                value={businessLogic}
+                onChange={(e) => onBusinessLogicChange?.(e.target.value)}
+                placeholder={t("businessLogic.placeholder")}
+                className="w-full resize-none text-sm transition-all duration-300"
+                style={{
+                  minHeight: "80px",
+                  maxHeight: "160px",
+                  border: "none",
+                  boxShadow: "none",
+                  padding: 0,
+                  background: "transparent",
+                  overflow: "auto",
+                }}
+                autoSize={false}
+                disabled={!isEditingMode}
+              />
+            </div>
+            
+            {/* 控件区域 - 固定40px高度，无背景无边框，控件靠右 */}
+            <div className="h-10 flex items-center justify-end px-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-600">{t("businessLogic.config.model")}：</span>
                 <Select
