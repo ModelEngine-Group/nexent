@@ -140,63 +140,13 @@ export default function AgentSetupOrchestrator({
     try {
       const result = await getCreatingSubAgentId();
       if (result.success && result.data) {
-        const {
-          agentId,
-          name,
-          displayName,
-          description,
-          enabledToolIds,
-          modelName,
-          maxSteps,
-          businessDescription,
-          dutyPrompt,
-          constraintPrompt,
-          fewShotsPrompt,
-          sub_agent_id_list,
-        } = result.data;
+        const { agentId } = result.data;
 
-        // Update the main agent ID
+        // Only set the new main agent ID; keep all other fields empty for a fresh creation UI.
         setMainAgentId(agentId);
-        // Update the main agent name
-        setAgentName?.(name);
-        // Update the main agent display name
-        setAgentDisplayName?.(displayName);
-        // Update the main agent description
-        setAgentDescription?.(description);
-        // Update the enabled tool ID list
-        setEnabledToolIds(enabledToolIds);
-        // Update the enabled agent ID list from sub_agent_id_list
-        if (sub_agent_id_list && sub_agent_id_list.length > 0) {
-          setEnabledAgentIds(sub_agent_id_list.map((id: any) => Number(id)));
-        } else {
-          setEnabledAgentIds([]);
-        }
-        // Update the model
-        setMainAgentModel(modelName);
-        // Update the model ID if available
-        if (result.data.model_id) {
-          setMainAgentModelId(result.data.model_id);
-        }
-        // Update the maximum number of steps
-        if (maxSteps) {
-          setMainAgentMaxStep(maxSteps);
-        }
-        // Update the business description
-        if (businessDescription) {
-          setBusinessLogic(businessDescription);
-        }
-        // Update the duty prompt
-        if (setDutyContent) {
-          setDutyContent(dutyPrompt || "");
-        }
-        // Update the constraint prompt
-        if (setConstraintContent) {
-          setConstraintContent(constraintPrompt || "");
-        }
-        // Update the few shots prompt
-        if (setFewShotsContent) {
-          setFewShotsContent(fewShotsPrompt || "");
-        }
+
+        // Do NOT prefill name/displayName/description/businessLogic/prompts/tools/model/maxSteps.
+        // These remain cleared by handleCreateNewAgent to ensure a clean slate.
       } else {
         message.error(
           result.message || t("businessLogic.config.error.agentIdFailed")
