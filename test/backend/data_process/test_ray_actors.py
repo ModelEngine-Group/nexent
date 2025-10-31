@@ -63,9 +63,6 @@ def stub_ray_before_import(monkeypatch):
 
 def import_module(monkeypatch):
     # Patch dependencies used by the module
-    import builtins
-    from importlib import reload
-    import os
     from pathlib import Path
 
     # Stub DataProcessCore and get_file_stream
@@ -76,6 +73,12 @@ def import_module(monkeypatch):
     fake_attachment_db_mod.get_file_stream = lambda source: io.BytesIO(b"file-bytes")
     fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
+    # Ensure parent package 'database' exists and link submodule for proper resolution
+    if "database" not in sys.modules:
+        fake_database_pkg = types.ModuleType("database")
+        fake_database_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "database", fake_database_pkg)
+    setattr(sys.modules["database"], "attachment_db", fake_attachment_db_mod)
 
     # Stub celery (and celery.result.AsyncResult) to avoid dependency
     fake_celery = types.ModuleType("celery")
@@ -134,8 +137,40 @@ def import_module(monkeypatch):
     fake_consts_const = types.ModuleType("consts.const")
     fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
     fake_consts_const.REDIS_BACKEND_URL = ""
+    # New defaults required by ray_actors import
+    fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+    fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+
+    # Ensure model_management_db is stubbed to avoid importing real DB layer
+    if "database.model_management_db" not in sys.modules:
+        monkeypatch.setitem(
+            sys.modules,
+            "database.model_management_db",
+            types.SimpleNamespace(
+                get_model_by_model_id=lambda model_id, tenant_id=None: None
+            ),
+        )
+    # Link model_management_db to parent 'database' package
+    if "database" not in sys.modules:
+        fake_database_pkg = types.ModuleType("database")
+        fake_database_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "database", fake_database_pkg)
+    setattr(
+        sys.modules["database"],
+        "model_management_db",
+        sys.modules["database.model_management_db"],
+    )
+
+    # Stub database.model_management_db so import succeeds
+    if "database.model_management_db" not in sys.modules:
+        monkeypatch.setitem(
+            sys.modules,
+            "database.model_management_db",
+            types.SimpleNamespace(
+                get_model_by_model_id=lambda model_id, tenant_id=None: None),
+        )
 
     # Import module under test
     import backend.data_process.ray_actors as ray_actors
@@ -159,12 +194,94 @@ def test_process_file_happy_path(monkeypatch):
     assert chunks[0]["content"] == "hello world"
 
 
+def test_process_file_applies_chunk_sizes_from_model(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    # Recorder core to capture params
+    class RecorderCore:
+        captured_params = None
+
+        def __init__(self):
+            pass
+
+        def file_process(self, file_data, filename, chunking_strategy, **params):
+            RecorderCore.captured_params = params
+            return [{"content": "x", "metadata": {}}]
+
+    # Use recorder core and a model record with explicit sizes
+    monkeypatch.setattr(ray_actors, "DataProcessCore", RecorderCore)
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: {
+            "expected_chunk_size": 2000,
+            "maximum_chunk_size": 3000,
+            "display_name": "emb",
+            "model_type": "embedding",
+        },
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    actor.process_file(
+        source="/tmp/a.txt",
+        chunking_strategy="basic",
+        destination="local",
+        model_id=9,
+        tenant_id="t1",
+    )
+
+    assert RecorderCore.captured_params is not None
+    assert RecorderCore.captured_params.get("new_after_n_chars") == 2000
+    assert RecorderCore.captured_params.get("max_characters") == 3000
+
+
+def test_process_file_no_model_omits_chunk_params(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class RecorderCore:
+        captured_params = None
+
+        def __init__(self):
+            pass
+
+        def file_process(self, file_data, filename, chunking_strategy, **params):
+            RecorderCore.captured_params = params
+            return [{"content": "y", "metadata": {}}]
+
+    # No model found
+    monkeypatch.setattr(ray_actors, "DataProcessCore", RecorderCore)
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: None,
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    actor.process_file(
+        source="/tmp/b.txt",
+        chunking_strategy="basic",
+        destination="local",
+        model_id=10,
+        tenant_id="t2",
+    )
+
+    assert RecorderCore.captured_params is not None
+    assert "new_after_n_chars" not in RecorderCore.captured_params
+    assert "max_characters" not in RecorderCore.captured_params
+
+
 def test_process_file_get_stream_none_raises(monkeypatch):
     # Override get_file_stream to return None
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
     fake_attachment_db_mod.get_file_stream = lambda source: None
     fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
+    # Ensure parent 'database' exists and link attachment_db
+    if "database" not in sys.modules:
+        fake_database_pkg = types.ModuleType("database")
+        fake_database_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "database", fake_database_pkg)
+    setattr(sys.modules["database"], "attachment_db", fake_attachment_db_mod)
 
     # Ensure DataProcessCore is stubbed during reload as well
     monkeypatch.setitem(
@@ -222,8 +339,30 @@ def test_process_file_get_stream_none_raises(monkeypatch):
     fake_consts_const = types.ModuleType("consts.const")
     fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
     fake_consts_const.REDIS_BACKEND_URL = ""
+    # Provide defaults required by backend.data_process.ray_actors import
+    fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+    fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
     monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
     monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+
+    # Stub database.model_management_db and link to parent to avoid real DB import
+    if "database.model_management_db" not in sys.modules:
+        monkeypatch.setitem(
+            sys.modules,
+            "database.model_management_db",
+            types.SimpleNamespace(
+                get_model_by_model_id=lambda model_id, tenant_id=None: None
+            ),
+        )
+    if "database" not in sys.modules:
+        fake_database_pkg = types.ModuleType("database")
+        fake_database_pkg.__path__ = []
+        monkeypatch.setitem(sys.modules, "database", fake_database_pkg)
+    setattr(
+        sys.modules["database"],
+        "model_management_db",
+        sys.modules["database.model_management_db"],
+    )
 
     # Re-import to take new stub
     from importlib import reload
@@ -309,8 +448,21 @@ def test_process_file_core_returns_none_list_variants(monkeypatch):
         fake_consts_const = types.ModuleType("consts.const")
         fake_consts_const.RAY_ACTOR_NUM_CPUS = 1
         fake_consts_const.REDIS_BACKEND_URL = ""
+        # Provide defaults required by backend.data_process.ray_actors import
+        fake_consts_const.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+        fake_consts_const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
         monkeypatch.setitem(sys.modules, "consts", fake_consts_pkg)
         monkeypatch.setitem(sys.modules, "consts.const", fake_consts_const)
+
+        # Ensure model_management_db is stubbed to avoid importing real DB layer
+        if "database.model_management_db" not in sys.modules:
+            monkeypatch.setitem(
+                sys.modules,
+                "database.model_management_db",
+                types.SimpleNamespace(
+                    get_model_by_model_id=lambda model_id, tenant_id=None: None
+                ),
+            )
         from importlib import reload
         import backend.data_process.ray_actors as ray_actors
         reload(ray_actors)

@@ -156,6 +156,10 @@ class ModelRecord(TableBase):
     connect_status = Column(String(
         100), doc="Model connectivity status of the latest detection. Optional values: Detecting, Available, Unavailable")
     tenant_id = Column(String(100), doc="Tenant ID for filtering")
+    expected_chunk_size = Column(
+        Integer, doc="Expected chunk size for embedding models, used during document chunking")
+    maximum_chunk_size = Column(
+        Integer, doc="Maximum chunk size for embedding models, used during document chunking")
 
 
 class ToolInfo(TableBase):

@@ -647,6 +647,9 @@
   "modelConfig.button.addCustomModel": "添加自定义模型",
   "modelConfig.button.editCustomModel": "修改自定义模型",
   "modelConfig.button.checkConnectivity": "检查模型连通性",
+  "modelConfig.slider.chunkingSize": "文档切片大小",
+  "modelConfig.slider.expectedChunkSize": "期望切片大小",
+  "modelConfig.slider.maximumChunkSize": "最大切片大小",
 
   "businessLogic.title": "描述 Agent 应该如何工作",
   "businessLogic.placeholder": "请描述您的业务场景和需求...",

@@ -1,283 +1,52 @@
 ---
-description: 
-globs: test/*.py
-alwaysApply: false
+globs: test/**/*.py
+description: Pytest Unit Test Rules for this repository
 ---
-# Pytest Unit Test Rules
 
-## Framework Requirements
-- **MANDATORY: Use pytest exclusively** - Do not use unittest framework
-- All tests must be written using pytest syntax and features
-- Use pytest fixtures instead of unittest setUp/tearDown methods
-- Use pytest assertions instead of unittest assert methods
+## Pytest Unit Test Rules (Concise)
 
-## File Naming Conventions
-- Test files must start with `test_`
-- Test class names start with `Test`, test method names start with `test_`
-- File names should reflect the module or functionality being tested, e.g., `test_user_service.py`
+### Framework
+- Use pytest exclusively; prefer fixtures; use pytest `assert` statements.
 
-## File Structure Standards
+### Naming
+- Files `test_*`; classes `Test*`; functions `test_*`.
 
-### Directory Organization
-```
-test/
-├── backend/                    # Backend service tests
-│   ├── apps/                   # Application layer tests
-│   │   ├── test_app_layer.py
-│   │   ├── test_app_layer_contract.py
-│   │   ├── test_app_layer_validation.py
-│   │   └── test_app_layer_errors.py
-│   ├── services/               # Service layer tests
-│   │   ├── test_user_service.py
-│   │   └── test_auth_service.py
-│   └── database/               # Database layer tests
-│       ├── test_models.py
-│       └── test_crud.py
-├── sdk/                        # SDK tests
-│   ├── test_embedding_models.py
-│   └── test_client.py
-├── web_test/                   # Web application tests
-├── assets/                     # Test assets and fixtures
-├── pytest.ini                 # Pytest configuration
-├── .coveragerc                # Coverage configuration
-└── requirements.txt           # Test dependencies
-```
+### Imports
+- Order: standard library, third‑party, project.
+- Import only the unit under test; mock collaborators using `pytest-mock`.
 
-### File Splitting Guidelines
-- **When a test file exceeds 500 lines or 50 test methods**, split it into multiple files
-- Split by functionality or feature area, not by test type
-- Create a dedicated subdirectory for the split test files:
-  ```
-  test/backend/services/
-  ├── test_auth_service.py              # Single file for smaller services
-  ├── test_user_service/                # Directory for split user service tests
-  │   ├── __init__.py                   # Required for Python package
-  │   ├── test_user_service_core.py     # Core user operations
-  │   ├── test_user_service_auth.py     # User authentication
-  │   ├── test_user_service_permissions.py  # User permissions
-  │   └── test_user_service_validation.py   # Input validation
-  └── test_order_service/               # Directory for split order service tests
-      ├── __init__.py
-      ├── test_order_service_core.py
-      ├── test_order_service_payment.py
-      └── test_order_service_shipping.py
-  ```
-- Use consistent naming pattern: `test_<module>_<feature>.py`
-- Each subdirectory must contain an `__init__.py` file
-- Maintain logical grouping within the same directory
-- Keep the original module name as the directory name for clarity
+### Import and Mock Rules
+- Do not directly import external interfaces/clients/services into tests to exercise collaborators.
+- Patch where the dependency is imported (lookup site) using a fully‑qualified path.
+- Use `side_effect` to cover error paths when appropriate.
 
-### Import Organization
 ```python
-# 1. Standard library imports first
-import sys
-import os
-import types
-from typing import Any, Dict, List
-
-# 2. Third-party library imports
-import pytest
-from pytest_mock import MockFixture  # Use pytest-mock instead of unittest.mock
-
-# 3. Project internal imports (after mocking dependencies if needed)
-from sdk.nexent.core.models.embedding_model import OpenAICompatibleEmbedding
-```
-
-### Test Class Organization
-- Each test class corresponds to one class or module being tested
-- Use pytest fixtures instead of `setUp` and `tearDown` methods
-- Group test methods by functionality with descriptive method names
-
-### Test Method Structure
-- Each test method tests only one functionality point
-- Use pytest assertions (`assert` statements)
-- Test method names should describe the test scenario, e.g., `test_create_user_success`
-
-## Test Content Standards
-
-### Coverage Requirements
-- Test normal flow and exception flow
-- Test boundary conditions and error handling
-- Use `@pytest.mark.parametrize` for parameterized testing
-
-### Mocking Guidelines
-- Use `pytest-mock` plugin instead of `unittest.mock`
-- Mock database operations, API calls, and other external services
-- Use `side_effect` to simulate exception scenarios
-
-### Assertion Standards
-- Use pytest assertions with clear error messages
-- Use `assert` statements with descriptive messages: `assert result.status == "success", f"Expected success, got {result.status}"`
-- Tests should fail fast and provide clear error location
-
-## Code Examples
-
-### Basic Test Structure (pytest-only)
-```python
-import pytest
 from pytest_mock import MockFixture
+from backend.apps.some_app import create_resource
 
-# ---
-# Fixtures
-# ---
-
-@pytest.fixture()
-def sample_instance():
-    """Return a sample instance with minimal viable attributes for tests."""
-    return SampleClass(
-        param1="value1",
-        param2="value2"
-    )
-
-# ---
-# Tests for method_name
-# ---
-
-@pytest.mark.asyncio
-async def test_method_success(sample_instance, mocker: MockFixture):
-    """method_name should return expected result when no exception is raised."""
-    
-    expected_result = {"status": "success"}
-    mock_dependency = mocker.patch(
-        "module.path.external_dependency",
-        return_value=expected_result,
-    )
-    
-    result = await sample_instance.method_name()
-    
-    assert result == expected_result
-    mock_dependency.assert_called_once()
-
-@pytest.mark.asyncio
-async def test_method_failure(sample_instance, mocker: MockFixture):
-    """method_name should handle exceptions gracefully."""
-    
+def test_create_resource_success(mocker: MockFixture):
     mocker.patch(
-        "module.path.external_dependency",
-        side_effect=Exception("connection error"),
+        "backend.services.model_provider_service.ModelProviderService.create",
+        return_value={"id": "res-1"},
     )
-    
-    result = await sample_instance.method_name()
-    
-    assert result is None  # or expected error handling
+    assert create_resource({...})["id"] == "res-1"
 ```
 
-### Complex Mocking Example (pytest-mock)
-```python
-import pytest
-from pytest_mock import MockFixture
+### Structure and Size
+- Keep files under 500 lines or split by feature; include `__init__.py` in split directories; use `test_<module>_<feature>.py` names.
 
-def test_complex_mocking(mocker: MockFixture):
-    """Test with complex dependency mocking."""
-    # Mock external modules
-    mock_external_module = mocker.MagicMock()
-    mock_external_module.ExternalClass = mocker.MagicMock()
-    
-    # Mock complex dependencies
-    class DummyExternalClass:
-        def __init__(self, *args, **kwargs):
-            pass
-        
-        def method_needed_by_tests(self, *args, **kwargs):
-            return {}
-    
-    mock_external_module.ExternalClass = DummyExternalClass
-    
-    # Test the actual functionality
-    # ... test implementation
-```
+### Coverage and Async
+- Cover success/error flows and boundaries; use `@pytest.mark.parametrize` for variants.
+- Use `@pytest.mark.asyncio` for async tests.
 
-### Parameterized Testing
-```python
-@pytest.mark.parametrize("input_value,expected_output", [
-    ("valid_input", {"status": "success"}),
-    ("invalid_input", {"status": "error"}),
-    ("", {"status": "error"}),
-])
-async def test_method_with_different_inputs(sample_instance, input_value, expected_output):
-    """Test method with various input scenarios."""
-    result = await sample_instance.method(input_value)
-    assert result["status"] == expected_output["status"]
-```
+### Isolation
+- Use `autouse=True` fixtures to reset state; fully mock external I/O and APIs.
 
-### Exception Testing
-```python
-@pytest.mark.asyncio
-async def test_method_raises_exception(sample_instance):
-    """Test that method raises appropriate exception."""
-    with pytest.raises(ValueError, match="Invalid input") as exc_info:
-        await sample_instance.method("invalid_input")
-    
-    assert "Invalid input" in str(exc_info.value)
-```
-
-### State Management
-```python
-@pytest.fixture(autouse=True)
-def reset_state():
-    """Reset global state between tests."""
-    global_state.clear()
-    mock_objects.reset_mock()
-
-@pytest.fixture
-def test_context():
-    """Provide test context with required attributes."""
-    return TestContext(
-        request_id="req-1",
-        tenant_id="tenant-1",
-        user_id="user-1"
-    )
-```
-
-## Best Practices
-
-### 1. Test Isolation
-- Each test should be independent
-- Use `autouse=True` fixtures for state reset
-- Mock external dependencies completely
-
-### 2. Async Testing
-- Use `@pytest.mark.asyncio` for async tests
-- Use `mocker.patch` for async operations
-- Use `assert_called_once()` for async assertions
-
-### 3. Mock Design
-- Create minimal viable mock objects
-- Use `DummyClass` pattern for complex dependencies
-- Record method calls for verification
-
-### 4. Test Organization
-- Group related tests with comment separators
-- Use descriptive test names
-- Include docstrings explaining test purpose
-- Split large test files into logical subdirectories
-
-### 5. Error Handling
-- Test both success and failure scenarios
-- Use `pytest.raises` for exception testing
-- Verify error messages and types with `match` parameter
-
-### 6. File Management
-- Keep test files under 500 lines or 50 test methods
-- Split large files by functionality, not by test type
-- Use consistent naming patterns for split files
-- Maintain logical grouping within directories
-
-## Migration from unittest
-- Replace `unittest.TestCase` with plain functions and pytest fixtures
-- Replace `self.assertTrue()` with `assert` statements
-- Replace `unittest.mock` with `pytest-mock` plugin
-- Replace `setUp`/`tearDown` with pytest fixtures
-- Use `pytest.raises()` instead of `self.assertRaises()`
-
-## Validation Checklist
-- [ ] All tests use pytest framework exclusively
-- [ ] No unittest imports or usage
-- [ ] External dependencies are mocked with pytest-mock
-- [ ] Tests cover normal and exception flows
-- [ ] Async tests use proper decorators
-- [ ] Assertions are specific and descriptive
-- [ ] Test names clearly describe scenarios
-- [ ] Fixtures provide necessary test data
-- [ ] State is properly reset between tests
-- [ ] Large test files are split into logical subdirectories
+### Checklist
+- [ ] pytest only (no unittest)
+- [ ] naming conventions followed
+- [ ] collaborators mocked with pytest-mock
+- [ ] import/mocking rules followed
+- [ ] async tests decorated when needed
+- [ ] clear, specific assertions
+- [ ] adequate coverage (normal and exception paths)

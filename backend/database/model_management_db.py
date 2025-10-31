@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, func, insert, select, update
 
+from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
@@ -149,8 +150,21 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
         # Execute the query
         records = session.scalars(stmt).all()
 
-        # Convert SQLAlchemy model instances to dictionaries
-        return [as_dict(record) for record in records]
+        # Convert SQLAlchemy model instances to dictionaries and fill default chunk sizes
+        result_list = []
+        for record in records:
+            record_dict = as_dict(record)
+
+            # For embedding models with null chunk sizes (legacy data), fill with defaults
+            if record_dict.get("model_type") in ["embedding", "multi_embedding"]:
+                if record_dict.get("expected_chunk_size") is None:
+                    record_dict["expected_chunk_size"] = DEFAULT_EXPECTED_CHUNK_SIZE
+                if record_dict.get("maximum_chunk_size") is None:
+                    record_dict["maximum_chunk_size"] = DEFAULT_MAXIMUM_CHUNK_SIZE
+
+            result_list.append(record_dict)
+
+        return result_list
 
 
 def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -218,6 +232,13 @@ def get_model_by_model_id(model_id: int, tenant_id: Optional[str] = None) -> Opt
         # Convert SQLAlchemy model object to dictionary
         result_dict = {key: value for key,
                        value in result.__dict__.items() if not key.startswith('_')}
+
+        # For embedding models with null chunk sizes (legacy data), fill with defaults
+        if result_dict.get("model_type") in ["embedding", "multi_embedding"]:
+            if result_dict.get("expected_chunk_size") is None:
+                result_dict["expected_chunk_size"] = DEFAULT_EXPECTED_CHUNK_SIZE
+            if result_dict.get("maximum_chunk_size") is None:
+                result_dict["maximum_chunk_size"] = DEFAULT_MAXIMUM_CHUNK_SIZE
 
         return result_dict
 

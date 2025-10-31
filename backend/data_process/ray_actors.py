@@ -4,8 +4,9 @@ from typing import Any, Dict, List, Optional
 
 import ray
 
-from consts.const import RAY_ACTOR_NUM_CPUS, REDIS_BACKEND_URL
+from consts.const import RAY_ACTOR_NUM_CPUS, REDIS_BACKEND_URL, DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from database.attachment_db import get_file_stream
+from database.model_management_db import get_model_by_model_id
 from nexent.data_process import DataProcessCore
 
 logger = logging.getLogger("data_process.ray_actors")
@@ -32,6 +33,8 @@ class DataProcessorRayActor:
         chunking_strategy: str,
         destination: str,
         task_id: Optional[str] = None,
+        model_id: Optional[int] = None,
+        tenant_id: Optional[str] = None,
         **params
     ) -> List[Dict[str, Any]]:
         """
@@ -42,16 +45,45 @@ class DataProcessorRayActor:
             chunking_strategy (str): The strategy for chunking the file.
             destination (str): The source type of the file, e.g., 'local', 'minio'.
             task_id (str, optional): The task ID for processing. Defaults to None.
+            model_id (int, optional): The embedding model ID for retrieving chunk size parameters. Defaults to None.
+            tenant_id (str, optional): The tenant ID for retrieving model configuration. Defaults to None.
             **params: Additional parameters for the processing task.
 
         Returns:
             List[Dict[str, Any]]: A list of dictionaries representing the processed chunks.
         """
         logger.info(
-            f"[RayActor] Processing start: source='{source}', destination='{destination}', strategy='{chunking_strategy}', task_id='{task_id}'")
+            f"[RayActor] Processing start: source='{source}', destination='{destination}', strategy='{chunking_strategy}', task_id='{task_id}', model_id='{model_id}'")
 
         if task_id:
             params['task_id'] = task_id
+
+        # Get chunk size parameters from embedding model if model_id is provided
+        if model_id and tenant_id:
+            try:
+                # Get embedding model details directly by model_id
+                model_record = get_model_by_model_id(
+                    model_id=model_id, tenant_id=tenant_id)
+                if model_record:
+                    expected_chunk_size = model_record.get(
+                        'expected_chunk_size', DEFAULT_EXPECTED_CHUNK_SIZE)
+                    maximum_chunk_size = model_record.get(
+                        'maximum_chunk_size', DEFAULT_MAXIMUM_CHUNK_SIZE)
+                    model_name = model_record.get('display_name')
+
+                    # Pass chunk sizes to processing parameters
+                    params['max_characters'] = maximum_chunk_size
+                    params['new_after_n_chars'] = expected_chunk_size
+
+                    logger.info(
+                        f"[RayActor] Using chunk sizes from embedding model '{model_name}' (ID: {model_id}): "
+                        f"max_characters={maximum_chunk_size}, new_after_n_chars={expected_chunk_size}")
+                else:
+                    logger.warning(
+                        f"[RayActor] Embedding model with ID {model_id} not found for tenant '{tenant_id}', using default chunk sizes")
+            except Exception as e:
+                logger.warning(
+                    f"[RayActor] Failed to retrieve chunk sizes from embedding model ID {model_id}: {e}. Using default chunk sizes")
 
         try:
             file_stream = get_file_stream(source)

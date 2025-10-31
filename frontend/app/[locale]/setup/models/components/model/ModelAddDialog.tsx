@@ -1,18 +1,29 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Modal, Select, Input, Button, Switch, Tooltip, App } from 'antd'
-import { InfoCircleFilled, LoadingOutlined, RightOutlined, DownOutlined, SettingOutlined } from '@ant-design/icons'
+import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
+import {
+  InfoCircleFilled,
+  LoadingOutlined,
+  RightOutlined,
+  DownOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 
-import { useConfig } from '@/hooks/useConfig'
-import { getConnectivityMeta, ConnectivityStatusType } from '@/lib/utils'
-import { modelService } from '@/services/modelService'
-import { ModelType, SingleModelConfig } from '@/types/modelConfig'
-import { MODEL_TYPES } from '@/const/modelConfig'
-import { useSiliconModelList } from '@/hooks/model/useSiliconModelList'
+import { useConfig } from "@/hooks/useConfig";
+import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
+import { modelService } from "@/services/modelService";
+import { ModelType, SingleModelConfig } from "@/types/modelConfig";
+import { MODEL_TYPES } from "@/const/modelConfig";
+import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import log from "@/lib/logger";
+import {
+  ModelChunkSizeSlider,
+  DEFAULT_EXPECTED_CHUNK_SIZE,
+  DEFAULT_MAXIMUM_CHUNK_SIZE,
+} from "./ModelChunkSizeSilder";
 
-const { Option } = Select
+const { Option } = Select;
 
 // Define the return type after adding a model
 export interface AddedModel {
@@ -21,17 +32,21 @@ export interface AddedModel {
 }
 
 interface ModelAddDialogProps {
-  isOpen: boolean
-  onClose: () => void
-  onSuccess: (model?: AddedModel) => Promise<void>
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (model?: AddedModel) => Promise<void>;
 }
 
 // Connectivity status type comes from utils
 
-export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogProps) => {
-  const { t } = useTranslation()
-  const { message } = App.useApp()
-  const { updateModelConfig } = useConfig()
+export const ModelAddDialog = ({
+  isOpen,
+  onClose,
+  onSuccess,
+}: ModelAddDialogProps) => {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const { updateModelConfig } = useConfig();
   const [form, setForm] = useState({
     type: MODEL_TYPES.LLM as ModelType,
     name: "",
@@ -43,27 +58,35 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
     // Whether to import multiple models at once
     isBatchImport: false,
     provider: "silicon",
-    vectorDimension: "1024"
-  })
-  const [loading, setLoading] = useState(false)
-  const [verifyingConnectivity, setVerifyingConnectivity] = useState(false)
+    vectorDimension: "1024",
+    // Default chunk size range for embedding models
+    chunkSizeRange: [
+      DEFAULT_EXPECTED_CHUNK_SIZE,
+      DEFAULT_MAXIMUM_CHUNK_SIZE,
+    ] as [number, number],
+  });
+  const [loading, setLoading] = useState(false);
+  const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
   const [connectivityStatus, setConnectivityStatus] = useState<{
-    status: ConnectivityStatusType
-    message: string
+    status: ConnectivityStatusType;
+    message: string;
   }>({
     status: null,
-    message: ""
-  })
+    message: "",
+  });
 
-  const [modelList, setModelList] = useState<any[]>([])
-  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set())
-  const [showModelList, setShowModelList] = useState(false)
-  const [loadingModelList, setLoadingModelList] = useState(false)
+  const [modelList, setModelList] = useState<any[]>([]);
+  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [showModelList, setShowModelList] = useState(false);
+  const [loadingModelList, setLoadingModelList] = useState(false);
 
   // Settings modal state
-  const [settingsModalVisible, setSettingsModalVisible] = useState(false)
-  const [selectedModelForSettings, setSelectedModelForSettings] = useState<any>(null)
-  const [modelMaxTokens, setModelMaxTokens] = useState("4096")
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [selectedModelForSettings, setSelectedModelForSettings] =
+    useState<any>(null);
+  const [modelMaxTokens, setModelMaxTokens] = useState("4096");
 
   // Use the silicon model list hook
   const { getModelList, getProviderSelectedModalList } = useSiliconModelList({
@@ -71,132 +94,151 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
     setModelList,
     setSelectedModelIds,
     setShowModelList,
-    setLoadingModelList
-  })
-
+    setLoadingModelList,
+  });
 
   const parseModelName = (name: string): string => {
-    if (!name) return ""
-    const parts = name.split('/')
+    if (!name) return "";
+    const parts = name.split("/");
     if (parts.length <= 2) {
-      return parts[parts.length - 1]
+      return parts[parts.length - 1];
     } else {
-      return `${parts[0]}/${parts[parts.length - 1]}`
+      return `${parts[0]}/${parts[parts.length - 1]}`;
     }
-  }
+  };
 
   // Handle model name change, automatically update the display name
   const handleModelNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const name = e.target.value
-    setForm(prev => ({
+    const name = e.target.value;
+    setForm((prev) => ({
       ...prev,
       name,
       // If the display name is the same as the parsed result of the model name, it means the user has not manually modified the display name
       // At this time, the display name should be automatically updated
-      displayName: prev.displayName === parseModelName(prev.name) ? parseModelName(name) : prev.displayName
-    }))
+      displayName:
+        prev.displayName === parseModelName(prev.name)
+          ? parseModelName(name)
+          : prev.displayName,
+    }));
     // Clear the previous verification status
-    setConnectivityStatus({ status: null, message: "" })
-  }
+    setConnectivityStatus({ status: null, message: "" });
+  };
 
   // Handle form change
   const handleFormChange = (field: string, value: string | boolean) => {
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
-      [field]: value
-    }))
+      [field]: value,
+    }));
     // If the key configuration item changes, clear the verification status
-    if (['type', 'url', 'apiKey', 'maxTokens', 'vectorDimension'].includes(field)) {
-      setConnectivityStatus({ status: null, message: "" })
+    if (
+      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(field)
+    ) {
+      setConnectivityStatus({ status: null, message: "" });
     }
-  }
+  };
 
   // Verify if the vector dimension is valid
   const isValidVectorDimension = (value: string): boolean => {
     const dimension = parseInt(value);
     return !isNaN(dimension) && dimension > 0;
-  }
+  };
 
   // Check if the form is valid
   const isFormValid = () => {
     if (form.isBatchImport) {
-      return form.provider.trim() !== "" && 
-             form.apiKey.trim() !== ""
+      return form.provider.trim() !== "" && form.apiKey.trim() !== "";
     }
     if (form.type === MODEL_TYPES.EMBEDDING) {
-      return form.name.trim() !== "" && 
-             form.url.trim() !== "" && 
-             isValidVectorDimension(form.vectorDimension);
+      return (
+        form.name.trim() !== "" &&
+        form.url.trim() !== "" &&
+        isValidVectorDimension(form.vectorDimension)
+      );
     }
-    return form.name.trim() !== "" && 
-           form.url.trim() !== "" && 
-           form.maxTokens.trim() !== ""
-  }
+    return (
+      form.name.trim() !== "" &&
+      form.url.trim() !== "" &&
+      form.maxTokens.trim() !== ""
+    );
+  };
 
   // Verify model connectivity
   const handleVerifyConnectivity = async () => {
     if (!isFormValid()) {
-      message.warning(t('model.dialog.warning.incompleteForm'))
-      return
+      message.warning(t("model.dialog.warning.incompleteForm"));
+      return;
     }
 
-    setVerifyingConnectivity(true)
-    setConnectivityStatus({ status: "checking", message: t('model.dialog.status.verifying') })
+    setVerifyingConnectivity(true);
+    setConnectivityStatus({
+      status: "checking",
+      message: t("model.dialog.status.verifying"),
+    });
 
     try {
-      const modelType = form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal ? 
-        MODEL_TYPES.MULTI_EMBEDDING as ModelType : 
-        form.type;
+      const modelType =
+        form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
+          ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+          : form.type;
 
       const config = {
         modelName: form.name,
         modelType: modelType,
         baseUrl: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens: form.type === MODEL_TYPES.EMBEDDING ? parseInt(form.vectorDimension) : parseInt(form.maxTokens),
-        embeddingDim: form.type === MODEL_TYPES.EMBEDDING ? parseInt(form.vectorDimension) : undefined
-      }
+        maxTokens:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : parseInt(form.maxTokens),
+        embeddingDim:
+          form.type === MODEL_TYPES.EMBEDDING
+            ? parseInt(form.vectorDimension)
+            : undefined,
+      };
 
-      const result = await modelService.verifyModelConfigConnectivity(config)
-      
+      const result = await modelService.verifyModelConfigConnectivity(config);
+
       // Set connectivity status
       if (result.connectivity) {
         setConnectivityStatus({
           status: "available",
-          message: t('model.dialog.connectivity.status.available')
-        })
+          message: t("model.dialog.connectivity.status.available"),
+        });
       } else {
         // Set status to unavailable
         setConnectivityStatus({
           status: "unavailable",
-          message: t('model.dialog.connectivity.status.unavailable')
-        })
+          message: t("model.dialog.connectivity.status.unavailable")
+        });
         // Show detailed error message using message.error (same as add failure)
         if (result.error) {
           message.error(result.error)
         }
       }
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       setConnectivityStatus({
         status: "unavailable",
-        message: t('model.dialog.connectivity.status.unavailable')
-      })
+        message: t("model.dialog.connectivity.status.unavailable"),
+      });
       // Show error message using message.error (same as add failure)
-      message.error(errorMessage || t('model.dialog.connectivity.status.unavailable'))
+      message.error(errorMessage || t("model.dialog.connectivity.status.unavailable"))
     } finally {
-      setVerifyingConnectivity(false)
+      setVerifyingConnectivity(false);
     }
-  }
+  };
 
-  // Handle batch adding models 
+  // Handle batch adding models
   const handleBatchAddModel = async () => {
     // Only include models whose id is in selectedModelIds (i.e., switch is ON)
-    const enabledModels = modelList.filter((model: any) => selectedModelIds.has(model.id));
-    const modelType = form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal ? 
-        MODEL_TYPES.MULTI_EMBEDDING as ModelType : 
-        form.type;
+    const enabledModels = modelList.filter((model: any) =>
+      selectedModelIds.has(model.id)
+    );
+    const modelType =
+      form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
+        ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+        : form.type;
     try {
       const result = await modelService.addBatchCustomModel({
         api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
@@ -204,45 +246,53 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         type: modelType,
         models: enabledModels.map((model: any) => ({
           ...model,
-          max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096
-        }))
-      })
+          max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
+          // Add chunk size range for embedding models
+          ...(isEmbeddingModel
+            ? {
+                expected_chunk_size: form.chunkSizeRange[0],
+                maximum_chunk_size: form.chunkSizeRange[1],
+              }
+            : {}),
+        })),
+      });
       if (result === 200) {
-        onSuccess()
+        onSuccess();
       }
     } catch (error: any) {
-      message.error(error?.message || '添加模型失败');
+      message.error(error?.message || "添加模型失败");
     }
 
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
-      isBatchImport: false
-    }))
-   
-    onClose()
-  }
+      isBatchImport: false,
+    }));
 
+    onClose();
+  };
 
   // Handle settings button click
   const handleSettingsClick = (model: any) => {
-    setSelectedModelForSettings(model)
-    setModelMaxTokens(model.max_tokens?.toString() || "4096")
-    setSettingsModalVisible(true)
-  }
+    setSelectedModelForSettings(model);
+    setModelMaxTokens(model.max_tokens?.toString() || "4096");
+    setSettingsModalVisible(true);
+  };
 
   // Handle settings save
   const handleSettingsSave = () => {
     if (selectedModelForSettings) {
       // Update the model in the list with new max_tokens
-      setModelList(prev => prev.map(model => 
-        model.id === selectedModelForSettings.id 
-          ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
-          : model
-      ))
+      setModelList((prev) =>
+        prev.map((model) =>
+          model.id === selectedModelForSettings.id
+            ? { ...model, max_tokens: parseInt(modelMaxTokens) || 4096 }
+            : model
+        )
+      );
     }
-    setSettingsModalVisible(false)
-    setSelectedModelForSettings(null)
-  }
+    setSettingsModalVisible(false);
+    setSelectedModelForSettings(null);
+  };
 
   // Handle adding a model
   const handleAddModel = async () => {
@@ -251,25 +301,29 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
       message.warning(t('model.dialog.error.connectivityRequired'))
       return
     }
-    
-    setLoading(true)
+
+    setLoading(true);
     if (form.isBatchImport) {
-      await handleBatchAddModel()
-      setLoading(false)
-      return
+      await handleBatchAddModel();
+      setLoading(false);
+      return;
     }
     try {
-      const modelType = form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal ? 
-        MODEL_TYPES.MULTI_EMBEDDING as ModelType : 
-        form.type;
-      
+      const modelType =
+        form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
+          ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+          : form.type;
+
       // Determine the maximum tokens value
       let maxTokensValue = parseInt(form.maxTokens);
-      if (form.type === MODEL_TYPES.EMBEDDING || form.type === MODEL_TYPES.MULTI_EMBEDDING) {
+      if (
+        form.type === MODEL_TYPES.EMBEDDING ||
+        form.type === MODEL_TYPES.MULTI_EMBEDDING
+      ) {
         // For embedding models, use the vector dimension as maxTokens
         maxTokensValue = 0;
       }
-      
+
       // Add to the backend service
       await modelService.addCustomModel({
         name: form.name,
@@ -277,9 +331,16 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         url: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
         maxTokens: maxTokensValue,
-        displayName: form.displayName || form.name
-      })
-      
+        displayName: form.displayName || form.name,
+        // Send chunk size range for embedding models
+        ...(isEmbeddingModel
+          ? {
+              expectedChunkSize: form.chunkSizeRange[0],
+              maximumChunkSize: form.chunkSizeRange[1],
+            }
+          : {}),
+      });
+
       // Create the model configuration object
       const modelConfig: SingleModelConfig = {
         modelName: form.name,
@@ -287,50 +348,50 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         apiConfig: {
           apiKey: form.apiKey,
           modelUrl: form.url,
-        }
-      }
-      
+        },
+      };
+
       // Add the dimension field for embedding models
       if (form.type === MODEL_TYPES.EMBEDDING) {
         modelConfig.dimension = parseInt(form.vectorDimension);
       }
-      
+
       // Update the local storage according to the model type
-      let configUpdate: any = {}
-      
-      switch(modelType) {
+      let configUpdate: any = {};
+
+      switch (modelType) {
         case MODEL_TYPES.LLM:
-          configUpdate = { llm: modelConfig }
+          configUpdate = { llm: modelConfig };
           break;
         case MODEL_TYPES.EMBEDDING:
-          configUpdate = { embedding: modelConfig }
+          configUpdate = { embedding: modelConfig };
           break;
         case MODEL_TYPES.MULTI_EMBEDDING:
-          configUpdate = { multiEmbedding: modelConfig }
+          configUpdate = { multiEmbedding: modelConfig };
           break;
         case MODEL_TYPES.VLM:
-          configUpdate = { vlm: modelConfig }
+          configUpdate = { vlm: modelConfig };
           break;
         case MODEL_TYPES.RERANK:
-          configUpdate = { rerank: modelConfig }
+          configUpdate = { rerank: modelConfig };
           break;
         case MODEL_TYPES.TTS:
-          configUpdate = { tts: modelConfig }
+          configUpdate = { tts: modelConfig };
           break;
         case MODEL_TYPES.STT:
-          configUpdate = { stt: modelConfig }
+          configUpdate = { stt: modelConfig };
           break;
       }
-      
+
       // Save to localStorage
-      updateModelConfig(configUpdate)
-      
+      updateModelConfig(configUpdate);
+
       // Create the returned model information
       const addedModel: AddedModel = {
         name: form.displayName,
-        type: modelType
-      }
-      
+        type: modelType,
+      };
+
       // Reset the form
       setForm({
         type: form.type,
@@ -342,32 +403,34 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         isMultimodal: false,
         isBatchImport: false,
         provider: "silicon",
-        vectorDimension: "1024"
-      })
-      
+        vectorDimension: "1024",
+        chunkSizeRange: [
+          DEFAULT_EXPECTED_CHUNK_SIZE,
+          DEFAULT_MAXIMUM_CHUNK_SIZE,
+        ],
+      });
+
       // Reset the connectivity status
-      setConnectivityStatus({ status: null, message: "" })
-      
+      setConnectivityStatus({ status: null, message: "" });
+
       // Call the success callback, pass the new added model information
-      await onSuccess(addedModel)
-      
+      await onSuccess(addedModel);
+
       // Close the dialog
-      onClose()
+      onClose();
     } catch (error) {
-      message.error(t('model.dialog.error.addFailed', { error }))
-      log.error(t('model.dialog.error.addFailedLog'), error)
+      message.error(t("model.dialog.error.addFailed", { error }));
+      log.error(t("model.dialog.error.addFailedLog"), error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING
-
-
+  const isEmbeddingModel = form.type === MODEL_TYPES.EMBEDDING;
 
   return (
     <Modal
-      title={t('model.dialog.title')}
+      title={t("model.dialog.title")}
       open={isOpen}
       onCancel={onClose}
       footer={null}
@@ -378,7 +441,7 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         <div>
           <div className="flex justify-between items-center">
             <label className="block text-sm font-medium text-gray-700">
-              {t('model.dialog.label.batchImport')}
+              {t("model.dialog.label.batchImport")}
             </label>
             <Switch
               checked={form.isBatchImport}
@@ -386,7 +449,9 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
             />
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {form.isBatchImport ? t('model.dialog.hint.batchImportEnabled') : t('model.dialog.hint.batchImportDisabled')}
+            {form.isBatchImport
+              ? t("model.dialog.hint.batchImportEnabled")
+              : t("model.dialog.hint.batchImportDisabled")}
           </div>
         </div>
 
@@ -394,14 +459,15 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         {form.isBatchImport && (
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.provider')}<span className="text-red-500">*</span>
+              {t("model.dialog.label.provider")}
+              <span className="text-red-500">*</span>
             </label>
             <Select
-              style={{ width: '100%' }}
+              style={{ width: "100%" }}
               value={form.provider}
-              onChange={(value) => handleFormChange('provider', value)}
+              onChange={(value) => handleFormChange("provider", value)}
             >
-              <Option value="silicon">{t('model.provider.silicon')}</Option>
+              <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
           </div>
         )}
@@ -409,19 +475,28 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         {/* Model Type */}
         <div>
           <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t('model.dialog.label.type')} <span className="text-red-500">*</span>
+            {t("model.dialog.label.type")}{" "}
+            <span className="text-red-500">*</span>
           </label>
           <Select
             style={{ width: "100%" }}
             value={form.type}
             onChange={(value) => handleFormChange("type", value)}
           >
-            <Option value={MODEL_TYPES.LLM}>{t('model.type.llm')}</Option>
-            <Option value={MODEL_TYPES.EMBEDDING}>{t('model.type.embedding')}</Option>
-            <Option value={MODEL_TYPES.VLM}>{t('model.type.vlm')}</Option>
-            <Option value={MODEL_TYPES.RERANK} disabled>{t('model.type.rerank')}</Option>
-            <Option value={MODEL_TYPES.STT} disabled>{t('model.type.stt')}</Option>
-            <Option value={MODEL_TYPES.TTS} disabled>{t('model.type.tts')}</Option>
+            <Option value={MODEL_TYPES.LLM}>{t("model.type.llm")}</Option>
+            <Option value={MODEL_TYPES.EMBEDDING}>
+              {t("model.type.embedding")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
+            <Option value={MODEL_TYPES.RERANK} disabled>
+              {t("model.type.rerank")}
+            </Option>
+            <Option value={MODEL_TYPES.STT} disabled>
+              {t("model.type.stt")}
+            </Option>
+            <Option value={MODEL_TYPES.TTS} disabled>
+              {t("model.type.tts")}
+            </Option>
           </Select>
         </div>
 
@@ -430,15 +505,19 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
           <div>
             <div className="flex justify-between items-center">
               <label className="block text-sm font-medium text-gray-700">
-                {t('model.dialog.label.multimodal')}
+                {t("model.dialog.label.multimodal")}
               </label>
-              <Switch 
+              <Switch
                 checked={form.isMultimodal}
-                onChange={(checked) => handleFormChange("isMultimodal", checked)}
+                onChange={(checked) =>
+                  handleFormChange("isMultimodal", checked)
+                }
               />
             </div>
             <div className="text-xs text-gray-500 mt-1">
-              {form.isMultimodal ? t('model.dialog.hint.multimodalEnabled') : t('model.dialog.hint.multimodalDisabled')}
+              {form.isMultimodal
+                ? t("model.dialog.hint.multimodalEnabled")
+                : t("model.dialog.hint.multimodalDisabled")}
             </div>
           </div>
         )}
@@ -446,12 +525,16 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         {/* Model Name */}
         {!form.isBatchImport && (
           <div>
-            <label htmlFor="name" className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.name')} <span className="text-red-500">*</span>
+            <label
+              htmlFor="name"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.name")}{" "}
+              <span className="text-red-500">*</span>
             </label>
             <Input
               id="name"
-              placeholder={t('model.dialog.placeholder.name')}
+              placeholder={t("model.dialog.placeholder.name")}
               value={form.name}
               onChange={handleModelNameChange}
             />
@@ -461,12 +544,15 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         {/* Display Name */}
         {!form.isBatchImport && (
           <div>
-            <label htmlFor="displayName" className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.displayName')}
+            <label
+              htmlFor="displayName"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.displayName")}
             </label>
             <Input
               id="displayName"
-              placeholder={t('model.dialog.placeholder.displayName')}
+              placeholder={t("model.dialog.placeholder.displayName")}
               value={form.displayName}
               onChange={(e) => handleFormChange("displayName", e.target.value)}
             />
@@ -476,15 +562,19 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         {/* Model URL */}
         {!form.isBatchImport && (
           <div>
-            <label htmlFor="url" className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.url')} <span className="text-red-500">*</span>
+            <label
+              htmlFor="url"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.url")}{" "}
+              <span className="text-red-500">*</span>
             </label>
             <Input
               id="url"
               placeholder={
                 form.type === MODEL_TYPES.EMBEDDING
-                  ? t('model.dialog.placeholder.url.embedding')
-                  : t('model.dialog.placeholder.url')
+                  ? t("model.dialog.placeholder.url.embedding")
+                  : t("model.dialog.placeholder.url")
               }
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
@@ -494,35 +584,62 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
 
         {/* API Key */}
         <div>
-          <label htmlFor="apiKey" className="block mb-1 text-sm font-medium text-gray-700">
-            {t('model.dialog.label.apiKey')} {form.isBatchImport && <span className="text-red-500">*</span>}
+          <label
+            htmlFor="apiKey"
+            className="block mb-1 text-sm font-medium text-gray-700"
+          >
+            {t("model.dialog.label.apiKey")}{" "}
+            {form.isBatchImport && <span className="text-red-500">*</span>}
           </label>
           <Input.Password
             id="apiKey"
-            placeholder={t('model.dialog.placeholder.apiKey')}
+            placeholder={t("model.dialog.placeholder.apiKey")}
             value={form.apiKey}
             onChange={(e) => handleFormChange("apiKey", e.target.value)}
             autoComplete="new-password"
           />
         </div>
 
+        {/* Chunk Size Slider (Embedding model only) */}
+        {isEmbeddingModel && (
+          <div>
+            <label className="block mb-1 text-sm font-medium text-gray-700">
+              {t("modelConfig.slider.chunkingSize")}
+            </label>
+            <ModelChunkSizeSlider
+              value={form.chunkSizeRange}
+              onChange={(value) => {
+                setForm((prev) => ({
+                  ...prev,
+                  chunkSizeRange: value,
+                }));
+              }}
+            />
+          </div>
+        )}
+
         {/* Vector dimension */}
         {isEmbeddingModel && (
           <div>
-            <label htmlFor="vectorDimension" className="block mb-1 text-sm font-medium text-gray-700">
-            </label>
+            <label
+              htmlFor="vectorDimension"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            ></label>
           </div>
         )}
 
         {/* Max Tokens */}
         {!isEmbeddingModel && !form.isBatchImport && (
           <div>
-            <label htmlFor="maxTokens" className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.label.maxTokens')}
+            <label
+              htmlFor="maxTokens"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("model.dialog.label.maxTokens")}
             </label>
             <Input
               id="maxTokens"
-              placeholder={t('model.dialog.placeholder.maxTokens')}
+              placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
               onChange={(e) => handleFormChange("maxTokens", e.target.value)}
             />
@@ -531,126 +648,157 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
 
         {/* Connectivity verification area */}
         {!form.isBatchImport && (
-        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <span className="text-sm font-medium text-gray-700">{t('model.dialog.connectivity.title')}</span>
-              {connectivityStatus.status && (
-                <div className="ml-2 flex items-center">
-                  {getConnectivityMeta(connectivityStatus.status).icon}
-                  <span 
-                    className="ml-1 text-xs"
-                    style={{ color: getConnectivityMeta(connectivityStatus.status).color }}
-                  >
-                    {connectivityStatus.status === 'available' && t('model.dialog.connectivity.status.available')}
-                    {connectivityStatus.status === 'unavailable' && t('model.dialog.connectivity.status.unavailable')}
-                    {connectivityStatus.status === 'checking' && t('model.dialog.status.verifying')}
-                  </span>
-                </div>
-              )}
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <span className="text-sm font-medium text-gray-700">
+                  {t("model.dialog.connectivity.title")}
+                </span>
+                {connectivityStatus.status && (
+                  <div className="ml-2 flex items-center">
+                    {getConnectivityMeta(connectivityStatus.status).icon}
+                    <span
+                      className="ml-1 text-xs"
+                      style={{
+                        color: getConnectivityMeta(connectivityStatus.status)
+                          .color,
+                      }}
+                    >
+                      {connectivityStatus.status === "available" &&
+                        t("model.dialog.connectivity.status.available")}
+                      {connectivityStatus.status === "unavailable" &&
+                        t("model.dialog.connectivity.status.unavailable")}
+                      {connectivityStatus.status === "checking" &&
+                        t("model.dialog.status.verifying")}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <Button
+                size="small"
+                type="default"
+                onClick={handleVerifyConnectivity}
+                disabled={!isFormValid() || verifyingConnectivity}
+              >
+                {verifyingConnectivity
+                  ? t("model.dialog.button.verifying")
+                  : t("model.dialog.button.verify")}
+              </Button>
             </div>
-            <Button
-              size="small"
-              type="default"
-              onClick={handleVerifyConnectivity}
-              disabled={!isFormValid() || verifyingConnectivity}
-            >
-              {verifyingConnectivity ? t('model.dialog.button.verifying') : t('model.dialog.button.verify')}
-            </Button>
           </div>
-        </div>
         )}
 
         {/* Model List */}
         {form.isBatchImport && (
-        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-          <div className="flex items-center justify-between mb-1">
-            <button
-              type="button"
-              onClick={() => setShowModelList(!showModelList)}
-              className="flex items-center focus:outline-none"
-            >
-              {showModelList ? (
-                <DownOutlined className="text-sm text-gray-700 mr-1" />
-              ) : (
-                <RightOutlined className="text-sm text-gray-700 mr-1" />
-              )}
-              <span className="text-sm font-medium text-gray-700">
-                {t('model.dialog.modelList.title')}
-              </span>
-            </button>
-            <Button
-              size="small"
-              type="default"
-              onClick={getModelList}
-              disabled={!isFormValid() || loadingModelList}
-            >
-              {loadingModelList ? t('common.loading') : t('model.dialog.button.modelList')}
-            </Button>
-          </div>
-          {showModelList && (
-            <div className="mt-2 space-y-1 max-h-60 overflow-y-auto">
-              {loadingModelList ? (
-                <div className="flex flex-col items-center justify-center py-4 text-xs text-gray-500">
-                  <LoadingOutlined spin style={{ fontSize: 18, color: '#1890ff', marginBottom: 4 }} />
-                  <span>{t('common.loading') || '获取中...'}</span>
-                </div>
-              ) : modelList.length === 0 ? (
-                <div className="text-xs text-gray-500 text-center">{t('model.dialog.message.noModels') || '请先获取模型'}</div>
-              ) : (
-                
-                modelList.map((model: any) => {
-                  const checked = selectedModelIds.has(model.id)
-                  const toggleSelect = (value: boolean) => {
-                    setSelectedModelIds(prev => {
-                      const next = new Set(prev)
-                      if (value) {
-                        next.add(model.id)
-                      } else {
-                        next.delete(model.id)
-                      }
-                      return next
-                    })
-                  }
-                  return (
-                    <div key={model.id} className="p-2 flex justify-between items-center rounded hover:bg-gray-100 text-sm border border-transparent">
-                      <div className="flex items-center min-w-0">
-                        <span className="truncate" title={model.id}>
-                          {model.id}
-                        </span>
-                        {model.model_type && (
-                          <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-200 text-gray-600 uppercase">
-                            {String(model.model_tag)}
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+            <div className="flex items-center justify-between mb-1">
+              <button
+                type="button"
+                onClick={() => setShowModelList(!showModelList)}
+                className="flex items-center focus:outline-none"
+              >
+                {showModelList ? (
+                  <DownOutlined className="text-sm text-gray-700 mr-1" />
+                ) : (
+                  <RightOutlined className="text-sm text-gray-700 mr-1" />
+                )}
+                <span className="text-sm font-medium text-gray-700">
+                  {t("model.dialog.modelList.title")}
+                </span>
+              </button>
+              <Button
+                size="small"
+                type="default"
+                onClick={getModelList}
+                disabled={!isFormValid() || loadingModelList}
+              >
+                {loadingModelList
+                  ? t("common.loading")
+                  : t("model.dialog.button.modelList")}
+              </Button>
+            </div>
+            {showModelList && (
+              <div className="mt-2 space-y-1 max-h-60 overflow-y-auto">
+                {loadingModelList ? (
+                  <div className="flex flex-col items-center justify-center py-4 text-xs text-gray-500">
+                    <LoadingOutlined
+                      spin
+                      style={{
+                        fontSize: 18,
+                        color: "#1890ff",
+                        marginBottom: 4,
+                      }}
+                    />
+                    <span>{t("common.loading") || "获取中..."}</span>
+                  </div>
+                ) : modelList.length === 0 ? (
+                  <div className="text-xs text-gray-500 text-center">
+                    {t("model.dialog.message.noModels") || "请先获取模型"}
+                  </div>
+                ) : (
+                  modelList.map((model: any) => {
+                    const checked = selectedModelIds.has(model.id);
+                    const toggleSelect = (value: boolean) => {
+                      setSelectedModelIds((prev) => {
+                        const next = new Set(prev);
+                        if (value) {
+                          next.add(model.id);
+                        } else {
+                          next.delete(model.id);
+                        }
+                        return next;
+                      });
+                    };
+                    return (
+                      <div
+                        key={model.id}
+                        className="p-2 flex justify-between items-center rounded hover:bg-gray-100 text-sm border border-transparent"
+                      >
+                        <div className="flex items-center min-w-0">
+                          <span className="truncate" title={model.id}>
+                            {model.id}
                           </span>
-                        )}
+                          {model.model_type && (
+                            <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-200 text-gray-600 uppercase">
+                              {String(model.model_tag)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {!isEmbeddingModel && (
+                            <Tooltip
+                              title={t(
+                                "model.dialog.modelList.tooltip.settings"
+                              )}
+                            >
+                              <Button
+                                type="text"
+                                icon={<SettingOutlined />}
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent switch toggle
+                                  handleSettingsClick(model);
+                                }}
+                              />
+                            </Tooltip>
+                          )}
+                          <Switch
+                            size="small"
+                            checked={checked}
+                            onChange={toggleSelect}
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        {!isEmbeddingModel && (
-                          <Tooltip title={t('model.dialog.modelList.tooltip.settings')}>
-                            <Button
-                              type="text"
-                              icon={<SettingOutlined />}
-                              size="small"
-                              onClick={(e) => {
-                                e.stopPropagation(); // Prevent switch toggle
-                                handleSettingsClick(model);
-                              }}
-                            />
-                          </Tooltip>
-                        )}
-                        <Switch size="small" checked={checked} onChange={toggleSelect} />
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          )}
-          {connectivityStatus.message && !showModelList && (
-            <div className="text-xs text-gray-600">
-              {connectivityStatus.message}
-            </div>
-          )}
+                    );
+                  })
+                )}
+              </div>
+            )}
+            {connectivityStatus.message && !showModelList && (
+              <div className="text-xs text-gray-600">
+                {connectivityStatus.message}
+              </div>
+            )}
           </div>
         )}
 
@@ -659,75 +807,94 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
           <div>
             <div className="flex items-center mb-1">
               <InfoCircleFilled className="text-md text-blue-500 mr-3" />
-              <p className="font-bold text-medium">{t('model.dialog.help.title')}</p>
+              <p className="font-bold text-medium">
+                {t("model.dialog.help.title")}
+              </p>
             </div>
             <div className="mt-0.5 ml-6">
-              {(form.isBatchImport ? t('model.dialog.help.content.batchImport') : t('model.dialog.help.content')).split('\n').map((line, index) => {
-                // Parse Markdown-style links: [text](url)
-                const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-                const parts: (string | { text: string; url: string })[] = [];
-                let lastIndex = 0;
-                let match;
-                
-                while ((match = markdownLinkRegex.exec(line)) !== null) {
-                  // Add text before the link
-                  if (match.index > lastIndex) {
-                    parts.push(line.substring(lastIndex, match.index));
+              {(form.isBatchImport
+                ? t("model.dialog.help.content.batchImport")
+                : t("model.dialog.help.content")
+              )
+                .split("\n")
+                .map((line, index) => {
+                  // Parse Markdown-style links: [text](url)
+                  const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+                  const parts: (string | { text: string; url: string })[] = [];
+                  let lastIndex = 0;
+                  let match;
+
+                  while ((match = markdownLinkRegex.exec(line)) !== null) {
+                    // Add text before the link
+                    if (match.index > lastIndex) {
+                      parts.push(line.substring(lastIndex, match.index));
+                    }
+                    // Add the link object
+                    parts.push({ text: match[1], url: match[2] });
+                    lastIndex = match.index + match[0].length;
                   }
-                  // Add the link object
-                  parts.push({ text: match[1], url: match[2] });
-                  lastIndex = match.index + match[0].length;
-                }
-                
-                // Add remaining text after the last link
-                if (lastIndex < line.length) {
-                  parts.push(line.substring(lastIndex));
-                }
-                
-                // If no links found, just add the whole line
-                if (parts.length === 0) {
-                  parts.push(line);
-                }
-                
-                return (
-                  <p key={index} className={index > 0 ? 'mt-1' : ''}>
-                    {parts.map((part, partIndex) => {
-                      if (typeof part === 'object') {
-                        return (
-                          <a 
-                            key={partIndex}
-                            href={part.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:text-blue-800 underline"
-                          >
-                            {part.text}
-                          </a>
-                        );
-                      }
-                      return <span key={partIndex}>{part}</span>;
-                    })}
-                  </p>
-                );
-              })}
+
+                  // Add remaining text after the last link
+                  if (lastIndex < line.length) {
+                    parts.push(line.substring(lastIndex));
+                  }
+
+                  // If no links found, just add the whole line
+                  if (parts.length === 0) {
+                    parts.push(line);
+                  }
+
+                  return (
+                    <p key={index} className={index > 0 ? "mt-1" : ""}>
+                      {parts.map((part, partIndex) => {
+                        if (typeof part === "object") {
+                          return (
+                            <a
+                              key={partIndex}
+                              href={part.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 underline"
+                            >
+                              {part.text}
+                            </a>
+                          );
+                        }
+                        return <span key={partIndex}>{part}</span>;
+                      })}
+                    </p>
+                  );
+                })}
             </div>
             <div className="mt-2 ml-6 flex items-center">
-              <span>{t('model.dialog.label.currentlySupported')}</span>
+              <span>{t("model.dialog.label.currentlySupported")}</span>
               {form.isBatchImport && (
                 <Tooltip title="SiliconFlow">
-                  <img src="/siliconflow.png" alt="SiliconFlow" className="h-4 ml-1.5" />
+                  <img
+                    src="/siliconflow.png"
+                    alt="SiliconFlow"
+                    className="h-4 ml-1.5"
+                  />
                 </Tooltip>
               )}
-              {form.type === 'llm' && !form.isBatchImport && (
+              {form.type === "llm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <img src="/openai.png" alt="OpenAI" className="h-4 ml-1.5" />
+                    <img
+                      src="/openai.png"
+                      alt="OpenAI"
+                      className="h-4 ml-1.5"
+                    />
                   </Tooltip>
                   <Tooltip title="Kimi">
                     <img src="/kimi.png" alt="Kimi" className="h-4 ml-1.5" />
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <img src="/deepseek.png" alt="Deepseek" className="h-4 ml-1.5" />
+                    <img
+                      src="/deepseek.png"
+                      alt="Deepseek"
+                      className="h-4 ml-1.5"
+                    />
                   </Tooltip>
                   <Tooltip title="Qwen">
                     <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5" />
@@ -735,10 +902,14 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
                   <span className="ml-1.5">...</span>
                 </>
               )}
-              {form.type === 'embedding' && !form.isBatchImport && (
+              {form.type === "embedding" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <img src="/openai.png" alt="OpenAI" className="h-4 ml-1.5" />
+                    <img
+                      src="/openai.png"
+                      alt="OpenAI"
+                      className="h-4 ml-1.5"
+                    />
                   </Tooltip>
                   <Tooltip title="Qwen">
                     <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5" />
@@ -752,13 +923,17 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
                   <span className="ml-1.5">...</span>
                 </>
               )}
-              {form.type === 'vlm' && !form.isBatchImport && (
+              {form.type === "vlm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="Qwen">
                     <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5" />
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <img src="/deepseek.png" alt="Deepseek" className="h-4 ml-1.5" />
+                    <img
+                      src="/deepseek.png"
+                      alt="Deepseek"
+                      className="h-4 ml-1.5"
+                    />
                   </Tooltip>
                   <span className="ml-1.5">...</span>
                 </>
@@ -769,23 +944,21 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
 
         {/* Footer Buttons */}
         <div className="flex justify-end space-x-3">
-          <Button onClick={onClose}>
-            {t('common.button.cancel')}
-          </Button>
+          <Button onClick={onClose}>{t("common.button.cancel")}</Button>
           <Button
             type="primary"
             onClick={handleAddModel}
             disabled={!isFormValid() || (!form.isBatchImport && connectivityStatus.status !== 'available')}
             loading={loading}
           >
-            {t('model.dialog.button.add')}
+            {t("model.dialog.button.add")}
           </Button>
         </div>
       </div>
 
       {/* Settings Modal */}
       <Modal
-        title={t('model.dialog.settings.title')}
+        title={t("model.dialog.settings.title")}
         open={settingsModalVisible}
         onCancel={() => setSettingsModalVisible(false)}
         onOk={handleSettingsSave}
@@ -794,17 +967,17 @@ export const ModelAddDialog = ({ isOpen, onClose, onSuccess }: ModelAddDialogPro
         <div className="space-y-3">
           <div>
             <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t('model.dialog.settings.label.maxTokens')}
+              {t("model.dialog.settings.label.maxTokens")}
             </label>
             <Input
               type="number"
               value={modelMaxTokens}
               onChange={(e) => setModelMaxTokens(e.target.value)}
-              placeholder={t('model.dialog.placeholder.maxTokens')}
+              placeholder={t("model.dialog.placeholder.maxTokens")}
             />
           </div>
         </div>
       </Modal>
     </Modal>
-  )
-} 
+  );
+};

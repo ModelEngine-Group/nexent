@@ -42,6 +42,8 @@ export interface ModelOption {
   apiUrl: string;
   displayName: string;
   connect_status?: ModelConnectStatus;
+  expectedChunkSize?: number;
+  maximumChunkSize?: number;
 }
 
 // Application configuration interface

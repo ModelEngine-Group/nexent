@@ -110,6 +110,8 @@ export const modelService = {
           displayName: model.display_name || model.model_name,
           connect_status:
             (model.connect_status as ModelConnectStatus) || "not_detected",
+          expectedChunkSize: model.expected_chunk_size,
+          maximumChunkSize: model.maximum_chunk_size,
         }));
       }
       // If API call was not successful, return empty array
@@ -133,6 +135,8 @@ export const modelService = {
     apiKey: string;
     maxTokens: number;
     displayName?: string;
+    expectedChunkSize?: number;
+    maximumChunkSize?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.customModelCreate, {
@@ -146,6 +150,8 @@ export const modelService = {
           api_key: model.apiKey,
           max_tokens: model.maxTokens,
           display_name: model.displayName,
+          expected_chunk_size: model.expectedChunkSize,
+          maximum_chunk_size: model.maximumChunkSize,
         }),
       });
 
@@ -271,6 +277,8 @@ export const modelService = {
     apiKey: string;
     maxTokens?: number;
     source?: ModelSource;
+    expectedChunkSize?: number;
+    maximumChunkSize?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.updateSingleModel, {
@@ -285,6 +293,12 @@ export const modelService = {
             ? { max_tokens: model.maxTokens }
             : {}),
           model_factory: model.source || "OpenAI-API-Compatible",
+          ...(model.expectedChunkSize !== undefined
+            ? { expected_chunk_size: model.expectedChunkSize }
+            : {}),
+          ...(model.maximumChunkSize !== undefined
+            ? { maximum_chunk_size: model.maximumChunkSize }
+            : {}),
         }),
       });
       const result = await response.json();

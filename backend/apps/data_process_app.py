@@ -47,14 +47,17 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
     """
     # Create task using the new process_and_forward task
 
-    logger.info(f"Creating task with source_type: {request.source_type}")
+    logger.info(
+        f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
     task_result = process_and_forward.delay(
         source=request.source,
         source_type=request.source_type,
         chunking_strategy=request.chunking_strategy,
         index_name=request.index_name,
         original_filename=request.original_filename,
-        authorization=authorization
+        authorization=authorization,
+        embedding_model_id=request.embedding_model_id,
+        tenant_id=request.tenant_id
     )
     return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_result.id})
 
@@ -108,6 +111,9 @@ async def process_sync_endpoint(
                 "text_length": result.get("text_length", 0)
             }
         )
+    except HTTPException:
+        # Preserve explicit HTTP errors
+        raise
     except Exception as e:
         logger.error(f"Error in synchronous processing: {str(e)}")
         raise HTTPException(
@@ -127,6 +133,8 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[
     try:
         task_ids = await service.create_batch_tasks_impl(authorization=authorization, request=request)
         return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_ids": task_ids})
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating batch tasks: {str(e)}")
         raise HTTPException(
@@ -155,6 +163,8 @@ async def load_image(url: str):
         image_data, content_type = await service.convert_to_base64(image)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"success": True, "base64": image_data, "content_type": content_type})
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error loading image: {str(e)}")
         raise HTTPException(
@@ -203,8 +213,7 @@ async def get_index_tasks(index_name: str):
 @router.get("/{task_id}/details")
 async def get_task_details(task_id: str):
     """Get detailed information about a task, including results"""
-    from data_process.utils import get_task_details as utils_get_task_details
-    task = await utils_get_task_details(task_id)
+    task = await service.get_task_details(task_id)
     if not task:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail="Task not found")
@@ -233,6 +242,8 @@ async def filter_important_image(
             status_code=HTTPStatus.OK,
             content=result
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
         raise HTTPException(
@@ -265,6 +276,8 @@ async def process_text_file(
             chunking_strategy=chunking_strategy,
         )
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(
             f"Error processing uploaded file {file.filename}: {str(e)}")
@@ -290,6 +303,8 @@ async def convert_state(request: ConvertStateRequest):
             status_code=HTTPStatus.OK,
             content={"state": result}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error converting state: {str(e)}")
         raise HTTPException(

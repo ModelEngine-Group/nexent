@@ -4,7 +4,11 @@ from typing import Dict, List
 
 import httpx
 
-from consts.const import DEFAULT_LLM_MAX_TOKENS
+from consts.const import (
+    DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_EXPECTED_CHUNK_SIZE,
+    DEFAULT_MAXIMUM_CHUNK_SIZE
+)
 from consts.model import ModelConnectStatusEnum, ModelRequest
 from consts.provider import SILICON_GET_URL, ProviderEnum
 from database.model_management_db import get_models_by_tenant_factory_type
@@ -85,6 +89,11 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     model_repo, model_name = split_repo_name(model["id"])
     model_display_name = add_repo_to_name(model_repo, model_name)
 
+    # For embedding models, apply default values when chunk sizes are null
+    if model["model_type"] in ["embedding", "multi_embedding"]:
+        expected_chunk_size = model.get("expected_chunk_size", DEFAULT_EXPECTED_CHUNK_SIZE)
+        maximum_chunk_size = model.get("maximum_chunk_size", DEFAULT_MAXIMUM_CHUNK_SIZE)
+
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
     model_obj = ModelRequest(
@@ -93,7 +102,9 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         model_type=model["model_type"],
         api_key=model_api_key,
         max_tokens=model["max_tokens"],
-        display_name=model_display_name
+        display_name=model_display_name,
+        expected_chunk_size=expected_chunk_size,
+        maximum_chunk_size=maximum_chunk_size
     )
 
     model_dict = model_obj.model_dump()

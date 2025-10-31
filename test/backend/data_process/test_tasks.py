@@ -47,6 +47,9 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         const_mod.RAY_ACTOR_NUM_CPUS = 1
         const_mod.FORWARD_REDIS_RETRY_DELAY_S = 0
         const_mod.FORWARD_REDIS_RETRY_MAX = 1
+        # New defaults required by ray_actors import
+        const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+        const_mod.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
         sys.modules["consts.const"] = const_mod
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
@@ -65,6 +68,33 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
             get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
             get_file_size_from_minio=lambda object_name, bucket=None: 0,
         )
+    # Stub model_management_db module required by ray_actors
+    if "database.model_management_db" not in sys.modules:
+        sys.modules["database.model_management_db"] = types.SimpleNamespace(
+            get_model_by_model_id=lambda model_id, tenant_id=None: None
+        )
+    # Ensure parent 'database' package exists and link submodules for proper import resolution
+    if "database" not in sys.modules:
+        db_pkg = types.ModuleType("database")
+        setattr(db_pkg, "__path__", [])
+        sys.modules["database"] = db_pkg
+    setattr(sys.modules["database"], "attachment_db",
+            sys.modules["database.attachment_db"])
+    setattr(sys.modules["database"], "model_management_db",
+            sys.modules["database.model_management_db"])
+
+    # Stub out auth and config utils to avoid importing real dependencies in file_management_utils
+    if "utils.auth_utils" not in sys.modules:
+        sys.modules["utils.auth_utils"] = types.SimpleNamespace(
+            get_current_user_id=lambda authorization: (
+                "user-test", "tenant-test")
+        )
+    if "utils.config_utils" not in sys.modules:
+        cfg_mod = types.ModuleType("utils.config_utils")
+        cfg_mod.tenant_config_manager = types.SimpleNamespace(
+            load_config=lambda tenant_id: {}
+        )
+        sys.modules["utils.config_utils"] = cfg_mod
     if "nexent.data_process" not in sys.modules:
         sys.modules["nexent.data_process"] = types.SimpleNamespace(
             DataProcessCore=type("_Core", (), {"__init__": lambda self: None, "file_process": lambda *a, **k: []})
@@ -261,6 +291,43 @@ def test_process_minio_path(monkeypatch):
     success_state = [s for s in self.states if s.get(
         "state") == tasks.states.SUCCESS][0]
     assert success_state.get("meta", {}).get("chunks_count") == 1
+
+
+def test_process_passes_embedding_ids_to_actor(monkeypatch, tmp_path):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch, initialized=True)
+
+    # Prepare a fake local file
+    f = tmp_path / "e.txt"
+    f.write_text("content")
+
+    captured = {}
+
+    class FakeActor:
+        def __init__(self):
+            def remote(*a, **k):
+                captured["kwargs"] = k
+                return "ref_cap"
+            self.process_file = types.SimpleNamespace(remote=remote)
+            self.store_chunks_in_redis = types.SimpleNamespace(
+                remote=lambda *a, **k: None)
+
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: FakeActor())
+    fake_ray.get_returns = [{"content": "chunk", "metadata": {}}]
+
+    self = FakeSelf("mid-1")
+    tasks.process(
+        self,
+        source=str(f),
+        source_type="local",
+        chunking_strategy="basic",
+        index_name="idx",
+        original_filename="e.txt",
+        embedding_model_id=321,
+        tenant_id="tenant-x",
+    )
+
+    assert captured.get("kwargs", {}).get("model_id") == 321
+    assert captured.get("kwargs", {}).get("tenant_id") == "tenant-x"
 
 
 def test_process_large_file_with_many_chunks(monkeypatch, tmp_path):

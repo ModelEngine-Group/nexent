@@ -647,6 +647,9 @@
   "modelConfig.button.addCustomModel": "Add Custom Model",
   "modelConfig.button.editCustomModel": "Edit Custom Model",
   "modelConfig.button.checkConnectivity": "Check Model Connectivity",
+  "modelConfig.slider.chunkingSize": "Chunk Size",
+  "modelConfig.slider.expectedChunkSize": "Expected Chunk Size",
+  "modelConfig.slider.maximumChunkSize": "Maximum Chunk Size",
 
   "businessLogic.title": "Describe how should this agent work",
   "businessLogic.placeholder": "Please describe your business scenario and requirements...",

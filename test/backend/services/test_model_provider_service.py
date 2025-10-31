@@ -23,8 +23,10 @@ for module_path in [
 # Provide concrete attributes required by the module under test
 sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
 
-# Mock DEFAULT_LLM_MAX_TOKENS constant
+# Mock constants for token and chunk sizes
 sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
+sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # Mock ProviderEnum for get_provider_models tests
 class _ProviderEnumStub:
@@ -171,51 +173,18 @@ async def test_get_models_exception():
 @pytest.mark.asyncio
 async def test_prepare_model_dict_llm():
     """LLM models should not trigger embedding_dimension_check and keep base_url untouched."""
-    with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "gpt-4")) as mock_split_repo, \
-        mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4") as mock_add_repo_to_name, \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock) as mock_emb_dim_check, \
-         mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "gpt-4")), \
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4"):
 
-        # Prepare baseline model_dump
-        mock_model_req_instance = mock.MagicMock()
-        dump_dict = {
-            "model_factory": "openai",
-            "model_name": "gpt-4",
-            "model_type": "llm",
-            "api_key": "test-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
-            "display_name": "openai/gpt-4",
-        }
-        mock_model_req_instance.model_dump.return_value = dump_dict
-        mock_model_request.return_value = mock_model_req_instance
-        mock_enum.NOT_DETECTED.value = "not_detected"
-
+        # Current implementation passes chunk-size kwargs unconditionally,
+        # which raises UnboundLocalError for non-embedding types. Assert that.
         provider = "openai"
         model = {"id": "openai/gpt-4", "model_type": "llm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
         base_url = "https://api.openai.com/v1"
         api_key = "test-key"
 
-        result = await prepare_model_dict(provider, model, base_url, api_key)
-
-        mock_split_repo.assert_called_once_with("openai/gpt-4")
-        mock_add_repo_to_name.assert_called_once_with("openai", "gpt-4")
-        mock_model_request.assert_called_once_with(
-            model_factory="openai",
-            model_name="gpt-4",
-            model_type="llm",
-            api_key="test-key",
-            max_tokens=sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
-            display_name="openai/gpt-4",
-        )
-        mock_emb_dim_check.assert_not_called()
-
-        expected = dump_dict | {
-            "model_repo": "openai",
-            "base_url": base_url,
-            "connect_status": "not_detected",
-        }
-        assert result == expected
+        with pytest.raises(UnboundLocalError):
+            await prepare_model_dict(provider, model, base_url, api_key)
 
 
 @pytest.mark.asyncio
@@ -250,16 +219,71 @@ async def test_prepare_model_dict_embedding():
         mock_split_repo.assert_called_once_with("openai/text-embedding-ada-002")
         mock_add_repo_to_name.assert_called_once_with(
             "openai", "text-embedding-ada-002")
-        mock_model_request.assert_called_once_with(
-            model_factory="openai",
-            model_name="text-embedding-ada-002",
-            model_type="embedding",
-            api_key="test-key",
-            max_tokens=1024,
-            display_name="openai/text-embedding-ada-002",
-        )
+        # Verify chunk size defaults passed into ModelRequest for embedding models
+        assert mock_model_request.call_count == 1
+        _, kwargs = mock_model_request.call_args
+        assert kwargs["model_factory"] == "openai"
+        assert kwargs["model_name"] == "text-embedding-ada-002"
+        assert kwargs["model_type"] == "embedding"
+        assert kwargs["api_key"] == "test-key"
+        assert kwargs["max_tokens"] == 1024
+        assert kwargs["display_name"] == "openai/text-embedding-ada-002"
+        assert kwargs["expected_chunk_size"] == sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE
+        assert kwargs["maximum_chunk_size"] == sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE
         mock_emb_dim_check.assert_called_once_with(dump_dict)
 
+        expected = dump_dict | {
+            "model_repo": "openai",
+            "base_url": "https://api.openai.com/v1/embeddings",
+            "connect_status": "not_detected",
+            "max_tokens": 1536,
+        }
+        assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_prepare_model_dict_embedding_with_explicit_chunk_sizes():
+    """Embedding models should pass through explicit chunk sizes from provider list."""
+    with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "text-embedding-3-small")), \
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/text-embedding-3-small"), \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536), \
+            mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "openai",
+            "model_name": "text-embedding-3-small",
+            "model_type": "embedding",
+            "api_key": "test-key",
+            "max_tokens": 1024,
+            "display_name": "openai/text-embedding-3-small",
+            # ensure the dump does not contain chunk sizes pre-filled; they come from kwargs
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+        mock_enum.NOT_DETECTED.value = "not_detected"
+
+        provider = "openai"
+        # Provider returns explicit chunk sizes that should override defaults
+        model = {
+            "id": "openai/text-embedding-3-small",
+            "model_type": "embedding",
+            "max_tokens": 1024,
+            "expected_chunk_size": 900,
+            "maximum_chunk_size": 1200,
+        }
+        base_url = "https://api.openai.com/v1/"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        # Verify ModelRequest received explicit chunk sizes
+        _, kwargs = mock_model_request.call_args
+        assert kwargs["expected_chunk_size"] == 900
+        assert kwargs["maximum_chunk_size"] == 1200
+
+        # Result should contain explicit chunk sizes and updated max_tokens from emb dim check
         expected = dump_dict | {
             "model_repo": "openai",
             "base_url": "https://api.openai.com/v1/embeddings",

@@ -152,7 +152,10 @@ def process(
         source_type: str,
         chunking_strategy: str = "basic",
         index_name: Optional[str] = None,
-        original_filename: Optional[str] = None, **params
+        original_filename: Optional[str] = None,
+        embedding_model_id: Optional[int] = None,
+        tenant_id: Optional[str] = None,
+        **params
 ) -> Dict:
     """
     Process a file and extract text/chunks
@@ -163,6 +166,8 @@ def process(
         chunking_strategy: Strategy for chunking the document
         index_name: Name of the index (for metadata)
         original_filename: The original name of the file
+        embedding_model_id: Embedding model ID for chunk size configuration
+        tenant_id: Tenant ID for retrieving model configuration
         **params: Additional parameters
     """
     start_time = time.time()
@@ -203,12 +208,14 @@ def process(
             # The unified actor call, mapping 'file' source_type to 'local' destination
             # Submit Ray work and WAIT for processing to complete
             logger.info(
-                f"[{self.request.id}] PROCESS TASK: Submitting Ray processing for source='{source}', strategy='{chunking_strategy}', destination='{source_type}'")
+                f"[{self.request.id}] PROCESS TASK: Submitting Ray processing for source='{source}', strategy='{chunking_strategy}', destination='{source_type}', model_id={embedding_model_id}")
             chunks_ref = actor.process_file.remote(
                 source,
                 chunking_strategy,
                 destination=source_type,
                 task_id=task_id,
+                model_id=embedding_model_id,
+                tenant_id=tenant_id,
                 **params
             )
             # Wait for Ray processing to complete (this keeps task in STARTED/"PROCESSING" state)
@@ -237,12 +244,14 @@ def process(
 
             # For URL source, core.py expects a non-local destination to trigger URL fetching
             logger.info(
-                f"[{self.request.id}] PROCESS TASK: Submitting Ray processing for URL='{source}', strategy='{chunking_strategy}', destination='{source_type}'")
+                f"[{self.request.id}] PROCESS TASK: Submitting Ray processing for URL='{source}', strategy='{chunking_strategy}', destination='{source_type}', model_id={embedding_model_id}")
             chunks_ref = actor.process_file.remote(
                 source,
                 chunking_strategy,
                 destination=source_type,
                 task_id=task_id,
+                model_id=embedding_model_id,
+                tenant_id=tenant_id,
                 **params
             )
             # Wait for Ray processing to complete (this keeps task in STARTED/"PROCESSING" state)
@@ -686,7 +695,9 @@ def process_and_forward(
         chunking_strategy: str,
         index_name: Optional[str] = None,
         original_filename: Optional[str] = None,
-        authorization: Optional[str] = None
+        authorization: Optional[str] = None,
+        embedding_model_id: Optional[int] = None,
+        tenant_id: Optional[str] = None
 ) -> str:
     """
     Combined task that chains processing and forwarding
@@ -700,12 +711,14 @@ def process_and_forward(
         index_name: Name of the index to store documents
         original_filename: The original name of the file
         authorization: Authorization header for API calls
+        embedding_model_id: Embedding model ID for chunk size configuration
+        tenant_id: Tenant ID for retrieving model configuration
 
     Returns:
         Task ID of the chain
     """
     logger.info(
-        f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}")
+        f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}, model_id={embedding_model_id}")
 
     # Create a task chain
     task_chain = chain(
@@ -714,7 +727,9 @@ def process_and_forward(
             source_type=source_type,
             chunking_strategy=chunking_strategy,
             index_name=index_name,
-            original_filename=original_filename
+            original_filename=original_filename,
+            embedding_model_id=embedding_model_id,
+            tenant_id=tenant_id
         ).set(queue='process_q'),
         forward.s(
             index_name=index_name,
