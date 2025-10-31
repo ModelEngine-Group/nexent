@@ -116,6 +116,11 @@ class _ServiceStub:
             raise RuntimeError("oops")
         return [{"id": "x"}]
 
+    async def get_task_details(self, task_id: str):
+        if task_id == "missing":
+            return None
+        return {"id": task_id, "ok": True}
+
     async def filter_important_image(self, image_url: str, positive_prompt: str, negative_prompt: str):
         if image_url == "err":
             raise RuntimeError("bad")
@@ -212,7 +217,6 @@ def test_process_sync_endpoint_success():
 def test_process_sync_endpoint_error(monkeypatch):
     # Reconfigure tasks stub to raise when getting result
     from backend.apps import data_process_app as app_module
-    tasks_mod = sys.modules["data_process.tasks"]
 
     class _ErrResult(_DummyResult):
         def get(self, timeout=None):
@@ -222,7 +226,7 @@ def test_process_sync_endpoint_error(monkeypatch):
         def apply_async(self, **kwargs):
             return _ErrResult("tid")
 
-    setattr(tasks_mod, "process_sync", _PSyncErr())
+    monkeypatch.setattr(app_module, "process_sync", _PSyncErr(), raising=True)
 
     app = _build_app()
     client = TestClient(app)
@@ -249,13 +253,13 @@ def test_batch_tasks_success():
 
 def test_batch_tasks_error(monkeypatch):
     # Make service raise
-    svc_mod = sys.modules["services.data_process_service"]
-    service: _ServiceStub = svc_mod.get_data_process_service()
+    from backend.apps import data_process_app as app_module
 
     async def err(*args, **kwargs):
         raise RuntimeError("x")
 
-    service.create_batch_tasks_impl = err  # type: ignore
+    monkeypatch.setattr(app_module.service,
+                        "create_batch_tasks_impl", err, raising=True)
 
     app = _build_app()
     client = TestClient(app)
@@ -274,13 +278,12 @@ def test_load_image_success_and_not_found():
 
 
 def test_load_image_internal_error(monkeypatch):
-    svc_mod = sys.modules["services.data_process_service"]
-    service: _ServiceStub = svc_mod.get_data_process_service()
+    from backend.apps import data_process_app as app_module
 
     async def err(url: str):
         raise RuntimeError("bad")
 
-    service.load_image = err  # type: ignore
+    monkeypatch.setattr(app_module.service, "load_image", err, raising=True)
     app = _build_app()
     client = TestClient(app)
     resp = client.get("/tasks/load_image", params={"url": "x"})
@@ -349,11 +352,11 @@ def test_convert_state_success_and_error(monkeypatch):
     assert ok.status_code == 200 and ok.json()["state"] == "COMPLETED"
 
     # Make service raise
-    svc_mod = sys.modules["services.data_process_service"]
-    service: _ServiceStub = svc_mod.get_data_process_service()
+    from backend.apps import data_process_app as app_module
     def raise_convert(*args, **kwargs):
         raise RuntimeError("x")
-    service.convert_celery_states_to_custom = raise_convert  # type: ignore
+    monkeypatch.setattr(
+        app_module.service, "convert_celery_states_to_custom", raise_convert, raising=True)
     err = client.post("/tasks/convert_state", json={"process_state": "PENDING", "forward_state": ""})
     assert err.status_code == 500
 

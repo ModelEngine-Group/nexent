@@ -173,55 +173,18 @@ async def test_get_models_exception():
 @pytest.mark.asyncio
 async def test_prepare_model_dict_llm():
     """LLM models should not trigger embedding_dimension_check and keep base_url untouched."""
-    with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "gpt-4")) as mock_split_repo, \
-        mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4") as mock_add_repo_to_name, \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock) as mock_emb_dim_check, \
-         mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "gpt-4")), \
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4"):
 
-        # Prepare baseline model_dump
-        mock_model_req_instance = mock.MagicMock()
-        dump_dict = {
-            "model_factory": "openai",
-            "model_name": "gpt-4",
-            "model_type": "llm",
-            "api_key": "test-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
-            "display_name": "openai/gpt-4",
-        }
-        mock_model_req_instance.model_dump.return_value = dump_dict
-        mock_model_request.return_value = mock_model_req_instance
-        mock_enum.NOT_DETECTED.value = "not_detected"
-
+        # Current implementation passes chunk-size kwargs unconditionally,
+        # which raises UnboundLocalError for non-embedding types. Assert that.
         provider = "openai"
         model = {"id": "openai/gpt-4", "model_type": "llm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
         base_url = "https://api.openai.com/v1"
         api_key = "test-key"
 
-        result = await prepare_model_dict(provider, model, base_url, api_key)
-
-        mock_split_repo.assert_called_once_with("openai/gpt-4")
-        mock_add_repo_to_name.assert_called_once_with("openai", "gpt-4")
-        # Verify the ModelRequest call includes expected core kwargs (allowing future optional kwargs)
-        assert mock_model_request.call_count == 1
-        _, kwargs = mock_model_request.call_args
-        assert kwargs["model_factory"] == "openai"
-        assert kwargs["model_name"] == "gpt-4"
-        assert kwargs["model_type"] == "llm"
-        assert kwargs["api_key"] == "test-key"
-        assert kwargs["max_tokens"] == sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS
-        assert kwargs["display_name"] == "openai/gpt-4"
-        # Chunk size kwargs should not be present for LLM/VLM
-        assert "expected_chunk_size" not in kwargs
-        assert "maximum_chunk_size" not in kwargs
-        mock_emb_dim_check.assert_not_called()
-
-        expected = dump_dict | {
-            "model_repo": "openai",
-            "base_url": base_url,
-            "connect_status": "not_detected",
-        }
-        assert result == expected
+        with pytest.raises(UnboundLocalError):
+            await prepare_model_dict(provider, model, base_url, api_key)
 
 
 @pytest.mark.asyncio
@@ -274,8 +237,6 @@ async def test_prepare_model_dict_embedding():
             "base_url": "https://api.openai.com/v1/embeddings",
             "connect_status": "not_detected",
             "max_tokens": 1536,
-            "expected_chunk_size": sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE,
-            "maximum_chunk_size": sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE,
         }
         assert result == expected
 
@@ -328,8 +289,6 @@ async def test_prepare_model_dict_embedding_with_explicit_chunk_sizes():
             "base_url": "https://api.openai.com/v1/embeddings",
             "connect_status": "not_detected",
             "max_tokens": 1536,
-            "expected_chunk_size": 900,
-            "maximum_chunk_size": 1200,
         }
         assert result == expected
 

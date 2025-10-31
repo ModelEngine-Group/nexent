@@ -11,26 +11,24 @@ from consts.model import (
     ConvertStateRequest,
     TaskRequest,
 )
-import importlib
-import sys
+from data_process.tasks import process_and_forward, process_sync
+from services.data_process_service import get_data_process_service
 
 logger = logging.getLogger("data_process.app")
+
+# Use shared service instance
+service = get_data_process_service()
+
 
 @asynccontextmanager
 async def lifespan(app: APIRouter):
     # Startup
     try:
-        svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-            "services.data_process_service")
-        svc = svc_mod.get_data_process_service()
-        await svc.start()
+        await service.start()
         yield
     finally:
         # Shutdown
-        svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-            "services.data_process_service")
-        svc = svc_mod.get_data_process_service()
-        await svc.stop()
+        await service.stop()
 
 
 router = APIRouter(
@@ -51,9 +49,7 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
 
     logger.info(
         f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
-    tasks_mod = sys.modules.get(
-        "data_process.tasks") or importlib.import_module("data_process.tasks")
-    task_result = tasks_mod.process_and_forward.delay(
+    task_result = process_and_forward.delay(
         source=request.source,
         source_type=request.source_type,
         chunking_strategy=request.chunking_strategy,
@@ -90,9 +86,7 @@ async def process_sync_endpoint(
     """
     try:
         # Use the synchronous process task with high priority
-        tasks_mod = sys.modules.get(
-            "data_process.tasks") or importlib.import_module("data_process.tasks")
-        task_result = tasks_mod.process_sync.apply_async(
+        task_result = process_sync.apply_async(
             kwargs={
                 'source': source,
                 'source_type': source_type,
@@ -137,10 +131,7 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[
     Processing happens in the background for each file independently.
     """
     try:
-        svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-            "services.data_process_service")
-        svc = svc_mod.get_data_process_service()
-        task_ids = await svc.create_batch_tasks_impl(authorization=authorization, request=request)
+        task_ids = await service.create_batch_tasks_impl(authorization=authorization, request=request)
         return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_ids": task_ids})
     except HTTPException:
         raise
@@ -163,16 +154,13 @@ async def load_image(url: str):
     """
     try:
         # Use the service to load the image
-        svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-            "services.data_process_service")
-        svc = svc_mod.get_data_process_service()
-        image = await svc.load_image(url)
+        image = await service.load_image(url)
 
         if image is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND, detail="Failed to load image or image format not supported")
 
-        image_data, content_type = await svc.convert_to_base64(image)
+        image_data, content_type = await service.convert_to_base64(image)
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"success": True, "base64": image_data, "content_type": content_type})
     except HTTPException:
@@ -186,10 +174,7 @@ async def load_image(url: str):
 @router.get("")
 async def list_tasks():
     """Get a list of all tasks with their basic status information"""
-    svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-        "services.data_process_service")
-    svc = svc_mod.get_data_process_service()
-    tasks = await svc.get_all_tasks()
+    tasks = await service.get_all_tasks()
 
     task_responses = []
     for task in tasks:
@@ -219,10 +204,7 @@ async def get_index_tasks(index_name: str):
     Returns tasks that are being processed or waiting to be processed
     """
     try:
-        svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-            "services.data_process_service")
-        svc = svc_mod.get_data_process_service()
-        return await svc.get_index_tasks(index_name)
+        return await service.get_index_tasks(index_name)
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -231,9 +213,7 @@ async def get_index_tasks(index_name: str):
 @router.get("/{task_id}/details")
 async def get_task_details(task_id: str):
     """Get detailed information about a task, including results"""
-    utils_mod = sys.modules.get(
-        "data_process.utils") or importlib.import_module("data_process.utils")
-    task = await utils_mod.get_task_details(task_id)
+    task = await service.get_task_details(task_id)
     if not task:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail="Task not found")
@@ -253,8 +233,7 @@ async def filter_important_image(
     Returns importance score and confidence level.
     """
     try:
-        svc = get_data_process_service()
-        result = await svc.filter_important_image(
+        result = await service.filter_important_image(
             image_url=image_url,
             positive_prompt=positive_prompt,
             negative_prompt=negative_prompt
@@ -291,8 +270,7 @@ async def process_text_file(
         file_content = await file.read()
         filename = file.filename or "unknown_file"
 
-        svc = get_data_process_service()
-        result = await svc.process_uploaded_text_file(
+        result = await service.process_uploaded_text_file(
             file_content=file_content,
             filename=filename,
             chunking_strategy=chunking_strategy,
@@ -317,10 +295,7 @@ async def convert_state(request: ConvertStateRequest):
     This endpoint converts a process state string to a forward state string.
     """
     try:
-        svc_mod = sys.modules.get("services.data_process_service") or importlib.import_module(
-            "services.data_process_service")
-        svc = svc_mod.get_data_process_service()
-        result = svc.convert_celery_states_to_custom(
+        result = service.convert_celery_states_to_custom(
             process_celery_state=request.process_state or "",
             forward_celery_state=request.forward_state or ""
         )
