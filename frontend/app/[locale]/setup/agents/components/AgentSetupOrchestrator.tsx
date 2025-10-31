@@ -214,9 +214,27 @@ export default function AgentSetupOrchestrator({
   useEffect(() => {
     if (isCreatingNewAgent) {
       if (!isEditingAgent) {
-        // Only clear and get new Agent configuration in creating mode
+        // Clear configuration in creating mode
         setBusinessLogic("");
-        fetchSubAgentIdAndEnableToolList(t);
+        // Create agent record immediately to get agent ID for generating prompts and using tools
+        // Only create if we don't already have a mainAgentId
+        if (!mainAgentId) {
+          const createAgentRecord = async () => {
+            try {
+              const createResult = await getCreatingSubAgentId();
+              if (createResult.success && createResult.data) {
+                const newAgentId = createResult.data.agentId;
+                setMainAgentId(newAgentId);
+                log.info("Created agent record with ID:", newAgentId);
+              } else {
+                log.error("Failed to create agent record:", createResult.message);
+              }
+            } catch (error) {
+              log.error("Error creating agent record:", error);
+            }
+          };
+          createAgentRecord();
+        }
       } else {
         // In edit mode, data is loaded in handleEditAgent, here validate the form
       }
@@ -236,7 +254,7 @@ export default function AgentSetupOrchestrator({
       // Sign that has been initialized
       hasInitialized.current = true;
     }
-  }, [isCreatingNewAgent, isEditingAgent]);
+  }, [isCreatingNewAgent, isEditingAgent, mainAgentId]);
 
   // Listen for changes in the tool status, update the selected tool
   useEffect(() => {
@@ -355,6 +373,16 @@ export default function AgentSetupOrchestrator({
 
   // Reset the status when the user cancels the creation of an Agent
   const handleCancelCreating = async () => {
+    // If we created an agent record during creation mode, delete it
+    if (mainAgentId && isCreatingNewAgent && !isEditingAgent) {
+      try {
+        await deleteAgent(Number(mainAgentId));
+        log.info("Deleted unsaved agent record with ID:", mainAgentId);
+      } catch (error) {
+        log.error("Error deleting unsaved agent record:", error);
+      }
+    }
+
     // First notify external editing state change to avoid UI jumping
     onEditingStateChange?.(false, null);
 
@@ -368,6 +396,9 @@ export default function AgentSetupOrchestrator({
       }
       setIsEditingAgent(false);
       setEditingAgent(null);
+      
+      // Clear the mainAgentId
+      setMainAgentId(null);
 
       // Note: Content clearing is handled by onExitCreation above
       // Delay clearing tool and collaborative agent selection to avoid jumping
@@ -424,11 +455,12 @@ export default function AgentSetupOrchestrator({
     max_step: number,
     business_description: string
   ) => {
-    if (name.trim() && mainAgentId) {
+    if (name.trim()) {
       try {
         let result;
 
         if (isEditingAgent && editingAgent) {
+          // Editing existing agent
           result = await updateAgent(
             Number(editingAgent.id),
             name,
@@ -447,6 +479,13 @@ export default function AgentSetupOrchestrator({
             businessLogicModelId ?? undefined
           );
         } else {
+          // Creating new agent - the agent record should already exist (created when entering create mode)
+          if (!mainAgentId) {
+            message.error(t("businessLogic.config.error.noAgentId"));
+            return;
+          }
+          
+          // Update the agent with all the details
           result = await updateAgent(
             Number(mainAgentId),
             name,
@@ -480,6 +519,7 @@ export default function AgentSetupOrchestrator({
           setIsCreatingNewAgent(false);
           setIsEditingAgent(false);
           setEditingAgent(null);
+          setMainAgentId(null); // Clear mainAgentId after successful save
           onEditingStateChange?.(false, null);
 
           setBusinessLogic("");
@@ -690,15 +730,16 @@ export default function AgentSetupOrchestrator({
     const targetAgentId =
       isEditingAgent && editingAgent ? editingAgent.id : mainAgentId;
 
-    if (!targetAgentId) {
-      message.error(t("businessLogic.config.error.noAgentId"));
-      return;
-    }
-
     const newValue = value ?? 5;
 
     // Update local state first
     setMainAgentMaxStep(newValue);
+
+    // If no agent ID yet (e.g., during initial creation setup), just update local state
+    // The max steps will be saved when the agent is fully created
+    if (!targetAgentId) {
+      return;
+    }
 
     // Call updateAgent API to save the max steps change
     try {
