@@ -167,3 +167,6 @@ Stuck or have questions? We're here to help! Reach out to us via：
 ## 🎉 Celebrate Your Contribution!
 
 Thank you for being part of the Nexent journey. Your contributions make a real difference, and we can't wait to see what you create! Happy coding! 🚀🌈
+
+"🎉 很高兴加入Nexent社区！作为新贡献者，我期待在代码优化、文档完善或测试反馈中尽一份力。#NexentCommunity 让我们一起构建更棒的项目！🚀"
+
