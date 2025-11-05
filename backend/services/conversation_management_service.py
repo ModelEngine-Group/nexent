@@ -276,7 +276,7 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["Z
                  "content": user_prompt}]
 
     # Call the model
-    response = llm(messages, max_tokens=10)
+    response = llm(messages)
 
     return remove_think_blocks(response.content.strip())
 
