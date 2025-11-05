@@ -29,6 +29,7 @@ class ProcessType(Enum):
 
 
 # message transformer base class
+# 将各阶段的消息进行格式化，风格统一
 class MessageTransformer:
     def transform(self, **kwargs: Any) -> str:
         """convert the content to a specific format"""
@@ -195,6 +196,7 @@ class MessageObserver:
                 # Found </think> tag, exit think mode
                 self.in_think_mode = False
                 # Process think content before </think>
+                # todo 这块为什么没有从思考的开始索引
                 think_content = buffer_text[:end_match.start()]
                 if think_content:
                     self.message_query.append(
@@ -230,6 +232,8 @@ class MessageObserver:
 
         if match:
             # found the code block marker
+            # 找到代码块的起始索引
+            # 实际输出 = 思考 + 代码块
             match_start = match.start()
 
             # only switch mode when in thinking mode
@@ -247,6 +251,7 @@ class MessageObserver:
                         Message(ProcessType.MODEL_OUTPUT_CODE, code_text).to_json())
 
                 # switch mode
+                # 切换当前处理阶段的模式
                 self.current_mode = ProcessType.MODEL_OUTPUT_CODE
             else:
                 # already in code mode, send the entire buffer content as code

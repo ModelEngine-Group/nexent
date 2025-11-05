@@ -25,7 +25,10 @@ if TYPE_CHECKING:
 
 
 def parse_code_blobs(text: str) -> str:
-    """Extract code blocs from the LLM's output for execution.
+    """
+    从大模型输出中，解析出代码块
+    <RUN> 的格式，输出python代码
+    Extract code blocs from the LLM's output for execution.
 
     This function is used to parse code that needs to be executed, so it only handles
     <RUN> format and legacy python formats.
@@ -79,6 +82,7 @@ def parse_code_blobs(text: str) -> str:
 
 def convert_code_format(text):
     """
+    将代码 转化为 markdown
     Convert code blocks to markdown format for display.
 
     This function is used to convert code blocks in final answers to markdown format,
@@ -114,25 +118,33 @@ class CoreAgent(CodeAgent):
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
+        在react框架下的单个步骤：思考、执行、观察结果
         """
+        # 观察 当前agent执行步骤
         self.observer.add_message(
             self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
+        # 把内存里面的记忆 转化为上下文 作为消息传入
         memory_messages = self.write_memory_to_messages()
 
         input_messages = memory_messages.copy()
 
         # Add new step in logs
+        # 之前步骤的输出，作为消息输入
         memory_step.model_input_messages = input_messages
         try:
             additional_args = {
                 "grammar": self.grammar} if self.grammar is not None else {}
             chat_message: ChatMessage = self.model(input_messages,
                                                    stop_sequences=["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"], **additional_args, )
+            # 记忆，模型输出的消息体
             memory_step.model_output_message = chat_message
+            # 模型输出的内容
             model_output = chat_message.content
+            # 记忆，模型输出的内容
             memory_step.model_output = model_output
 
+            # 日志以markdown的形式 进行记录
             self.logger.log_markdown(
                 content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
         except Exception as e:
@@ -144,6 +156,7 @@ class CoreAgent(CodeAgent):
 
         # Parse
         try:
+            # 将模型输出的内容，先解析为代码块，然后使得 解析成 final answer的格式
             code_action = fix_final_answer_code(parse_code_blobs(model_output))
             # Record parsing results
             self.observer.add_message(
@@ -154,9 +167,11 @@ class CoreAgent(CodeAgent):
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
             raise FinalAnswerError()
 
+        # 将python解释器、代码块，封装成一个 工具调用的对象
         memory_step.tool_calls = [
             ToolCall(name="python_interpreter", arguments=code_action, id=f"call_{len(self.memory.steps)}", )]
 
+        # 通过解释器 执行代码
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
@@ -196,6 +211,7 @@ class CoreAgent(CodeAgent):
             raise AgentExecutionError(error_msg, self.logger)
 
         truncated_output = truncate_content(str(output))
+        # todo 将当前步骤的输出结果，记录在observation观察中。用于下一步骤？？？
         if output is not None:
             observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
@@ -205,6 +221,7 @@ class CoreAgent(CodeAgent):
                  style=("bold #d4b702" if is_final_answer else ""), ), ]
         self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
         memory_step.action_output = output
+        # 如果是 最终回答，则返回输出，否则返回 None
         yield output if is_final_answer else None
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
@@ -227,6 +244,7 @@ class CoreAgent(CodeAgent):
         agent.run("What is the result of 2 power 3.7384?")
         ```
         """
+        # 最大运行步数
         max_steps = max_steps or self.max_steps
         self.task = task
         if additional_args is not None:
@@ -234,10 +252,11 @@ class CoreAgent(CodeAgent):
             self.task += f"""
 You have been provided with these additional arguments, that you can access using the keys as variables in your python code:
 {str(additional_args)}."""
-
+        # 初始化提示词
         self.system_prompt = self.initialize_system_prompt()
         self.memory.system_prompt = SystemPromptStep(
             system_prompt=self.system_prompt)
+        # 重置
         if reset:
             self.memory.reset()
             self.monitor.reset()
@@ -246,12 +265,14 @@ You have been provided with these additional arguments, that you can access usin
                              subtitle=f"{type(self.model).__name__} - {(self.model.model_id if hasattr(self.model, 'model_id') else '')}",
                              level=LogLevel.INFO, title=self.name if hasattr(self, "name") else None, )
 
+        # 通过消息观察者，记录当前任务的状态
         # Record current agent task
         self.observer.add_message(
             self.name, ProcessType.AGENT_NEW_RUN, self.task.strip())
 
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
+        # 初始化python解释器
         if getattr(self, "python_executor", None):
             self.python_executor.send_variables(variables=self.state)
             self.python_executor.send_tools(
@@ -264,12 +285,16 @@ You have been provided with these additional arguments, that you can access usin
         return list(self._run_stream(task=self.task, max_steps=max_steps, images=images))[-1].final_answer
 
     def __call__(self, task: str, **kwargs):
-        """Adds additional prompting for the managed agent, runs it, and wraps the output.
+        """
+        只被sub agent 进行调用
+        对sub agent，添加额外的提示词，
+        Adds additional prompting for the managed agent, runs it, and wraps the output.
         This method is called only by a managed agent.
         """
         full_task = Template(self.prompt_templates["managed_agent"]["task"], undefined=StrictUndefined).render({
             "name": self.name, "task": task, **self.state
         })
+        # 更新提示词，然后作为agent进行运行，并返回结果
         report = self.run(full_task, **kwargs)
 
         # When a sub-agent finishes running, return a marker
@@ -279,11 +304,13 @@ You have been provided with these additional arguments, that you can access usin
         except:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
+        # 将subagent的运行结果，包装在提示词中，返回结果
         answer = Template(self.prompt_templates["managed_agent"]["report"], undefined=StrictUndefined).render({
             "name": self.name, "final_answer": report
         })
         if self.provide_run_summary:
             answer += "\n\nFor more detail, find below a summary of this agent's work:\n<summary_of_work>\n"
+            # todo ？ 总结性的结果，是在内存中？然后通过write_memory_to_messages 转化为消息，并拼接到最终的输出结果中
             for message in self.write_memory_to_messages(summary_mode=True):
                 content = message["content"]
                 answer += "\n" + truncate_content(str(content)) + "\n---"
@@ -293,7 +320,10 @@ You have been provided with these additional arguments, that you can access usin
     def _run_stream(
             self, task: str, max_steps: int, images: list["PIL.Image.Image"] | None = None
     ) -> Generator[ActionStep | PlanningStep | FinalAnswerStep]:
+        # 方法返回的是  执行步骤、计划步骤、最后回答步骤
+        # 通过final_answer 标记 是否是最后一段输出
         final_answer = None
+        # 记录这是当前第几个步骤
         self.step_number = 1
         while final_answer is None and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
@@ -302,11 +332,13 @@ You have been provided with these additional arguments, that you can access usin
                 step_number=self.step_number, start_time=step_start_time, observations_images=images
             )
             try:
+                # todo _execute_step 调用agent的 _step_stream方法，实现单步执行
                 for el in self._execute_step(action_step):
                     yield el
                 final_answer = el
             except FinalAnswerError:
                 # When the model does not output code, directly treat the large model content as the final answer
+                # 如果模型没有输出代码，则直接输出模型的返回值
                 final_answer = action_step.model_output
                 if isinstance(final_answer, str):
                     final_answer = convert_code_format(final_answer)
@@ -320,6 +352,7 @@ You have been provided with these additional arguments, that you can access usin
                 yield action_step
                 self.step_number += 1
 
+        # 如果 停止，则将输出设为xxx
         if self.stop_event.is_set():
             final_answer = "<user_break>"
 
@@ -327,4 +360,5 @@ You have been provided with these additional arguments, that you can access usin
             final_answer = self._handle_max_steps_reached(
                 task, images, step_start_time)
             yield action_step
+        # todo 将模型的最终输出，封装成 FinalAnswerStep
         yield FinalAnswerStep(handle_agent_output_types(final_answer))

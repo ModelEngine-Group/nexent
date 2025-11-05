@@ -59,6 +59,7 @@ class NexentAgent:
 
 
     def create_local_tool(self, tool_config: ToolConfig):
+        # 初始化本地工具
         class_name = tool_config.class_name
         params = tool_config.params
         tool_class = globals().get(class_name)
@@ -131,6 +132,7 @@ class NexentAgent:
                 raise ValueError(f"Error in creating managed agent: {e}")
 
             # create the agent
+            # 使用coreagent，初始化agent
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,
@@ -169,11 +171,14 @@ class NexentAgent:
         for msg in history:
             if msg.role == 'user':
                 # Create task step for user message
+                # 用户 是 taskstep
                 self.agent.memory.steps.append(TaskStep(task=msg.content))
             elif msg.role == 'assistant':
+                # 助手 是 ActionStep
                 self.agent.memory.steps.append(ActionStep(action_output=msg.content, model_output=msg.content))
 
     def agent_run_with_observer(self, query: str, reset=True):
+        # 实际 agent运行的入口
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
@@ -190,8 +195,10 @@ class NexentAgent:
                 if hasattr(step_log, "error") and step_log.error is not None:
                     observer.add_message("", ProcessType.ERROR, str(step_log.error))
 
+            # 最后一个log 就是最后的输出结果
             final_answer = step_log.final_answer  # Last log is the run's final_answer
 
+            # 最终都转化为 markdown 进行输出
             if isinstance(final_answer, AgentText):
                 final_answer_str = convert_code_format(final_answer.to_string())
             else:
