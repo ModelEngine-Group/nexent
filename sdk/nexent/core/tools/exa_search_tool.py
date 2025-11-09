@@ -120,11 +120,13 @@ class ExaSearchTool(Tool):
             negative_prompt = "logo or banner or background or advertisement or icon or avatar"
 
             # Define the async function to perform the filtering
+            # 定义异步方法 用于图片过滤
             async def process_images():
                 # Maximum number of concurrent requests
                 semaphore = asyncio.Semaphore(10)  # Limit concurrent requests
 
                 # Create a ClientSession
+                # 创建http客户端
                 connector = aiohttp.TCPConnector(
                     limit=0)  # No limit on connections
                 timeout = aiohttp.ClientTimeout(total=2)  # 2 seconds timeout
@@ -135,6 +137,7 @@ class ExaSearchTool(Tool):
                         async with semaphore:  # Limit concurrency
                             try:
                                 # Create API endpoint URL
+                                # 请求数据处理
                                 api_url = f"{self.data_process_service}/tasks/filter_important_image"
 
                                 # Prepare form data
@@ -162,7 +165,9 @@ class ExaSearchTool(Tool):
                                 return None
 
                     # Process all images concurrently
+                    # 并发处理所有图片
                     tasks = [process_single_image(url) for url in images_list_url]
+                    # 收集最终结果
                     results = await asyncio.gather(*tasks)
 
                     # Filter out None results
@@ -170,6 +175,7 @@ class ExaSearchTool(Tool):
                         url for url in results if url is not None]
 
                     # Notify results through observer after filtering
+                    # 通知 已完成过滤
                     if self.observer:
                         # Send the filtered images list
                         filtered_images_json = json.dumps(
@@ -178,8 +184,9 @@ class ExaSearchTool(Tool):
                             "", ProcessType.PICTURE_WEB, filtered_images_json)
 
             # Create a new event loop and run the async function in the current thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # 创建事件循环，并在当前线程运行函数
+            loop = asyncio.new_event_loop() # 新建 事件循环
+            asyncio.set_event_loop(loop) # 设为当前循环
             try:
                 loop.run_until_complete(process_images())
             finally:

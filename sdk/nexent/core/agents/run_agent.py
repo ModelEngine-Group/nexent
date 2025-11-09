@@ -32,7 +32,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             agent_run_info.observer.add_message(
                 "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             mcp_client_list = [{"url": mcp_url} for mcp_url in mcp_host]
-
+            # 根据mcp配置 创建mcp tool集合
             with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
@@ -62,6 +62,7 @@ async def agent_run(agent_run_info: AgentRunInfo):
     observer = agent_run_info.observer
 
     monitoring_manager.add_span_event("agent_run.started")
+    # 开启agent线程
     thread_agent = Thread(target=agent_run_thread, args=(agent_run_info,))
     thread_agent.start()
     monitoring_manager.add_span_event("agent_run.thread_started")

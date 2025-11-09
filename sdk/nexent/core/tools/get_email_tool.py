@@ -68,6 +68,7 @@ class GetEmailTool(Tool):
         email_data = {"subject": self._decode_subject(msg["subject"]), "from": msg["from"], "date": msg["date"],
             "body": "", "attachments": []}
 
+        # 解码
         def safe_decode(payload, encoding=None):
             if payload is None:
                 return ""
@@ -81,6 +82,7 @@ class GetEmailTool(Tool):
                 except Exception:
                     return payload.decode('latin1', errors='replace')
 
+        # 判断返回消息是不是  多个部分组成
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
@@ -97,6 +99,7 @@ class GetEmailTool(Tool):
             try:
                 payload = msg.get_payload(decode=True)
                 encoding = msg.get_content_charset()
+                # 根据编码方式进行解码
                 email_data["body"] = safe_decode(payload, encoding)
             except Exception:
                 email_data["body"] = msg.get_payload()

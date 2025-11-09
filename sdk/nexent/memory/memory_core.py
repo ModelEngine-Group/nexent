@@ -1,5 +1,8 @@
 """SDK-level wrapper around mem0 Memory that keeps an in-process cache.
-
+# 用于管理 mem0 内存系统实例的 SDK 级包装器
+#主要目的
+#提供进程内的单例模式，确保相同配置只创建一个 AsyncMemory 对象
+#线程安全和多进程友好（适用于 Gunicorn、Uvicorn 等工作进程）
 This module **must not** depend on any backend packages – therefore callers are
 responsible for assembling a fully-validated configuration dictionary that is
 accepted by *mem0* and handing it in via :pyfunc:`get_memory_instance`.
@@ -25,14 +28,15 @@ from .embedder_adaptor import EmbedderAdaptor
 
 logger = logging.getLogger("memory_core")
 
-# In-process cache – {config_hash: Memory}
+# In-process cache – {config_hash: Memory} # 配置哈希 → Memory 实例
 _MEMORY_CACHE: dict[str, AsyncMemory] = {}
-# One asyncio.Lock per event loop to avoid cross-loop errors
+# One asyncio.Lock per event loop to avoid cross-loop errors # 事件循环ID → Lock
 _CACHE_LOCKS: dict[int, asyncio.Lock] = {}
 
 
 def _get_cache_lock() -> asyncio.Lock:
     """Return an event-loop-local ``asyncio.Lock``.
+    为每个事件循环提供独立的锁
 
     Creating locks per-loop prevents the *"is bound to a different event loop"*
     runtime error when this module is used from multiple independent loops
@@ -60,6 +64,11 @@ def _validate_config(config: Dict[str, Any]) -> None:
 
     The function purposefully *does not* fill in defaults; callers must pass a
     complete configuration so that the behaviour is explicit and predictable.
+    严格验证配置完整性，要求必须包含：
+
+    LLM 配置: provider, model, api_key, openai_base_url
+    嵌入模型配置: provider, model, openai_base_url, embedding_dims, api_key
+    向量数据库配置: collection_name, host, port, embedding_model_dims, api_key
     """
     try:
         # LLM section
@@ -92,7 +101,13 @@ def _validate_config(config: Dict[str, Any]) -> None:
 
 async def get_memory_instance(memory_config: Dict[str, Any]) -> AsyncMemory:
     """Return (and cache) a *mem0* ``Memory`` instance for *memory_config*.
+    主入口函数：
 
+    验证配置 → 失败时立即报错
+    计算配置哈希作为缓存键
+    加锁检查缓存
+    命中缓存直接返回，否则创建新实例
+    自动附加 EmbedderAdaptor
     Parameters
     ----------
     memory_config

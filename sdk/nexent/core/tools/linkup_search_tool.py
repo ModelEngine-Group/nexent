@@ -82,6 +82,7 @@ class LinkupSearchTool(Tool):
             elif isinstance(result, LinkupSearchImageResult):
                 search_result_message = SearchResultTextMessage(
                     title=result.name or "",
+                    # todo 这个url为什么是空？？
                     url="",
                     text="This is a pure image result",
                     published_date="",

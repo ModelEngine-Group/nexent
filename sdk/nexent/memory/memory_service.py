@@ -4,6 +4,11 @@ All operations eventually delegate to :pyfunc:`nexent.memory.memory_core.get_mem
 thus avoiding any HTTP round-trips.  The module purposely contains no FastAPI
 or networking code so that it can be used in any context (sync workers, async
 handlers, CLI scripts, etc.).
+这是连接业务逻辑和底层记忆系统的中间层，特点是：
+
+无网络依赖 - 不包含 FastAPI 或 HTTP 代码
+多环境适用 - 可用于同步worker、异步处理器、CLI脚本等
+统一委托 - 所有操作最终都委托给 get_memory_instance
 """
 
 from __future__ import annotations
@@ -79,6 +84,7 @@ async def add_memory_in_levels(
 ):
     """
     Add memory across the specified levels concurrently, then merge results.
+    并发写入多个级别 + 智能合并结果
 
     Args:
         ...
