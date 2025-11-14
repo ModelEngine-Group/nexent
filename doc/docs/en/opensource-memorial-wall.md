@@ -63,3 +63,7 @@ just dropping by to say nice work 👍 starred the repo
 ::: info IPM - 2025-10-15
 Really impressed by Nexent — smooth interface and powerful agent framework. Great work!
 :::
+
+::: info uu - 2024-01-15
+华为ICT智能体，感谢nexent平台支持！
+:::
