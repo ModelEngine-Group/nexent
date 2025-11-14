@@ -31,7 +31,8 @@ uv sync --extra performance
 export ENABLE_TELEMETRY=true
 
 # 4. 启动后端服务
-python backend/main_service.py
+python backend/edit_time_service.py
+python backend/runtime_service.py
 ```
 
 ## 📊 访问监控界面

@@ -323,7 +323,8 @@ CREATE TABLE mcp_servers (
 ```bash
 # 启动主服务
 cd backend
-python main_service.py
+python edit_time_service.py
+python runtime_service.py
 
 # 启动本地MCP服务
 cd backend

@@ -74,7 +74,7 @@ Version is configured directly in `backend/consts/const.py`.
 Backend startup will print version information in the logs:
 
 ```python
-# backend/main_service.py
+# backend/edit_time_service.py
 logger.info(f"APP version is: {APP_VERSION}")
 ```
 
@@ -92,7 +92,7 @@ APP_VERSION="v1.1.0"
    ```bash
    # Start the backend service
    cd backend
-   python main_service.py
+   python edit_time_service.py
 
    # Check the version information in the startup logs
    # Output example: APP version is: v1.1.0

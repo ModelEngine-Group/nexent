@@ -10,8 +10,9 @@ const app = next({
 const handle = app.getRequestHandler();
 
 // Backend addresses
-const HTTP_BACKEND = process.env.HTTP_BACKEND || 'http://localhost:5010';
-const WS_BACKEND = process.env.WS_BACKEND || 'ws://localhost:5010';
+const HTTP_BACKEND = process.env.HTTP_BACKEND || 'http://localhost:5010'; // edit-time
+const WS_BACKEND = process.env.WS_BACKEND || 'ws://localhost:5010'; // edit-time
+const RUNTIME_HTTP_BACKEND = process.env.RUNTIME_HTTP_BACKEND || 'http://localhost:5014'; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || 'http://localhost:9000';
 const PORT = 3000;
 
@@ -26,8 +27,13 @@ app.prepare().then(() => {
     if (pathname.includes('/attachments/') && !pathname.startsWith('/api/')) {
       proxy.web(req, res, { target: MINIO_BACKEND });
     } else if (pathname.startsWith('/api/')) {
-      // All /api/ requests (including the initial handshake for WebSockets) go to the backend
-      proxy.web(req, res, { target: HTTP_BACKEND, changeOrigin: true });
+      // Route runtime endpoints to runtime backend, others to edit-time backend
+      // Runtime endpoints: /api/agent/run and /api/agent/stop/{conversation_id}
+      const isRuntime =
+        pathname === '/api/agent/run' ||
+        pathname.startsWith('/api/agent/stop/');
+      const target = isRuntime ? RUNTIME_HTTP_BACKEND : HTTP_BACKEND;
+      proxy.web(req, res, { target, changeOrigin: true });
     } else {
       // Let Next.js handle all other requests
       handle(req, res, parsedUrl);

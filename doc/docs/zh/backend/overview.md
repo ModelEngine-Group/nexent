@@ -179,7 +179,8 @@ uv sync && uv pip install -e ../sdk
 ### 服务启动
 ```bash
 python backend/data_process_service.py   # 数据处理服务
-python backend/main_service.py           # 主服务
+python backend/edit_time_service.py      # 编辑态服务
+python runtime_service.py                # 运行态服务
 python backend/nexent_mcp_service.py     # MCP服务
 ```
 

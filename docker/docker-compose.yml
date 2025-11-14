@@ -74,12 +74,95 @@ services:
     networks:
       - nexent
 
-  nexent:
+  nexent-edit-time:
     image: ${NEXENT_IMAGE}
-    container_name: nexent
+    container_name: nexent-edit-time
     restart: always
     ports:
-      - "5010:5010"  # Backend service port
+      - "5010:5010"  # Edit-time service port
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+    environment:
+      <<: [*minio-vars, *es-vars]
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - .env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: ["/bin/bash", "-c", "python backend/edit_time_service.py"]
+
+  nexent-runtime:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-runtime
+    restart: always
+    ports:
+      - "5014:5014"  # Runtime service port
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+    environment:
+      <<: [*minio-vars, *es-vars]
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - .env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: ["/bin/bash", "-c", "python backend/runtime_service.py"]
+
+  nexent-mcp:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-mcp
+    restart: always
+    ports:
+      - "5011:5011"  # MCP service port
+    volumes:
+      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+    environment:
+      <<: [*minio-vars, *es-vars]
+      skip_proxy: "true"
+      UMASK: 0022
+    env_file:
+      - .env
+    user: root
+    depends_on:
+      nexent-elasticsearch:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
+    networks:
+      - nexent
+    entrypoint: ["/bin/bash", "-c", "python backend/nexent_mcp_service.py"]
+
+  nexent-northbound:
+    image: ${NEXENT_IMAGE}
+    container_name: nexent-northbound
+    restart: always
+    ports:
       - "5013:5013"  # Northbound service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
@@ -101,7 +184,7 @@ services:
         max-file: "3"    # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/bin/bash", "-c", "python backend/nexent_mcp_service.py & python backend/northbound_service.py & python backend/main_service.py"]
+    entrypoint: ["/bin/bash", "-c", "python backend/northbound_service.py"]
 
   nexent-web:
     image: ${NEXENT_WEB_IMAGE}
@@ -112,8 +195,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - HTTP_BACKEND=http://nexent:5010
-      - WS_BACKEND=ws://nexent:5010
+      - HTTP_BACKEND=http://nexent-edit-time:5010
+      - WS_BACKEND=ws://nexent-edit-time:5010
+      - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
       - MINIO_ENDPOINT=http://nexent-minio:9000
     logging:
       driver: "json-file"

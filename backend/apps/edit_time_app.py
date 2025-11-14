@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from apps.agent_app import router as agent_router
+from apps.agent_app import agent_edit_time_router as agent_router
 from apps.config_sync_app import router as config_sync_router
 from apps.conversation_management_app import router as conversation_management_router
 from apps.elasticsearch_app import router as elasticsearch_router

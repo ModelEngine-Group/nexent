@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 from dotenv import load_dotenv
 load_dotenv()
 
-from apps.base_app import app
+from apps.edit_time_app import app
 from utils.logging_utils import configure_logging, configure_elasticsearch_logging
 from services.tool_configuration_service import initialize_tools_on_startup
 

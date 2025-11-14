@@ -74,7 +74,7 @@ APP_VERSION = "v1.0.0"
 后端启动时会在日志中打印版本信息：
 
 ```python
-# backend/main_service.py
+# backend/edit_time_service.py
 logger.info(f"APP version is: {APP_VERSION}")
 ```
 
@@ -92,7 +92,7 @@ APP_VERSION="v1.1.0"
    ```bash
    # 启动后端服务
    cd backend
-   python main_service.py
+   python edit_time_service.py
 
    # 查看启动日志中的版本信息
    # 输出示例：APP version is: v1.1.0
