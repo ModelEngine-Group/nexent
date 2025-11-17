@@ -1,7 +1,7 @@
 services:
   kong:
     container_name: supabase-kong-mini
-    image: ${SUPABASE_KONG}
+    image: kong:latest
     restart: unless-stopped
     ports:
       - "8000:8000/tcp"

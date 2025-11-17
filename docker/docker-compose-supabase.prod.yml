@@ -1,7 +1,7 @@
 services:
   kong:
     container_name: supabase-kong-mini
-    image: ${SUPABASE_KONG}
+    image: kong:latest
     restart: unless-stopped
     volumes:
       - $ROOT_DIR/volumes/api/kong.yml:/home/kong/temp.yml
