@@ -212,7 +212,6 @@ class RayConfig:
     def log_configuration(self):
         """Log current configuration information"""
         logger.debug("Ray Configuration:")
-        logger.debug(f"  Plasma directory: {self.plasma_directory}")
         logger.debug(f"  ObjectStore memory: {self.object_store_memory_gb} GB")
         logger.debug(f"  Temp directory: {self.temp_dir}")
         logger.debug(f"  Preallocate plasma: {self.preallocate_plasma}")
