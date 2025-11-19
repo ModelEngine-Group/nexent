@@ -18,7 +18,8 @@ Keep messages respectful and in line with our Code of Conduct.
 
 ::: info techbro_kevin - 2025-06-15
 first time doing open source, nexent is pretty cool! natural language to create agents, way easier than i thought
-:::
+:::info Your Name - 2025-119
+I think i can do it
 
 ::: warning Dr. Chen - AI Algorithm Engineer - 2025-06-25
 Moving from LangChain to the MCP ecosystem was definitely the right choice. Nexent's MCP tool integration makes our team's workflow much more standardized, especially when handling enterprise applications. The "USB-C of AI" analogy is so apt! Now our agents can seamlessly connect to various external services - no more headaches over different API formats.
