@@ -210,7 +210,7 @@ For detailed build instructions, see [Docker Build Guide](../deployment/docker-b
 ### Documentation Resources
 - [Installation Guide](./installation.md) - Environment setup and deployment
 - [FAQ](./faq) - Frequently asked questions
-- [User Guide](../user-guide/) - Nexent user guide
+- [User Guide](../user-guide/home-page) - Nexent user guide
 
 ### Community Support
 - [Discord Community](https://discord.gg/tb5H3S3wyv) - Real-time communication and support

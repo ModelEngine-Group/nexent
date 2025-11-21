@@ -55,25 +55,31 @@ export default defineConfig({
           {
             text: "User Guide",
             items: [
-              { text: "Quick Start", link: "/en/user-guide/" },
+              { text: "Home Page", link: "/en/user-guide/home-page" },
+              { text: "Start Chat", link: "/en/user-guide/start-chat" },
               {
-                text: "App Configuration",
-                link: "/en/user-guide/app-configuration",
+                text: "Quick Setup",
+                link: "/en/user-guide/quick-setup",
+              },
+              { text: "Agent Space", link: "/en/user-guide/agent-space" },
+              { text: "Agent Market", link: "/en/user-guide/agent-market" },
+              {
+                text: "Agent Development",
+                link: "/en/user-guide/agent-development",
               },
               {
-                text: "Model Configuration",
-                link: "/en/user-guide/model-configuration",
+                text: "Knowledge Base",
+                link: "/en/user-guide/knowledge-base",
               },
               {
-                text: "Knowledge Base Configuration",
-                link: "/en/user-guide/knowledge-base-configuration",
+                text: "Model Management",
+                link: "/en/user-guide/model-management",
               },
               {
-                text: "Agent Configuration",
-                link: "/en/user-guide/agent-configuration",
+                text: "Memory Management",
+                link: "/en/user-guide/memory-management",
               },
-              { text: "Chat Interface", link: "/en/user-guide/chat-interface" },
-              { text: "Memory Configuration", link: "/en/user-guide/memory" },
+              { text: "User Management", link: "/en/user-guide/user-management" },
               {
                 text: "Local Tools",
                 items: [
@@ -231,19 +237,22 @@ export default defineConfig({
           {
             text: "用户指南",
             items: [
-              { text: "快速开始", link: "/zh/user-guide/" },
-              { text: "应用配置", link: "/zh/user-guide/app-configuration" },
-              { text: "模型配置", link: "/zh/user-guide/model-configuration" },
+              { text: "首页", link: "/zh/user-guide/home-page" },
+              { text: "开始问答", link: "/zh/user-guide/start-chat" },
+              { text: "快速设置", link: "/zh/user-guide/quick-setup" },
+              { text: "智能体空间", link: "/zh/user-guide/agent-space" },
+              { text: "智能体市场", link: "/zh/user-guide/agent-market" },
               {
-                text: "知识库配置",
-                link: "/zh/user-guide/knowledge-base-configuration",
+                text: "智能体开发",
+                link: "/zh/user-guide/agent-development",
               },
               {
-                text: "智能体配置",
-                link: "/zh/user-guide/agent-configuration",
+                text: "知识库",
+                link: "/zh/user-guide/knowledge-base",
               },
-              { text: "对话页面", link: "/zh/user-guide/chat-interface" },
-              { text: "记忆配置", link: "/zh/user-guide/memory" },
+              { text: "模型管理", link: "/zh/user-guide/model-management" },
+              { text: "记忆管理", link: "/zh/user-guide/memory-management" },
+              { text: "用户管理", link: "/zh/user-guide/user-management" },
               {
                 text: "本地工具",
                 items: [

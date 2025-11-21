@@ -1,6 +1,6 @@
 # Nexent 常见问题
 
-本常见问题解答主要针对安装和使用 Nexent 过程中可能遇到的问题。如需了解基本安装步骤，请参考[安装部署](./installation)。如需了解基本使用指导，请参考[用户指南](../user-guide/)。
+本常见问题解答主要针对安装和使用 Nexent 过程中可能遇到的问题。如需了解基本安装步骤，请参考[安装部署](./installation)。如需了解基本使用指导，请参考[用户指南](../user-guide/home-page)。
 
 ## 🚫 常见错误与运维方式
 
@@ -42,8 +42,16 @@
     2. **有效的 API 密钥**: 验证您的 API 密钥具有适当权限
     3. **模型名称**: 确认模型标识符正确
     4. **网络访问**: 确保您的部署可以访问提供商的服务器
-    
-    关于如何配置模型，请参阅用户指南中的 [模型配置](../user-guide/model-configuration)。
+    关于如何配置模型，请参阅用户指南中的 [模型管理](../user-guide/model-management)。
+
+- **Q: 接入 DeepSeek 官方 API 时多轮对话会报错，如何解决？**
+  - A: DeepSeek 官方当前仅支持文本对话接口，而 Nexent 的推理流程面向多模态设计。在多轮对话中，官方 API 无法正确接收多模态格式数据，因此会触发错误。建议改用硅基流动等已对 DeepSeek 系列模型完成多模态适配的供应商，既保持 DeepSeek 模型的体验，又能兼容 Nexent 的多模态调用链。具体来说，我们使用的消息体形如：
+  ```python
+  { "role":"user", "content":[ { "type":"text", "text":"prompt" } ] }
+  ```
+  而DeepSeek只接收：
+  ```python
+  { "role":"user", "content":"prompt" }
 
 ## 💡 需要帮助
 

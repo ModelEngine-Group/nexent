@@ -207,7 +207,7 @@ The tool returns results in JSON format, including:
 ### Configure Terminal Tool in Nexent
 
 1. Log in to the Nexent platform
-2. Navigate to the **[Agent Configuration](../agent-configuration)** page
+2. Navigate to the **[Agent Development](../agent-development)** page
 3. Select the agent to configure
 4. Find "Terminal Tool" in the "Select Agent Tools" tab
 
@@ -421,11 +421,4 @@ maxretry = 3
 bantime = 3600
 ```
 
-## 🚀 Next Steps
-
-After completing Terminal tool configuration, you can:
-
-1. **[Agent Configuration](../agent-configuration)** - Add Terminal tool to agents
-2. **[Chat Interface](../chat-interface)** - Use Terminal tool through agents to execute server management tasks
-
-If you encounter any issues during configuration, please refer to our **[FAQ](../../getting-started/faq)** or join our [Discord Community](https://discord.gg/tb5H3S3wyv) for support.
+Need help? Please open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

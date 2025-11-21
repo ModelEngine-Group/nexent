@@ -134,6 +134,6 @@ Run the SQL scripts shipped with each release to keep your schema up to date.
 After deployment:
 
 1. Open `http://localhost:3000` in your browser.
-2. Review the [User Guide](https://doc.nexent.tech/en/user-guide/) to validate agent functionality.
+2. Review the [User Guide](https://doc.nexent.tech/en/user-guide/home-page) to validate agent functionality.
 
 

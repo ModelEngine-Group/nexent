@@ -1,6 +1,6 @@
-# Agent Configuration
+# Agent Development
 
-In the Agent Configuration module, you can create, configure, and manage agents. Agents are the core feature of Nexent—they can understand your needs and perform corresponding tasks.
+In the Agent Development page, you can create, configure, and manage agents. Agents are the core feature of Nexent—they can understand your needs and perform corresponding tasks.
 
 ## 🛠️ Agent Management
 
@@ -9,6 +9,7 @@ In the Agent Configuration module, you can create, configure, and manage agents.
 On the Agent Management tab, click "Create Agent" to create a new blank agent. Click "Exit Create" to leave creation mode.
 
 If you have an existing agent configuration, you can also import it:
+
 1. Click "Import Agent"
 2. In the popup, select the agent configuration file (JSON format)
 3. Click "Open"; the system will validate the file format and content, and display the imported agent information
@@ -49,6 +50,8 @@ Agents can use various tools to complete tasks, such as knowledge base search, e
   <img src="./assets/agent/set-tool.png" style="width: 50%; height: auto;" />
 </div>
 
+> 📚 Want to learn about all the built-in local tools in Nexent? Please see [Local Tools Overview](./local-tools/index.md).
+
 ### Add MCP Tools
 
 Nexent allows you to quickly use third-party MCP tools to enrich agent capabilities.
@@ -61,7 +64,7 @@ Nexent allows you to quickly use third-party MCP tools to enrich agent capabilit
   <img src="./assets/agent/mcp.png" style="width: 80%; height: auto;" />
 </div>
 
-Many third-party services such as ModelScope provide MCP services, which you can quickly integrate and use.
+Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
 
 ### Custom Tools
 
@@ -70,15 +73,15 @@ You can refer to the following guides to develop your own tools and integrate th
 - [MCP Tool Development](../backend/tools/mcp)
 - [SDK Tool Documentation](../sdk/core/tools)
 
-## 📝 Describe Business Logic
+## 📝 Describe the Agent’s Logic
 
-### Describe How should this Agent Work
+### Describe How the Agent Should Work
 
-Based on the selected collaborative agents and tools, you can now use concise language to describe how you want this agent to work. Nexent will automatically generate the agent’s name, description, and prompt suggestions based on your configuration and description.
+Once the collaborators and tools are ready, describe—in plain language—how you expect the agent to behave. Nexent uses this description plus your configuration to auto-generate the agent name, description, and prompts.
 
-1. In the "Describe should this agent work" editor, enter a brief description
-2. Click "Generate"; Nexent will generate detailed agent content for you
-3. You can further edit the generated content for fine-tuning
+1. Enter the description under **Describe how this agent should work**
+2. Click **Generate Agent** and wait for the detailed content
+3. Review the generated role prompt, constraints, examples, and tweak anything you want
 
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent/generate-agent.png" style="width: 50%; height: auto;" />
@@ -94,14 +97,16 @@ After completing the initial agent configuration, you can debug the agent and op
 
 ### Manage Agents
 
-- **Save:** After successful debugging, click the "Save" button in the lower right corner to save the agent. The agent will then be available for selection in the chat page.
-- **Export:** Export the successfully debugged agent configuration as a JSON file. When creating an agent, you can use this JSON file to create a copy via import.
-- **Delete:** Delete the agent (use with caution)
+- **Save:** After you finish debugging, click **Save** in the lower-right corner so the agent becomes available in Start Chat.
+- **Export:** Download a JSON file of any agent you like, then re-import it later to create copies.
+- **Delete:** Remove an agent you no longer need (this cannot be undone).
 
 ## 🚀 Next Steps
 
-After completing agent configuration, you can click "Complete Setup" to proceed to:
+After shipping an agent you can:
 
-1. **[Chat Interface](./chat-interface)** – Interact with your agent
+1. Manage every build inside **[Agent Space](./agent-space)**.
+2. Start working with your agent on the **[Start Chat](./start-chat)** page.
+3. Configure **[Memory Management](./memory-management)** to give agents persistent memory.
 
-If you encounter any issues during agent configuration, please refer to our **[FAQ](../getting-started/faq)** or join our [Discord community](https://discord.gg/tb5H3S3wyv) for support. 
+Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

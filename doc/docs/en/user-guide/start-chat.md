@@ -1,6 +1,6 @@
-# Chat Interface
+# Start Chat
 
-The Chat Interface is the core area for interacting with your agents. Here, you can chat with different agents, upload files, use voice input, and manage your chat history.
+The Start Chat is the core area for interacting with your agents. Here, you can talk to different agents, upload files, use voice input, and manage your chat history.
 
 ## 🤖 Start Chatting
 
@@ -27,11 +27,12 @@ Before starting a chat, you need to select an agent.
 After selecting an agent, you can send text messages in the following ways:
 
 1. **Enter your question**
-   - Type your question or command in the input box at the bottom of the chat box
+   - Type your question or command in the input box at the bottom
+   - Press `Shift+Enter` to insert a line break
 
 2. **Send Message**
    - Click the send button on the right side of the input box
-   - Or simply press Enter on your keyboard
+   - Or press `Enter` on your keyboard
    - The agent will start processing your request and generate a reply
 
 3. **View Replies**
@@ -44,7 +45,7 @@ After selecting an agent, you can send text messages in the following ways:
 
 ### Use Voice Input
 
-Nexent supports voice input, allowing you to interact with agents by speaking:
+Nexent supports voice input (make sure you have configured the speech model under [Model Management](./model-management) beforehand) so you can interact by speaking:
 
 1. **Enable Voice Input**
    - Find the microphone icon in the lower right corner of the input box
@@ -61,7 +62,7 @@ Nexent supports voice input, allowing you to interact with agents by speaking:
    - You can also manually edit the recognized text before sending
    - Both Chinese and English speech recognition are supported
 
-> 💡 **Tip:** For better speech recognition, use it in a quiet environment and speak clearly.
+> 💡 **Tip:** For better recognition results, use it in a quiet environment and articulate clearly.
 
 ### Upload Files for Chat
 
@@ -120,10 +121,15 @@ The left sidebar provides complete chat history management:
   <img src="./assets/chat/chat-management-2.png" style="width: 48%; height: auto;" alt="Chat Edit" />
 </div>
 
-### Access Settings Page
+### Access Other Modules
 
-- In the lower left corner of the sidebar, find the ⚙️ settings icon
-- Click the icon to enter the settings page, where you can modify agent and system settings
+Use the left navigation bar to jump to other modules at any time:
+
+- **Agent Space** – Review and manage all agents you have built.
+- **Agent Studio** – Continue creating or editing agents.
+- **Model Management** – Update app information and model credentials.
+- **Knowledge Base** – Upload, summarize, and organize documents.
+- **Memory Management** – Configure multi-layer memory and sharing rules.
 
 ## 🔍 View Knowledge References
 
@@ -198,8 +204,4 @@ Congratulations! You now master all the core features of Nexent. We look forward
 
 ### Get Help
 
-If you encounter any issues while using Nexent:
-
-- 📖 Check our **[FAQ](../getting-started/faq)** for detailed answers
-- 💬 Join our [Discord community](https://discord.gg/tb5H3S3wyv) to communicate with other users
-- 🆘 Contact technical support for professional help 
+Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

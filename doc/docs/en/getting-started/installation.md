@@ -48,7 +48,7 @@ After executing this command, the system will provide two different versions for
 
 When deployment completes successfully:
 1. Open **http://localhost:3000** in your browser
-2. Refer to the [User Guide](../user-guide/) to develop agents
+2. Refer to the [User Guide](../user-guide/home-page) to develop agents
 
 
 ## 🏗️ Service Architecture
