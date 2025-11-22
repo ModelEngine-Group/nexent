@@ -615,7 +615,7 @@ export default function PromptManager({
                   overflowY: "auto",
                 }}
                 autoSize={false}
-                disabled={!isEditingMode}
+                disabled={!isEditingMode || isGeneratingAgent}
               />
             </div>
             
