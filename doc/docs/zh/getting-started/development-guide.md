@@ -210,7 +210,7 @@ source .env && python backend/runtime_service.py        # 运行态服务
 ### 文档资源
 - [安装部署](./installation.md) - 环境搭建和部署
 - [常见问题](./faq) - 常见问题解答
-- [用户指南](../user-guide/) - Nexent使用指南
+- [用户指南](../user-guide/home-page) - Nexent使用指南
 
 ### 社区支持
 - [Discord 社区](https://discord.gg/tb5H3S3wyv) - 实时交流和支持

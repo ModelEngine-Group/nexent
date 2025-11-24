@@ -135,4 +135,4 @@ bash deploy.sh
 部署完成后：
 
 1. 在浏览器打开 `http://localhost:3000`
-2. 参考 [用户指南](https://doc.nexent.tech/zh/user-guide/) 完成智能体配置与验证
+2. 参考 [用户指南](https://doc.nexent.tech/zh/user-guide/home-page) 完成智能体配置与验证
