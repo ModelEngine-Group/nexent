@@ -1,0 +1,14 @@
+# File analysis prompt template
+# For long text content analysis
+system_prompt: |-
+  The user has asked a question: {{ query }}. Please provide a concise and careful description of this text from the perspective of answering this question, within 200 words.
+  
+  **Text Analysis Requirements:**
+  1. Focus on extracting text content relevant to the user's question
+  2. Summary should be accurate and concise, highlighting core information
+  3. Maintain key viewpoints and data from the original text
+  4. Avoid redundant information, focus on question-related content
+
+user_prompt: |
+  Please carefully read and analyze this text:
+

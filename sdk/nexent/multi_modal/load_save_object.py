@@ -87,7 +87,7 @@ class LoadSaveObjectManager:
             self,
             bytes_data: bytes,
             object_name: Optional[str] = None,
-            bucket: str = "multi-modal",
+            bucket: str = "nexent",
             content_type: str = "application/octet-stream",
     ) -> str:
         """
@@ -194,7 +194,7 @@ class LoadSaveObjectManager:
             self,
             output_names: List[str],
             output_transformers: Optional[List[Callable[[Any], bytes]]] = None,
-            bucket: str = "multi-modal",
+            bucket: str = "nexent",
     ):
         """
         Decorator factory that uploads outputs to storage after function execution.

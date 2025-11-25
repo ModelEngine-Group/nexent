@@ -11,7 +11,7 @@ from fastmcp import Client
 import jsonref
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 
-from consts.const import DEFAULT_USER_ID, LOCAL_MCP_SERVER
+from consts.const import DEFAULT_USER_ID, LOCAL_MCP_SERVER, DATA_PROCESS_SERVICE
 from consts.exceptions import MCPConnectionError, ToolExecutionException, NotFoundException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
 from database.remote_mcp_db import get_mcp_records_by_tenant, get_mcp_server_by_name_and_tenant
@@ -23,6 +23,8 @@ from database.tool_db import (
     search_last_tool_instance_by_tool_id,
 )
 from database.user_tenant_db import get_all_tenant_ids
+from services.file_management_service import get_llm_model
+from backend.database.client import minio_client
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
 from services.tenant_config_service import get_selected_knowledge_list
 
@@ -611,6 +613,17 @@ def _validate_local_tool(
                 'index_names': index_names,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "analyze_text_file":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+            long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
+            params = {
+                **instantiation_params,
+                'llm_model': long_text_to_text_model,
+                'storage_client': minio_client,
+                "data_process_service_url": DATA_PROCESS_SERVICE
             }
             tool_instance = tool_class(**params)
         else:

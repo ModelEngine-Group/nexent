@@ -9,8 +9,10 @@ from typing import List, Optional, AsyncGenerator
 import httpx
 from fastapi import UploadFile
 
+from nexent import MessageObserver
+from nexent.core.models import OpenAILongContextModel
 from agents.preprocess_manager import preprocess_manager
-from consts.const import UPLOAD_FOLDER, MAX_CONCURRENT_UPLOADS, DATA_PROCESS_SERVICE, LANGUAGE
+from consts.const import UPLOAD_FOLDER, MAX_CONCURRENT_UPLOADS, DATA_PROCESS_SERVICE, LANGUAGE, MODEL_CONFIG_MAPPING
 from database.attachment_db import (
     upload_fileobj,
     get_file_url,
@@ -21,6 +23,7 @@ from database.attachment_db import (
 )
 from utils.attachment_utils import convert_image_to_text, convert_long_text_to_text
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.prompt_template_utils import get_file_processing_messages_template
 from utils.file_management_utils import save_upload_file
 
@@ -405,3 +408,16 @@ def get_file_description(files: List[UploadFile]) -> str:
         else:
             description += f"- File {file.filename or ''}\n"
     return description
+
+def get_llm_model(tenant_id: str):
+    # Get the tenant config
+    main_model_config = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    long_text_to_text_model = OpenAILongContextModel(
+        observer=MessageObserver(),
+        model_id=get_model_name_from_config(main_model_config),
+        api_base=main_model_config.get("base_url"),
+        api_key=main_model_config.get("api_key"),
+        max_context_tokens=main_model_config.get("max_tokens")
+    )
+    return long_text_to_text_model
