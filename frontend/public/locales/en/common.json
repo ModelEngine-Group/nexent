@@ -502,6 +502,7 @@
   "document.summary.modelPlaceholder": "Select Model",
   "document.status.creating": "Creating...",
   "document.status.loadingList": "Loading document list...",
+  "document.status.waitingForTask": "Waiting for task creation...",
   "document.input.knowledgeBaseName": "Please enter knowledge base name",
   "document.button.details": "Details",
   "document.button.overview": "Overview",

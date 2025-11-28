@@ -503,6 +503,7 @@
   "document.summary.modelPlaceholder": "选择模型",
   "document.status.creating": "创建中...",
   "document.status.loadingList": "正在加载文档列表...",
+  "document.status.waitingForTask": "正在等待任务创建...",
   "document.input.knowledgeBaseName": "请输入知识库名称",
   "document.button.details": "详细内容",
   "document.button.overview": "概览",

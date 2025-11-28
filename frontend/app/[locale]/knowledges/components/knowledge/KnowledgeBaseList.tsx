@@ -284,27 +284,34 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           {t('knowledgeBase.tag.chunks', { count: kb.chunkCount || 0 })}
                         </span>
 
-                        {/* Knowledge base source tag */}
-                        <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
-                          {t('knowledgeBase.tag.source', { source: kb.source })}
-                        </span>
+                        {/* Only show source, creation date, and model tags when there are valid documents or chunks */}
+                        {((kb.documentCount || 0) > 0 || (kb.chunkCount || 0) > 0) && (
+                          <>
+                            {/* Knowledge base source tag */}
+                            <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
+                              {t('knowledgeBase.tag.source', { source: kb.source })}
+                            </span>
 
-                        {/* Creation date tag - only show date */}
-                        <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
-                          {t('knowledgeBase.tag.createdAt', { date: formatDate(kb.createdAt) })}
-                        </span>
+                            {/* Creation date tag - only show date */}
+                            <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
+                              {t('knowledgeBase.tag.createdAt', { date: formatDate(kb.createdAt) })}
+                            </span>
 
-                        {/* Force line break */}
-                        <div className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}></div>
+                            {/* Force line break */}
+                            <div className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}></div>
 
-                        {/* Model tag - show normal or mismatch */}
-                        <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}>
-                          {t('knowledgeBase.tag.model', { model: getModelDisplayName(kb.embeddingModel) })}
-                        </span>
-                        {kb.embeddingModel !== "unknown" && kb.embeddingModel !== currentEmbeddingModel && (
-                          <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}>
-                            {t('knowledgeBase.tag.modelMismatch')}
-                          </span>
+                            {/* Model tag - only show when model is not "unknown" */}
+                            {kb.embeddingModel !== "unknown" && (
+                              <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}>
+                                {t('knowledgeBase.tag.model', { model: getModelDisplayName(kb.embeddingModel) })}
+                              </span>
+                            )}
+                            {kb.embeddingModel !== "unknown" && kb.embeddingModel !== currentEmbeddingModel && (
+                              <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}>
+                                {t('knowledgeBase.tag.modelMismatch')}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

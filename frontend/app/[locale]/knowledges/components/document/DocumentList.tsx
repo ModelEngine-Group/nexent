@@ -56,6 +56,7 @@ interface DocumentListProps {
   isCreatingMode?: boolean;
   onNameChange?: (name: string) => void;
   hasDocuments?: boolean;
+  isNewlyCreatedAndWaiting?: boolean; // New prop to track newly created KB waiting for documents
 
   // Upload related props
   isDragging?: boolean;
@@ -85,6 +86,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       isCreatingMode = false,
       onNameChange,
       hasDocuments = false,
+      isNewlyCreatedAndWaiting = false, // New prop
 
       // Upload related props
       isDragging = false,
@@ -511,29 +513,42 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </Button>
               </div>
             </div>
-          ) : docState.isLoadingDocuments ? (
+          ) : docState.isLoadingDocuments || isNewlyCreatedAndWaiting ? (
             <div className="flex items-center justify-center h-full border border-gray-200 rounded-md">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
                 <p className="text-sm text-gray-600">
-                  {t("document.status.loadingList")}
+                  {isNewlyCreatedAndWaiting 
+                    ? t("document.status.waitingForTask")
+                    : t("document.status.loadingList")}
                 </p>
               </div>
             </div>
           ) : isCreatingMode ? (
-            <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
-              <div className="text-center p-6">
-                <div className="mb-4 text-blue-600 text-[36px]">
-                  <InfoCircleFilled />
+            (hasDocuments || isUploading || docState.isLoadingDocuments) ? (
+              <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                  <p className="text-sm text-gray-600">
+                    {t("document.status.waitingForTask")}
+                  </p>
                 </div>
-                <h3 className="text-lg font-medium text-gray-800 mb-2">
-                  {t("document.title.createNew")}
-                </h3>
-                <p className="text-gray-500 text-sm max-w-md">
-                  {t("document.hint.uploadToCreate")}
-                </p>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
+                <div className="text-center p-6">
+                  <div className="mb-4 text-blue-600 text-[36px]">
+                    <InfoCircleFilled />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-800 mb-2">
+                    {t("document.title.createNew")}
+                  </h3>
+                  <p className="text-gray-500 text-sm max-w-md">
+                    {t("document.hint.uploadToCreate")}
+                  </p>
+                </div>
+              </div>
+            )
           ) : sortedDocuments.length > 0 ? (
             <div className="overflow-y-auto border border-gray-200 rounded-md h-full">
               <table className="min-w-full bg-white">
