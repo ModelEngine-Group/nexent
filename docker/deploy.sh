@@ -8,6 +8,21 @@ fi
 
 # Exit immediately if a command exits with a non-zero status
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
+DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
+
+MODE_CHOICE_SAVED=""
+VERSION_CHOICE_SAVED=""
+IS_MAINLAND_SAVED=""
+ENABLE_TERMINAL_SAVED="N"
+TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
+APP_VERSION_VALUE=""
+
+cd "$SCRIPT_DIR"
+
 set -a
 source .env
 
@@ -221,6 +236,48 @@ check_ports_in_env_files() {
   echo ""
 }
 
+trim_quotes() {
+  local value="$1"
+  value="${value%$'\r'}"
+  value="${value%\"}"
+  value="${value#\"}"
+  echo "$value"
+}
+
+get_app_version() {
+  if [ -n "$APP_VERSION_VALUE" ]; then
+    echo "$APP_VERSION_VALUE"
+    return
+  fi
+
+  if [ ! -f "$CONST_FILE" ]; then
+    echo ""
+    return
+  fi
+
+  local line
+  line=$(grep -E 'APP_VERSION' "$CONST_FILE" | tail -n 1 || true)
+  line="${line##*=}"
+  line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  APP_VERSION_VALUE="$(trim_quotes "$line")"
+  echo "$APP_VERSION_VALUE"
+}
+
+persist_deploy_options() {
+  local app_version
+  app_version="$(get_app_version || true)"
+
+  {
+    echo "APP_VERSION=\"${app_version}\""
+    echo "ROOT_DIR=\"${ROOT_DIR}\""
+    echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
+    echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
+    echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
+    echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
+  } > "$DEPLOY_OPTIONS_FILE"
+}
+
 generate_minio_ak_sk() {
   echo "🔑 Generating MinIO keys..."
 
@@ -395,6 +452,7 @@ select_deployment_mode() {
 
   # Sanitize potential Windows CR in input
   mode_choice=$(sanitize_input "$mode_choice")
+  MODE_CHOICE_SAVED="$mode_choice"
   
   case $mode_choice in
       2)
@@ -606,7 +664,7 @@ select_deployment_version() {
 
   # Sanitize potential Windows CR in input
   version_choice=$(sanitize_input "$version_choice")
-
+  VERSION_CHOICE_SAVED="${version_choice}"
   case $version_choice in
       2)
           export DEPLOYMENT_VERSION="full"
@@ -692,6 +750,7 @@ select_terminal_tool() {
     enable_terminal=$(sanitize_input "$enable_terminal")
 
     if [[ "$enable_terminal" =~ ^[Yy]$ ]]; then
+        ENABLE_TERMINAL_SAVED="Y"
         export ENABLE_TERMINAL_TOOL_CONTAINER="true"
         export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}terminal"
         echo "✅ Terminal tool container will be created 🔧"
@@ -707,6 +766,7 @@ select_terminal_tool() {
         read -p "   📁 Enter host directory to mount to container (default: /opt/terminal): " terminal_mount_dir
         terminal_mount_dir=$(sanitize_input "$terminal_mount_dir")
         TERMINAL_MOUNT_DIR="${terminal_mount_dir:-$default_terminal_dir}"
+        TERMINAL_MOUNT_DIR_SAVED="$TERMINAL_MOUNT_DIR"
         
         # Save to environment variables
         export TERMINAL_MOUNT_DIR
@@ -770,6 +830,7 @@ select_terminal_tool() {
         fi
         echo ""
     else
+        ENABLE_TERMINAL_SAVED="N"
         export ENABLE_TERMINAL_TOOL_CONTAINER="false"
         echo "🚫 Terminal tool container disabled"
     fi
@@ -814,9 +875,11 @@ choose_image_env() {
   # Sanitize potential Windows CR in input
   is_mainland=$(sanitize_input "$is_mainland")
   if [[ "$is_mainland" =~ ^[Yy]$ ]]; then
+    IS_MAINLAND_SAVED="Y"
     echo "🌐 Detected mainland China network, using .env.mainland for image sources."
     source .env.mainland
   else
+    IS_MAINLAND_SAVED="N"
     echo "🌐 Using general image sources from .env.general."
     source .env.general
   fi
@@ -867,6 +930,7 @@ main_deploy() {
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
     echo "💡 Use 'source .env' to load environment variables in your development shell"
+    persist_deploy_options
     return 0
   fi
 
@@ -883,6 +947,7 @@ main_deploy() {
     create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 0; }
   fi
 
+  persist_deploy_options
   echo "🎉  Deployment completed successfully!"
   echo "🌐  You can now access the application at http://localhost:3000"
 }
