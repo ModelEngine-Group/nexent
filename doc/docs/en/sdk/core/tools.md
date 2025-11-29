@@ -28,6 +28,10 @@ The current SDK includes the following tool types:
 - **GetEmailTool**: Email retrieval tool via IMAP
 - **SendEmailTool**: Email sending tool via SMTP
 
+### Multimodal Tools
+- **AnalyzeTextFileTool**: A document question-answering tool based on data processing and large language models
+- **AnalyzeImageTool**: An image question-answering tool based on visual language models
+
 ## 🔧 Common Characteristics
 
 ### 1. Basic Architecture

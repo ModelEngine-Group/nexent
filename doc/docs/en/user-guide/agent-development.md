@@ -45,7 +45,12 @@ Agents can use various tools to complete tasks, such as knowledge base search, e
   <img src="./assets/agent-development/set-tool.png" style="width: 50%; height: auto;" />
 </div>
 
-> 📚 Want to learn about all the built-in local tools in Nexent? Please see [Local Tools Overview](./local-tools/index.md).
+> 💡 **Tips**：
+> 1. Please select the `knowledge_base_search` tool to enable the knowledge base search function.
+> 2. Please select the `analyze_text_file` tool to enable the parsing function for document and text files.
+> 3. Please select the `analyze_image` tool to enable the parsing function for image files.
+> 
+> 📚 Want to learn about all the built-in local tools available in the system? Please refer to [Local Tools Overview](./local-tools/index.md).
 
 ### 🔌 Add MCP Tools
 

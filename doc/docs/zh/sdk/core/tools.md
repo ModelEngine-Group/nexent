@@ -28,6 +28,10 @@
 - **GetEmailTool**: 通过 IMAP 的邮件获取工具
 - **SendEmailTool**: 通过 SMTP 的邮件发送工具
 
+### 多模态工具
+- **AnalyzeTextFileTool**: 基于数据处理和大语言模型的文档问答工具
+- **AnalyzeImageTool**: 基于视觉语言模型的图片问答工具
+
 ## 🔧 工具共性特征
 
 ### 1. 基础架构
