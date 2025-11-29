@@ -12,6 +12,7 @@ import log from "@/lib/logger";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { USER_ROLES } from "@/const/modelConfig";
+import { saveView } from "@/lib/viewPersistence";
 
 import MemoryManageModal from "../internal/memory/memoryManageModal";
 
@@ -34,7 +35,8 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   const goToModelSetup = () => {
-    router.push(`/${i18n.language}/setup/models`);
+    saveView("models");
+    router.push(`/${i18n.language}`);
   };
 
   // Update editTitle when the title attribute changes
