@@ -121,6 +121,24 @@ export default function SubAgentPool({
           opacity: 0.5;
           cursor: not-allowed !important;
         }
+
+        /* Agent description clamps to 1 line on small screens */
+        .agent-description {
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          line-height: 1.25;
+          -webkit-line-clamp: 1;
+          max-height: 1.25rem;
+        }
+
+        @media (min-width: 640px) {
+          .agent-description {
+            -webkit-line-clamp: 2;
+            max-height: 2.5rem;
+          }
+        }
       `}</style>
       <div className="flex flex-col h-full min-h-[300px] lg:min-h-0 overflow-hidden">
         <div className="flex justify-between items-center mb-2">
@@ -298,7 +316,7 @@ export default function SubAgentPool({
                       }}
                     >
                       <div className="flex items-center h-full">
-                        <div className="flex-1 overflow-hidden">
+                        <div className="flex-1 overflow-hidden min-w-0">
                           <div
                             className={`font-medium text-base truncate transition-colors duration-300 ${
                               !isAvailable ? "text-gray-500" : ""
@@ -333,24 +351,16 @@ export default function SubAgentPool({
                             </div>
                           </div>
                           <div
-                            className={`text-xs line-clamp-2 transition-colors duration-300 leading-[1.25] overflow-hidden ${
+                            className={`text-xs transition-colors duration-300 leading-[1.25] agent-description ${
                               !isAvailable ? "text-gray-400" : "text-gray-500"
                             }`}
-                            style={{
-                              display: "-webkit-box",
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: "vertical",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              maxHeight: "2.5rem",
-                            }}
                           >
                             {agent.description}
                           </div>
                         </div>
 
                         {/* Operation button area */}
-                        <div className="flex items-center gap-1 ml-2">
+                        <div className="flex items-center gap-1 ml-2 flex-shrink-0">
                           {/* View call relationship button */}
                           <Tooltip>
                             <TooltipTrigger asChild>

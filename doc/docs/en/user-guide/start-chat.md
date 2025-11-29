@@ -66,9 +66,15 @@ Nexent supports voice input (make sure you have configured the speech model unde
 
 ### Upload Files for Chat
 
-You can upload files during a chat, allowing agents to assist you based on file content:
+You can upload files during a chat so the agent can reason over their content:
 
-1. **Choose File Upload Method**
+> ⚠️ **Important:**
+> 1. Multimodal file conversations require the agent to have the corresponding parsing tools enabled during agent development. 
+>    2. For document or text files select the `analyze_text_file` tool.
+>    3. For image files select the `analyze_image` tool.
+> 2. Each uploaded file should ideally be under 10 MB. Split large documents into multiple uploads.
+
+1. **Choose a File Upload Method**
    - Click the file upload button in the lower right corner of the input box
    - Or drag files directly into the chat area
 
@@ -78,16 +84,14 @@ You can upload files during a chat, allowing agents to assist you based on file 
    - **Images:** JPG, PNG, GIF, and other common formats
 
 3. **File Processing Flow**
-   - The system will automatically process your uploaded files
-   - Extract file content and add it to the current chat context
-   - The agent will answer your questions based on the file content
+   - The platform stores the uploaded file in MinIO and returns an S3 URL
+   - It builds structured file metadata and injects it into the active conversation
+   - The agent then answers your questions based on both the prompt and file metadata
 
 4. **File-based Chat**
-   - After uploading a file, you can ask questions about its content
-   - The agent can analyze, summarize, or process information from the file
+   - After uploading a file, ask questions about its contents at any time
+   - The agent can call the relevant multimodal tools to analyze, summarize, or process the data
    - Multiple files can be uploaded and processed simultaneously
-
-> ⚠️ **Note:** There is a file size limit for uploads. It is recommended that a single file not exceed 10MB. For large documents, upload in batches.
 
 ## 📚 Manage Your Chat History
 
@@ -162,7 +166,7 @@ The right sidebar provides two tabs: "Source" and "Images" to help you understan
 
 ### Image Processing
 
-Nexent supports image input and processing (requires configuration of a vision model):
+Nexent supports image input and processing (make sure a vision model **and** the `analyze_image` tool are configured):
 
 1. **Upload Images**
    - Drag image files directly into the chat area

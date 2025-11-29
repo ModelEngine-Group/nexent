@@ -4,7 +4,7 @@ Nexent平台提供了丰富的本地工具，帮助智能体完成各种系统�
 
 ## 🛠️ 可用工具
 
-Nexent预置了一组可以直接复用的本地工具。它们按照能力分为邮件、文件、搜索三大类，Terminal 工具则作为远程 Shell 能力单独提供。下方列出各工具的名称与核心特性，方便在 Agent 中快速定位所需能力。
+Nexent预置了一组可以直接复用的本地工具。它们按照能力分为邮件、文件、搜索、多模态三大类，Terminal 工具则作为远程 Shell 能力单独提供。下方列出各工具的名称与核心特性，方便在 Agent 中快速定位所需能力。
 
 ### 📧 邮件工具（Email）
 
@@ -29,6 +29,12 @@ Nexent预置了一组可以直接复用的本地工具。它们按照能力分�
 - **exa_search**：调用 EXA API 进行实时全网搜索，可配置返回条数并支持附带图片链接（默认在服务端进一步筛选）。需要在工具配置中填写 EXA API Key，前往 [exa.ai](https://exa.ai/) 注册即可免费获取。
 - **tavily_search**：基于 Tavily API 的网页搜索，擅长新闻、实时资讯查询，同时返回文本结果和相关图片 URL，同样支持可选的图片过滤能力，可在 [tavily.com](https://www.tavily.com/) 免费申请 API Key。
 - **linkup_search**：使用 Linkup API 获取文本与图片结果，除了普通网页内容，还能返回纯图片结果，适合需要图文混合参考的场景。访问 [linkup.so](https://www.linkup.so/) 注册获取免费的 API Key。
+
+
+### 🖼️ 多模态工具（Multimodal）
+
+- **analyze_text_file**：基于用户提问和文本文件的s3 url、http url、https url，解析文件并使用大语言模型理解文件，回答用户问题。需要在模型管理页面配置可用的大语言模型。
+- **analyze_image**：基于用户提问和图片的s3 url、http url、https url，使用视觉语言模型分析理解图像，回答用户问题。需要在模型管理页面配置可用的视觉语言模型。
 
 ### 🖥️ Terminal工具
 

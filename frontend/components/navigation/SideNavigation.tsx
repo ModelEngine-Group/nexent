@@ -71,6 +71,9 @@ export function SideNavigation({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [selectedKey, setSelectedKey] = useState("0");
+  const expandedWidth = 277;
+  const collapsedWidth = 64;
+  const siderWidth = collapsed ? collapsedWidth : expandedWidth;
   
   // Update selected key when pathname or currentView changes
   useEffect(() => {
@@ -247,35 +250,39 @@ export function SideNavigation({
       }}
     >
       <div style={{ position: "relative" }}>
-        <Sider
-          collapsed={collapsed}
-          trigger={null}
-          breakpoint="lg"
-          collapsedWidth={64}
-          width={277}
-          className="!bg-white/95 dark:!bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
-          style={{
-            overflow: "auto",
-            height: sidebarHeight,
-            position: "sticky",
-            top: sidebarTop,
-            left: 0,
-          }}
-        >
-          <div className="py-2 h-full">
-            <Menu
-              mode="inline"
-              selectedKeys={[selectedKey]}
-              items={menuItems}
-              onClick={({ key }) => setSelectedKey(key)}
-              className="!bg-transparent !border-r-0"
-              style={{
-                height: "100%",
-                borderRight: 0,
-              }}
-            />
-          </div>
-        </Sider>
+        <div style={{ width: `${siderWidth}px`, flexShrink: 0 }}>
+          <Sider
+            collapsed={collapsed}
+            trigger={null}
+            breakpoint="lg"
+            collapsedWidth={collapsedWidth}
+            width={expandedWidth}
+            className="!bg-white/95 dark:!bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
+            style={{
+              overflow: "auto",
+              minHeight: sidebarHeight,
+              height: sidebarHeight,
+              position: "fixed",
+              top: sidebarTop,
+              left: 0,
+              width: `${siderWidth}px`,
+            }}
+          >
+            <div className="py-2 h-full">
+              <Menu
+                mode="inline"
+                selectedKeys={[selectedKey]}
+                items={menuItems}
+                onClick={({ key }) => setSelectedKey(key)}
+                className="!bg-transparent !border-r-0"
+                style={{
+                  height: "100%",
+                  borderRight: 0,
+                }}
+              />
+            </div>
+          </Sider>
+        </div>
 
         {/* Custom circular floating toggle button - positioned outside Sider */}
         <Button
@@ -297,7 +304,7 @@ export function SideNavigation({
             alignItems: "center",
             justifyContent: "center",
             border: "2px solid white",
-            zIndex: 1000,
+            zIndex: 800,
             transition: "left 0.2s ease",
           }}
           icon={

@@ -30,6 +30,11 @@ Nexent preloads a set of reusable local tools grouped by capability: email, file
 - **tavily_search**: Uses the Tavily API to retrieve webpages, particularly strong for news and current events. Returns both text results and related image URLs, with optional image filtering. Request a free API key from [tavily.com](https://www.tavily.com/).
 - **linkup_search**: Uses the Linkup API to fetch text and images. In addition to regular webpages, it can return image-only results, making it useful when mixed media references are required. Register at [linkup.so](https://www.linkup.so/) to obtain a free API key.
 
+### 🖼️ Multimodal Tools
+
+- **analyze_text_file**: Based on user queries and the S3 URL, HTTP URL, and HTTPS URL of a text file, parse the file and use a large language model to understand it, answering user questions. An available large language model needs to be configured on the model management page.
+- **analyze_image**: Based on user queries and the S3 URL, HTTP URL, and HTTPS URL of an image, use a visual language model to analyze and understand the image, answering user questions. An available visual language model needs to be configured on the model management page.
+
 ### 🖥️ Terminal Tool
 
 The **Terminal Tool** is one of Nexent's core local capabilities that provides a persistent SSH session. Agents can execute remote commands, perform system inspections, read logs, or deploy services. Refer to the dedicated [Terminal Tool guide](./terminal-tool) for detailed setup, parameters, and security guidance.
