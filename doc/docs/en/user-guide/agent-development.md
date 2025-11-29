@@ -15,6 +15,14 @@ If you have an existing agent configuration, you can also import it:
   <img src="./assets/agent-development/import.png" style="width: 80%; height: auto;" />
 </div>
 
+> ⚠️ **Note:** If you import an agent with a duplicate name, a prompt dialog will appear. You can choose:
+> - **Import anyway**: Keep the duplicate name; the imported agent will be in an unavailable state and requires manual modification of the Agent name and variable name before it can be used
+> - **Regenerate and import**: The system will call the LLM to rename the Agent, which will consume a certain amount of model tokens and may take longer
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
+</div>
+
 ## 👥 Configure Collaborative Agents/Tools
 
 You can configure other collaborative agents for your created agent, as well as assign available tools to empower the agent to complete complex tasks.
