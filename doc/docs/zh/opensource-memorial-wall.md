@@ -553,3 +553,7 @@ Nexent加油
 祝越来越好
 ::: info aaa - 2025-11-28
 祝nexent平台越来越好
+
+:::info kissmekm - 2025-12-01
+感谢 Nexent 让我踏上了开源之旅！希望Nexent越来越好！。
+:::
