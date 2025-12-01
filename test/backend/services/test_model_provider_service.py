@@ -13,7 +13,7 @@ class MockModule(mock.MagicMock):
 # without its real heavy dependencies being present during unit-testing.
 # ---------------------------------------------------------------------------
 for module_path in [
-    "consts", "consts.provider", "consts.model", "consts.const",
+    "consts", "consts.provider", "consts.model", "consts.const", "consts.exceptions",
     "utils", "utils.model_name_utils",
     "services", "services.model_health_service",
     "database", "database.model_management_db",
@@ -31,6 +31,7 @@ sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # Mock ProviderEnum for get_provider_models tests
 class _ProviderEnumStub:
     SILICON = mock.Mock(value="silicon")
+    MODELENGINE = mock.Mock(value="modelengine")
 
 sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
 
@@ -41,6 +42,13 @@ class _EnumStub:
     DETECTING = mock.Mock(value="detecting")
 
 sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
+
+# Mock exception classes
+class _TimeoutExceptionStub(Exception):
+    """Mock TimeoutException for testing."""
+    pass
+
+sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
 
 # Mock the database function that merge_existing_model_tokens depends on
 sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = mock.MagicMock()
