@@ -331,7 +331,8 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
             mock_observer_instance,
             model_id="gpt-4",
             api_base="http://host.docker.internal:8080",
-            api_key="test-key"
+            api_key="test-key",
+            ssl_verify=True
         )
 
 
@@ -363,7 +364,8 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
             mock_observer_instance,
             model_id="gpt-4",
             api_base="http://host.docker.internal:8000",
-            api_key="test-key"
+            api_key="test-key",
+            ssl_verify=True
         )
 
 @pytest.mark.asyncio
@@ -415,7 +417,7 @@ async def test_check_model_connectivity_success():
         mock_update_model.assert_any_call(
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
-            "openai/gpt-4", "llm", "https://api.openai.com", "test-key"
+            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True
         )
 
 
@@ -540,7 +542,7 @@ async def test_verify_model_config_connectivity_success():
         assert "error" not in response
 
         mock_connectivity_check.assert_called_once_with(
-            "gpt-4", "llm", "https://api.openai.com", "test-key"
+            "gpt-4", "llm", "https://api.openai.com", "test-key", True
         )
 
 
