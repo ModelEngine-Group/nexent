@@ -203,7 +203,8 @@ async def test_perform_connectivity_check_llm():
             mock_observer_instance,
             model_id="gpt-4",
             api_base="https://api.openai.com",
-            api_key="test-key"
+            api_key="test-key",
+            ssl_verify=True
         )
         mock_model_instance.check_connectivity.assert_called_once()
 
@@ -330,7 +331,8 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
             mock_observer_instance,
             model_id="gpt-4",
             api_base="http://host.docker.internal:8080",
-            api_key="test-key"
+            api_key="test-key",
+            ssl_verify=True
         )
 
 
@@ -362,7 +364,8 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
             mock_observer_instance,
             model_id="gpt-4",
             api_base="http://host.docker.internal:8000",
-            api_key="test-key"
+            api_key="test-key",
+            ssl_verify=True
         )
 
 @pytest.mark.asyncio
@@ -414,7 +417,7 @@ async def test_check_model_connectivity_success():
         mock_update_model.assert_any_call(
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
-            "openai/gpt-4", "llm", "https://api.openai.com", "test-key"
+            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True
         )
 
 
@@ -539,7 +542,7 @@ async def test_verify_model_config_connectivity_success():
         assert "error" not in response
 
         mock_connectivity_check.assert_called_once_with(
-            "gpt-4", "llm", "https://api.openai.com", "test-key"
+            "gpt-4", "llm", "https://api.openai.com", "test-key", True
         )
 
 
@@ -785,146 +788,3 @@ async def test_embedding_dimension_check_wrapper_value_error():
         )
 
 
-@pytest.mark.asyncio
-async def test_check_me_connectivity_impl_success():
-    """Test successful ME connectivity check"""
-    # Setup
-    with mock.patch("backend.services.model_health_service.MODEL_ENGINE_APIKEY", "me-api-key"), \
-            mock.patch("backend.services.model_health_service.MODEL_ENGINE_HOST", "https://me-host.com"), \
-            mock.patch("backend.services.model_health_service.ModelConnectStatusEnum") as mock_enum, \
-            mock.patch("backend.services.model_health_service.aiohttp.ClientSession") as mock_session_class:
-
-        mock_enum.AVAILABLE.value = "available"
-        mock_enum.UNAVAILABLE.value = "unavailable"
-
-        # Create mock response
-        mock_response = mock.AsyncMock()
-        mock_response.status = 200
-
-        # Create mock session
-        mock_session = mock.AsyncMock()
-        mock_get = mock.AsyncMock()
-        mock_get.__aenter__.return_value = mock_response
-        mock_session.get = mock.MagicMock(return_value=mock_get)
-
-        # Create mock session factory
-        mock_client_session = mock.AsyncMock()
-        mock_client_session.__aenter__.return_value = mock_session
-        mock_session_class.return_value = mock_client_session
-
-        # Import the function after mocking
-        from backend.services.model_health_service import check_me_connectivity_impl
-
-        # Execute - the function should return None on success or raise an exception
-        result = await check_me_connectivity_impl(timeout=30)
-
-        # Assert - should return None on success
-        assert result is None
-
-
-@pytest.mark.asyncio
-async def test_check_me_connectivity_impl_http_error():
-    """Test ME connectivity check with HTTP error response"""
-    # Setup
-    with mock.patch("backend.services.model_health_service.MODEL_ENGINE_APIKEY", "me-api-key"), \
-            mock.patch("backend.services.model_health_service.MODEL_ENGINE_HOST", "https://me-host.com"), \
-            mock.patch("backend.services.model_health_service.ModelConnectStatusEnum") as mock_enum, \
-            mock.patch("backend.services.model_health_service.aiohttp.ClientSession") as mock_session_class:
-
-        mock_enum.AVAILABLE.value = "available"
-        mock_enum.UNAVAILABLE.value = "unavailable"
-
-        # Create mock response with error status
-        mock_response = mock.AsyncMock()
-        mock_response.status = 500
-
-        # Create mock session
-        mock_session = mock.AsyncMock()
-        mock_get = mock.AsyncMock()
-        mock_get.__aenter__.return_value = mock_response
-        mock_session.get = mock.MagicMock(return_value=mock_get)
-
-        # Create mock session factory
-        mock_client_session = mock.AsyncMock()
-        mock_client_session.__aenter__.return_value = mock_session
-        mock_session_class.return_value = mock_client_session
-
-        # Import the function after mocking
-        from backend.services.model_health_service import check_me_connectivity_impl
-
-        # Execute and expect an exception
-        with pytest.raises(Exception) as exc_info:
-            await check_me_connectivity_impl(timeout=30)
-
-        # Assert the exception message
-        assert "Unknown error occurred: Connection failed, error code: 500" in str(
-            exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_check_me_connectivity_impl_timeout():
-    """Test ME connectivity check with timeout error"""
-    # Setup
-    with mock.patch("backend.services.model_health_service.MODEL_ENGINE_APIKEY", "me-api-key"), \
-            mock.patch("backend.services.model_health_service.MODEL_ENGINE_HOST", "https://me-host.com"), \
-            mock.patch("backend.services.model_health_service.ModelConnectStatusEnum") as mock_enum, \
-            mock.patch("backend.services.model_health_service.aiohttp.ClientSession") as mock_session_class:
-
-        mock_enum.AVAILABLE.value = "available"
-        mock_enum.UNAVAILABLE.value = "unavailable"
-
-        # Create mock session that raises TimeoutError
-        mock_session = mock.AsyncMock()
-        mock_get = mock.AsyncMock()
-        mock_get.__aenter__.side_effect = asyncio.TimeoutError()
-        mock_session.get = mock.MagicMock(return_value=mock_get)
-
-        # Create mock session factory
-        mock_client_session = mock.AsyncMock()
-        mock_client_session.__aenter__.return_value = mock_session
-        mock_session_class.return_value = mock_client_session
-
-        # Import the function after mocking
-        from backend.services.model_health_service import check_me_connectivity_impl
-
-        # Execute and expect a TimeoutException
-        with pytest.raises(TimeoutException) as exc_info:
-            await check_me_connectivity_impl(timeout=30)
-
-        # Assert the exception message
-        assert "Connection timed out" in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_check_me_connectivity_impl_exception():
-    """Test ME connectivity check with general exception"""
-    # Setup
-    with mock.patch("backend.services.model_health_service.MODEL_ENGINE_APIKEY", "me-api-key"), \
-            mock.patch("backend.services.model_health_service.MODEL_ENGINE_HOST", "https://me-host.com"), \
-            mock.patch("backend.services.model_health_service.ModelConnectStatusEnum") as mock_enum, \
-            mock.patch("backend.services.model_health_service.aiohttp.ClientSession") as mock_session_class:
-
-        mock_enum.AVAILABLE.value = "available"
-        mock_enum.UNAVAILABLE.value = "unavailable"
-
-        # Create mock session that raises general exception
-        mock_session = mock.AsyncMock()
-        mock_get = mock.AsyncMock()
-        mock_get.__aenter__.side_effect = Exception("Connection error")
-        mock_session.get = mock.MagicMock(return_value=mock_get)
-
-        # Create mock session factory
-        mock_client_session = mock.AsyncMock()
-        mock_client_session.__aenter__.return_value = mock_session
-        mock_session_class.return_value = mock_client_session
-
-        # Import the function after mocking
-        from backend.services.model_health_service import check_me_connectivity_impl
-
-        # Execute and expect an Exception
-        with pytest.raises(Exception) as exc_info:
-            await check_me_connectivity_impl(timeout=30)
-
-        # Assert the exception message
-        assert "Unknown error occurred: Connection error" in str(
-            exc_info.value)

@@ -263,8 +263,13 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["Z
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
 
     # Create OpenAIServerModel instance
-    llm = OpenAIServerModel(model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "", api_base=model_config.get("base_url", ""),
-                            api_key=model_config.get("api_key", ""), temperature=0.7, top_p=0.95)
+    llm = OpenAIServerModel(
+        model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "",
+        api_base=model_config.get("base_url", ""),
+        api_key=model_config.get("api_key", ""),
+        temperature=0.7,
+        top_p=0.95
+    )
 
     # Build messages
     user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({

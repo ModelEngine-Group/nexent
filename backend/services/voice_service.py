@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 from nexent.core.models.stt_model import STTConfig, STTModel
 from nexent.core.models.tts_model import TTSConfig, TTSModel

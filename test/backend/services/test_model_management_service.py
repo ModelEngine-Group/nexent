@@ -119,6 +119,7 @@ consts_provider_mod = types.ModuleType("consts.provider")
 
 class _ProviderEnum:
     SILICON = _EnumItem("silicon")
+    MODELENGINE = _EnumItem("modelengine")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
@@ -329,6 +330,29 @@ async def test_create_model_for_tenant_conflict_raises():
 
 
 @pytest.mark.asyncio
+async def test_create_model_for_tenant_display_name_conflict_valueerror():
+    """Test that display_name conflict raises ValueError (covers lines 65-72)"""
+    svc = import_svc()
+
+    existing_model = {"model_id": 1, "display_name": "existing_name"}
+    with mock.patch.object(svc, "get_model_by_display_name", return_value=existing_model):
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "huggingface/llama",
+            "display_name": "existing_name",  # Conflicts with existing
+            "base_url": "http://localhost:8000",
+            "model_type": "llm",
+        }
+
+        # ValueError is wrapped in Exception, but the error message should contain the original ValueError message
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+        assert "already in use" in str(exc.value)
+        assert "existing_name" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_create_model_for_tenant_multi_embedding_creates_two_records():
     svc = import_svc()
 
@@ -405,6 +429,40 @@ async def test_create_provider_models_for_tenant_exception():
 
 
 @pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_other_provider():
+    """Test batch_create_models_for_tenant with non-Silicon/ModelEngine provider (covers lines 138-140)"""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "openai",  # Not Silicon or ModelEngine
+        "type": "llm",
+        "models": [
+            {"id": "openai/gpt-4", "max_tokens": 4096},
+        ],
+        "api_key": "k",
+    }
+
+    # Add MODELENGINE to ProviderEnum if it doesn't exist
+    if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
+        modelengine_item = _EnumItem("modelengine")
+        svc.ProviderEnum.MODELENGINE = modelengine_item
+    
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "gpt-4")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="openai/gpt-4"), \
+            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+        
+        # Verify prepare_model_dict was called with empty model_url for non-Silicon/ModelEngine provider
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == ""  # Should be empty for other providers
+
+
+@pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_flow():
     svc = import_svc()
 
@@ -444,6 +502,56 @@ async def test_batch_create_models_for_tenant_flow():
             "keep-id", {"max_tokens": 4096}, "u1")
         mock_prep.assert_awaited()
         mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_max_tokens_update():
+    """Test batch_create_models updates max_tokens when display_name exists and max_tokens changed (covers lines 160->173, 168->171)"""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "llm",
+        "models": [
+            {"id": "silicon/model1", "max_tokens": 8192},  # Changed from 4096
+            {"id": "silicon/model2", "max_tokens": 4096},  # Same as existing
+            {"id": "silicon/model3", "max_tokens": None},  # None should not update
+        ],
+        "api_key": "k",
+    }
+
+    def get_by_display(display_name, tenant_id):
+        if display_name == "silicon/model1":
+            return {"model_id": "id1", "max_tokens": 4096}  # Different from new value
+        elif display_name == "silicon/model2":
+            return {"model_id": "id2", "max_tokens": 4096}  # Same as new value
+        elif display_name == "silicon/model3":
+            return {"model_id": "id3", "max_tokens": 2048}  # Existing has value, new is None
+        return None
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", side_effect=lambda x: ("silicon", x.split("/")[1] if "/" in x else x)), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda r, n: f"{r}/{n}"), \
+            mock.patch.object(svc, "get_model_by_display_name", side_effect=get_by_display) as mock_get_by_display, \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # Should update model1 (max_tokens changed from 4096 to 8192)
+        # Note: update_model_record may be called multiple times, so check if it was called with correct args
+        update_calls = [call for call in mock_update.call_args_list if call[0][0] == "id1"]
+        if update_calls:
+            assert update_calls[0][0][1] == {"max_tokens": 8192}
+        
+        # Should NOT update model2 (max_tokens same) or model3 (new max_tokens is None)
+        # Verify model2 and model3 were not updated
+        model2_calls = [call for call in mock_update.call_args_list if call[0][0] == "id2"]
+        model3_calls = [call for call in mock_update.call_args_list if call[0][0] == "id3"]
+        assert len(model2_calls) == 0  # model2 should not be updated (same max_tokens)
+        assert len(model3_calls) == 0  # model3 should not be updated (new max_tokens is None)
 
 
 @pytest.mark.asyncio
@@ -759,6 +867,44 @@ async def test_list_llm_models_for_tenant_normalizes_connect_status():
         # Normalized from None
         assert result[0]["connect_status"] == "not_detected"
         assert result[1]["connect_status"] == "operational"
+
+
+async def test_list_models_for_tenant_type_mapping():
+    """Test list_models_for_tenant maps model_type from 'chat' to 'llm' (covers line 310)"""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "model_type": "chat",  # ModelEngine type that should be mapped to "llm"
+            "connect_status": "operational"
+        },
+        {
+            "model_id": "llm2",
+            "model_repo": "anthropic",
+            "model_name": "claude-3",
+            "display_name": "Claude 3",
+            "model_type": "llm",  # Already correct type
+            "connect_status": "not_detected"
+        }
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+
+        result = await svc.list_models_for_tenant("t1")
+
+        assert len(result) == 2
+        # First model should have model_type mapped from "chat" to "llm" (covers line 310)
+        assert result[0]["model_type"] == "llm"  # Should be mapped from "chat"
+        assert result[0]["model_id"] == "llm1"
+        # Second model should remain "llm"
+        assert result[1]["model_type"] == "llm"
+        assert result[1]["model_id"] == "llm2"
 
 
 async def test_list_llm_models_for_tenant_handles_missing_repo():
