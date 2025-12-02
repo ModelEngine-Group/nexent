@@ -194,10 +194,10 @@ export default function SetupLayout({
   completeText,
 }: SetupLayoutProps) {
   return (
-    <div className="w-full h-full bg-slate-50 dark:bg-slate-900 font-sans">
+    <div className="w-full h-full bg-slate-50 dark:bg-slate-900 font-sans overflow-hidden">
       {/* Main content with fixed size */}
       <div className="max-w-[1800px] mx-auto px-8 pb-6 pt-6 bg-transparent h-full flex flex-col">
-        <div className="flex-1 overflow-auto w-full h-full flex items-center justify-center">
+        <div className="flex-1 w-full h-full flex items-center justify-center">
         {children}
         </div>
         <Navigation

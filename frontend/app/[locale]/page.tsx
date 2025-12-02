@@ -506,7 +506,8 @@ export default function Home() {
             ? "centered"
             : currentView === "memory" ||
               currentView === "models" ||
-              currentView === "knowledges"
+              currentView === "knowledges" ||
+              currentView === "setup"
             ? "centered"
             : currentView === "chat"
             ? "fullscreen"
