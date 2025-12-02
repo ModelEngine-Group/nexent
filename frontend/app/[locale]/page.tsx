@@ -500,7 +500,7 @@ export default function Home() {
         onAdminRequired={handleAdminRequired}
         onViewChange={handleViewChange}
         currentView={currentView}
-        showFooter={currentView !== "setup"}
+        showFooter={true}
         contentMode={
           currentView === "home"
             ? "centered"

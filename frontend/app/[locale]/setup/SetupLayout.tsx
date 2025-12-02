@@ -131,7 +131,7 @@ function Navigation({
   };
 
   return (
-    <div className="mt-3 flex justify-between px-6">
+    <div className="mt-3 flex justify-between" style={{ padding: "0 16px" }}> 
       <div className="flex gap-2">
         {showBack && onBack && (
           <button
@@ -196,8 +196,8 @@ export default function SetupLayout({
   return (
     <div className="w-full h-full bg-slate-50 dark:bg-slate-900 font-sans">
       {/* Main content with fixed size */}
-      <div className="max-w-[1800px] mx-auto px-8 pb-4 pt-6 bg-transparent h-full flex flex-col">
-        <div className="flex-1 overflow-auto">
+      <div className="max-w-[1800px] mx-auto px-8 pb-6 pt-6 bg-transparent h-full flex flex-col">
+        <div className="flex-1 overflow-auto w-full h-full flex items-center justify-center">
         {children}
         </div>
         <Navigation
