@@ -324,7 +324,7 @@ export default function Home() {
         
         case "models":
           return (
-            <div className="w-full h-full p-1">
+            <div className="w-full h-full p-8">
               <ModelsContent
                 connectionStatus={connectionStatus}
                 isCheckingConnection={isCheckingConnection}
@@ -502,10 +502,12 @@ export default function Home() {
         currentView={currentView}
         showFooter={currentView !== "setup"}
         contentMode={
-          currentView === "home" 
-            ? "centered" 
-            : currentView === "memory" || currentView === "models" 
-            ? "centered" 
+          currentView === "home"
+            ? "centered"
+            : currentView === "memory" ||
+              currentView === "models" ||
+              currentView === "knowledges"
+            ? "centered"
             : currentView === "chat"
             ? "fullscreen"
             : "scrollable"
