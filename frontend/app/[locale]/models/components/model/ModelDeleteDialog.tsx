@@ -22,14 +22,14 @@ interface ModelDeleteDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => Promise<void>;
-  customModels: ModelOption[];
+  models: ModelOption[];
 }
 
 export const ModelDeleteDialog = ({
   isOpen,
   onClose,
   onSuccess,
-  customModels,
+  models,
 }: ModelDeleteDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -167,6 +167,8 @@ export const ModelDeleteDialog = ({
         return t("model.source.openai");
       case MODEL_SOURCES.SILICON:
         return t("model.source.silicon");
+      case MODEL_SOURCES.MODELENGINE:
+        return t("model.source.modelEngine");
       case MODEL_SOURCES.OPENAI_API_COMPATIBLE:
         return t("model.source.custom");
       default:
@@ -184,6 +186,12 @@ export const ModelDeleteDialog = ({
           bg: "bg-purple-50",
           text: "text-purple-600",
           border: "border-purple-100",
+        };
+      case MODEL_SOURCES.MODELENGINE:
+        return {
+          bg: "bg-blue-50",
+          text: "text-blue-600",
+          border: "border-blue-100",
         };
       case MODEL_SOURCES.OPENAI:
         return {
@@ -217,6 +225,14 @@ export const ModelDeleteDialog = ({
             className="w-5 h-5"
           />
         );
+      case MODEL_SOURCES.MODELENGINE:
+        return (
+          <img
+            src="/modelengine-logo.png"
+            alt="ModelEngine"
+            className="w-5 h-5"
+          />
+        );
       case MODEL_SOURCES.OPENAI:
         return (
           <span role="img" aria-label="openai">
@@ -242,12 +258,12 @@ export const ModelDeleteDialog = ({
   const getApiKeyByType = (type: ModelType | null): string => {
     if (!type) return "";
     // Prioritize silicon models of the current type
-    const byType = customModels.find(
+    const byType = models.find(
       (m) => m.source === MODEL_SOURCES.SILICON && m.type === type && m.apiKey
     );
     if (byType?.apiKey) return byType.apiKey;
     // Fall back to any available silicon model
-    const anySilicon = customModels.find(
+    const anySilicon = models.find(
       (m) => m.source === MODEL_SOURCES.SILICON && m.apiKey
     );
     return anySilicon?.apiKey || "";
@@ -266,9 +282,9 @@ export const ModelDeleteDialog = ({
         apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
       });
       setProviderModels(result || []);
-      // Initialize pending selected switch states (based on current customModels status)
+      // Initialize pending selected switch states (based on current models status)
       const currentIds = new Set(
-        customModels
+        models
           .filter(
             (m) => m.type === modelType && m.source === MODEL_SOURCES.SILICON
           )
@@ -379,7 +395,7 @@ export const ModelDeleteDialog = ({
 
       // Adjust hierarchical navigation based on remaining count after deletion
       if (deletingModelType) {
-        const remainingByTypeAndSource = customModels.filter(
+        const remainingByTypeAndSource = models.filter(
           (model) =>
             model.type === deletingModelType &&
             (!selectedSource || model.source === selectedSource) &&
@@ -389,7 +405,7 @@ export const ModelDeleteDialog = ({
           // No models under current source, return to source selection
           setSelectedSource(null);
         }
-        const remainingByType = customModels.filter(
+        const remainingByType = models.filter(
           (model) =>
             model.type === deletingModelType &&
             model.displayName !== displayName
@@ -452,7 +468,7 @@ export const ModelDeleteDialog = ({
     if (selectedSource === MODEL_SOURCES.SILICON && deletingModelType) {
       try {
         const currentIds = new Set(
-          customModels
+          models
             .filter(
               (m) =>
                 m.type === deletingModelType &&
@@ -462,7 +478,7 @@ export const ModelDeleteDialog = ({
         );
 
         // Build payload items for the current silicon models in required format
-        const currentModelPayloads = customModels
+        const currentModelPayloads = models
           .filter(
             (m) =>
               m.type === deletingModelType &&
@@ -630,12 +646,12 @@ export const ModelDeleteDialog = ({
                 MODEL_TYPES.TTS,
               ] as ModelType[]
             ).map((type) => {
-              const customModelsByType = customModels.filter(
+              const modelsByType = models.filter(
                 (model) => model.type === type
               );
               const colorScheme = getModelColorScheme(type);
 
-              if (customModelsByType.length === 0) return null;
+              if (modelsByType.length === 0) return null;
 
               return (
                 <button
@@ -645,7 +661,7 @@ export const ModelDeleteDialog = ({
                     setSelectedSource(null);
                     setProviderModelSearchTerm("");
                     // Initialize maxTokens with a value from existing models of this type
-                    const existingModel = customModels.find(
+                    const existingModel = models.find(
                       (model) => model.type === type
                     );
                     setMaxTokens(existingModel?.maxTokens || 0);
@@ -671,7 +687,7 @@ export const ModelDeleteDialog = ({
                       </div>
                       <div className="text-xs text-gray-500">
                         {t("model.dialog.delete.customModelCount", {
-                          count: customModelsByType.length,
+                          count: modelsByType.length,
                         })}
                         {(type === MODEL_TYPES.STT ||
                           type === MODEL_TYPES.TTS) &&
@@ -685,7 +701,7 @@ export const ModelDeleteDialog = ({
             })}
           </div>
 
-          {customModels.length === 0 && (
+          {models.length === 0 && (
             <div className="text-center py-8 text-gray-500">
               {t("model.dialog.delete.noModels")}
             </div>
@@ -717,12 +733,13 @@ export const ModelDeleteDialog = ({
           <div className="grid grid-cols-1 gap-2">
             {(
               [
+                MODEL_SOURCES.MODELENGINE,
                 MODEL_SOURCES.OPENAI,
                 MODEL_SOURCES.SILICON,
                 MODEL_SOURCES.OPENAI_API_COMPATIBLE,
               ] as ModelSource[]
             ).map((source) => {
-              const modelsOfSource = customModels.filter(
+              const modelsOfSource = models.filter(
                 (model) =>
                   model.type === deletingModelType && model.source === source
               );
@@ -918,7 +935,7 @@ export const ModelDeleteDialog = ({
             </div>
           ) : (
             <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-200">
-              {customModels
+              {models
                 .filter(
                   (model) =>
                     model.type === deletingModelType &&
@@ -994,7 +1011,7 @@ export const ModelDeleteDialog = ({
                   </div>
                 ))}
 
-              {customModels.filter(
+              {models.filter(
                 (model) =>
                   model.type === deletingModelType &&
                   model.source === selectedSource
@@ -1045,7 +1062,7 @@ export const ModelDeleteDialog = ({
         onClose={() => setIsProviderConfigOpen(false)}
         initialApiKey={getApiKeyByType(deletingModelType)}
         initialMaxTokens={(
-          customModels.find(
+          models.find(
             (m) => m.type === deletingModelType && m.source === "silicon"
           )?.maxTokens || 4096
         ).toString()}

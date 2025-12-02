@@ -13,7 +13,6 @@ import {
 import {
   ModelConnectStatus,
   ModelOption,
-  ModelSource,
   ModelType,
 } from "@/types/modelConfig";
 import log from "@/lib/logger";
@@ -119,10 +118,9 @@ interface ModelListCardProps {
   modelTypeName: string;
   selectedModel: string;
   onModelChange: (value: string) => void;
-  officialModels: ModelOption[];
-  customModels: ModelOption[];
-  onVerifyModel?: (modelName: string, modelType: ModelType) => void; // New callback for verifying models
-  errorFields?: { [key: string]: boolean }; // New error field state
+  models: ModelOption[];
+  onVerifyModel?: (modelName: string, modelType: ModelType) => void;
+  errorFields?: { [key: string]: boolean };
 }
 
 export const ModelListCard = ({
@@ -131,18 +129,14 @@ export const ModelListCard = ({
   modelTypeName,
   selectedModel,
   onModelChange,
-  officialModels,
-  customModels,
+  models,
   onVerifyModel,
   errorFields,
 }: ModelListCardProps) => {
   const { t } = useTranslation();
 
   // Add model list state for updates
-  const [modelsData, setModelsData] = useState({
-    official: [...officialModels],
-    custom: [...customModels],
-  });
+  const [modelsData, setModelsData] = useState<ModelOption[]>([...models]);
 
   // Create a style element in the component containing animation definitions
   useEffect(() => {
@@ -158,110 +152,44 @@ export const ModelListCard = ({
     };
   }, []);
 
-  // When getting model list, need to consider specific option type
-  const getModelsBySource = (): {
-    official: ModelOption[];
-    custom: ModelOption[];
-  } => {
-    // Each type only shows models of corresponding type
-    return {
-      official: modelsData.official.filter((model) => model.type === type),
-      custom: modelsData.custom.filter((model) => model.type === type),
-    };
+  // Get filtered models by type
+  const getFilteredModels = (): ModelOption[] => {
+    return modelsData.filter((model) => model.type === type);
   };
 
-  // Get model source
+  // Get model source label based on source field
   const getModelSource = (displayName: string): string => {
-    if (
-      type === MODEL_TYPES.TTS ||
-      type === MODEL_TYPES.STT ||
-      type === MODEL_TYPES.VLM
-    ) {
-      const modelOfType = modelsData.custom.find(
-        (m) => m.type === type && m.displayName === displayName
-      );
-      if (modelOfType) return t("model.source.custom");
-    }
-
-    const officialModel = modelsData.official.find(
-      (m) => m.type === type && m.name === displayName
-    );
-    if (officialModel) return t("model.source.modelEngine");
-
-    const customModel = modelsData.custom.find(
+    const model = modelsData.find(
       (m) => m.type === type && m.displayName === displayName
     );
-    return customModel ? t("model.source.custom") : t("model.source.unknown");
+    
+    if (!model) return t("model.source.unknown");
+    
+    // Return source label based on model.source
+    if (model.source === "modelengine") {
+      return t("model.source.modelEngine");
+    } else if (model.source === "silicon") {
+      return t("model.source.silicon");
+    } else if (model.source === "OpenAI-API-Compatible") {
+      return t("model.source.custom");
+    }
+    
+    return t("model.source.unknown");
   };
 
-  const modelsBySource = getModelsBySource();
-
-  // Local update model status
-  const updateLocalModelStatus = (
-    displayName: string,
-    status: ModelConnectStatus
-  ) => {
-    setModelsData((prevData) => {
-      // Find model to update
-      const modelToUpdate = prevData.custom.find(
-        (m) => m.displayName === displayName && m.type === type
-      );
-
-      if (!modelToUpdate) {
-        log.warn(t("model.warning.updateNotFound", { displayName, type }));
-        return prevData;
-      }
-
-      const updatedCustomModels = prevData.custom.map((model) => {
-        if (model.displayName === displayName && model.type === type) {
-          return {
-            ...model,
-            connect_status: status,
-          };
-        }
-        return model;
-      });
-
-      return {
-        official: prevData.official,
-        custom: updatedCustomModels,
-      };
-    });
+  const filteredModels = getFilteredModels();
+  
+  // Group models by source for display
+  const groupedModels = {
+    modelengine: filteredModels.filter((m) => m.source === "modelengine"),
+    silicon: filteredModels.filter((m) => m.source === "silicon"),
+    custom: filteredModels.filter((m) => m.source === "OpenAI-API-Compatible"),
   };
 
   // When parent component's model list updates, update local state
   useEffect(() => {
-    // Update local state but don't trigger fetchModelsStatus
-    setModelsData((prevData) => {
-      const updatedOfficialModels = officialModels.map((model) => {
-        // Preserve existing connect_status if it exists
-        const existingModel = prevData.official.find(
-          (m) => m.name === model.name && m.type === model.type
-        );
-        return {
-          ...model,
-          connect_status:
-            existingModel?.connect_status ||
-            (MODEL_STATUS.AVAILABLE as ModelConnectStatus),
-        };
-      });
-
-      const updatedCustomModels = customModels.map((model) => {
-        // Prioritize using newly passed status to reflect latest backend state
-        return {
-          ...model,
-          connect_status:
-            model.connect_status ||
-            (MODEL_STATUS.UNCHECKED as ModelConnectStatus),
-        };
-      });
-
-      return {
-        official: updatedOfficialModels,
-        custom: updatedCustomModels,
-      };
-    });
-  }, [officialModels, customModels, type, modelId]);
+    setModelsData(models);
+  }, [models]);
 
   // Handle status indicator click event
   const handleStatusClick = (e: React.MouseEvent, displayName: string) => {
@@ -270,9 +198,7 @@ export const ModelListCard = ({
     e.nativeEvent.stopImmediatePropagation(); // Prevent all sibling event handlers
 
     if (onVerifyModel && displayName) {
-      // First update local state to "checking"
-      updateLocalModelStatus(displayName, MODEL_STATUS.CHECKING);
-      // Then call verification function
+      // Call verification function (parent component will update status)
       onVerifyModel(displayName, type);
     }
 
@@ -317,35 +243,105 @@ export const ModelListCard = ({
           errorFields && errorFields[`${type}.${modelId}`] ? "error-select" : ""
         }
       >
-        {modelsBySource.official.length > 0 && (
+        {groupedModels.modelengine.length > 0 && (
           <Select.OptGroup label={t("model.group.modelEngine")}>
-            {modelsBySource.official.map((model) => (
+            {groupedModels.modelengine.map((model) => (
               <Option
-                key={`${type}-${model.name}-official`}
+                key={`${type}-${model.name}-modelengine`}
                 value={model.displayName}
               >
-                <div className="flex items-center justify-between">
+                <div
+                  className="flex items-center justify-between"
+                  style={{ minWidth: 0 }}
+                >
                   <div
-                    className="flex items-center min-w-0"
-                    style={{ flex: "1 1 auto" }}
+                    className="flex items-center font-medium truncate"
+                    style={{ flex: "1 1 auto", minWidth: 0 }}
+                    title={model.displayName}
                   >
                     <img
                       src={getOfficialProviderIcon()}
                       alt="provider"
                       className="w-4 h-4 rounded mr-2 flex-shrink-0"
                     />
-                    <div className="font-medium truncate" title={model.name}>
-                      {model.displayName}
-                    </div>
+                    <span className="truncate">{model.displayName}</span>
+                  </div>
+                  <div
+                    style={{
+                      flex: "0 0 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    <Tooltip title={t("model.status.tooltip")}>
+                      <span
+                        onClick={(e) => handleStatusClick(e, model.displayName)}
+                        onMouseDown={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        style={getStatusStyle(model.connect_status)}
+                        className="status-indicator"
+                      />
+                    </Tooltip>
                   </div>
                 </div>
               </Option>
             ))}
           </Select.OptGroup>
         )}
-        {modelsBySource.custom.length > 0 && (
+        {groupedModels.silicon.length > 0 && (
+          <Select.OptGroup label={t("model.group.silicon")}>
+            {groupedModels.silicon.map((model) => (
+              <Option
+                key={`${type}-${model.displayName}-silicon`}
+                value={model.displayName}
+              >
+                <div
+                  className="flex items-center justify-between"
+                  style={{ minWidth: 0 }}
+                >
+                  <div
+                    className="flex items-center font-medium truncate"
+                    style={{ flex: "1 1 auto", minWidth: 0 }}
+                    title={model.displayName}
+                  >
+                    <img
+                      src={getProviderIconByUrl(model.apiUrl)}
+                      alt="provider"
+                      className="w-4 h-4 rounded mr-2 flex-shrink-0"
+                    />
+                    <span className="truncate">{model.displayName}</span>
+                  </div>
+                  <div
+                    style={{
+                      flex: "0 0 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    <Tooltip title={t("model.status.tooltip")}>
+                      <span
+                        onClick={(e) => handleStatusClick(e, model.displayName)}
+                        onMouseDown={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        style={getStatusStyle(model.connect_status)}
+                        className="status-indicator"
+                      />
+                    </Tooltip>
+                  </div>
+                </div>
+              </Option>
+            ))}
+          </Select.OptGroup>
+        )}
+        {groupedModels.custom.length > 0 && (
           <Select.OptGroup label={t("model.group.custom")}>
-            {modelsBySource.custom.map((model) => (
+            {groupedModels.custom.map((model) => (
               <Option
                 key={`${type}-${model.displayName}-custom`}
                 value={model.displayName}
@@ -359,16 +355,11 @@ export const ModelListCard = ({
                     style={{ flex: "1 1 auto", minWidth: 0 }}
                     title={model.displayName}
                   >
-                    {(() => {
-                      const icon = getProviderIconByUrl(model.apiUrl);
-                      return (
-                        <img
-                          src={icon}
-                          alt="provider"
-                          className="w-4 h-4 rounded mr-2 flex-shrink-0"
-                        />
-                      );
-                    })()}
+                    <img
+                      src={getProviderIconByUrl(model.apiUrl)}
+                      alt="provider"
+                      className="w-4 h-4 rounded mr-2 flex-shrink-0"
+                    />
                     <span className="truncate">{model.displayName}</span>
                   </div>
                   <div
