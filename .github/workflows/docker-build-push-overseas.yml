@@ -7,6 +7,11 @@ on:
         description: 'Image version tag (e.g. v1.0.0 or latest)'
         required: true
         default: 'latest'
+      push_latest:
+        description: 'Also push latest tag'
+        required: false
+        default: false
+        type: boolean
       runner_label_json:
         description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: true
@@ -32,6 +37,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push main image (amd64) to DockerHub
         run: docker push nexent/nexent:${{ inputs.version }}-amd64
+      - name: Tag main image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent:${{ inputs.version }}-amd64 nexent/nexent:amd64
+      - name: Push latest main image (amd64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent:amd64
 
   build-and-push-main-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -52,6 +63,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push main image (arm64) to DockerHub
         run: docker push nexent/nexent:${{ inputs.version }}-arm64
+      - name: Tag main image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent:${{ inputs.version }}-arm64 nexent/nexent:arm64
+      - name: Push latest main image (arm64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent:arm64
 
   build-and-push-data-process-amd64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -81,6 +98,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push data process image (amd64) to DockerHub
         run: docker push nexent/nexent-data-process:${{ inputs.version }}-amd64
+      - name: Tag data process image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-data-process:${{ inputs.version }}-amd64 nexent/nexent-data-process:amd64
+      - name: Push latest data process image (amd64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-data-process:amd64
 
   build-and-push-data-process-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -110,6 +133,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push data process image (arm64) to DockerHub
         run: docker push nexent/nexent-data-process:${{ inputs.version }}-arm64
+      - name: Tag data process image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-data-process:${{ inputs.version }}-arm64 nexent/nexent-data-process:arm64
+      - name: Push latest data process image (arm64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-data-process:arm64
 
   build-and-push-web-amd64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -130,6 +159,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push web image (amd64) to DockerHub
         run: docker push nexent/nexent-web:${{ inputs.version }}-amd64
+      - name: Tag web image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-web:${{ inputs.version }}-amd64 nexent/nexent-web:amd64
+      - name: Push latest web image (amd64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-web:amd64
 
   build-and-push-web-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -150,6 +185,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push web image (arm64) to DockerHub
         run: docker push nexent/nexent-web:${{ inputs.version }}-arm64
+      - name: Tag web image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-web:${{ inputs.version }}-arm64 nexent/nexent-web:arm64
+      - name: Push latest web image (arm64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-web:arm64
 
   build-and-push-terminal-amd64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -170,6 +211,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push terminal image (amd64) to DockerHub
         run: docker push nexent/nexent-ubuntu-terminal:${{ inputs.version }}-amd64
+      - name: Tag terminal image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-ubuntu-terminal:${{ inputs.version }}-amd64 nexent/nexent-ubuntu-terminal:amd64
+      - name: Push latest terminal image (amd64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-ubuntu-terminal:amd64
 
   build-and-push-terminal-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -190,6 +237,12 @@ jobs:
         run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
       - name: Push terminal image (arm64) to DockerHub
         run: docker push nexent/nexent-ubuntu-terminal:${{ inputs.version }}-arm64
+      - name: Tag terminal image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-ubuntu-terminal:${{ inputs.version }}-arm64 nexent/nexent-ubuntu-terminal:arm64
+      - name: Push latest terminal image (arm64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-ubuntu-terminal:arm64
 
   manifest-push-main:
     runs-on: ubuntu-latest
@@ -205,6 +258,13 @@ jobs:
             nexent/nexent:${{ inputs.version }}-amd64 \
             nexent/nexent:${{ inputs.version }}-arm64
           docker manifest push nexent/nexent:${{ inputs.version }}
+      - name: Create and push latest manifest for main (DockerHub)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create nexent/nexent:latest \
+            nexent/nexent:amd64 \
+            nexent/nexent:arm64
+          docker manifest push nexent/nexent:latest
 
   manifest-push-data-process:
     runs-on: ubuntu-latest
@@ -220,6 +280,13 @@ jobs:
             nexent/nexent-data-process:${{ inputs.version }}-amd64 \
             nexent/nexent-data-process:${{ inputs.version }}-arm64
           docker manifest push nexent/nexent-data-process:${{ inputs.version }}
+      - name: Create and push latest manifest for data-process (DockerHub)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create nexent/nexent-data-process:latest \
+            nexent/nexent-data-process:amd64 \
+            nexent/nexent-data-process:arm64
+          docker manifest push nexent/nexent-data-process:latest
 
   manifest-push-web:
     runs-on: ubuntu-latest
@@ -235,6 +302,13 @@ jobs:
             nexent/nexent-web:${{ inputs.version }}-amd64 \
             nexent/nexent-web:${{ inputs.version }}-arm64
           docker manifest push nexent/nexent-web:${{ inputs.version }}
+      - name: Create and push latest manifest for web (DockerHub)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create nexent/nexent-web:latest \
+            nexent/nexent-web:amd64 \
+            nexent/nexent-web:arm64
+          docker manifest push nexent/nexent-web:latest
 
   manifest-push-terminal:
     runs-on: ubuntu-latest
@@ -250,3 +324,10 @@ jobs:
             nexent/nexent-ubuntu-terminal:${{ inputs.version }}-amd64 \
             nexent/nexent-ubuntu-terminal:${{ inputs.version }}-arm64
           docker manifest push nexent/nexent-ubuntu-terminal:${{ inputs.version }}
+      - name: Create and push latest manifest for terminal (DockerHub)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create nexent/nexent-ubuntu-terminal:latest \
+            nexent/nexent-ubuntu-terminal:amd64 \
+            nexent/nexent-ubuntu-terminal:arm64
+          docker manifest push nexent/nexent-ubuntu-terminal:latest
