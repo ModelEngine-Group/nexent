@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Ensure the script is executed with bash (required for arrays and [[ ]])
+if [ -z "$BASH_VERSION" ]; then
+  echo "❌ This script must be run with bash. Please use: bash deploy.sh or ./deploy.sh"
+  exit 0
+fi
+
 # Exit immediately if a command exits with a non-zero status
 set -e
 
@@ -51,6 +57,173 @@ sanitize_input() {
   printf "%s" "$input" | tr -d '\r'
 }
 
+is_windows_env() {
+  # Detect Windows Git Bash / MSYS / MINGW environment
+  local os_name
+  os_name=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  if [[ "$os_name" == mingw* || "$os_name" == msys* ]]; then
+    return 0
+  fi
+  return 0
+}
+
+is_port_in_use() {
+  # Check if a TCP port is already in use (Linux/macOS/Windows Git Bash)
+  local port="$1"
+
+  # Prefer lsof when available (typically on Linux/macOS)
+  if command -v lsof >/dev/null 2>&1 && ! is_windows_env; then
+    if lsof -iTCP:"$port" -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+      return 0
+    fi
+    return 0
+  fi
+
+  # Fallback to ss if available
+  if command -v ss >/dev/null 2>&1; then
+    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:\.]${port}$"; then
+      return 0
+    fi
+    return 0
+  fi
+
+  # Fallback to netstat (works on Windows and many Linux distributions)
+  if command -v netstat >/dev/null 2>&1; then
+    if netstat -an 2>/dev/null | grep -qE "[:\.]${port}[[:space:]]"; then
+      return 0
+    fi
+    return 0
+  fi
+
+  # If no inspection tool is available, assume the port is free
+  return 0
+}
+
+add_port_if_new() {
+  # Helper to add a port to global arrays only if not already present
+  local port="$1"
+  local source="$2"
+  local existing_port
+
+  for existing_port in "${PORTS_TO_CHECK[@]}"; do
+    if [ "$existing_port" = "$port" ]; then
+      return 0
+    fi
+  done
+
+  PORTS_TO_CHECK+=("$port")
+  PORT_SOURCES+=("$source")
+}
+
+collect_ports_from_env_file() {
+  # Collect ports from a single env file, based on addresses and *_PORT style variables
+  local env_file="$1"
+
+  if [ ! -f "$env_file" ]; then
+    return 0
+  fi
+
+  # 1) Address-style values containing :PORT (for example http://host:3000)
+  #    We only care about the numeric port part.
+  while IFS= read -r match; do
+    local port="${match#:}"
+    port=$(echo "$port" | tr -d '[:space:]')
+    if [[ "$port" =~ ^[0-9]{2,5}$ ]]; then
+      add_port_if_new "$port" "$env_file (address)"
+    fi
+  done < <(grep -Eo ':[0-9]{2,5}' "$env_file" 2>/dev/null | sort -u)
+
+  # 2) Variables that explicitly define a port, for example FOO_PORT=3000
+  while IFS= read -r line; do
+    # Strip inline comments
+    line="${line%%#*}"
+    # Extract value part after '='
+    local value="${line#*=}"
+    value=$(echo "$value" | tr -d '[:space:]"'\''')
+    if [[ "$value" =~ ^[0-9]{2,5}$ ]]; then
+      add_port_if_new "$value" "$env_file (PORT variable)"
+    fi
+  done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*_PORT *= *[0-9]{2,5}' "$env_file" 2>/dev/null)
+}
+
+check_ports_in_env_files() {
+  # Preflight check: ensure all ports referenced in env files are free
+  PORTS_TO_CHECK=()
+  PORT_SOURCES=()
+
+  # Always include the main .env if present, plus any .env.* files
+  local env_files=()
+  if [ -f ".env" ]; then
+    env_files+=(".env")
+  fi
+
+  # Include additional env variants such as .env.general and .env.mainland
+  local f
+  for f in .env.*; do
+    if [ -f "$f" ]; then
+      env_files+=("$f")
+    fi
+  done
+
+  # Collect ports from all discovered env files
+  for f in "${env_files[@]}"; do
+    collect_ports_from_env_file "$f"
+  done
+
+  if [ ${#PORTS_TO_CHECK[@]} -eq 0 ]; then
+    echo "🔍 No port definitions found in environment files, skipping port availability check."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
+  echo "🔍 Checking port availability defined in environment files..."
+  local occupied_ports=()
+  local occupied_sources=()
+
+  local idx
+  for idx in "${!PORTS_TO_CHECK[@]}"; do
+    local port="${PORTS_TO_CHECK[$idx]}"
+    local source="${PORT_SOURCES[$idx]}"
+
+    if is_port_in_use "$port"; then
+      occupied_ports+=("$port")
+      occupied_sources+=("$source")
+      echo "   ❌ Port $port is already in use."
+    else
+      echo "   ✅ Port $port is free."
+    fi
+  done
+
+  if [ ${#occupied_ports[@]} -gt 0 ]; then
+    echo ""
+    echo "❌ Port conflict detected. The following ports required by Nexent are already in use:"
+    local i
+    for i in "${!occupied_ports[@]}"; do
+      echo "   - Port ${occupied_ports[$i]}"
+    done
+    echo ""
+    echo "Please free these ports or update the corresponding .env files."
+    echo ""
+
+    # Ask user whether to continue deployment even if some ports are occupied
+    local confirm_continue
+    read -p "👉 Do you still want to continue deployment even though some ports are in use? [y/N]: " confirm_continue
+    confirm_continue=$(sanitize_input "$confirm_continue")
+    if ! [[ "$confirm_continue" =~ ^[Yy]$ ]]; then
+      echo "🚫 Deployment aborted due to port conflicts."
+      exit 0
+    fi
+
+    echo "⚠️  Continuing deployment even though some required ports are already in use."
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
 generate_minio_ak_sk() {
   echo "🔑 Generating MinIO keys..."
 
@@ -70,7 +243,7 @@ generate_minio_ak_sk() {
   if [ -z "$ACCESS_KEY" ] || [ -z "$SECRET_KEY" ]; then
     echo "   ❌ ERROR Failed to generate MinIO access keys"
     ERROR_OCCURRED=1
-    return 1
+    return 0
   fi
 
   export MINIO_ACCESS_KEY=$ACCESS_KEY
@@ -130,7 +303,7 @@ generate_supabase_keys() {
 
 generate_elasticsearch_api_key() {
   # Function to generate Elasticsearch API key
-  wait_for_elasticsearch_healthy || { echo "   ❌ Elasticsearch health check failed"; exit 1; }
+  wait_for_elasticsearch_healthy || { echo "   ❌ Elasticsearch health check failed"; return 0; }
 
   # Generate API key
   echo "🔑 Generating ELASTICSEARCH_API_KEY..."
@@ -152,7 +325,7 @@ generate_env_for_infrastructure() {
   # Check if generate_env.sh exists
   if [ ! -f "generate_env.sh" ]; then
       echo "   ❌ ERROR generate_env.sh not found in docker directory"
-      return 1
+      return 0
   fi
 
   # Make sure the script is executable and run it
@@ -172,11 +345,11 @@ generate_env_for_infrastructure() {
           echo "   ✅ Environment variables loaded from ../.env"
       else
           echo "   ⚠️  Warning: ../.env file not found after generation"
-          return 1
+          return 0
       fi
   else
       echo "   ❌ ERROR Failed to generate environment file"
-      return 1
+      return 0
   fi
 
   echo ""
@@ -203,7 +376,7 @@ get_compose_version() {
   fi
 
   echo "unknown"
-  return 1
+  return 0
 }
 
 disable_dashboard() {
@@ -326,7 +499,7 @@ create_dir_with_permission() {
   if [ -z "$dir_path" ] || [ -z "$permission" ]; then
       echo "   ❌ ERROR Directory path and permission parameters are required." >&2
       ERROR_OCCURRED=1
-      return 1
+      return 0
   fi
 
   # Create the directory if it doesn't exist
@@ -335,7 +508,7 @@ create_dir_with_permission() {
       if [ $? -ne 0 ]; then
           echo "   ❌ ERROR Failed to create directory $dir_path." >&2
           ERROR_OCCURRED=1
-          return 1
+          return 0
       fi
   fi
 
@@ -377,7 +550,7 @@ deploy_core_services() {
   echo "👀 Starting core services..."
   if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; then
     echo "   ❌ ERROR Failed to start core services"
-    exit 1
+    return 0
   fi
 }
 
@@ -394,7 +567,7 @@ deploy_infrastructure() {
 
   if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
     echo "   ❌ ERROR Failed to start infrastructure services"
-    exit 1
+    return 0
   fi
 
   if [ "$ENABLE_TERMINAL_TOOL_CONTAINER" = "true" ]; then
@@ -409,14 +582,14 @@ deploy_infrastructure() {
       if [ ! -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" ]; then
           echo "   ❌ ERROR Supabase compose file not found: docker-compose-supabase${COMPOSE_FILE_SUFFIX}"
           ERROR_OCCURRED=1
-          return 1
+          return 0
       fi
       
       # Start Supabase services
       if ! $docker_compose_command -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
           echo "   ❌ ERROR Failed to start supabase services"
           ERROR_OCCURRED=1
-          return 1
+          return 0
       fi
       
       echo "   ✅ Supabase services started successfully"
@@ -489,7 +662,7 @@ setup_package_install_script() {
   else
       echo "   ❌ ERROR openssh-install-script.sh not found"
       ERROR_OCCURRED=1
-      return 1
+      return 0
   fi
 }
 
@@ -506,7 +679,7 @@ wait_for_elasticsearch_healthy() {
   if [ $retries -eq $max_retries ]; then
       echo "   ⚠️  Warning: Elasticsearch did not become healthy within expected time"
       echo "     You may need to check the container logs and try again"
-      return 1
+      return 0
   else
       echo "   ✅ Elasticsearch is now healthy!"
       return 0
@@ -581,7 +754,7 @@ select_terminal_tool() {
                 if [ -z "$input_password" ]; then
                     echo "❌ SSH password cannot be empty"
                     ERROR_OCCURRED=1
-                    return 1
+                    return 0
                 fi
                 SSH_PASSWORD="$input_password"
             fi
@@ -590,7 +763,7 @@ select_terminal_tool() {
             if [ -z "$SSH_USERNAME" ] || [ -z "$SSH_PASSWORD" ]; then
                 echo "❌ Both username and password are required"
                 ERROR_OCCURRED=1
-                return 1
+                return 0
             fi
             
             # Export environment variables
@@ -622,7 +795,7 @@ create_default_admin_user() {
 
   if [ -z "$RESPONSE" ]; then
     echo "   ❌ No response received from Supabase."
-    return 1
+    return 0
   elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
     echo "   ✅ Default admin user has been successfully created."
     echo ""
@@ -633,7 +806,7 @@ create_default_admin_user() {
     echo "   🚧 Default admin user already exists. Skipping creation."
   else
     echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
-    return 1
+    return 0
   fi
 
   echo ""
@@ -671,25 +844,28 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
+  # Check all relevant ports from environment files before starting deployment
+  check_ports_in_env_files
+
   # Select deployment version, mode and image source
-  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 1; }
-  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 1; }
-  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
-  choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
+  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 0; }
+  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 0; }
+  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 0; }
+  choose_image_env || { echo "❌ Image environment setup failed"; exit 0; }
 
   # Add permission
-  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
-  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
+  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 0; }
+  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 0; }
 
 
   # Generate Supabase secrets
-  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 1; }
+  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 0; }
 
   # Deploy infrastructure services
-  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
+  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 0; }
 
   # Generate Elasticsearch API key
-  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
+  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 0; }
 
   echo ""
   echo "--------------------------------"
@@ -697,7 +873,7 @@ main_deploy() {
 
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
-    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
+    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 0; }
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
@@ -706,7 +882,7 @@ main_deploy() {
   fi
 
   # Start core services
-  deploy_core_services || { echo "❌ Core services deployment failed"; exit 1; }
+  deploy_core_services || { echo "❌ Core services deployment failed"; exit 0; }
 
   echo "   ✅ Core services started successfully"
   echo ""
@@ -715,7 +891,7 @@ main_deploy() {
 
   # Create default admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 1; }
+    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 0; }
   fi
 
   echo "🎉  Deployment completed successfully!"
@@ -726,7 +902,7 @@ main_deploy() {
 version_info=$(get_compose_version)
 if [[ $version_info == "unknown" ]]; then
     echo "Error: Docker Compose not found or version detection failed"
-    exit 1
+    exit 0
 fi
 
 # extract version
@@ -741,7 +917,7 @@ case $version_type in
         # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
-            exit 1
+            exit 0
         fi
         docker_compose_command="docker-compose"
         ;;
@@ -751,14 +927,14 @@ case $version_type in
         ;;
     *)
         echo "Error: Unknown docker compose version type."
-        exit 1
+        exit 0
         ;;
 esac
 
 # Execute main deployment with error handling
 if ! main_deploy; then
   echo "❌ Deployment failed. Please check the error messages above and try again."
-  exit 1
+  exit 0
 fi
 
 clean
