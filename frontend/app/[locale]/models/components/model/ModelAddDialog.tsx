@@ -1072,6 +1072,13 @@ export const ModelAddDialog = ({
             </div>
             <div className="mt-2 ml-6 flex items-center">
               <span>{t("model.dialog.label.currentlySupported")}</span>
+              <Tooltip title="ModelEngine">
+                <img
+                  src="/modelengine-logo.png"
+                  alt="ModelEngine"
+                  className="h-4 ml-1.5"
+                />
+              </Tooltip>
               {form.isBatchImport && (
                 <Tooltip title="SiliconFlow">
                   <img

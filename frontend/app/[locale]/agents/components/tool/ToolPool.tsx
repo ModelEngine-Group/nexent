@@ -650,15 +650,19 @@ function ToolPool({
                 {t("toolPool.tooltip.functionGuide")}
               </div>
             }
-            overlayInnerStyle={{
-              backgroundColor: "#ffffff",
-              color: "#374151",
-              border: "1px solid #e5e7eb",
-              borderRadius: "6px",
-              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-              padding: "12px",
-              maxWidth: "600px",
-              minWidth: "400px",
+            color="#ffffff"
+            styles={{
+              body: {
+                backgroundColor: "#ffffff",
+                color: "#374151",
+                border: "1px solid #e5e7eb",
+                borderRadius: "6px",
+                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+                padding: "12px",
+                maxWidth: "800px",
+                minWidth: "700px",
+                width: "fit-content",
+              },
             }}
           >
             <BulbOutlined className="ml-2 text-yellow-500" />

@@ -231,8 +231,8 @@ export const modelService = {
   },
 
   updateSingleModel: async (model: {
-    model_id: string;
-    displayName: string;
+    currentDisplayName: string;
+    displayName?: string;
     url: string;
     apiKey: string;
     maxTokens?: number;
@@ -241,26 +241,30 @@ export const modelService = {
     maximumChunkSize?: number;
   }): Promise<void> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.updateSingleModel, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          model_id: model.model_id,
-          display_name: model.displayName,
-          base_url: model.url,
-          api_key: model.apiKey,
-          ...(model.maxTokens !== undefined
-            ? { max_tokens: model.maxTokens }
-            : {}),
-          model_factory: model.source || "OpenAI-API-Compatible",
-          ...(model.expectedChunkSize !== undefined
-            ? { expected_chunk_size: model.expectedChunkSize }
-            : {}),
-          ...(model.maximumChunkSize !== undefined
-            ? { maximum_chunk_size: model.maximumChunkSize }
-            : {}),
-        }),
-      });
+      const response = await fetch(
+        API_ENDPOINTS.model.updateSingleModel(model.currentDisplayName),
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            ...(model.displayName !== undefined
+              ? { display_name: model.displayName }
+              : {}),
+            base_url: model.url,
+            api_key: model.apiKey,
+            ...(model.maxTokens !== undefined
+              ? { max_tokens: model.maxTokens }
+              : {}),
+            model_factory: model.source || "OpenAI-API-Compatible",
+            ...(model.expectedChunkSize !== undefined
+              ? { expected_chunk_size: model.expectedChunkSize }
+              : {}),
+            ...(model.maximumChunkSize !== undefined
+              ? { maximum_chunk_size: model.maximumChunkSize }
+              : {}),
+          }),
+        }
+      );
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(
