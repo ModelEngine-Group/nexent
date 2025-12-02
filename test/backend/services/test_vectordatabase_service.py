@@ -1248,21 +1248,17 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("Health check failed", str(context.exception))
 
 
-    @patch('backend.services.vectordatabase_service.calculate_term_weights')
     @patch('database.model_management_db.get_model_by_model_id')
-    def test_summary_index_name(self, mock_get_model_by_model_id, mock_calculate_weights):
+    def test_summary_index_name(self, mock_get_model_by_model_id):
         """
         Test generating a summary for an index.
 
         This test verifies that:
         1. Random documents are retrieved for summarization
-        2. Term weights are calculated to identify important keywords
-        3. The summary generation stream is properly initialized
-        4. A StreamingResponse object is returned for streaming the summary tokens
+        2. The summary generation stream is properly initialized using Map-Reduce approach
+        3. A StreamingResponse object is returned for streaming the summary tokens
         """
         # Setup
-        mock_calculate_weights.return_value = {
-            "keyword1": 0.8, "keyword2": 0.6}
         mock_get_model_by_model_id.return_value = {
             'api_key': 'test_api_key',
             'base_url': 'https://api.test.com',
