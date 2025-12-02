@@ -348,7 +348,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_llm_instance = mock_openai.return_value
         mock_response = MagicMock()
         mock_response.content = "AI Discussion"
-        mock_llm_instance.return_value = mock_response
+        mock_llm_instance.generate.return_value = mock_response
 
         # Execute
         result = call_llm_for_title(
@@ -357,7 +357,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
-        mock_llm_instance.assert_called_once()
+        mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
 
     @patch('backend.services.conversation_management_service.OpenAIServerModel')
@@ -380,7 +380,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_prompt_template.return_value = mock_prompt_template
 
         mock_llm_instance = mock_openai.return_value
-        mock_llm_instance.return_value = None
+        mock_llm_instance.generate.return_value = None
 
         # Execute
         result = call_llm_for_title(
@@ -389,6 +389,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "新对话")
         mock_openai.assert_called_once()
+        mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
 
     @patch('backend.services.conversation_management_service.OpenAIServerModel')
@@ -411,7 +412,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_prompt_template.return_value = mock_prompt_template
 
         mock_llm_instance = mock_openai.return_value
-        mock_llm_instance.return_value = None
+        mock_llm_instance.generate.return_value = None
 
         # Execute
         result = call_llm_for_title(
@@ -420,6 +421,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "New Conversation")
         mock_openai.assert_called_once()
+        mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='en')
 
     @patch('backend.services.conversation_management_service.rename_conversation')
