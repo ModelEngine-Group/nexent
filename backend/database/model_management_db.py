@@ -185,6 +185,21 @@ def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dic
     return model
 
 
+def get_models_by_display_name(display_name: str, tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all model records by display name (for multi_embedding which creates two records)
+
+    Args:
+        display_name: Model display name
+        tenant_id: Tenant ID
+
+    Returns:
+        List[Dict[str, Any]]: List of model records with the same display_name
+    """
+    filters = {'display_name': display_name}
+    return get_model_records(filters, tenant_id)
+
+
 def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[int]:
     """
     Get a model ID by display name

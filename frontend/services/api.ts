@@ -93,7 +93,8 @@ export const API_ENDPOINTS = {
         displayName
       )}`,
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
-    updateSingleModel: `${API_BASE_URL}/model/update`,
+    updateSingleModel: (displayName: string) =>
+      `${API_BASE_URL}/model/update?display_name=${encodeURIComponent(displayName)}`,
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,

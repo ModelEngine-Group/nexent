@@ -757,6 +757,40 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbName(name);
   };
 
+  // If Embedding model is not configured, show warning container instead of content
+  if (showEmbeddingWarning) {
+    return (
+      <div
+        className="w-full mx-auto relative"
+        style={{
+          maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
+          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+        }}
+      >
+        <div
+          className={STANDARD_CARD.BASE_CLASSES}
+          style={{
+            height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
+            padding: STANDARD_CARD.PADDING,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div className="text-center">
+            <WarningFilled
+              className="text-yellow-500 mb-4"
+              style={{ fontSize: 48 }}
+            />
+            <div className="text-base text-gray-800 font-semibold">
+              {t("embedding.knowledgeBaseDisabledWarningModal.title")}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div
@@ -770,32 +804,6 @@ function DataConfig({ isActive }: DataConfigProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {showEmbeddingWarning && (
-          <div className="absolute inset-0 bg-gray-500/45 z-40" />
-        )}
-        <Modal
-          open={showEmbeddingWarning && !!contentRef.current}
-          title={null}
-          footer={null}
-          closable={false}
-          maskClosable={false}
-          mask={false}
-          centered
-          getContainer={() => contentRef.current || document.body}
-          styles={{ body: { padding: 0 } }}
-          rootClassName="kb-embedding-warning"
-        >
-          <div className="py-2">
-            <div className="flex items-center">
-              <WarningFilled className="text-yellow-500 mt-1 mr-2 text-3xl" />
-              <div className="ml-3 mt-2">
-                <div className="text-base text-gray-800 font-semibold">
-                  {t("embedding.knowledgeBaseDisabledWarningModal.title")}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
         <Modal
           open={showAutoDeselectModal}
           title={t("embedding.knowledgeBaseAutoDeselectModal.title")}
