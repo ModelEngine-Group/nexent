@@ -8,9 +8,6 @@ fi
 
 # Exit immediately if a command exits with a non-zero status
 set -e
-
-ERROR_OCCURRED=0
-
 set -a
 source .env
 
@@ -64,7 +61,7 @@ is_windows_env() {
   if [[ "$os_name" == mingw* || "$os_name" == msys* ]]; then
     return 0
   fi
-  return 0
+  return 1
 }
 
 is_port_in_use() {
@@ -76,7 +73,7 @@ is_port_in_use() {
     if lsof -iTCP:"$port" -sTCP:LISTEN -P -n >/dev/null 2>&1; then
       return 0
     fi
-    return 0
+    return 1
   fi
 
   # Fallback to ss if available
@@ -84,7 +81,7 @@ is_port_in_use() {
     if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:\.]${port}$"; then
       return 0
     fi
-    return 0
+    return 1
   fi
 
   # Fallback to netstat (works on Windows and many Linux distributions)
@@ -92,11 +89,11 @@ is_port_in_use() {
     if netstat -an 2>/dev/null | grep -qE "[:\.]${port}[[:space:]]"; then
       return 0
     fi
-    return 0
+    return 1
   fi
 
   # If no inspection tool is available, assume the port is free
-  return 0
+  return 1
 }
 
 add_port_if_new() {
@@ -242,8 +239,7 @@ generate_minio_ak_sk() {
 
   if [ -z "$ACCESS_KEY" ] || [ -z "$SECRET_KEY" ]; then
     echo "   ❌ ERROR Failed to generate MinIO access keys"
-    ERROR_OCCURRED=1
-    return 0
+    return 1
   fi
 
   export MINIO_ACCESS_KEY=$ACCESS_KEY
@@ -325,7 +321,7 @@ generate_env_for_infrastructure() {
   # Check if generate_env.sh exists
   if [ ! -f "generate_env.sh" ]; then
       echo "   ❌ ERROR generate_env.sh not found in docker directory"
-      return 0
+      return 1
   fi
 
   # Make sure the script is executable and run it
@@ -345,11 +341,11 @@ generate_env_for_infrastructure() {
           echo "   ✅ Environment variables loaded from ../.env"
       else
           echo "   ⚠️  Warning: ../.env file not found after generation"
-          return 0
+          return 1
       fi
   else
       echo "   ❌ ERROR Failed to generate environment file"
-      return 0
+      return 1
   fi
 
   echo ""
@@ -498,8 +494,7 @@ create_dir_with_permission() {
   # Check if parameters are provided
   if [ -z "$dir_path" ] || [ -z "$permission" ]; then
       echo "   ❌ ERROR Directory path and permission parameters are required." >&2
-      ERROR_OCCURRED=1
-      return 0
+      return 1
   fi
 
   # Create the directory if it doesn't exist
@@ -507,8 +502,7 @@ create_dir_with_permission() {
       mkdir -p "$dir_path"
       if [ $? -ne 0 ]; then
           echo "   ❌ ERROR Failed to create directory $dir_path." >&2
-          ERROR_OCCURRED=1
-          return 0
+          return 1
       fi
   fi
 
@@ -581,15 +575,13 @@ deploy_infrastructure() {
       # Check if the supabase compose file exists
       if [ ! -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" ]; then
           echo "   ❌ ERROR Supabase compose file not found: docker-compose-supabase${COMPOSE_FILE_SUFFIX}"
-          ERROR_OCCURRED=1
-          return 0
+          return 1
       fi
       
       # Start Supabase services
       if ! $docker_compose_command -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
           echo "   ❌ ERROR Failed to start supabase services"
-          ERROR_OCCURRED=1
-          return 0
+          return 1
       fi
       
       echo "   ✅ Supabase services started successfully"
@@ -661,7 +653,6 @@ setup_package_install_script() {
       echo "   ✅ Package installation script created/updated"
   else
       echo "   ❌ ERROR openssh-install-script.sh not found"
-      ERROR_OCCURRED=1
       return 0
   fi
 }
@@ -753,8 +744,7 @@ select_terminal_tool() {
                 echo ""
                 if [ -z "$input_password" ]; then
                     echo "❌ SSH password cannot be empty"
-                    ERROR_OCCURRED=1
-                    return 0
+                    return 1
                 fi
                 SSH_PASSWORD="$input_password"
             fi
@@ -762,8 +752,7 @@ select_terminal_tool() {
             # Validate credentials
             if [ -z "$SSH_USERNAME" ] || [ -z "$SSH_PASSWORD" ]; then
                 echo "❌ Both username and password are required"
-                ERROR_OCCURRED=1
-                return 0
+                return 1
             fi
             
             # Export environment variables
@@ -795,7 +784,7 @@ create_default_admin_user() {
 
   if [ -z "$RESPONSE" ]; then
     echo "   ❌ No response received from Supabase."
-    return 0
+    return 1
   elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
     echo "   ✅ Default admin user has been successfully created."
     echo ""
@@ -806,7 +795,7 @@ create_default_admin_user() {
     echo "   🚧 Default admin user already exists. Skipping creation."
   else
     echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
-    return 0
+    return 1
   fi
 
   echo ""
