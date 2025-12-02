@@ -539,7 +539,7 @@ Nexent加油
 
 ::: info AstreoX - 2025-11-27
 感谢Nexent为智能体开发提出了更多可能！
-:::
+::: info AstreoX - 2025-11-27
 
 ::: info user - 2025-11-26
 祝nexent平台越做越胡奥
@@ -591,4 +591,5 @@ Nexent加油
 
 ::: info sbwrn - 2025-12-02
 祝nexent平台越来越好
-:::
+::: info sbwrn - 2025-12-02
+留言
