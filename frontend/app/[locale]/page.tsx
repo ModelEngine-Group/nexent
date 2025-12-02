@@ -366,8 +366,11 @@ export default function Home() {
               onLoadAgents={loadAgents}
               onImportAgent={handleImportAgent}
               onChatNavigate={(agentId) => {
-                // TODO: Store the selected agentId and pass it to ChatContent
-                // For now, just navigate to chat view
+                // Update URL with agent_id parameter for auto-selection in ChatAgentSelector
+                const url = new URL(window.location.href);
+                url.searchParams.set("agent_id", agentId);
+                window.history.replaceState({}, "", url.toString());
+                
                 setCurrentView("chat");
                 saveView("chat");
               }}
