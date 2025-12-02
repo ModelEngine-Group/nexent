@@ -9,6 +9,7 @@ class ToolSign(Enum):
     EXA_SEARCH = "b"  # Exa search tool identifier
     LINKUP_SEARCH = "c"       # Linkup search tool identifier
     TAVILY_SEARCH = "d"  # Tavily search tool identifier
+    DATAMATE_KNOWLEDGE_BASE = "e"  # DataMate knowledge base search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
     MULTIMODAL_OPERATION = "m" # Multimodal operation tool identifier
@@ -20,6 +21,7 @@ TOOL_SIGN_MAPPING = {
     "tavily_search": ToolSign.TAVILY_SEARCH.value,
     "linkup_search": ToolSign.LINKUP_SEARCH.value,
     "exa_search": ToolSign.EXA_SEARCH.value,
+    "datamate_knowledge_base_search": ToolSign.DATAMATE_KNOWLEDGE_BASE.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,
