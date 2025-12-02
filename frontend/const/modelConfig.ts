@@ -19,6 +19,7 @@ export const MODEL_TYPES = {
 export const MODEL_SOURCES = {
   OPENAI: "openai",
   SILICON: "silicon",
+  MODELENGINE: "modelengine",
   OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
   CUSTOM: "custom"
 } as const;

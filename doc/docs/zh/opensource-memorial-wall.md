@@ -517,15 +517,15 @@ nexent智能体帮助我学到更多的东西，赞！
 第一次使用nexent，想借此更快入手ai应用开发呀！
 :::
 
-:::info user - 2025-11-26
+::: info user - 2025-11-26
 Nexent开发者加油
 :::
 
-:::info NOSN - 2025-11-27
+::: info NOSN - 2025-11-27
 Nexent越做越强大！
 :::
 
-:::info Chenpi-Sakura - 2025-11-27
+::: info Chenpi-Sakura - 2025-11-27
 开源共创未来！
 :::
 
@@ -533,11 +533,11 @@ Nexent越做越强大！
 Nexent加油
 :::
 
-:::info AstreoX - 2025-11-27
+::: info AstreoX - 2025-11-27
 感谢Nexent为智能体开发提出了更多可能！
 :::
 
-:::info user - 2025-11-26
+::: info user - 2025-11-26
 祝nexent平台越做越胡奥
 :::
 
@@ -551,8 +551,23 @@ Nexent加油
 
 ::: info kj - 2025-11-27
 祝越来越好
+:::
+
 ::: info aaa - 2025-11-28
 祝nexent平台越来越好
+:::
+
+::: info hanyuan5888-beep - 2025-11-29
+通过华为ICT大赛接触到的这个平台，前端做的非常好看，并且功能很全面。
+:::
+
+::: info user - 2025-11-29
+感谢 Nexent 让我踏上了开源之旅！这个项目的文档真的很棒，帮助我快速上手。
+:::
+
+::: info G-oeX - 2025-11-30
+感谢 Nexent 让我第一次感受到智能体 希望参加ICT比赛过程中可以学到更多知识 能够对该领域有更多的了解和认识！star！！！
+:::
 
 ::: info luna - 2025-12-1
 感谢nexent，祝平台越做越强大
