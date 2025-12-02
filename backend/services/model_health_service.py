@@ -1,15 +1,11 @@
-import asyncio
 import logging
-import aiohttp
-from http import HTTPStatus
 
 from nexent.core import MessageObserver
 from nexent.core.models import OpenAIModel, OpenAIVLModel
 from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding
 
 from services.voice_service import get_voice_service
-from consts.const import MODEL_ENGINE_APIKEY, MODEL_ENGINE_HOST, LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
-from consts.exceptions import MEConnectionException, TimeoutException
+from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
 from database.model_management_db import get_model_by_display_name, update_model_record
 from utils.config_utils import get_model_name_from_config
@@ -57,6 +53,7 @@ async def _perform_connectivity_check(
     model_type: str,
     model_base_url: str,
     model_api_key: str,
+    ssl_verify: bool = True,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -65,6 +62,7 @@ async def _perform_connectivity_check(
         model_type: Model type
         model_base_url: Model base URL
         model_api_key: API key
+        ssl_verify: Whether to verify SSL certificates (default: True)
     Returns:
         bool: Connectivity check result
     """
@@ -95,7 +93,8 @@ async def _perform_connectivity_check(
             observer,
             model_id=model_name,
             api_base=model_base_url,
-            api_key=model_api_key
+            api_key=model_api_key,
+            ssl_verify=ssl_verify
         ).check_connectivity()
     elif model_type == "rerank":
         connectivity = False
@@ -135,11 +134,12 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         model_type = model["model_type"]
         model_base_url = model["base_url"]
         model_api_key = model["api_key"]
+        ssl_verify = model.get("ssl_verify", True)  # Default to True if not present
 
         try:
             # Use the common connectivity check function
             connectivity = await _perform_connectivity_check(
-                model_name, model_type, model_base_url, model_api_key
+                model_name, model_type, model_base_url, model_api_key, ssl_verify
             )
         except Exception as e:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
@@ -167,32 +167,6 @@ async def check_model_connectivity(display_name: str, tenant_id: str) -> dict:
         raise e
 
 
-async def check_me_connectivity_impl(timeout: int):
-    """
-    Check ME connectivity and return structured response data
-    Args:
-        timeout: Request timeout in seconds
-    """
-    try:
-        headers = {'Authorization': f'Bearer {MODEL_ENGINE_APIKEY}'}
-
-        async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=timeout),
-                connector=aiohttp.TCPConnector(ssl=False)
-        ) as session:
-            async with session.get(
-                    f"{MODEL_ENGINE_HOST}/open/router/v1/models",
-                    headers=headers
-            ) as response:
-                if response.status == HTTPStatus.OK:
-                    return
-                else:
-                    raise MEConnectionException(
-                        f"Connection failed, error code: {response.status}")
-    except asyncio.TimeoutError:
-        raise TimeoutException("Connection timed out")
-    except Exception as e:
-        raise Exception(f"Unknown error occurred: {str(e)}")
 
 
 async def verify_model_config_connectivity(model_config: dict):
@@ -208,11 +182,12 @@ async def verify_model_config_connectivity(model_config: dict):
         model_type = model_config["model_type"]
         model_base_url = model_config["base_url"]
         model_api_key = model_config["api_key"]
+        ssl_verify = model_config.get("ssl_verify", True)  # Default to True if not present
 
         try:
             # Use the common connectivity check function
             connectivity = await _perform_connectivity_check(
-                model_name, model_type, model_base_url, model_api_key
+                model_name, model_type, model_base_url, model_api_key, ssl_verify
             )
             
             if not connectivity:

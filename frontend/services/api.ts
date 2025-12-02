@@ -72,12 +72,14 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/image?url=${encodeURIComponent(url)}`,
   },
   model: {
-    // Official model service
-    officialModelList: `${API_BASE_URL}/me/model/list`,
-    officialModelHealthcheck: `${API_BASE_URL}/me/healthcheck`,
+    // ModelEngine health check
+    modelEngineHealthcheck: `${API_BASE_URL}/me/healthcheck`,
 
-    // Custom model service
+    // Model lists
+    officialModelList: `${API_BASE_URL}/model/list`, // ModelEngine models are also in this list
     customModelList: `${API_BASE_URL}/model/list`,
+    
+    // Custom model service
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,

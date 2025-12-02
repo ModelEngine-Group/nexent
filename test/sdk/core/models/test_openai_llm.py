@@ -1,4 +1,7 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
+import importlib.util
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -55,6 +58,28 @@ nexent_monitor_mock.monitoring_manager = monitoring_manager_mock
 nexent_monitor_mock.MonitoringManager = MagicMock
 nexent_monitor_mock.MonitoringConfig = MagicMock
 
+# Create mock parent package structure for nexent module
+nexent_mock = MagicMock()
+nexent_mock.monitor = nexent_monitor_mock
+nexent_core_mock = MagicMock()
+nexent_core_models_mock = MagicMock()
+nexent_core_utils_mock = MagicMock()
+
+# Mock MessageObserver and ProcessType for utils.observer
+class MockMessageObserver:
+    def __init__(self, *args, **kwargs):
+        self.add_model_new_token = MagicMock()
+        self.add_model_reasoning_content = MagicMock()
+        self.flush_remaining_tokens = MagicMock()
+
+class MockProcessType:
+    MODEL_OUTPUT_THINKING = "model_output_thinking"
+    MODEL_OUTPUT = "model_output"
+
+nexent_core_utils_mock.observer = MagicMock()
+nexent_core_utils_mock.observer.MessageObserver = MockMessageObserver
+nexent_core_utils_mock.observer.ProcessType = MockProcessType
+
 # Assemble smolagents.* paths and monitoring mocks
 module_mocks = {
     "smolagents": mock_smolagents,
@@ -62,13 +87,35 @@ module_mocks = {
     "openai.types": MagicMock(),
     "openai.types.chat": MagicMock(),
     "openai.types.chat.chat_completion_message": MagicMock(),
+    "openai": MagicMock(),
+    "openai.lib": MagicMock(),
+    "nexent": nexent_mock,
     "nexent.monitor": nexent_monitor_mock,
     "nexent.monitor.monitoring": nexent_monitor_mock,
+    "nexent.core": nexent_core_mock,
+    "nexent.core.models": nexent_core_models_mock,
+    "nexent.core.utils": nexent_core_utils_mock,
+    "nexent.core.utils.observer": nexent_core_utils_mock.observer,
 }
 
+# Dynamically load the module directly by file path
+MODULE_NAME = "nexent.core.models.openai_llm"
+MODULE_PATH = (
+    Path(__file__).resolve().parents[4]
+    / "sdk"
+    / "nexent"
+    / "core"
+    / "models"
+    / "openai_llm.py"
+)
+
 with patch.dict("sys.modules", module_mocks):
-    # Import after patching so dependencies are satisfied
-    from sdk.nexent.core.models.openai_llm import OpenAIModel as ImportedOpenAIModel
+    spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
+    openai_llm_module = importlib.util.module_from_spec(spec)
+    sys.modules[MODULE_NAME] = openai_llm_module
+    assert spec and spec.loader
+    spec.loader.exec_module(openai_llm_module)
+    ImportedOpenAIModel = openai_llm_module.OpenAIModel
 
     # -----------------------------------------------------------------------
     # Fixtures
@@ -83,6 +130,8 @@ with patch.dict("sys.modules", module_mocks):
 
         # Inject dummy attributes required by the method under test
         model.model_id = "dummy-model"
+        model.temperature = 0.7
+        model.top_p = 0.9
         model.custom_role_conversions = {}  # Add missing attribute
 
         # Client hierarchy: client.chat.completions.create
@@ -590,6 +639,220 @@ def test_call_with_reasoning_content_and_content_together(openai_model_instance)
             "Reasoning alongside content")
         openai_model_instance.observer.add_model_new_token.assert_called_once_with(
             "Response text")
+
+
+# ---------------------------------------------------------------------------
+# Tests for __init__ with ssl_verify parameter
+# ---------------------------------------------------------------------------
+
+def test_init_with_ssl_verify_false():
+    """Test __init__ method creates http_client when ssl_verify=False"""
+    
+    observer = MagicMock()
+    
+    # Mock DefaultHttpxClient from openai module
+    with patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        mock_httpx_client.return_value = MagicMock()
+        
+        # Create model with ssl_verify=False
+        model = ImportedOpenAIModel(observer=observer, ssl_verify=False)
+        
+        # Verify DefaultHttpxClient was called with verify=False
+        mock_httpx_client.assert_called_once_with(verify=False)
+
+
+def test_init_with_ssl_verify_true():
+    """Test __init__ method doesn't create http_client when ssl_verify=True (default)"""
+    
+    observer = MagicMock()
+    
+    # Mock DefaultHttpxClient from openai module
+    with patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        # Create model with ssl_verify=True (default)
+        model = ImportedOpenAIModel(observer=observer, ssl_verify=True)
+        
+        # Verify DefaultHttpxClient was NOT called
+        mock_httpx_client.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests for monitoring and token_tracker integration
+# ---------------------------------------------------------------------------
+
+def test_call_with_monitoring_and_token_tracker(openai_model_instance):
+    """Test __call__ method with monitoring and token_tracker enabled"""
+    
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    
+    # Create mock token_tracker
+    mock_token_tracker = MagicMock()
+    mock_token_tracker.record_first_token = MagicMock()
+    mock_token_tracker.record_token = MagicMock()
+    mock_token_tracker.record_completion = MagicMock()
+    
+    # Mock the stream response
+    mock_chunk1 = MagicMock()
+    mock_chunk1.choices = [MagicMock()]
+    mock_chunk1.choices[0].delta.content = "Hello"
+    mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning_content = None
+    
+    mock_chunk2 = MagicMock()
+    mock_chunk2.choices = [MagicMock()]
+    mock_chunk2.choices[0].delta.content = " world"
+    mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning_content = None
+    
+    mock_chunk3 = MagicMock()
+    mock_chunk3.choices = [MagicMock()]
+    mock_chunk3.choices[0].delta.content = None
+    mock_chunk3.choices[0].delta.role = None
+    mock_chunk3.choices[0].delta.reasoning_content = None
+    mock_chunk3.usage = MagicMock()
+    mock_chunk3.usage.prompt_tokens = 10
+    mock_chunk3.usage.completion_tokens = 5
+    mock_chunk3.usage.total_tokens = 15
+    
+    mock_stream = [mock_chunk1, mock_chunk2, mock_chunk3]
+    
+    # Mock ChatMessage.from_dict
+    mock_result_message = MagicMock()
+    mock_result_message.raw = mock_stream
+    mock_result_message.role = MagicMock()
+    
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = mock_stream
+        
+        # Call with _token_tracker kwarg
+        result = openai_model_instance.__call__(messages, _token_tracker=mock_token_tracker)
+        
+        # Verify monitoring calls
+        monitoring_manager_mock.add_span_event.assert_any_call("completion_started")
+        monitoring_manager_mock.set_span_attributes.assert_called()
+        monitoring_manager_mock.add_span_event.assert_any_call("completion_finished", ANY)
+        
+        # Verify token_tracker calls
+        mock_token_tracker.record_first_token.assert_called_once()
+        assert mock_token_tracker.record_token.call_count == 2  # "Hello" and " world"
+        mock_token_tracker.record_completion.assert_called_once_with(10, 5)
+
+
+def test_call_with_token_tracker_on_reasoning_content(openai_model_instance):
+    """Test __call__ method tracks first token on reasoning_content"""
+    
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    
+    # Create mock token_tracker
+    mock_token_tracker = MagicMock()
+    mock_token_tracker.record_first_token = MagicMock()
+    mock_token_tracker.record_token = MagicMock()
+    mock_token_tracker.record_completion = MagicMock()
+    
+    # Mock the stream response with reasoning_content first
+    mock_chunk1 = MagicMock()
+    mock_chunk1.choices = [MagicMock()]
+    mock_chunk1.choices[0].delta.content = None
+    mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning_content = "Thinking..."
+    
+    mock_chunk2 = MagicMock()
+    mock_chunk2.choices = [MagicMock()]
+    mock_chunk2.choices[0].delta.content = "Response"
+    mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning_content = None
+    mock_chunk2.usage = MagicMock()
+    mock_chunk2.usage.prompt_tokens = 5
+    mock_chunk2.usage.completion_tokens = 3
+    mock_chunk2.usage.total_tokens = 8
+    
+    mock_stream = [mock_chunk1, mock_chunk2]
+    
+    # Mock ChatMessage.from_dict
+    mock_result_message = MagicMock()
+    mock_result_message.raw = mock_stream
+    mock_result_message.role = MagicMock()
+    
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = mock_stream
+        
+        # Call with _token_tracker kwarg
+        result = openai_model_instance.__call__(messages, _token_tracker=mock_token_tracker)
+        
+        # Verify token_tracker.record_first_token was called when reasoning_content was received
+        mock_token_tracker.record_first_token.assert_called()
+        mock_token_tracker.record_token.assert_called_once_with("Response")
+
+
+def test_call_with_stop_event_and_token_tracker(openai_model_instance):
+    """Test __call__ method adds monitoring event when stop_event is set with token_tracker"""
+    
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    
+    # Create mock token_tracker
+    mock_token_tracker = MagicMock()
+    
+    # Mock the stream response
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        
+        # Set the stop event before calling
+        openai_model_instance.stop_event.set()
+        
+        # Call the method with token_tracker and expect RuntimeError
+        with pytest.raises(RuntimeError, match="Model is interrupted by stop event"):
+            openai_model_instance.__call__(messages, _token_tracker=mock_token_tracker)
+        
+        # Verify monitoring event was added
+        monitoring_manager_mock.add_span_event.assert_any_call("model_stopped", {"reason": "stop_event_set"})
+
+
+def test_call_exception_with_token_tracker(openai_model_instance):
+    """Test __call__ method adds error event when exception occurs with token_tracker"""
+    
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    
+    # Create mock token_tracker
+    mock_token_tracker = MagicMock()
+    
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to raise an exception
+        openai_model_instance.client.chat.completions.create.side_effect = Exception("API Error")
+        
+        # Call the method with token_tracker and expect exception
+        with pytest.raises(Exception, match="API Error"):
+            openai_model_instance.__call__(messages, _token_tracker=mock_token_tracker)
+        
+        # Verify error event was added
+        monitoring_manager_mock.add_span_event.assert_any_call("error_occurred", ANY)
+
+
+def test_call_context_length_exceeded_with_token_tracker(openai_model_instance):
+    """Test __call__ method adds error event for context_length_exceeded with token_tracker"""
+    
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+    
+    # Create mock token_tracker
+    mock_token_tracker = MagicMock()
+    
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        # Mock the client to raise context length exceeded error
+        openai_model_instance.client.chat.completions.create.side_effect = Exception(
+            "context_length_exceeded: token limit exceeded")
+        
+        # Call the method with token_tracker and expect exception
+        with pytest.raises(Exception, match="context_length_exceeded"):
+            openai_model_instance.__call__(messages, _token_tracker=mock_token_tracker)
+        
+        # Verify error event was added
+        monitoring_manager_mock.add_span_event.assert_any_call("error_occurred", ANY)
 
 
 if __name__ == "__main__":

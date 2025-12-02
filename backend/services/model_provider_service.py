@@ -3,14 +3,18 @@ from abc import ABC, abstractmethod
 from typing import Dict, List
 
 import httpx
+import aiohttp
 
 from consts.const import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_EXPECTED_CHUNK_SIZE,
-    DEFAULT_MAXIMUM_CHUNK_SIZE
+    DEFAULT_MAXIMUM_CHUNK_SIZE,
+    MODEL_ENGINE_HOST,
+    MODEL_ENGINE_APIKEY,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
 from consts.provider import SILICON_GET_URL, ProviderEnum
+from consts.exceptions import TimeoutException
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from utils.model_name_utils import split_repo_name, add_repo_to_name
@@ -67,6 +71,76 @@ class SiliconModelProvider(AbstractModelProvider):
             return []
 
 
+class ModelEngineProvider(AbstractModelProvider):
+    """Concrete implementation for ModelEngine provider."""
+
+    async def get_models(self, provider_config: Dict) -> List[Dict]:
+        """
+        Fetch models from ModelEngine API.
+        
+        Args:
+            provider_config: Configuration dict containing model_type
+            
+        Returns:
+            List of models with canonical fields
+        """
+        try:
+            if not MODEL_ENGINE_HOST or not MODEL_ENGINE_APIKEY:
+                logger.warning("ModelEngine environment variables not configured")
+                return []
+
+            model_type: str = provider_config.get("model_type", "")
+            headers = {"Authorization": f"Bearer {MODEL_ENGINE_APIKEY}"}
+
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+                connector=aiohttp.TCPConnector(ssl=False)
+            ) as session:
+                async with session.get(
+                    f"{MODEL_ENGINE_HOST}/open/router/v1/models",
+                    headers=headers
+                ) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    all_models = data.get("data", [])
+
+            # Type mapping from ModelEngine to internal types
+            type_map = {
+                "embed": "embedding",
+                "chat": "llm",
+                "asr": "stt",
+                "tts": "tts",
+                "rerank": "rerank",
+                "vlm": "vlm",
+            }
+
+            # Filter models by type if specified
+            filtered_models = []
+            for model in all_models:
+                me_type = model.get("type", "")
+                internal_type = type_map.get(me_type)
+                
+                # If model_type filter is provided, only include matching models
+                if model_type and internal_type != model_type:
+                    continue
+                
+                if internal_type:
+                    filtered_models.append({
+                        "id": model.get("id", ""),
+                        "model_type": internal_type,
+                        "model_tag": me_type,
+                        "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
+                        # ModelEngine models will get base_url and api_key from environment
+                        "base_url": MODEL_ENGINE_HOST,
+                        "api_key": MODEL_ENGINE_APIKEY,
+                    })
+
+            return filtered_models
+        except Exception as e:
+            logger.error(f"Error getting models from ModelEngine: {e}")
+            return []
+
+
 async def prepare_model_dict(provider: str, model: dict, model_url: str, model_api_key: str) -> dict:
     """
     Construct a model configuration dictionary that is ready to be stored in the
@@ -75,11 +149,10 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     the router implementation concise.
 
     Args:
-        provider: Name of the model provider (e.g. "silicon", "openai").
+        provider: Name of the model provider (e.g. "silicon", "openai", "modelengine").
         model:      A single model item coming from the provider list.
         model_url:  Base URL for the provider API.
         model_api_key: API key that should be saved together with the model.
-        max_tokens: User-supplied max token / embedding dimension upper-bound.
 
     Returns:
         A dictionary ready to be passed to *create_model_record*.
@@ -97,6 +170,18 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     if model["model_type"] in ["embedding", "multi_embedding"]:
         expected_chunk_size = model.get("expected_chunk_size", DEFAULT_EXPECTED_CHUNK_SIZE)
         maximum_chunk_size = model.get("maximum_chunk_size", DEFAULT_MAXIMUM_CHUNK_SIZE)
+
+    # For ModelEngine provider, extract the host from model's base_url
+    # We'll append the correct path later
+    if provider == ProviderEnum.MODELENGINE.value:
+        # Get the raw host URL from model (e.g., "https://120.253.225.102:50001")
+        raw_model_url = model.get("base_url", "")
+        # Strip any existing path to get just the host
+        if raw_model_url:
+            # Remove any trailing /open/router/v1 or similar paths to get base host
+            raw_model_url = raw_model_url.split("/open/")[0] if "/open/" in raw_model_url else raw_model_url
+        model_url = raw_model_url
+        model_api_key = model.get("api_key", model_api_key)
 
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
@@ -117,11 +202,24 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Determine the correct base_url and, for embeddings, update the actual
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
-        model_dict["base_url"] = f"{model_url}embeddings"
+        if provider != ProviderEnum.MODELENGINE.value:
+            model_dict["base_url"] = f"{model_url}embeddings"
+        else:
+            # For ModelEngine embedding models, append the embeddings path
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/open/router/v1/embeddings"
         # The embedding dimension might differ from the provided max_tokens.
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
     else:
-        model_dict["base_url"] = model_url
+        # For non-embedding models
+        if provider == ProviderEnum.MODELENGINE.value:
+            # Ensure ModelEngine models have the full API path
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/open/router/v1"
+        else:
+            model_dict["base_url"] = model_url
+
+    # ModelEngine models don't support SSL verification
+    if provider == ProviderEnum.MODELENGINE.value:
+        model_dict["ssl_verify"] = False
 
     # All newly created models start in NOT_DETECTED status.
     model_dict["connect_status"] = ModelConnectStatusEnum.NOT_DETECTED.value
@@ -181,6 +279,9 @@ async def get_provider_models(model_data: dict) -> List[dict]:
 
     if model_data["provider"] == ProviderEnum.SILICON.value:
         provider = SiliconModelProvider()
+        model_list = await provider.get_models(model_data)
+    elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
+        provider = ModelEngineProvider()
         model_list = await provider.get_models(model_data)
 
     return model_list

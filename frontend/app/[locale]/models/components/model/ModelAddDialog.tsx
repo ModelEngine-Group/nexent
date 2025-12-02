@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
@@ -36,6 +36,7 @@ interface ModelAddDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (model?: AddedModel) => Promise<void>;
+  defaultProvider?: string; // Default provider to select when dialog opens
 }
 
 // Connectivity status type comes from utils
@@ -129,6 +130,7 @@ export const ModelAddDialog = ({
   isOpen,
   onClose,
   onSuccess,
+  defaultProvider,
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -166,7 +168,7 @@ export const ModelAddDialog = ({
     isMultimodal: false,
     // Whether to import multiple models at once
     isBatchImport: false,
-    provider: "silicon",
+    provider: "modelengine",
     vectorDimension: "1024",
     // Default chunk size range for embedding models
     chunkSizeRange: [
@@ -218,6 +220,17 @@ export const ModelAddDialog = ({
     setShowModelList,
     setLoadingModelList,
   });
+
+  // Handle default provider when dialog opens
+  useEffect(() => {
+    if (isOpen && defaultProvider) {
+      setForm((prev) => ({
+        ...prev,
+        provider: defaultProvider,
+        isBatchImport: true,
+      }));
+    }
+  }, [isOpen, defaultProvider]);
 
   const parseModelName = (name: string): string => {
     if (!name) return "";
@@ -638,6 +651,7 @@ export const ModelAddDialog = ({
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
             >
+              <Option value="modelengine">{t("model.provider.modelengine")}</Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
           </div>
