@@ -5,6 +5,7 @@ Test LLM integration for knowledge base summarization
 import pytest
 import sys
 import os
+from unittest.mock import patch, MagicMock
 
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
@@ -32,16 +33,19 @@ class TestLLMIntegration:
         content = "This is a test document with some content about machine learning and AI."
         filename = "test_doc.txt"
         
-        # Test with model_id and tenant_id but no actual LLM call (will fallback due to missing config)
-        result = summarize_document(
-            content, filename, language="zh", max_words=50, 
-            model_id=1, tenant_id="test_tenant"
-        )
-        
-        # Should return placeholder summary when model config not found (fallback behavior)
-        assert "[Document Summary: test_doc.txt]" in result
-        assert "max 50 words" in result
-        assert "Content:" in result
+        # Mock get_model_by_model_id to return None (no config found) to avoid MinIO initialization
+        # Patch at the source module since it's imported inside the function
+        with patch('database.model_management_db.get_model_by_model_id', return_value=None):
+            # Test with model_id and tenant_id but no actual LLM call (will fallback due to missing config)
+            result = summarize_document(
+                content, filename, language="zh", max_words=50, 
+                model_id=1, tenant_id="test_tenant"
+            )
+            
+            # Should return placeholder summary when model config not found (fallback behavior)
+            assert "[Document Summary: test_doc.txt]" in result
+            assert "max 50 words" in result
+            assert "Content:" in result
     
     def test_summarize_cluster_without_llm(self):
         """Test cluster summarization without LLM (fallback mode)"""
@@ -65,15 +69,18 @@ class TestLLMIntegration:
             "Document 2 discusses neural networks and deep learning."
         ]
         
-        result = summarize_cluster(
-            document_summaries, language="zh", max_words=100,
-            model_id=1, tenant_id="test_tenant"
-        )
-        
-        # Should return placeholder summary when model config not found (fallback behavior)
-        assert "[Cluster Summary]" in result
-        assert "max 100 words" in result
-        assert "Based on 2 documents" in result
+        # Mock get_model_by_model_id to return None (no config found) to avoid MinIO initialization
+        # Patch at the source module since it's imported inside the function
+        with patch('database.model_management_db.get_model_by_model_id', return_value=None):
+            result = summarize_cluster(
+                document_summaries, language="zh", max_words=100,
+                model_id=1, tenant_id="test_tenant"
+            )
+            
+            # Should return placeholder summary when model config not found (fallback behavior)
+            assert "[Cluster Summary]" in result
+            assert "max 100 words" in result
+            assert "Based on 2 documents" in result
     
     def test_summarize_document_english(self):
         """Test document summarization in English"""
