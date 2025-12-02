@@ -4,7 +4,7 @@ import type React from "react";
 import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal } from "antd";
+import { App, Modal, Row, Col } from "antd";
 import { InfoCircleFilled, WarningFilled } from "@ant-design/icons";
 import {
   DOCUMENT_ACTION_TYPES,
@@ -19,7 +19,7 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import {
   SETUP_PAGE_CONTAINER,
-  FLEX_TWO_COLUMN_LAYOUT,
+  TWO_COLUMN_LAYOUT,
   STANDARD_CARD,
 } from "@/const/layoutConstants";
 
@@ -820,12 +820,14 @@ function DataConfig({ isActive }: DataConfigProps) {
             </div>
           </div>
         </Modal>
-        <div
-          className="flex h-full"
-          style={{ gap: FLEX_TWO_COLUMN_LAYOUT.GAP }}
-        >
-          {/* Left knowledge base list - occupies 1/3 space */}
-          <div style={{ width: FLEX_TWO_COLUMN_LAYOUT.LEFT_WIDTH }}>
+        <Row gutter={TWO_COLUMN_LAYOUT.GUTTER} className="h-full">
+          <Col
+            xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
+            md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
+            lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
+            xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
+            xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
+          >
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               selectedIds={kbState.selectedIds}
@@ -842,10 +844,15 @@ function DataConfig({ isActive }: DataConfigProps) {
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
             />
-          </div>
+          </Col>
 
-          {/* Right content area - occupies 2/3 space, now unified with config.tsx style */}
-          <div style={{ width: FLEX_TWO_COLUMN_LAYOUT.RIGHT_WIDTH }}>
+          <Col
+            xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
+            md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
+            lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
+            xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
+            xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
+          >
             {isCreatingMode ? (
               <DocumentList
                 documents={[]}
@@ -917,8 +924,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 />
               </div>
             )}
-          </div>
-        </div>
+          </Col>
+        </Row>
       </div>
     </>
   );
