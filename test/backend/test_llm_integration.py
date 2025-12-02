@@ -32,14 +32,16 @@ class TestLLMIntegration:
         content = "This is a test document with some content about machine learning and AI."
         filename = "test_doc.txt"
         
-        # Test with model_id and tenant_id but no actual LLM call (will fail due to missing config)
+        # Test with model_id and tenant_id but no actual LLM call (will fallback due to missing config)
         result = summarize_document(
             content, filename, language="zh", max_words=50, 
             model_id=1, tenant_id="test_tenant"
         )
         
-        # Should return error message when model config not found
-        assert "Failed to generate summary" in result or "No model configuration found" in result
+        # Should return placeholder summary when model config not found (fallback behavior)
+        assert "[Document Summary: test_doc.txt]" in result
+        assert "max 50 words" in result
+        assert "Content:" in result
     
     def test_summarize_cluster_without_llm(self):
         """Test cluster summarization without LLM (fallback mode)"""
@@ -68,8 +70,10 @@ class TestLLMIntegration:
             model_id=1, tenant_id="test_tenant"
         )
         
-        # Should return error message when model config not found
-        assert "Failed to generate summary" in result or "No model configuration found" in result
+        # Should return placeholder summary when model config not found (fallback behavior)
+        assert "[Cluster Summary]" in result
+        assert "max 100 words" in result
+        assert "Based on 2 documents" in result
     
     def test_summarize_document_english(self):
         """Test document summarization in English"""

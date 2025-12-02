@@ -130,3 +130,30 @@ async def test_check_me_connectivity_variables_not_set():
 
         # Assert
         assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_me_connectivity_general_exception():
+    """Test ME connectivity check with general exception (covers lines 54-55)"""
+    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'mock-api-key'), \
+            patch.object(svc, 'MODEL_ENGINE_HOST', 'https://me-host.com'), \
+            patch('backend.services.me_model_management_service.aiohttp.ClientSession') as mock_session_class:
+
+        # Create mock session that raises a general exception
+        mock_session = AsyncMock()
+        mock_get = AsyncMock()
+        mock_get.__aenter__.side_effect = ValueError("Unexpected error")
+        mock_session.get = MagicMock(return_value=mock_get)
+
+        # Create mock session factory
+        mock_client_session = AsyncMock()
+        mock_client_session.__aenter__.return_value = mock_session
+        mock_session_class.return_value = mock_client_session
+
+        # Execute and expect a generic Exception
+        with pytest.raises(Exception) as exc_info:
+            await svc.check_me_connectivity(timeout=30)
+
+        # Assert the exception message contains "Unknown error occurred"
+        assert "Unknown error occurred" in str(exc_info.value)
+        assert "Unexpected error" in str(exc_info.value)
