@@ -271,12 +271,13 @@ async def test_get_creating_sub_agent_id_service_new_agent(mock_search, mock_cre
     )
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test successful retrieval of an agent's information by ID.
 
@@ -284,7 +285,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     1. The function correctly retrieves the agent's basic information
     2. It fetches the associated tools
     3. It gets the sub-agent ID list
-    4. It returns a complete agent information structure
+    4. It returns a complete agent information structure with availability status
     """
     # Setup
     mock_agent_info = {
@@ -302,6 +303,9 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     
     # Mock get_model_by_model_id - return None for model_id=None
     mock_get_model_by_model_id.return_value = None
+    
+    # Mock check_agent_availability - agent is available
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -314,7 +318,9 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
-        "business_logic_model_name": None
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     mock_search_agent_info.assert_called_once_with(123, "test_tenant")
@@ -322,6 +328,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
         main_agent_id=123, tenant_id="test_tenant")
+    mock_check_availability.assert_called_once()
 
 
 @patch('backend.services.agent_service.get_model_by_model_id')
@@ -1063,9 +1070,10 @@ async def test_export_agent_impl_no_mcp_tools(mock_get_current_user_info, mock_e
     mock_export_data_format.assert_called_once()
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
-async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with an error in retrieving tool information.
 
@@ -1081,6 +1089,7 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
         "business_description": "Test agent"
     }
     mock_search_agent_info.return_value = mock_agent_info
+    mock_check_availability.return_value = (True, [])
 
     # Mock the search_tools_for_sub_agent function to raise an exception
     with patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
@@ -1097,15 +1106,18 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
         assert result["tools"] == []
         assert result["sub_agent_id_list"] == []
         assert result["model_name"] is None
+        assert result["is_available"] == True
+        assert result["unavailable_reasons"] == []
         mock_search_agent_info.assert_called_once_with(123, "test_tenant")
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with an error in retrieving sub agent id list.
 
@@ -1128,6 +1140,7 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
     # Mock query_sub_agents_id_list to raise an exception
     mock_query_sub_agents_id.side_effect = Exception("Sub agent query error")
     mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1137,6 +1150,8 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
     assert result["tools"] == mock_tools
     assert result["sub_agent_id_list"] == []
     assert result["model_name"] is None
+    assert result["is_available"] == True
+    assert result["unavailable_reasons"] == []
     mock_search_agent_info.assert_called_once_with(123, "test_tenant")
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
@@ -1144,12 +1159,13 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
         main_agent_id=123, tenant_id="test_tenant")
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with a valid model_id.
 
@@ -1179,6 +1195,9 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "provider": "openai"
     }
     mock_get_model_by_model_id.return_value = mock_model_info
+    
+    # Mock check_agent_availability - agent is available
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1191,18 +1210,21 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
-        "business_logic_model_name": None
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     mock_get_model_by_model_id.assert_called_once_with(456)
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with model_id but model has no display_name.
 
@@ -1231,6 +1253,7 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         # No display_name field
     }
     mock_get_model_by_model_id.return_value = mock_model_info
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1243,18 +1266,21 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
-        "business_logic_model_name": None
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     mock_get_model_by_model_id.assert_called_once_with(456)
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with model_id but get_model_by_model_id returns None.
 
@@ -1278,6 +1304,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
 
     # Mock get_model_by_model_id to return None
     mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1290,18 +1317,21 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": None,
-        "business_logic_model_name": None
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     mock_get_model_by_model_id.assert_called_once_with(456)
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with business_logic_model_id.
 
@@ -1348,6 +1378,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         return None
     
     mock_get_model_by_model_id.side_effect = mock_get_model
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1361,7 +1392,9 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
-        "business_logic_model_name": "Claude-3.5"
+        "business_logic_model_name": "Claude-3.5",
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     
@@ -1371,12 +1404,13 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     mock_get_model_by_model_id.assert_any_call(789)
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with business_logic_model_id but get_model_by_model_id returns None.
 
@@ -1415,6 +1449,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         return None
     
     mock_get_model_by_model_id.side_effect = mock_get_model
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1428,7 +1463,9 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
-        "business_logic_model_name": None  # Should be None when model info is not found
+        "business_logic_model_name": None,  # Should be None when model info is not found
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     
@@ -1438,12 +1475,13 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     mock_get_model_by_model_id.assert_any_call(789)
 
 
+@patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.search_tools_for_sub_agent')
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
-async def test_get_agent_info_impl_with_business_logic_model_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id):
+async def test_get_agent_info_impl_with_business_logic_model_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with business_logic_model_id but model has no display_name.
 
@@ -1489,6 +1527,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         return None
     
     mock_get_model_by_model_id.side_effect = mock_get_model
+    mock_check_availability.return_value = (True, [])
 
     # Execute
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -1502,7 +1541,9 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
         "model_name": "GPT-4",
-        "business_logic_model_name": None  # Should be None when display_name is not in model_info
+        "business_logic_model_name": None,  # Should be None when display_name is not in model_info
+        "is_available": True,
+        "unavailable_reasons": []
     }
     assert result == expected_result
     
@@ -6190,6 +6231,260 @@ def test_check_single_model_availability_returns_empty_for_available_model():
     )
 
     assert reasons == []
+
+
+# ============================================================================
+# Tests for check_agent_availability function
+# ============================================================================
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_all_available(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability when all tools and models are available."""
+    from backend.services.agent_service import check_agent_availability
+    
+    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [{"tool_id": 1}, {"tool_id": 2}]
+    mock_check_tool.return_value = [True, True]
+    mock_collect_model_reasons.return_value = []
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant"
+    )
+    
+    assert is_available is True
+    assert reasons == []
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_tools.assert_called_once_with(agent_id=123, tenant_id="test_tenant")
+    mock_check_tool.assert_called_once_with([1, 2])
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_tool_unavailable(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability when some tools are unavailable."""
+    from backend.services.agent_service import check_agent_availability
+    
+    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [{"tool_id": 1}, {"tool_id": 2}]
+    mock_check_tool.return_value = [True, False]  # One tool unavailable
+    mock_collect_model_reasons.return_value = []
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant"
+    )
+    
+    assert is_available is False
+    assert reasons == ["tool_unavailable"]
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_model_unavailable(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability when model is unavailable."""
+    from backend.services.agent_service import check_agent_availability
+    
+    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [{"tool_id": 1}]
+    mock_check_tool.return_value = [True]
+    mock_collect_model_reasons.return_value = ["model_unavailable"]
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant"
+    )
+    
+    assert is_available is False
+    assert reasons == ["model_unavailable"]
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_both_unavailable(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability when both tools and model are unavailable."""
+    from backend.services.agent_service import check_agent_availability
+    
+    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [{"tool_id": 1}]
+    mock_check_tool.return_value = [False]
+    mock_collect_model_reasons.return_value = ["model_unavailable"]
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant"
+    )
+    
+    assert is_available is False
+    assert "tool_unavailable" in reasons
+    assert "model_unavailable" in reasons
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_no_tools(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability when agent has no tools."""
+    from backend.services.agent_service import check_agent_availability
+    
+    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []  # No tools
+    mock_collect_model_reasons.return_value = []
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant"
+    )
+    
+    assert is_available is True
+    assert reasons == []
+
+
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+def test_check_agent_availability_agent_not_found(mock_search_agent_info):
+    """Test check_agent_availability when agent is not found."""
+    from backend.services.agent_service import check_agent_availability
+    
+    mock_search_agent_info.return_value = None
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=999,
+        tenant_id="test_tenant"
+    )
+    
+    assert is_available is False
+    assert reasons == ["agent_not_found"]
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+def test_check_agent_availability_with_pre_fetched_agent_info(
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability with pre-fetched agent_info (avoids duplicate DB query)."""
+    from backend.services.agent_service import check_agent_availability
+    
+    pre_fetched_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_search_tools.return_value = [{"tool_id": 1}]
+    mock_check_tool.return_value = [True]
+    mock_collect_model_reasons.return_value = []
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant",
+        agent_info=pre_fetched_agent_info
+    )
+    
+    assert is_available is True
+    assert reasons == []
+    # search_agent_info_by_agent_id should NOT be called since agent_info was provided
+    mock_search_tools.assert_called_once_with(agent_id=123, tenant_id="test_tenant")
+
+
+@patch('backend.services.agent_service._collect_model_availability_reasons')
+@patch('backend.services.agent_service.check_tool_is_available')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+def test_check_agent_availability_with_model_cache(
+    mock_search_tools,
+    mock_check_tool,
+    mock_collect_model_reasons
+):
+    """Test check_agent_availability with pre-populated model cache."""
+    from backend.services.agent_service import check_agent_availability
+    
+    pre_fetched_agent_info = {"agent_id": 123, "model_id": 456}
+    model_cache = {456: {"connect_status": "available"}}
+    mock_search_tools.return_value = [{"tool_id": 1}]
+    mock_check_tool.return_value = [True]
+    mock_collect_model_reasons.return_value = []
+    
+    is_available, reasons = check_agent_availability(
+        agent_id=123,
+        tenant_id="test_tenant",
+        agent_info=pre_fetched_agent_info,
+        model_cache=model_cache
+    )
+    
+    assert is_available is True
+    assert reasons == []
+    # Verify model_cache was passed to _collect_model_availability_reasons
+    mock_collect_model_reasons.assert_called_once()
+    call_args = mock_collect_model_reasons.call_args
+    assert call_args.kwargs.get("model_cache") == model_cache or call_args[1].get("model_cache") == model_cache
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+async def test_get_agent_info_impl_with_unavailable_agent(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_model_by_model_id,
+    mock_check_availability
+):
+    """Test get_agent_info_impl returns is_available=False when agent is unavailable."""
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_id": 456,
+        "business_description": "Test agent"
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = [{"tool_id": 1}]
+    mock_query_sub_agents_id.return_value = []
+    mock_get_model_by_model_id.return_value = {"display_name": "GPT-4"}
+    # Agent is unavailable due to tool issues
+    mock_check_availability.return_value = (False, ["tool_unavailable"])
+    
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+    
+    assert result["is_available"] is False
+    assert result["unavailable_reasons"] == ["tool_unavailable"]
 
 
 @pytest.mark.asyncio
