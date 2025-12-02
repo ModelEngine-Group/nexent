@@ -100,11 +100,9 @@ export const ModelConfigSection = forwardRef<
   const modelData = getModelData(t);
 
   // State management
-  const [officialModels, setOfficialModels] = useState<ModelOption[]>([]);
-  const [customModels, setCustomModels] = useState<ModelOption[]>([]);
+  const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isModifyWarningOpen, setIsModifyWarningOpen] = useState(false);
 
@@ -222,14 +220,10 @@ export const ModelConfigSection = forwardRef<
       modelType: ModelType
     ): ModelConnectStatus | undefined => {
       if (!displayName) return undefined;
-      const isOfficial = officialModels.some(
+      const model = models.find(
         (m) => m.displayName === displayName && m.type === modelType
       );
-      if (isOfficial) return MODEL_STATUS.AVAILABLE;
-      const custom = customModels.find(
-        (m) => m.displayName === displayName && m.type === modelType
-      );
-      return custom?.connect_status as ModelConnectStatus | undefined;
+      return model?.connect_status as ModelConnectStatus | undefined;
     };
 
     result.embedding = resolveStatus(
@@ -264,23 +258,10 @@ export const ModelConfigSection = forwardRef<
     const modelConfig = configStore.getConfig().models;
 
     try {
-      const [official, custom] = await Promise.all([
-        modelService.getOfficialModels(),
-        modelService.getCustomModels(),
-      ]);
+      const allModels = await modelService.getAllModels();
 
-      // Ensure all official models have "available" status
-      const officialWithStatus = official.map((model) => ({
-        ...model,
-        connect_status: MODEL_STATUS.AVAILABLE,
-      }));
-
-      // Update state
-      setOfficialModels(officialWithStatus);
-      setCustomModels(custom);
-
-      // Merge all available model lists (official and custom)
-      const allModels = [...officialWithStatus, ...custom];
+      // Update state with all models
+      setModels(allModels);
 
       // Load selected models from configuration and check if models still exist
       const llmMain = modelConfig.llm.displayName;
@@ -423,14 +404,10 @@ export const ModelConfigSection = forwardRef<
 
       // Perform verification directly here instead of using setTimeout
       // This ensures we use model data from the current function scope instead of relying on state updates
-      if (officialWithStatus.length > 0 || custom.length > 0) {
+      if (allModels.length > 0) {
         if (hasConfiguredModels && !skipVerify) {
           // Call internal verification function, passing model data and latest selected model information
-          verifyModelsInternal(
-            officialWithStatus,
-            custom,
-            updatedSelectedModels
-          );
+          verifyModelsInternal(allModels, updatedSelectedModels);
         }
       }
     } catch (error) {
@@ -441,8 +418,7 @@ export const ModelConfigSection = forwardRef<
 
   // Internal verification function that accepts model data as parameters and doesn't depend on state
   const verifyModelsInternal = async (
-    officialData: ModelOption[],
-    customData: ModelOption[],
+    allModels: ModelOption[],
     modelsToCheck?: Record<string, Record<string, string>> // Optional parameter to pass latest selected models
   ) => {
     // If already verifying, don't execute again
@@ -451,7 +427,7 @@ export const ModelConfigSection = forwardRef<
     }
 
     // Ensure model data is loaded
-    if (officialData.length === 0 && customData.length === 0) {
+    if (allModels.length === 0) {
       return;
     }
 
@@ -520,7 +496,6 @@ export const ModelConfigSection = forwardRef<
         optionId: string;
         modelName: string;
         modelType: ModelType;
-        isOfficialModel: boolean;
       }> = [];
 
       // Collect all models that need verification, using passed selected model data
@@ -543,28 +518,16 @@ export const ModelConfigSection = forwardRef<
                 : MODEL_TYPES.EMBEDDING;
           }
 
-          // Find model in officialData or customData
-          const isOfficialModel = officialData.some(
-            (model) => model.name === modelName && model.type === modelType
-          );
-
           // Add model to verification list
           modelsToVerify.push({
             category,
             optionId,
             modelName,
             modelType,
-            isOfficialModel,
           });
 
-          // Only update custom model status to "checking", official models are always "available"
-          if (!isOfficialModel) {
-            updateCustomModelStatus(
-              modelName,
-              modelType,
-              MODEL_STATUS.CHECKING
-            );
-          }
+          // Update model status to "checking"
+          updateModelStatus(modelName, modelType, MODEL_STATUS.CHECKING);
         }
       }
 
@@ -578,49 +541,29 @@ export const ModelConfigSection = forwardRef<
 
       // Verify all models in parallel
       await Promise.all(
-        modelsToVerify.map(
-          async ({ modelName, modelType, isOfficialModel }) => {
-            // Call different verification methods based on model source
-            let isConnected = false;
+        modelsToVerify.map(async ({ modelName, modelType }) => {
+          try {
+            const isConnected = await modelService.verifyCustomModel(
+              modelName,
+              signal
+            );
 
-            if (isOfficialModel) {
-              // Official models are always considered "available"
-              isConnected = true;
-            } else {
-              // Custom models, verify using modelService
-              try {
-                isConnected = await modelService.verifyCustomModel(
-                  modelName,
-                  signal
-                );
-
-                // Update model status
-                updateCustomModelStatus(
-                  modelName,
-                  modelType,
-                  isConnected
-                    ? MODEL_STATUS.AVAILABLE
-                    : MODEL_STATUS.UNAVAILABLE
-                );
-              } catch (error: any) {
-                // Check if request was cancelled
-                if (error.name === "AbortError") {
-                  return;
-                }
-
-                log.error(
-                  `Failed to verify custom model ${modelName}:`,
-                  error
-                );
-                updateCustomModelStatus(
-                  modelName,
-                  modelType,
-                  MODEL_STATUS.UNAVAILABLE
-                );
-              }
+            // Update model status
+            updateModelStatus(
+              modelName,
+              modelType,
+              isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
+            );
+          } catch (error: any) {
+            // Check if request was cancelled
+            if (error.name === "AbortError") {
+              return;
             }
+
+            log.error(`Failed to verify model ${modelName}:`, error);
+            updateModelStatus(modelName, modelType, MODEL_STATUS.UNAVAILABLE);
           }
-        )
+        })
       );
     } catch (error: any) {
       // Check if request was cancelled
@@ -646,27 +589,18 @@ export const ModelConfigSection = forwardRef<
     }
 
     // Ensure model data is loaded
-    if (officialModels.length === 0 && customModels.length === 0) {
+    if (models.length === 0) {
       // Model data not yet loaded, skip verification
       return;
     }
 
     // Call internal verification function
-    await verifyModelsInternal(officialModels, customModels, selectedModels);
+    await verifyModelsInternal(models, selectedModels);
   };
 
-  // Synchronize model lists
-  const handleSyncModels = async () => {
-    setIsSyncing(true);
-    try {
-      await loadModelLists(true);
-      message.success(t("modelConfig.message.syncSuccess"));
-    } catch (error) {
-      log.error(t("modelConfig.error.syncFailed"), error);
-      message.error(t("modelConfig.error.syncFailed"));
-    } finally {
-      setIsSyncing(false);
-    }
+  // Open batch add dialog with ModelEngine provider pre-selected
+  const handleSyncModels = () => {
+    setIsAddModalOpen(true);
   };
 
   // Verify single model connection status (with throttling logic)
@@ -674,13 +608,8 @@ export const ModelConfigSection = forwardRef<
     // If empty model name, return directly
     if (!displayName) return;
 
-    // Find model in officialModels or customModels
-    const isOfficialModel = officialModels.some(
-      (model) => model.displayName === displayName && model.type === modelType
-    );
-
-    // Official models are always considered "available"
-    if (isOfficialModel) return;
+    // Immediately update status to "checking" for instant user feedback
+    updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
 
     // If in throttling, clear previous timer
     if (throttleTimerRef.current) {
@@ -689,15 +618,12 @@ export const ModelConfigSection = forwardRef<
 
     // Use throttling, delay 1s before verification to avoid repeated verification when switching models frequently
     throttleTimerRef.current = setTimeout(async () => {
-      // Update custom model status to "checking"
-      updateCustomModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
-
       try {
-        // Use modelService to verify custom model
+        // Use modelService to verify model
         const isConnected = await modelService.verifyCustomModel(displayName);
 
         // Update model status
-        updateCustomModelStatus(
+        updateModelStatus(
           displayName,
           modelType,
           isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
@@ -707,11 +633,7 @@ export const ModelConfigSection = forwardRef<
           t("modelConfig.error.verifyCustomModel", { model: displayName }),
           error
         );
-        updateCustomModelStatus(
-          displayName,
-          modelType,
-          MODEL_STATUS.UNAVAILABLE
-        );
+        updateModelStatus(displayName, modelType, MODEL_STATUS.UNAVAILABLE);
       } finally {
         throttleTimerRef.current = null;
       }
@@ -757,17 +679,13 @@ export const ModelConfigSection = forwardRef<
           : MODEL_TYPES.EMBEDDING;
     }
 
-    const modelInfo = [...officialModels, ...customModels].find(
+    const modelInfo = models.find(
       (m) => m.displayName === displayName && m.type === modelType
     );
 
-    // If newly selected model is a custom model and no status was previously set, set to "unchecked"
-    if (
-      modelInfo &&
-      modelInfo.source === "custom" &&
-      !modelInfo.connect_status
-    ) {
-      updateCustomModelStatus(displayName, modelType, MODEL_STATUS.UNCHECKED);
+    // If newly selected model has no status, set to "unchecked"
+    if (modelInfo && !modelInfo.connect_status) {
+      updateModelStatus(displayName, modelType, MODEL_STATUS.UNCHECKED);
     }
 
     // Update configuration
@@ -891,12 +809,12 @@ export const ModelConfigSection = forwardRef<
   };
 
   // Only update local UI state, no database operations involved
-  const updateCustomModelStatus = (
+  const updateModelStatus = (
     displayName: string,
     modelType: string,
     status: ModelConnectStatus
   ) => {
-    setCustomModels((prev) => {
+    setModels((prev) => {
       const idx = prev.findIndex(
         (model) => model.displayName === displayName && model.type === modelType
       );
@@ -933,7 +851,7 @@ export const ModelConfigSection = forwardRef<
         >
           <Space size={10}>
             <Button type="primary" size="middle" onClick={handleSyncModels}>
-              <SyncOutlined spin={isSyncing} />{" "}
+              <SyncOutlined />{" "}
               {t("modelConfig.button.syncModelEngine")}
             </Button>
             <Button
@@ -1060,8 +978,7 @@ export const ModelConfigSection = forwardRef<
                         onModelChange={(modelName) =>
                           handleModelChange(key, option.id, modelName)
                         }
-                        officialModels={officialModels}
-                        customModels={customModels}
+                        models={models}
                         onVerifyModel={verifyOneModel}
                         errorFields={errorFields}
                       />
@@ -1086,6 +1003,7 @@ export const ModelConfigSection = forwardRef<
               }, 100);
             }
           }}
+          defaultProvider="modelengine"
         />
 
         <ModelDeleteDialog
@@ -1095,7 +1013,7 @@ export const ModelConfigSection = forwardRef<
             await loadModelLists(true);
             return;
           }}
-          customModels={customModels}
+          models={models}
         />
 
         <EmbedderCheckModal

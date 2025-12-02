@@ -15,12 +15,12 @@ const fetch = fetchWithAuth;
  */
 const modelEngineService = {
   /**
-   * Check ModelEngine connection status
+   * Check ModelEngine connection status (environment variable configuration check)
    * @returns Promise<ModelEngineCheckResult> Result object containing connection status and check time
    */
   checkConnection: async (): Promise<ModelEngineCheckResult> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.officialModelHealthcheck, {
+      const response = await fetch(API_ENDPOINTS.model.modelEngineHealthcheck, {
         method: "GET"
       })
 

@@ -133,6 +133,9 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
 
         if provider == ProviderEnum.SILICON.value:
             model_url = SILICON_BASE_URL
+        elif provider == ProviderEnum.MODELENGINE.value:
+            # ModelEngine models carry their own base_url in each model dict
+            model_url = ""
         else:
             model_url = ""
 
@@ -288,6 +291,12 @@ async def list_models_for_tenant(tenant_id: str):
     try:
         records = get_model_records(None, tenant_id)
         result: List[Dict[str, Any]] = []
+        
+        # Type mapping for backwards compatibility (chat -> llm for frontend)
+        type_map = {
+            "chat": "llm",
+        }
+        
         for record in records:
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
@@ -295,6 +304,11 @@ async def list_models_for_tenant(tenant_id: str):
             )
             record["connect_status"] = ModelConnectStatusEnum.get_value(
                 record.get("connect_status"))
+            
+            # Map model_type if necessary (for ModelEngine compatibility)
+            if record.get("model_type") in type_map:
+                record["model_type"] = type_map[record["model_type"]]
+            
             result.append(record)
 
         logging.debug("Successfully retrieved model list")

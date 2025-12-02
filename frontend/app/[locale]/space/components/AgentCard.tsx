@@ -265,8 +265,13 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
               e.stopPropagation();
               handleChat();
             }}
-            className="p-2 rounded-md hover:bg-green-50 dark:hover:bg-green-900/20 text-slate-400 hover:text-green-600 dark:hover:text-green-400 transition-colors"
-            title={t("space.actions.chat", "Chat")}
+            disabled={!agent.is_available}
+            className={`p-2 rounded-md transition-colors ${
+              agent.is_available
+                ? "hover:bg-green-50 dark:hover:bg-green-900/20 text-slate-400 hover:text-green-600 dark:hover:text-green-400"
+                : "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+            }`}
+            title={agent.is_available ? t("space.actions.chat", "Chat") : t("space.status.unavailable", "Unavailable")}
           >
             <MessageSquare className="h-4 w-4" />
           </button>
