@@ -7,6 +7,11 @@ on:
         description: 'Image version tag (e.g. v1.0.0 or latest)'
         required: true
         default: 'latest'
+      push_latest:
+        description: 'Also push latest tag'
+        required: false
+        default: false
+        type: boolean
       runner_label_json:
         description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: true
@@ -32,6 +37,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push main image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}-amd64
+      - name: Tag main image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent:amd64
+      - name: Push latest main image (amd64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:amd64
 
   build-and-push-main-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -52,6 +63,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push main image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}-arm64
+      - name: Tag main image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent:arm64
+      - name: Push latest main image (arm64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent:arm64
 
   build-and-push-data-process-amd64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -81,6 +98,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push data process image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}-amd64
+      - name: Tag data process image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64
+      - name: Push latest data process image (amd64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64
 
   build-and-push-data-process-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -110,6 +133,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push data process image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}-arm64
+      - name: Tag data process image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:arm64
+      - name: Push latest data process image (arm64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:arm64
 
   build-and-push-web-amd64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -130,6 +159,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push web image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}-amd64
+      - name: Tag web image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64
+      - name: Push latest web image (amd64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64
 
   build-and-push-web-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -150,6 +185,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push web image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}-arm64
+      - name: Tag web image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-web:arm64
+      - name: Push latest web image (arm64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:arm64
 
   build-and-push-terminal-amd64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -170,6 +211,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push terminal image (amd64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}-amd64
+      - name: Tag terminal image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64
+      - name: Push latest terminal image (amd64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64
 
   build-and-push-terminal-arm64:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -190,6 +237,12 @@ jobs:
         run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
       - name: Push terminal image (arm64) to Tencent Cloud
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}-arm64
+      - name: Tag terminal image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
+      - name: Push latest terminal image (arm64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
 
   manifest-push-main:
     runs-on: ubuntu-latest
@@ -205,6 +258,13 @@ jobs:
             ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent:${{ inputs.version }}
+      - name: Create and push latest manifest for main (Tencent Cloud)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent:latest \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent:amd64 \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent:arm64
+          docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent:latest
 
   manifest-push-data-process:
     runs-on: ubuntu-latest
@@ -220,6 +280,13 @@ jobs:
             ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:${{ inputs.version }}
+      - name: Create and push latest manifest for data-process (Tencent Cloud)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:latest \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:amd64 \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:arm64
+          docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process:latest
 
   manifest-push-web:
     runs-on: ubuntu-latest
@@ -235,6 +302,13 @@ jobs:
             ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:${{ inputs.version }}
+      - name: Create and push latest manifest for web (Tencent Cloud)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-web:latest \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-web:amd64 \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-web:arm64
+          docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-web:latest
 
   manifest-push-terminal:
     runs-on: ubuntu-latest
@@ -250,3 +324,10 @@ jobs:
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}-amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}-arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:${{ inputs.version }}
+      - name: Create and push latest manifest for terminal (Tencent Cloud)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:latest \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64 \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
+          docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:latest
