@@ -52,7 +52,8 @@ class NexentAgent:
             api_key=model_config.api_key,
             api_base=model_config.url,
             temperature=model_config.temperature,
-            top_p=model_config.top_p
+            top_p=model_config.top_p,
+            ssl_verify=model_config.ssl_verify if model_config.ssl_verify is not None else True
         )
         model.stop_event = self.stop_event
         return model

@@ -13,14 +13,35 @@ from ..utils.observer import MessageObserver, ProcessType
 
 logger = logging.getLogger("openai_llm")
 
-
 class OpenAIModel(OpenAIServerModel):
-    def __init__(self, observer: MessageObserver, temperature=0.2, top_p=0.95, *args, **kwargs):
+    def __init__(self, observer: MessageObserver, temperature=0.2, top_p=0.95, 
+                 ssl_verify=True, *args, **kwargs):
+        """
+        Initialize OpenAI Model with observer and SSL verification option.
+        
+        Args:
+            observer: MessageObserver instance for tracking model output
+            temperature: Sampling temperature (default: 0.2)
+            top_p: Top-p sampling parameter (default: 0.95)
+            ssl_verify: Whether to verify SSL certificates (default: True). 
+                       Set to False for local services without SSL support.
+            *args: Additional positional arguments for OpenAIServerModel
+            **kwargs: Additional keyword arguments for OpenAIServerModel
+        """
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
+        
+        # Create http_client based on ssl_verify parameter
+        if not ssl_verify:
+            from openai import DefaultHttpxClient
+            http_client = DefaultHttpxClient(verify=False)
+            client_kwargs = kwargs.get('client_kwargs', {})
+            client_kwargs['http_client'] = http_client
+            kwargs['client_kwargs'] = client_kwargs
+        
         super().__init__(*args, **kwargs)
 
     @get_monitoring_manager().monitor_llm_call("openai_chat", "chat_completion")

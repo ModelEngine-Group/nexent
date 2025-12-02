@@ -129,7 +129,7 @@ class CoreAgent(CodeAgent):
             additional_args = {
                 "grammar": self.grammar} if self.grammar is not None else {}
             chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"], **additional_args, )
+                                                   stop_sequences=["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"], **additional_args)
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
             memory_step.model_output = model_output

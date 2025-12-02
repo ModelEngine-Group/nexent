@@ -160,6 +160,8 @@ class ModelRecord(TableBase):
         Integer, doc="Expected chunk size for embedding models, used during document chunking")
     maximum_chunk_size = Column(
         Integer, doc="Maximum chunk size for embedding models, used during document chunking")
+    ssl_verify = Column(
+        Boolean, default=True, doc="Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.")
 
 
 class ToolInfo(TableBase):
