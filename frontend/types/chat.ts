@@ -95,6 +95,7 @@ export interface AttachmentItem {
   name: string;
   size: number;
   url?: string;
+  object_name?: string;
   contentType?: string;
 }
 

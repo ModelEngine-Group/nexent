@@ -61,15 +61,34 @@ export const API_ENDPOINTS = {
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
     files: `${API_BASE_URL}/file/storage`,
-    file: (objectName: string, download: string = "ignore") =>
-      `${API_BASE_URL}/file/storage/${objectName}?download=${download}`,
+    file: (objectName: string, download: string = "ignore", filename?: string) => {
+      const queryParams = new URLSearchParams();
+      queryParams.append("download", download);
+      if (filename) queryParams.append("filename", filename);
+      return `${API_BASE_URL}/file/download/${objectName}?${queryParams.toString()}`;
+    },
+    datamateDownload: (params: {
+      url?: string;
+      baseUrl?: string;
+      datasetId?: string;
+      fileId?: string;
+      filename?: string;
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params.url) queryParams.append("url", params.url);
+      if (params.baseUrl) queryParams.append("base_url", params.baseUrl);
+      if (params.datasetId) queryParams.append("dataset_id", params.datasetId);
+      if (params.fileId) queryParams.append("file_id", params.fileId);
+      if (params.filename) queryParams.append("filename", params.filename);
+      return `${API_BASE_URL}/file/datamate/download?${queryParams.toString()}`;
+    },
     delete: (objectName: string) =>
       `${API_BASE_URL}/file/storage/${objectName}`,
     preprocess: `${API_BASE_URL}/file/preprocess`,
   },
   proxy: {
-    image: (url: string) =>
-      `${API_BASE_URL}/image?url=${encodeURIComponent(url)}`,
+    image: (url: string, format: string = "stream") =>
+      `${API_BASE_URL}/image?url=${encodeURIComponent(url)}&format=${format}`,
   },
   model: {
     // Official model service

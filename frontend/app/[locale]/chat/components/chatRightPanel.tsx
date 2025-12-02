@@ -8,6 +8,8 @@ import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { API_ENDPOINTS } from "@/services/api";
 import { formatDate, formatUrl } from "@/lib/utils";
+import { convertImageUrlToApiUrl, extractObjectNameFromImageUrl, storageService } from "@/services/storageService";
+import { message } from "antd";
 import log from "@/lib/logger";
 
 
@@ -92,30 +94,48 @@ export function ChatRightPanel({
     }));
 
     try {
-      // Use the proxy service to get the image
-      const response = await fetch(API_ENDPOINTS.proxy.image(imageUrl));
-      const data = await response.json();
+      // Convert image URL to backend API URL
+      const apiUrl = convertImageUrlToApiUrl(imageUrl);
+      
+      // Use backend API to get the image
+      const response = await fetch(apiUrl);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to load image: ${response.statusText}`);
+      }
 
-      if (data.success) {
+      // Get image as blob and convert to base64
+      const blob = await response.blob();
+      const reader = new FileReader();
+      
+      reader.onloadend = () => {
+        const base64Data = reader.result as string;
+        // Remove data URL prefix (e.g., "data:image/png;base64,")
+        const base64 = base64Data.split(',')[1] || base64Data;
+        
         setImageData((prev) => ({
           ...prev,
           [imageUrl]: {
-            base64Data: data.base64,
-            contentType: data.content_type || "image/jpeg",
+            base64Data: base64,
+            contentType: blob.type || "image/jpeg",
             isLoading: false,
             loadAttempts: currentAttempts + 1,
           },
         }));
-      } else {
-        // If loading fails, remove it directly from the list
+        loadingImages.current.delete(imageUrl);
+      };
+      
+      reader.onerror = () => {
+        log.error("Failed to read image blob");
         handleImageLoadFail(imageUrl);
-      }
+        loadingImages.current.delete(imageUrl);
+      };
+      
+      reader.readAsDataURL(blob);
     } catch (error) {
       log.error(t("chatRightPanel.imageProxyError"), error);
       // If loading fails, remove it directly from the list
       handleImageLoadFail(imageUrl);
-    } finally {
-      // Whether successful or not, remove the loading mark
       loadingImages.current.delete(imageUrl);
     }
 
@@ -200,11 +220,93 @@ export function ChatRightPanel({
   // Search result item component
   const SearchResultItem = ({ result }: { result: SearchResult }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
     const title = result.title || t("chatRightPanel.unknownTitle");
     const url = result.url || "#";
     const text = result.text || t("chatRightPanel.noContentDescription");
     const published_date = result.published_date || "";
     const source_type = result.source_type || "url";
+    const filename = result.filename || "";
+    const datamateDatasetId = result.score_details?.datamate_dataset_id;
+    const datamateFileId = result.score_details?.datamate_file_id;
+    const datamateBaseUrl = result.score_details?.datamate_base_url;
+
+    // Handle file download
+    const handleFileDownload = async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (!filename && !url) {
+        message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
+        return;
+      }
+
+      // Check if URL is a direct http/https URL that can be accessed directly
+      // Exclude backend API endpoints (containing /api/file/download/)
+      if (
+        url &&
+        url !== "#" &&
+        (url.startsWith("http://") || url.startsWith("https://")) &&
+        !url.includes("/api/file/download/")
+      ) {
+        // Direct download from HTTP/HTTPS URL without backend
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename || "download";
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+        return;
+      }
+
+      setIsDownloading(true);
+      try {
+        // Handle datamate source type separately
+        if (source_type === "datamate") {
+          if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
+            if (!url || url === "#") {
+              message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
+              return;
+            }
+          }
+          await storageService.downloadDatamateFile({
+            url: url !== "#" ? url : undefined,
+            baseUrl: datamateBaseUrl,
+            datasetId: datamateDatasetId,
+            fileId: datamateFileId,
+            filename: filename || undefined,
+          });
+          message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+          return;
+        }
+
+        // Handle regular file source type
+        // For knowledge base files, backend stores the MinIO object_name in path_or_url,
+        // so we should always try to extract it from the URL and avoid guessing from filename.
+        let objectName: string | undefined = undefined;
+
+        if (url && url !== "#") {
+          objectName = extractObjectNameFromImageUrl(url) || undefined;
+        }
+
+        if (!objectName) {
+          message.error(t("chatRightPanel.fileDownloadError", "Cannot determine file object name"));
+          return;
+        }
+
+        await storageService.downloadFile(objectName, filename || "download");
+        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
+      } catch (error) {
+        log.error("Failed to download file:", error);
+        message.error(t("chatRightPanel.fileDownloadError", "Failed to download file. Please try again."));
+      } finally {
+        setIsDownloading(false);
+      }
+    };
 
     return (
       <div className="p-3 rounded-lg border border-gray-200 text-xs hover:bg-gray-50 transition-colors overflow-hidden">
@@ -226,6 +328,29 @@ export function ChatRightPanel({
                 title={title}
               >
                 {title}
+              </a>
+            ) : source_type === "file" || source_type === "datamate" ? (
+              <a
+                href="#"
+                onClick={handleFileDownload}
+                className="font-medium text-blue-600 hover:underline block text-base cursor-pointer"
+                style={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                  wordBreak: "break-word",
+                }}
+                title={title}
+              >
+                {isDownloading ? (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="animate-spin">⏳</span>
+                    {t("chatRightPanel.downloading", "Downloading...")}
+                  </span>
+                ) : (
+                  title
+                )}
               </a>
             ) : (
               <div
@@ -268,20 +393,35 @@ export function ChatRightPanel({
               <div className="w-3 h-3 flex-shrink-0 mr-1">
                 {source_type === "url" ? (
                   <ExternalLink className="w-full h-full" />
-                ) : source_type === "file" ? (
+                ) : source_type === "file" || source_type === "datamate" ? (
                   <Database className="w-full h-full" />
                 ) : null}
               </div>
-              <span
-                className="text-gray-500 truncate"
-                style={{
-                  maxWidth: "75%",
-                  display: "inline-block",
-                }}
-                title={formatUrl(result)}
-              >
-                {formatUrl(result)}
-              </span>
+              {source_type === "file" || source_type === "datamate" ? (
+                <a
+                  href="#"
+                  onClick={handleFileDownload}
+                  className="text-blue-600 hover:underline truncate cursor-pointer"
+                  style={{
+                    maxWidth: "75%",
+                    display: "inline-block",
+                  }}
+                  title={formatUrl(result)}
+                >
+                  {filename || formatUrl(result)}
+                </a>
+              ) : (
+                <span
+                  className="text-gray-500 truncate"
+                  style={{
+                    maxWidth: "75%",
+                    display: "inline-block",
+                  }}
+                  title={formatUrl(result)}
+                >
+                  {formatUrl(result)}
+                </span>
+              )}
             </div>
 
             {text.length > 150 && (

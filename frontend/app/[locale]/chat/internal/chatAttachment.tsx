@@ -2,6 +2,9 @@ import { chatConfig } from "@/const/chatConfig";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
+import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
+import { message } from "antd";
+import log from "@/lib/logger";
 import {
   AiFillFileImage,
   AiFillFilePdf,
@@ -37,6 +40,9 @@ const ImageViewer = ({
 }) => {
   if (!isOpen) return null;
   const { t } = useTranslation("common");
+  
+  // Convert image URL to backend API URL
+  const imageUrl = convertImageUrlToApiUrl(url);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -47,7 +53,7 @@ const ImageViewer = ({
           </DialogTitle>
         </DialogHeader>
         <div className="flex items-center justify-center h-full">
-          <img src={url} alt="Full size" className="max-h-[80vh] max-w-full" />
+          <img src={imageUrl} alt="Full size" className="max-h-[80vh] max-w-full" />
         </div>
       </DialogContent>
     </Dialog>
@@ -56,13 +62,15 @@ const ImageViewer = ({
 
 // File viewer component
 const FileViewer = ({
+  objectName,
   url,
   name,
   contentType,
   isOpen,
   onClose,
 }: {
-  url: string;
+  objectName?: string;
+  url?: string;
   name: string;
   contentType?: string;
   isOpen: boolean;
@@ -70,6 +78,131 @@ const FileViewer = ({
 }) => {
   if (!isOpen) return null;
   const { t } = useTranslation("common");
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // Extract object_name from URL if not provided
+  const extractObjectNameFromUrl = (url: string): string | null => {
+    try {
+      // Try to extract object_name from MinIO URL
+      // MinIO URLs typically look like: http://host:port/bucket/object_name?signature
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      // Remove leading slash and bucket name if present
+      // Path format: /bucket/object_name or /object_name
+      const parts = pathname.split('/').filter(Boolean);
+      if (parts.length > 1) {
+        // Skip bucket name, return the rest as object_name
+        return parts.slice(1).join('/');
+      } else if (parts.length === 1) {
+        return parts[0];
+      }
+      return null;
+    } catch (error) {
+      log.error("Failed to extract object_name from URL:", error);
+      return null;
+    }
+  };
+
+  // Handle file download
+  const handleDownload = async (e: React.MouseEvent) => {
+    // Prevent dialog from closing immediately
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Check if URL is a direct http/https URL that can be accessed directly
+    // Exclude backend API endpoints (containing /api/file/download/)
+    if (
+      url &&
+      (url.startsWith("http://") || url.startsWith("https://")) &&
+      !url.includes("/api/file/download/")
+    ) {
+      // Direct download from HTTP/HTTPS URL without backend
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
+      message.success(t("chatAttachment.downloadSuccess", "File download started"));
+      setTimeout(() => {
+        onClose();
+      }, 500);
+      return;
+    }
+    
+    // Try to get object_name from props or extract from URL
+    let finalObjectName: string | undefined = objectName;
+    
+    if (!finalObjectName && url) {
+      finalObjectName = extractObjectNameFromUrl(url) || undefined;
+    }
+
+    if (!finalObjectName) {
+      // If we still don't have object_name, fall back to direct URL download
+      if (url) {
+        // Create a temporary link to download from URL
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+        message.success(t("chatAttachment.downloadSuccess", "File download started"));
+        return;
+      } else {
+        message.error(t("chatAttachment.downloadError", "File object name or URL is missing"));
+        return;
+      }
+    }
+
+    setIsDownloading(true);
+    try {
+      // Start download (non-blocking, browser handles it)
+      await storageService.downloadFile(finalObjectName, name);
+      // Show success message immediately after triggering download
+      message.success(t("chatAttachment.downloadSuccess", "File download started"));
+      // Keep dialog open for a moment to show the message, then close
+      setTimeout(() => {
+        setIsDownloading(false);
+        onClose();
+      }, 500);
+    } catch (error) {
+      log.error("Failed to download file:", error);
+      setIsDownloading(false);
+      // If backend download fails and we have URL, try direct download as fallback
+      if (url) {
+        try {
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = name;
+          link.style.display = "none";
+          document.body.appendChild(link);
+          link.click();
+          setTimeout(() => {
+            document.body.removeChild(link);
+          }, 100);
+          message.success(t("chatAttachment.downloadSuccess", "File download started"));
+          setTimeout(() => {
+            onClose();
+          }, 500);
+        } catch (fallbackError) {
+          message.error(
+            t("chatAttachment.downloadError", "Failed to download file. Please try again.")
+          );
+        }
+      } else {
+        message.error(
+          t("chatAttachment.downloadError", "Failed to download file. Please try again.")
+        );
+      }
+    }
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -89,15 +222,17 @@ const FileViewer = ({
             <p className="text-gray-600 mb-4">
               {t("chatAttachment.previewNotSupported")}
             </p>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            <button
+              onClick={handleDownload}
+              disabled={(!objectName && !url) || isDownloading}
+              type="button"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ExternalLink size={16} />
-              {t("chatAttachment.downloadToView")}
-            </a>
+              {isDownloading
+                ? t("chatAttachment.downloading", "Downloading...")
+                : t("chatAttachment.downloadToView")}
+            </button>
           </div>
         </div>
       </DialogContent>
@@ -183,7 +318,8 @@ export function ChatAttachment({
 }: ChatAttachmentProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<{
-    url: string;
+    objectName?: string;
+    url?: string;
     name: string;
     contentType?: string;
   } | null>(null);
@@ -218,6 +354,7 @@ export function ChatAttachment({
       } else {
         // For files, use internal preview
         setSelectedFile({
+          objectName: attachment.object_name,
           url: attachment.url,
           name: attachment.name,
           contentType: attachment.contentType,
@@ -252,7 +389,7 @@ export function ChatAttachment({
                   <div className="w-10 h-10 flex-shrink-0 overflow-hidden rounded-md">
                     {attachment.url && (
                       <img
-                        src={attachment.url}
+                        src={convertImageUrlToApiUrl(attachment.url)}
                         alt={attachment.name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -306,6 +443,7 @@ export function ChatAttachment({
       {/* File viewer */}
       {selectedFile && (
         <FileViewer
+          objectName={selectedFile.objectName}
           url={selectedFile.url}
           name={selectedFile.name}
           contentType={selectedFile.contentType}

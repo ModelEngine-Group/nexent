@@ -17,6 +17,7 @@ import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType, CardItem, MessageHandler } from "@/types/chat";
 import { useChatTaskMessage } from "@/hooks/useChatTaskMessage";
+import { storageService, extractObjectNameFromImageUrl } from "@/services/storageService";
 import log from "@/lib/logger";
 
 // Icon mapping dictionary - map strings to corresponding icon components
@@ -29,6 +30,23 @@ const iconMap: Record<string, React.ReactNode> = {
   zap: <Zap size={16} className="mr-2" color="#4b5563" />,
   knowledge: <FileText size={16} className="mr-2" color="#4b5563" />,
   default: <Wrench size={16} className="mr-2" color="#4b5563" />, // Default icon
+};
+
+type KnowledgeSiteInfo = {
+  key: string;
+  domain: string;
+  displayName: string;
+  faviconUrl: string;
+  useDefaultIcon: boolean;
+  isKnowledgeBase: boolean;
+  sourceType: string;
+  url: string;
+  filename: string;
+  datamateDatasetId?: string;
+  datamateFileId?: string;
+  datamateBaseUrl?: string;
+  objectName?: string;
+  canOpenWeb: boolean;
 };
 
 // Define the handlers for different types of messages to improve extensibility
@@ -126,77 +144,188 @@ const messageHandlers: MessageHandler[] = [
         }
       );
 
-      // Process website information for display
-      const siteInfos = uniqueSearchResults.map((result: any) => {
-        const pageUrl = result.url || "";
-        const filename = result.filename || "";
-        const sourceType = result.source_type || "";
-        let domain = t("taskWindow.unknownSource");
-        let displayName = t("taskWindow.unknownSource");
-        let baseUrl = "";
-        let faviconUrl = "";
-        let useDefaultIcon = false;
-        let isKnowledgeBase = false;
-        let canClick = true; // whether to allow click to jump
+      // Process website / knowledge base information for display
+      const siteInfos: KnowledgeSiteInfo[] = uniqueSearchResults.map(
+        (result: any, index: number) => {
+          const pageUrl = result.url || "";
+          const filename = result.filename || "";
+          const sourceType = result.source_type || (filename ? "file" : "url");
+          const scoreDetails = result.score_details || {};
+          const datamateDatasetId =
+            scoreDetails?.datamate_dataset_id || scoreDetails?.dataset_id;
+          const datamateFileId =
+            scoreDetails?.datamate_file_id || scoreDetails?.file_id;
+          const datamateBaseUrl =
+            scoreDetails?.datamate_base_url ||
+            scoreDetails?.datamate_baseUrl ||
+            scoreDetails?.base_url;
+          const objectName =
+            result.object_name ||
+            scoreDetails?.object_name ||
+            scoreDetails?.minio_object_name;
 
-        // first judge based on source_type
-        if (sourceType === "file") {
-          isKnowledgeBase = true;
-          displayName =
-            filename || result.title || t("taskWindow.knowledgeFile");
-          useDefaultIcon = true;
-          canClick = false; // file type does not allow jump
+          let domain = t("taskWindow.unknownSource");
+          let displayName = t("taskWindow.unknownSource");
+          let baseUrl = "";
+          let faviconUrl = "";
+          let useDefaultIcon = false;
+          let isKnowledgeBase =
+            sourceType === "file" ||
+            sourceType === "datamate" ||
+            (!sourceType && !!filename);
+          let canOpenWeb = false;
+
+          if (isKnowledgeBase) {
+            displayName =
+              filename || result.title || t("taskWindow.knowledgeFile");
+            domain =
+              datamateBaseUrl ||
+              (pageUrl && pageUrl !== "#"
+                ? (() => {
+                    try {
+                      return new URL(pageUrl).hostname;
+                    } catch {
+                      return t("taskWindow.unknownSource");
+                    }
+                  })()
+                : t("taskWindow.unknownSource"));
+            useDefaultIcon = true;
+          } else if (pageUrl && pageUrl !== "#") {
+            try {
+              const parsedUrl = new URL(pageUrl);
+              baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+              domain = parsedUrl.hostname;
+
+              displayName = domain
+                .replace(/^www\./, "")
+                .replace(
+                  /\.(com|cn|org|net|io|gov|edu|co|info|biz|xyz)(\.[a-z]{2})?$/,
+                  ""
+                );
+              if (!displayName) {
+                displayName = domain;
+              }
+
+              faviconUrl = `${baseUrl}/favicon.ico`;
+              canOpenWeb = true;
+            } catch (e) {
+              log.error(t("taskWindow.urlParseError"), e);
+              useDefaultIcon = true;
+              canOpenWeb = false;
+            }
+          } else {
+            useDefaultIcon = true;
+            canOpenWeb = false;
+          }
+
+          return {
+            key: `site-${index}-${result.cite_index ?? ""}-${filename ?? ""}`,
+            domain,
+            displayName,
+            faviconUrl,
+            url: pageUrl,
+            useDefaultIcon,
+            isKnowledgeBase,
+            filename,
+            sourceType,
+            datamateDatasetId,
+            datamateFileId,
+            datamateBaseUrl,
+            objectName,
+            canOpenWeb,
+          };
         }
-        // if there is no source_type, judge based on filename (compatibility processing)
-        else if (filename) {
-          isKnowledgeBase = true;
-          displayName = filename;
-          useDefaultIcon = true;
-          canClick = false; // file type does not allow jump
-        }
-        // handle webpage link
-        else if (pageUrl && pageUrl !== "#") {
-          try {
-            const parsedUrl = new URL(pageUrl);
-            baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
-            domain = parsedUrl.hostname;
+      );
 
-            // Process the domain, remove the www prefix and com/cn etc. suffix
-            displayName = domain
-              .replace(/^www\./, "") // Remove the www. prefix
-              .replace(
-                /\.(com|cn|org|net|io|gov|edu|co|info|biz|xyz)(\.[a-z]{2})?$/,
-                ""
-              ); // Remove common suffixes
+      const handleKnowledgeFileDownload = async (
+        site: KnowledgeSiteInfo
+      ): Promise<void> => {
+        try {
+          // Check if URL is a direct http/https URL that can be accessed directly
+          // Exclude backend API endpoints (containing /api/file/download/)
+          if (
+            site.url &&
+            site.url !== "#" &&
+            (site.url.startsWith("http://") || site.url.startsWith("https://")) &&
+            !site.url.includes("/api/file/download/")
+          ) {
+            // Direct download from HTTP/HTTPS URL without backend
+            const link = document.createElement("a");
+            link.href = site.url;
+            link.download = site.filename || "download";
+            link.style.display = "none";
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+              document.body.removeChild(link);
+            }, 100);
+            message.success(
+              t("taskWindow.downloadSuccess", "File download started")
+            );
+            return;
+          }
 
-            // If the processing is empty, use the original domain
-            if (!displayName) {
-              displayName = domain;
+          if (site.sourceType === "datamate") {
+            if (
+              !site.datamateDatasetId &&
+              !site.datamateFileId &&
+              (!site.url || site.url === "#")
+            ) {
+              message.error(
+                t(
+                  "taskWindow.downloadError",
+                  "Missing Datamate dataset or file information"
+                )
+              );
+              return;
             }
 
-            faviconUrl = `${baseUrl}/favicon.ico`;
-            canClick = true;
-          } catch (e) {
-            log.error(t("taskWindow.urlParseError"), e);
-            useDefaultIcon = true;
-            canClick = false;
+            await storageService.downloadDatamateFile({
+              url: site.url && site.url !== "#" ? site.url : undefined,
+              baseUrl: site.datamateBaseUrl,
+              datasetId: site.datamateDatasetId,
+              fileId: site.datamateFileId,
+              filename: site.filename || undefined,
+            });
+          } else {
+            let objectName = site.objectName;
+            if (!objectName && site.url) {
+              objectName =
+                extractObjectNameFromImageUrl(site.url) || undefined;
+            }
+            if (!objectName && site.filename) {
+              objectName = site.filename.includes("/")
+                ? site.filename
+                : `attachments/${site.filename}`;
+            }
+            if (!objectName) {
+              message.error(
+                t(
+                  "taskWindow.downloadError",
+                  "Failed to download file. Please try again."
+                )
+              );
+              return;
+            }
+            await storageService.downloadFile(
+              objectName,
+              site.filename || undefined
+            );
           }
-        } else {
-          useDefaultIcon = true;
-          canClick = false;
-        }
 
-        return {
-          domain,
-          displayName,
-          faviconUrl,
-          url: pageUrl,
-          useDefaultIcon,
-          isKnowledgeBase,
-          filename,
-          canClick,
-        };
-      });
+          message.success(
+            t("taskWindow.downloadSuccess", "File download started")
+          );
+        } catch (error) {
+          log.error("Failed to download knowledge file:", error);
+          message.error(
+            t(
+              "taskWindow.downloadError",
+              "Failed to download file. Please try again."
+            )
+          );
+        }
+      };
 
       // Render the search result information bar
       return (
@@ -237,9 +366,11 @@ const messageHandlers: MessageHandler[] = [
                 gap: "0.5rem",
               }}
             >
-              {siteInfos.map((site: any, index: number) => (
+              {siteInfos.map((site) => {
+                const isClickable = site.isKnowledgeBase || site.canOpenWeb;
+                return (
                 <div
-                  key={index}
+                  key={site.key}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -249,28 +380,32 @@ const messageHandlers: MessageHandler[] = [
                     fontSize: "0.75rem",
                     color: "#4b5563",
                     border: "1px solid #e5e7eb",
-                    cursor: site.canClick ? "pointer" : "default",
-                    transition: site.canClick
-                      ? "background-color 0.2s"
-                      : "none",
+                    cursor: isClickable ? "pointer" : "default",
+                    transition: isClickable ? "background-color 0.2s" : "none",
                   }}
                   onClick={() => {
-                    if (site.canClick && site.url) {
+                    if (site.isKnowledgeBase) {
+                      handleKnowledgeFileDownload(site);
+                    } else if (site.canOpenWeb && site.url) {
                       window.open(site.url, "_blank", "noopener,noreferrer");
                     }
                   }}
                   onMouseEnter={(e) => {
-                    if (site.canClick) {
+                    if (isClickable) {
                       e.currentTarget.style.backgroundColor = "#f3f4f6";
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (site.canClick) {
+                    if (isClickable) {
                       e.currentTarget.style.backgroundColor = "#f9fafb";
                     }
                   }}
                   title={
-                    site.canClick
+                    site.isKnowledgeBase
+                      ? t("taskWindow.downloadFile", {
+                          name: site.filename || site.displayName,
+                        })
+                      : site.canOpenWeb
                       ? t("taskWindow.visit", { domain: site.domain })
                       : site.filename || site.displayName
                   }
@@ -314,9 +449,26 @@ const messageHandlers: MessageHandler[] = [
                       }}
                     />
                   )}
-                  <span>{site.displayName}</span>
+                  <span
+                    style={{
+                      color: site.isKnowledgeBase ? "#2563eb" : undefined,
+                      textDecoration: site.isKnowledgeBase
+                        ? "underline"
+                        : "none",
+                      fontWeight: site.isKnowledgeBase ? 600 : undefined,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.25rem",
+                    }}
+                  >
+                    {site.displayName}
+                    {site.isKnowledgeBase && (
+                      <ChevronRight size={14} color="#2563eb" />
+                    )}
+                  </span>
                 </div>
-              ))}
+              );
+            })}
             </div>
           </div>
         </div>
