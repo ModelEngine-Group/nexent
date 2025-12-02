@@ -198,85 +198,33 @@ async def test_get_me_models_with_filter():
     assert response_data["data"][0]["name"] == "model2"
 
 
-@pytest.mark.asyncio
-async def test_get_me_models_env_not_configured_returns_skip_message_and_empty_list():
-    """When ME env not configured, endpoint returns 200 with skip message and empty data."""
-    with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=False)):
-        response = client.get("/me/model/list")
+# NOTE: The following tests are disabled because /me/model/list endpoint has been removed
+# Model listing is now handled through the main model management endpoints
 
-    assert response.status_code == HTTPStatus.OK
-    data = response.json()
-    assert data["message"] == "Retrieve skipped"
-    assert data["data"] == []
+# @pytest.mark.asyncio
+# async def test_get_me_models_env_not_configured_returns_skip_message_and_empty_list():
+#     """When ME env not configured, endpoint returns 200 with skip message and empty data."""
+#     pass
 
+# @pytest.mark.asyncio
+# async def test_get_me_models_not_found_filter():
+#     """Test model list retrieval with not found filter"""
+#     pass
 
-@pytest.mark.asyncio
-async def test_get_me_models_not_found_filter():
-    # Patch the service impl to raise NotFoundException so the route returns 404
-    with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.get_me_models_impl') as mock_impl:
-            mock_impl.side_effect = NotFoundException(
-                "No models found with type 'nonexistent'.")
-            response = client.get("/me/model/list?type=nonexistent")
+# @pytest.mark.asyncio
+# async def test_get_me_models_timeout():
+#     """Test model list retrieval with timeout via real route"""
+#     pass
 
-    # Assertions - route maps NotFoundException -> 404 and raises HTTPException with detail
-    assert response.status_code == HTTPStatus.NOT_FOUND
-    body = response.json()
-    assert body["detail"] == "ModelEngine model not found"
+# @pytest.mark.asyncio
+# async def test_get_me_models_exception():
+#     """Test model list retrieval with generic exception"""
+#     pass
 
-
-@pytest.mark.asyncio
-async def test_get_me_models_timeout():
-    """Test model list retrieval with timeout via real route"""
-    # Patch service to raise TimeoutException so the real route returns 408
-    with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.get_me_models_impl') as mock_impl:
-            mock_impl.side_effect = TimeoutException("Request timeout.")
-
-            response = client.get("/me/model/list")
-
-    assert response.status_code == HTTPStatus.REQUEST_TIMEOUT
-    body = response.json()
-    assert body["detail"] == "Failed to get ModelEngine model list: timeout"
-
-
-@pytest.mark.asyncio
-async def test_get_me_models_exception():
-    """Test model list retrieval with generic exception"""
-    with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.get_me_models_impl') as mock_impl:
-            mock_impl.side_effect = Exception("boom")
-            response = client.get("/me/model/list")
-
-    # Assertions
-    assert response.status_code == 500
-    response_data = response.json()
-    assert response_data["detail"] == "Failed to get ModelEngine model list"
-
-
-@pytest.mark.asyncio
-async def test_get_me_models_success_response():
-    """Test successful model list retrieval with proper JSONResponse format"""
-    # Mock the service implementation to return test data
-    with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.get_me_models_impl') as mock_impl:
-            mock_impl.return_value = [
-                {"name": "model1", "type": "embed", "version": "1.0"},
-                {"name": "model2", "type": "chat", "version": "1.0"}
-            ]
-
-            # Test the endpoint
-            response = client.get("/me/model/list")
-
-        # Assertions
-        assert response.status_code == HTTPStatus.OK
-        response_data = response.json()
-        assert response_data["message"] == "Successfully retrieved"
-        assert response_data["data"] == [
-            {"name": "model1", "type": "embed", "version": "1.0"},
-            {"name": "model2", "type": "chat", "version": "1.0"}
-        ]
-        assert len(response_data["data"]) == 2
+# @pytest.mark.asyncio
+# async def test_get_me_models_success_response():
+#     """Test successful model list retrieval with proper JSONResponse format"""
+#     pass
 
 
 @pytest.mark.asyncio
@@ -288,92 +236,64 @@ async def test_check_me_connectivity_env_not_configured_returns_skip_message():
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert body["connectivity"] is False
-    assert body["message"] == "ModelEngine platform necessary environment variables not configured. Healthcheck skipped."
+    assert body["message"] == "ModelEngine platform environment variables not configured. Healthcheck skipped."
 
 
 @pytest.mark.asyncio
 async def test_check_me_connectivity_success():
     """Test successful ME connectivity check"""
-    # Mock the check_me_connectivity_impl function in the app module
+    # Mock the check_me_connectivity function from the service
     with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.check_me_connectivity_impl') as mock_connectivity:
-            mock_connectivity.return_value = (
-                HTTPStatus.OK,
-                "Connection successful",
-                {
-                    "status": "Connected",
-                    "desc": "Connection successful",
-                    "connect_status": "available"
-                }
-            )
-
+        with patch('backend.apps.me_model_managment_app.check_me_connectivity', AsyncMock(return_value=None)):
             # Test with TestClient
             response = client.get("/me/healthcheck")
 
         # Assertions
-        assert response.status_code == 200
+        assert response.status_code == HTTPStatus.OK
         response_data = response.json()
-        assert response_data["connectivity"]
-        # Updated success message string
-        with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-            with patch('backend.apps.me_model_managment_app.check_me_connectivity_impl') as mock_connectivity2:
-                mock_connectivity2.return_value = (
-                    HTTPStatus.OK,
-                    "Connection successful",
-                    {
-                        "status": "Connected",
-                        "desc": "Connection successful",
-                        "connect_status": "available"
-                    }
-                )
-                response2 = client.get("/me/healthcheck")
-                assert response2.status_code == 200
-                assert response2.json()[
-                    "message"] == "ModelEngine platform connect successfully."
+        assert response_data["connectivity"] is True
+        assert response_data["message"] == "ModelEngine platform connected successfully."
 
 
 @pytest.mark.asyncio
 async def test_check_me_connectivity_failure():
     """Trigger MEConnectionException to simulate connectivity failure"""
-    # Patch the impl to raise MEConnectionException so the route returns 503
+    # Patch the connectivity check to raise MEConnectionException so the route returns 503
     with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.check_me_connectivity_impl') as mock_connectivity:
-            mock_connectivity.side_effect = MEConnectionException(
-                "Downstream 404 or similar")
-
+        with patch('backend.apps.me_model_managment_app.check_me_connectivity', AsyncMock(side_effect=MEConnectionException("Downstream 404 or similar"))):
             response = client.get("/me/healthcheck")
 
     assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    body = response.json()
+    assert "ModelEngine connection failed" in body["detail"]
 
 
 @pytest.mark.asyncio
 async def test_check_me_connectivity_timeout():
     """Test ME connectivity check with timeout"""
-    # Mock the impl to raise TimeoutException so the route returns 408
+    # Mock the connectivity check to raise TimeoutException so the route returns 408
     with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.check_me_connectivity_impl') as mock_connectivity:
-            mock_connectivity.side_effect = TimeoutException(
-                "timeout simulated")
-
+        with patch('backend.apps.me_model_managment_app.check_me_connectivity', AsyncMock(side_effect=TimeoutException("timeout simulated"))):
             response = client.get("/me/healthcheck")
 
-    # Assertions - route maps TimeoutException -> 408 and returns status/desc/connect_status
+    # Assertions - route maps TimeoutException -> 408
     assert response.status_code == HTTPStatus.REQUEST_TIMEOUT
+    body = response.json()
+    assert body["detail"] == "ModelEngine connection timeout."
 
 
 @pytest.mark.asyncio
 async def test_check_me_connectivity_generic_exception():
     """Test ME connectivity check with generic exception"""
-    # Mock the impl to raise a generic Exception so the route returns 500
+    # Mock the connectivity check to raise a generic Exception so the route returns 500
     with patch('backend.apps.me_model_managment_app.check_me_variable_set', AsyncMock(return_value=True)):
-        with patch('backend.apps.me_model_managment_app.check_me_connectivity_impl') as mock_connectivity:
-            mock_connectivity.side_effect = Exception(
-                "Unexpected error occurred")
-
+        with patch('backend.apps.me_model_managment_app.check_me_connectivity', AsyncMock(side_effect=Exception("Unexpected error occurred"))):
             response = client.get("/me/healthcheck")
 
-    # Assertions - route maps generic Exception -> 500 and returns status/desc/connect_status
+    # Assertions - route maps generic Exception -> 500
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    body = response.json()
+    assert "ModelEngine healthcheck failed" in body["detail"]
 
 
 @pytest.mark.asyncio
