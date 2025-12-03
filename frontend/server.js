@@ -23,7 +23,7 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || 'http://localhost:5010'; // con
 const WS_BACKEND = process.env.WS_BACKEND || 'ws://localhost:5014'; // runtime
 const RUNTIME_HTTP_BACKEND = process.env.RUNTIME_HTTP_BACKEND || 'http://localhost:5014'; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || 'http://localhost:9010';
-const MARKET_BACKEND = process.env.MARKET_BACKEND || 'http://localhost:8010'; // market
+const MARKET_BACKEND = process.env.MARKET_BACKEND || 'https://market.nexent.tech'; // market
 const PORT = 3000;
 
 const proxy = createProxyServer();

@@ -164,6 +164,8 @@ export default function McpConfigModal({
       content: t("mcpConfig.delete.confirmContent", {
         name: server.service_name,
       }),
+      okText: t("common.delete", "Delete"),
+      cancelText: t("common.cancel", "Cancel"),
       okType: "danger",
       cancelButtonProps: { disabled: updatingTools },
       okButtonProps: { disabled: updatingTools, loading: updatingTools },
