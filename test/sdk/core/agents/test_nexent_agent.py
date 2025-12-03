@@ -27,11 +27,16 @@ mock_smolagents = MagicMock()
 
 
 class _ActionStep:
-    pass
+    def __init__(self, step_number=None, timing=None, action_output=None, model_output=None):
+        self.step_number = step_number
+        self.timing = timing
+        self.action_output = action_output
+        self.model_output = model_output
 
 
 class _TaskStep:
-    pass
+    def __init__(self, task=None):
+        self.task = task
 
 
 class _AgentText:
@@ -214,6 +219,8 @@ module_mocks = {
     "nexent.storage": mock_nexent_storage_module,
     "nexent.multi_modal": mock_nexent_multi_modal_module,
     "nexent.multi_modal.load_save_object": mock_nexent_load_save_module,
+    # Mock tiktoken to avoid importing the real package when models import it
+    "tiktoken": MagicMock(),
     # Mock the OpenAIModel import
     "sdk.nexent.core.models.openai_llm": MagicMock(OpenAIModel=mock_openai_model_class),
     # Mock CoreAgent import
@@ -230,7 +237,7 @@ with patch.dict("sys.modules", module_mocks):
     from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
     from sdk.nexent.core.agents import nexent_agent
     from sdk.nexent.core.agents.nexent_agent import NexentAgent, ActionStep, TaskStep
-    from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig
+    from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory
 
 
 # ----------------------------------------------------------------------------
@@ -1087,6 +1094,48 @@ def test_add_history_to_agent_none_history(nexent_agent_instance, mock_core_agen
     assert len(mock_core_agent.memory.steps) == 0
 
 
+def test_add_history_to_agent_user_and_assistant_history(nexent_agent_instance, mock_core_agent):
+    """Test add_history_to_agent correctly converts user and assistant messages to memory steps."""
+    nexent_agent_instance.agent = mock_core_agent
+
+    user_msg = AgentHistory(role="user", content="User question")
+    assistant_msg = AgentHistory(role="assistant", content="Assistant reply")
+
+    nexent_agent_instance.add_history_to_agent([user_msg, assistant_msg])
+
+    mock_core_agent.memory.reset.assert_called_once()
+    assert len(mock_core_agent.memory.steps) == 2
+
+    # First step should be a TaskStep for the user message
+    first_step = mock_core_agent.memory.steps[0]
+    assert isinstance(first_step, TaskStep)
+    assert first_step.task == "User question"
+
+    # Second step should be an ActionStep for the assistant message
+    second_step = mock_core_agent.memory.steps[1]
+    assert isinstance(second_step, ActionStep)
+    assert second_step.action_output == "Assistant reply"
+    assert second_step.model_output == "Assistant reply"
+
+
+def test_add_history_to_agent_invalid_agent_type(nexent_agent_instance):
+    """Test add_history_to_agent raises TypeError when agent is not a CoreAgent."""
+    nexent_agent_instance.agent = "not_core_agent"
+
+    with pytest.raises(TypeError, match="agent must be a CoreAgent object"):
+        nexent_agent_instance.add_history_to_agent([])
+
+
+def test_add_history_to_agent_invalid_history_items(nexent_agent_instance, mock_core_agent):
+    """Test add_history_to_agent raises TypeError when history items are not AgentHistory."""
+    nexent_agent_instance.agent = mock_core_agent
+
+    invalid_history = [{"role": "user", "content": "hello"}]
+
+    with pytest.raises(TypeError, match="history must be a list of AgentHistory objects"):
+        nexent_agent_instance.add_history_to_agent(invalid_history)
+
+
 def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, mock_core_agent):
     """Test successful agent_run_with_observer with AgentText final answer."""
     # Setup
@@ -1224,6 +1273,14 @@ def test_agent_run_with_observer_with_exception(nexent_agent_instance, mock_core
     mock_core_agent.observer.add_message.assert_called_once_with(
         agent_name="test_agent", process_type=ProcessType.ERROR, content="Error in interaction: Test execution error"
     )
+
+
+def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
+    """Test agent_run_with_observer raises TypeError when agent is not a CoreAgent."""
+    nexent_agent_instance.agent = "not_core_agent"
+
+    with pytest.raises(TypeError, match="agent must be a CoreAgent object"):
+        nexent_agent_instance.agent_run_with_observer("test query")
 
 
 def test_agent_run_with_observer_with_reset_false(nexent_agent_instance, mock_core_agent):
