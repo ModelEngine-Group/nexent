@@ -19,7 +19,7 @@ VERSION_CHOICE_SAVED=""
 IS_MAINLAND_SAVED=""
 ENABLE_TERMINAL_SAVED="N"
 TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
-APP_VERSION_VALUE=""
+APP_VERSION=""
 
 cd "$SCRIPT_DIR"
 
@@ -245,11 +245,6 @@ trim_quotes() {
 }
 
 get_app_version() {
-  if [ -n "$APP_VERSION_VALUE" ]; then
-    echo "$APP_VERSION_VALUE"
-    return
-  fi
-
   if [ ! -f "$CONST_FILE" ]; then
     echo ""
     return
@@ -259,16 +254,14 @@ get_app_version() {
   line=$(grep -E 'APP_VERSION' "$CONST_FILE" | tail -n 1 || true)
   line="${line##*=}"
   line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  APP_VERSION_VALUE="$(trim_quotes "$line")"
-  echo "$APP_VERSION_VALUE"
+  local value
+  value="$(trim_quotes "$line")"
+  echo "$value"
 }
 
 persist_deploy_options() {
-  local app_version
-  app_version="$(get_app_version || true)"
-
   {
-    echo "APP_VERSION=\"${app_version}\""
+    echo "APP_VERSION=\"${APP_VERSION}\""
     echo "ROOT_DIR=\"${ROOT_DIR}\""
     echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
     echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
@@ -895,6 +888,13 @@ main_deploy() {
   echo ""
   echo "--------------------------------"
   echo ""
+
+  APP_VERSION="$(get_app_version)"
+  if [ -z "$APP_VERSION" ]; then
+    echo "❌ Failed to get app version, please check the backend/consts/const.py file"
+    exit 0
+  fi
+  echo "🌐 App version: $APP_VERSION"
 
   # Check all relevant ports from environment files before starting deployment
   check_ports_in_env_files
