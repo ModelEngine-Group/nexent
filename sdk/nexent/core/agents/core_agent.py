@@ -1,3 +1,4 @@
+import json
 import re
 import ast
 import time
@@ -9,12 +10,13 @@ from collections.abc import Generator
 from rich.console import Group
 from rich.text import Text
 
-from smolagents.agents import CodeAgent, handle_agent_output_types, AgentError
+from smolagents.agents import CodeAgent, handle_agent_output_types, AgentError, ActionOutput, RunResult
 from smolagents.local_python_executor import fix_final_answer_code
 from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
-from smolagents.models import ChatMessage
-from smolagents.monitoring import LogLevel
-from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content
+from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT
+from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
+from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
+    extract_code_from_text
 
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined
@@ -125,13 +127,20 @@ class CoreAgent(CodeAgent):
 
         # Add new step in logs
         memory_step.model_input_messages = input_messages
+        stop_sequences = ["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"]
+        if self.code_block_tags[1] not in self.code_block_tags[0]:
+            # If the closing tag is contained in the opening tag, adding it as a stop sequence would cut short any code generation
+            stop_sequences.append(self.code_block_tags[1])
+
         try:
-            additional_args = {
-                "grammar": self.grammar} if self.grammar is not None else {}
+            additional_args: dict[str, Any] = {}
+            if self._use_structured_outputs_internally:
+                additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
             chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"], **additional_args)
+                                                   stop_sequences=stop_sequences, **additional_args)
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
+            memory_step.token_usage = chat_message.token_usage
             memory_step.model_output = model_output
 
             self.logger.log_markdown(
@@ -145,7 +154,13 @@ class CoreAgent(CodeAgent):
 
         # Parse
         try:
-            code_action = fix_final_answer_code(parse_code_blobs(model_output))
+            if self._use_structured_outputs_internally:
+                code_action = json.loads(model_output)["code"]
+                code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
+            else:
+                code_action = parse_code_blobs(model_output)
+            code_action = fix_final_answer_code(code_action)
+            memory_step.code_action = code_action
             # Record parsing results
             self.observer.add_message(
                 self.agent_name, ProcessType.PARSE, code_action)
@@ -155,26 +170,29 @@ class CoreAgent(CodeAgent):
                 content=model_output, title="AGENT FINAL ANSWER", level=LogLevel.INFO)
             raise FinalAnswerError()
 
-        memory_step.tool_calls = [
-            ToolCall(name="python_interpreter", arguments=code_action, id=f"call_{len(self.memory.steps)}", )]
+        tool_call = ToolCall(
+            name="python_interpreter",
+            arguments=code_action,
+            id=f"call_{len(self.memory.steps)}",
+        )
+        memory_step.tool_calls = [tool_call]
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
                              content=code_action, level=LogLevel.INFO)
-        is_final_answer = False
         try:
-            output, execution_logs, is_final_answer = self.python_executor(
-                code_action)
-
+            code_output = self.python_executor(code_action)
             execution_outputs_console = []
-            if len(execution_logs) > 0:
+            if len(code_output.logs) > 0:
                 # Record execution results
                 self.observer.add_message(
-                    self.agent_name, ProcessType.EXECUTION_LOGS, f"{execution_logs}")
+                    self.agent_name, ProcessType.EXECUTION_LOGS, f"{code_output.logs}")
 
                 execution_outputs_console += [
-                    Text("Execution logs:", style="bold"), Text(execution_logs), ]
-            observation = "Execution logs:\n" + execution_logs
+                    Text("Execution logs:", style="bold"),
+                    Text(code_output.logs),
+                ]
+            observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
             if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
                 execution_logs = str(
@@ -196,20 +214,24 @@ class CoreAgent(CodeAgent):
                     level=LogLevel.INFO, )
             raise AgentExecutionError(error_msg, self.logger)
 
-        truncated_output = truncate_content(str(output))
-        if output is not None:
+        truncated_output = None
+        if code_output is not None and code_output.output is not None:
+            truncated_output = truncate_content(str(code_output.output))
             observation += "Last output from code snippet:\n" + truncated_output
         memory_step.observations = observation
 
-        execution_outputs_console += [
-            Text(f"{('Out - Final answer' if is_final_answer else 'Out')}: {truncated_output}",
-                 style=("bold #d4b702" if is_final_answer else ""), ), ]
+        if not code_output.is_final_answer and truncated_output is not None:
+            execution_outputs_console += [
+                Text(
+                    f"Out: {truncated_output}",
+                ),
+            ]
         self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
-        memory_step.action_output = output
-        yield output if is_final_answer else None
+        memory_step.action_output = code_output.output
+        yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
 
     def run(self, task: str, stream: bool = False, reset: bool = True, images: Optional[List[str]] = None,
-            additional_args: Optional[Dict] = None, max_steps: Optional[int] = None, ):
+            additional_args: Optional[Dict] = None, max_steps: Optional[int] = None, return_full_result: bool | None = None):
         """
         Run the agent for the given task.
 
@@ -220,6 +242,8 @@ class CoreAgent(CodeAgent):
             images (`list[str]`, *optional*): Paths to image(s).
             additional_args (`dict`, *optional*): Any other variables that you want to pass to the agent run, for instance images or dataframes. Give them clear names!
             max_steps (`int`, *optional*): Maximum number of steps the agent can take to solve the task. if not provided, will use the agent's default value.
+            return_full_result (`bool`, *optional*): Whether to return the full [`RunResult`] object or just the final answer output.
+                If `None` (default), the agent's `self.return_full_result` setting is used.
 
         Example:
         ```py
@@ -236,7 +260,6 @@ class CoreAgent(CodeAgent):
 You have been provided with these additional arguments, that you can access using the keys as variables in your python code:
 {str(additional_args)}."""
 
-        self.system_prompt = self.initialize_system_prompt()
         self.memory.system_prompt = SystemPromptStep(
             system_prompt=self.system_prompt)
         if reset:
@@ -261,8 +284,47 @@ You have been provided with these additional arguments, that you can access usin
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
             return self._run_stream(task=self.task, max_steps=max_steps, images=images)
+        run_start_time = time.time()
+        steps = list(self._run_stream(task=self.task, max_steps=max_steps, images=images))
+
         # Outputs are returned only at the end. We only look at the last step.
-        return list(self._run_stream(task=self.task, max_steps=max_steps, images=images))[-1].final_answer
+        assert isinstance(steps[-1], FinalAnswerStep)
+        output = steps[-1].output
+
+        return_full_result = return_full_result if return_full_result is not None else self.return_full_result
+        if return_full_result:
+            total_input_tokens = 0
+            total_output_tokens = 0
+            correct_token_usage = True
+            for step in self.memory.steps:
+                if isinstance(step, (ActionStep, PlanningStep)):
+                    if step.token_usage is None:
+                        correct_token_usage = False
+                        break
+                    else:
+                        total_input_tokens += step.token_usage.input_tokens
+                        total_output_tokens += step.token_usage.output_tokens
+            if correct_token_usage:
+                token_usage = TokenUsage(input_tokens=total_input_tokens, output_tokens=total_output_tokens)
+            else:
+                token_usage = None
+
+            if self.memory.steps and isinstance(getattr(self.memory.steps[-1], "error", None), AgentMaxStepsError):
+                state = "max_steps_error"
+            else:
+                state = "success"
+
+            step_dicts = self.memory.get_full_steps()
+
+            return RunResult(
+                output=output,
+                token_usage=token_usage,
+                steps=step_dicts,
+                timing=Timing(start_time=run_start_time, end_time=time.time()),
+                state=state,
+            )
+
+        return output
 
     def __call__(self, task: str, **kwargs):
         """Adds additional prompting for the managed agent, runs it, and wraps the output.
@@ -271,7 +333,11 @@ You have been provided with these additional arguments, that you can access usin
         full_task = Template(self.prompt_templates["managed_agent"]["task"], undefined=StrictUndefined).render({
             "name": self.name, "task": task, **self.state
         })
-        report = self.run(full_task, **kwargs)
+        result = self.run(full_task, **kwargs)
+        if isinstance(result, RunResult):
+            report = result.output
+        else:
+            report = result
 
         # When a sub-agent finishes running, return a marker
         try:
@@ -286,7 +352,7 @@ You have been provided with these additional arguments, that you can access usin
         if self.provide_run_summary:
             answer += "\n\nFor more detail, find below a summary of this agent's work:\n<summary_of_work>\n"
             for message in self.write_memory_to_messages(summary_mode=True):
-                content = message["content"]
+                content = message.content
                 answer += "\n" + truncate_content(str(content)) + "\n---"
             answer += "\n</summary_of_work>"
         return answer
@@ -295,28 +361,44 @@ You have been provided with these additional arguments, that you can access usin
             self, task: str, max_steps: int, images: list["PIL.Image.Image"] | None = None
     ) -> Generator[ActionStep | PlanningStep | FinalAnswerStep]:
         final_answer = None
+        action_step = None
         self.step_number = 1
-        while final_answer is None and self.step_number <= max_steps and not self.stop_event.is_set():
+        returned_final_answer = False
+        while not returned_final_answer and self.step_number <= max_steps and not self.stop_event.is_set():
             step_start_time = time.time()
 
             action_step = ActionStep(
-                step_number=self.step_number, start_time=step_start_time, observations_images=images
+                step_number=self.step_number, timing=Timing(start_time=step_start_time), observations_images=images
             )
             try:
-                for el in self._execute_step(action_step):
-                    yield el
-                final_answer = el
+                for output in self._step_stream(action_step):
+                    yield output
+
+                if isinstance(output, ActionOutput) and output.is_final_answer:
+                    final_answer = output.output
+                    self.logger.log(
+                        Text(f"Final answer: {final_answer}", style=f"bold {YELLOW_HEX}"),
+                        level=LogLevel.INFO,
+                    )
+
+                    if self.final_answer_checks:
+                        self._validate_final_answer(final_answer)
+                    returned_final_answer = True
+                    action_step.is_final_answer = True
+
             except FinalAnswerError:
                 # When the model does not output code, directly treat the large model content as the final answer
                 final_answer = action_step.model_output
                 if isinstance(final_answer, str):
                     final_answer = convert_code_format(final_answer)
+                returned_final_answer = True
+                action_step.is_final_answer = True
 
             except AgentError as e:
                 action_step.error = e
 
             finally:
-                self._finalize_step(action_step, step_start_time)
+                self._finalize_step(action_step)
                 self.memory.steps.append(action_step)
                 yield action_step
                 self.step_number += 1
@@ -324,8 +406,7 @@ You have been provided with these additional arguments, that you can access usin
         if self.stop_event.is_set():
             final_answer = "<user_break>"
 
-        if final_answer is None and self.step_number == max_steps + 1:
-            final_answer = self._handle_max_steps_reached(
-                task, images, step_start_time)
+        if not returned_final_answer and self.step_number == max_steps + 1:
+            final_answer = self._handle_max_steps_reached(task)
             yield action_step
         yield FinalAnswerStep(handle_agent_output_types(final_answer))

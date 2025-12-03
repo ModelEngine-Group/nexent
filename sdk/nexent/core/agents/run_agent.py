@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from threading import Thread
+from typing import Any, Dict, Union
 
 from smolagents import ToolCollection
 
@@ -11,6 +12,56 @@ from ...monitor import get_monitoring_manager
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
 monitoring_manager = get_monitoring_manager()
+
+
+def _detect_transport(url: str) -> str:
+    """
+    Auto-detect MCP transport type based on URL format.
+    
+    Args:
+        url: MCP server URL
+        
+    Returns:
+        Transport type: 'sse' or 'streamable-http'
+    """
+    url_stripped = url.strip()
+    
+    # Check URL ending to determine transport type
+    if url_stripped.endswith("/sse"):
+        return "sse"
+    elif url_stripped.endswith("/mcp"):
+        return "streamable-http"
+    
+    # Default to streamable-http for unrecognized formats
+    return "streamable-http"
+
+
+def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Normalize MCP host configuration to a dictionary format.
+    
+    Args:
+        mcp_host_item: Either a string URL or a dict with 'url' and optional 'transport'
+        
+    Returns:
+        Dictionary with 'url' and 'transport' keys
+    """
+    if isinstance(mcp_host_item, str):
+        url = mcp_host_item
+        transport = _detect_transport(url)
+        return {"url": url, "transport": transport}
+    elif isinstance(mcp_host_item, dict):
+        url = mcp_host_item.get("url")
+        if not url:
+            raise ValueError("MCP host dict must contain 'url' key")
+        transport = mcp_host_item.get("transport")
+        if not transport:
+            transport = _detect_transport(url)
+        if transport not in ("sse", "streamable-http"):
+            raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
+        return {"url": url, "transport": transport}
+    else:
+        raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
 
 
 @monitoring_manager.monitor_endpoint("agent_run_thread", "agent_run_thread")
@@ -31,7 +82,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         else:
             agent_run_info.observer.add_message(
                 "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
-            mcp_client_list = [{"url": mcp_url} for mcp_url in mcp_host]
+            # Normalize MCP host configurations to support both string and dict formats
+            mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
 
             with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
                 nexent = NexentAgent(

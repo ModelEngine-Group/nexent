@@ -1103,7 +1103,7 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "Final answer with <think>thinking</think> content")
 
     mock_core_agent.run.return_value = [mock_action_step]
-    mock_core_agent.run.return_value[-1].final_answer = mock_final_answer
+    mock_core_agent.run.return_value[-1].output = mock_final_answer
 
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
@@ -1129,7 +1129,7 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_action_step]
-    mock_core_agent.run.return_value[-1].final_answer = "String final answer with <think>thinking</think>"
+    mock_core_agent.run.return_value[-1].output = "String final answer with <think>thinking</think>"
 
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
@@ -1153,7 +1153,7 @@ def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_
     mock_action_step.error = "Test error occurred"
 
     mock_core_agent.run.return_value = [mock_action_step]
-    mock_core_agent.run.return_value[-1].final_answer = "Final answer"
+    mock_core_agent.run.return_value[-1].output = "Final answer"
 
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
@@ -1176,7 +1176,7 @@ def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mo
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_task_step, mock_action_step]
-    mock_core_agent.run.return_value[-1].final_answer = "Final answer"
+    mock_core_agent.run.return_value[-1].output = "Final answer"
 
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
@@ -1199,7 +1199,7 @@ def test_agent_run_with_observer_with_stop_event_set(nexent_agent_instance, mock
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_action_step]
-    mock_core_agent.run.return_value[-1].final_answer = "Final answer"
+    mock_core_agent.run.return_value[-1].output = "Final answer"
 
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
@@ -1238,7 +1238,7 @@ def test_agent_run_with_observer_with_reset_false(nexent_agent_instance, mock_co
     mock_action_step.error = None
 
     mock_core_agent.run.return_value = [mock_action_step]
-    mock_core_agent.run.return_value[-1].final_answer = "Final answer"
+    mock_core_agent.run.return_value[-1].output = "Final answer"
 
     # Execute with reset=False
     nexent_agent_instance.agent_run_with_observer("test query", reset=False)
