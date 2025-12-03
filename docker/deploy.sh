@@ -3,7 +3,7 @@
 # Ensure the script is executed with bash (required for arrays and [[ ]])
 if [ -z "$BASH_VERSION" ]; then
   echo "❌ This script must be run with bash. Please use: bash deploy.sh or ./deploy.sh"
-  exit 0
+  exit 1
 fi
 
 # Exit immediately if a command exits with a non-zero status
@@ -225,7 +225,7 @@ check_ports_in_env_files() {
     confirm_continue=$(sanitize_input "$confirm_continue")
     if ! [[ "$confirm_continue" =~ ^[Yy]$ ]]; then
       echo "🚫 Deployment aborted due to port conflicts."
-      exit 0
+      exit 1
     fi
 
     echo "⚠️  Continuing deployment even though some required ports are already in use."
@@ -595,7 +595,7 @@ deploy_core_services() {
   echo "👀 Starting core services..."
   if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; then
     echo "   ❌ ERROR Failed to start core services"
-    return 0
+    return 1
   fi
 }
 
@@ -612,7 +612,7 @@ deploy_infrastructure() {
 
   if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
     echo "   ❌ ERROR Failed to start infrastructure services"
-    return 0
+    return 1
   fi
 
   if [ "$ENABLE_TERMINAL_TOOL_CONTAINER" = "true" ]; then
@@ -704,7 +704,7 @@ setup_package_install_script() {
       echo "   ✅ Package installation script created/updated"
   else
       echo "   ❌ ERROR openssh-install-script.sh not found"
-      return 0
+      return 1
   fi
 }
 
@@ -892,7 +892,7 @@ main_deploy() {
   APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
-    exit 0
+    exit 1
   fi
   echo "🌐 App version: $APP_VERSION"
 
@@ -900,24 +900,24 @@ main_deploy() {
   check_ports_in_env_files
 
   # Select deployment version, mode and image source
-  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 0; }
-  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 0; }
-  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 0; }
-  choose_image_env || { echo "❌ Image environment setup failed"; exit 0; }
+  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 1; }
+  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 1; }
+  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
+  choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
 
   # Add permission
-  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 0; }
-  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 0; }
+  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
+  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
 
 
   # Generate Supabase secrets
-  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 0; }
+  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 1; }
 
   # Deploy infrastructure services
-  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 0; }
+  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
 
   # Generate Elasticsearch API key
-  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 0; }
+  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
 
   echo ""
   echo "--------------------------------"
@@ -925,7 +925,7 @@ main_deploy() {
 
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
-    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 0; }
+    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
@@ -935,7 +935,7 @@ main_deploy() {
   fi
 
   # Start core services
-  deploy_core_services || { echo "❌ Core services deployment failed"; exit 0; }
+  deploy_core_services || { echo "❌ Core services deployment failed"; exit 1; }
 
   echo "   ✅ Core services started successfully"
   echo ""
@@ -944,7 +944,7 @@ main_deploy() {
 
   # Create default admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 0; }
+    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 1; }
   fi
 
   persist_deploy_options
@@ -956,7 +956,7 @@ main_deploy() {
 version_info=$(get_compose_version)
 if [[ $version_info == "unknown" ]]; then
     echo "Error: Docker Compose not found or version detection failed"
-    exit 0
+    exit 1
 fi
 
 # extract version
@@ -971,7 +971,7 @@ case $version_type in
         # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
-            exit 0
+            exit 1
         fi
         docker_compose_command="docker-compose"
         ;;
@@ -981,14 +981,14 @@ case $version_type in
         ;;
     *)
         echo "Error: Unknown docker compose version type."
-        exit 0
+        exit 1
         ;;
 esac
 
 # Execute main deployment with error handling
 if ! main_deploy; then
   echo "❌ Deployment failed. Please check the error messages above and try again."
-  exit 0
+  exit 1
 fi
 
 clean
