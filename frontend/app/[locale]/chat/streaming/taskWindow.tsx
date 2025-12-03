@@ -967,6 +967,19 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
     );
   };
 
+  // Error messages that should be completely hidden (including the node)
+  const suppressedErrorMessages = [
+    "Model is interrupted by stop event",
+    "Agent execution interrupted by external stop signal",
+  ];
+
+  // Check if a message should be suppressed (not displayed at all)
+  const shouldSuppressMessage = (message: any) => {
+    if (message.type !== "error") return false;
+    const content = message.content || "";
+    return suppressedErrorMessages.some((errText) => content.includes(errText));
+  };
+
   // Check if it is the last message
   const isLastMessage = (index: number, messages: any[]) => {
     return index === messages.length - 1;
@@ -996,15 +1009,20 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
       );
     }
 
+    // Filter out messages that should be suppressed
+    const filteredGroupedMessages = groupedMessages.filter(
+      (group) => !shouldSuppressMessage(group.message)
+    );
+
     return (
       <div className="relative">
         <div className="absolute left-[0.2rem] top-[1.25rem] bottom-0 w-0.5 bg-gray-200"></div>
 
-        {groupedMessages.map((group, groupIndex) => {
+        {filteredGroupedMessages.map((group, groupIndex) => {
           const message = group.message;
           const isBlinking = shouldBlinkDot(
             groupIndex,
-            groupedMessages.map((g) => g.message)
+            filteredGroupedMessages.map((g) => g.message)
           );
 
           return (

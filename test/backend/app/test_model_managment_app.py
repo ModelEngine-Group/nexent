@@ -6,8 +6,15 @@ from fastapi import FastAPI
 from http import HTTPStatus
 from unittest.mock import patch, MagicMock
 
-# Add path for correct imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
+# Add project root to sys.path so that the top-level `backend` package is importable
+PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "../../..")
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# Also add the backend source directory so that subpackages like `consts` can be imported directly
+BACKEND_ROOT = os.path.join(PROJECT_ROOT, "backend")
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
 
 # Patch environment variables before any imports that might use them
 os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
@@ -513,12 +520,21 @@ async def test_update_single_model_success(client, auth_header, user_credentials
         "provider": "huggingface"
     }
     response = client.post(
-        "/model/update", json=update_data, headers=auth_header)
+        "/model/update",
+        params={"display_name": "Updated Test Model"},
+        json=update_data,
+        headers=auth_header,
+    )
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
     assert "Model updated successfully" in data["message"]
-    mock_update.assert_called_once_with(user_credentials[0], user_credentials[1], update_data)
+    mock_update.assert_called_once_with(
+        user_credentials[0],
+        user_credentials[1],
+        "Updated Test Model",
+        update_data,
+    )
 
 
 @pytest.mark.asyncio
@@ -527,8 +543,8 @@ async def test_update_single_model_conflict(client, auth_header, user_credential
     mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     mock_update = mocker.patch(
-        'apps.model_managment_app.update_single_model_for_tenant', 
-        side_effect=ValueError("Name 'Conflicting Name' is already in use, please choose another display name")
+        'apps.model_managment_app.update_single_model_for_tenant',
+        side_effect=ValueError("Name 'Conflicting Name' is already in use, please choose another display name"),
     )
     
     update_data = {
@@ -541,13 +557,22 @@ async def test_update_single_model_conflict(client, auth_header, user_credential
         "provider": "huggingface"
     }
     response = client.post(
-        "/model/update", json=update_data, headers=auth_header)
+        "/model/update",
+        params={"display_name": "Conflicting Name"},
+        json=update_data,
+        headers=auth_header,
+    )
     
     assert response.status_code == HTTPStatus.CONFLICT
     data = response.json()
     # Now we return the actual error message
     assert "Name 'Conflicting Name' is already in use" in data.get("detail", "")
-    mock_update.assert_called_once_with(user_credentials[0], user_credentials[1], update_data)
+    mock_update.assert_called_once_with(
+        user_credentials[0],
+        user_credentials[1],
+        "Conflicting Name",
+        update_data,
+    )
 
 
 # Tests for /model/batch_update endpoint
