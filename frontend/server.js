@@ -2,6 +2,15 @@ const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 const { createProxyServer } = require('http-proxy');
+const path = require('path');
+
+// Load environment variables from .env file in parent directory (project root)
+// In container environments, env vars are injected directly by Docker, so .env file may not exist
+// Using optional: true to avoid errors if .env file is not found
+require('dotenv').config({ 
+  path: path.resolve(__dirname, '../.env'),
+  override: false // Don't override existing environment variables (important for Docker)
+});
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ 

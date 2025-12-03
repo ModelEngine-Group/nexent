@@ -573,6 +573,15 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str):
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
+    # Check agent availability
+    is_available, unavailable_reasons = check_agent_availability(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        agent_info=agent_info
+    )
+    agent_info["is_available"] = is_available
+    agent_info["unavailable_reasons"] = unavailable_reasons
+
     return agent_info
 
 
@@ -1168,23 +1177,13 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
             if not agent["enabled"]:
                 continue
 
-            unavailable_reasons: list[str] = []
-
-            tool_info = search_tools_for_sub_agent(
-                agent_id=agent["agent_id"], tenant_id=tenant_id)
-            tool_id_list = [tool["tool_id"]
-                            for tool in tool_info if tool.get("tool_id") is not None]
-            if tool_id_list:
-                tool_statuses = check_tool_is_available(tool_id_list)
-                if not all(tool_statuses):
-                    unavailable_reasons.append("tool_unavailable")
-
-            model_reasons = _collect_model_availability_reasons(
-                agent=agent,
+            # Use shared availability check function
+            _, unavailable_reasons = check_agent_availability(
+                agent_id=agent["agent_id"],
                 tenant_id=tenant_id,
+                agent_info=agent,
                 model_cache=model_cache
             )
-            unavailable_reasons.extend(model_reasons)
 
             # Preserve the raw data so we can adjust availability for duplicates
             enriched_agents.append({
@@ -1293,6 +1292,56 @@ def _check_single_model_availability(
         return [reason_key]
 
     return []
+
+
+def check_agent_availability(
+    agent_id: int,
+    tenant_id: str,
+    agent_info: dict | None = None,
+    model_cache: Dict[int, Optional[dict]] | None = None
+) -> tuple[bool, list[str]]:
+    """
+    Check if an agent is available based on its tools and model configuration.
+    
+    Args:
+        agent_id: The agent ID to check
+        tenant_id: The tenant ID
+        agent_info: Optional pre-fetched agent info (to avoid duplicate DB queries)
+        model_cache: Optional model cache for performance optimization
+        
+    Returns:
+        tuple: (is_available: bool, unavailable_reasons: list[str])
+    """
+    unavailable_reasons: list[str] = []
+    
+    if model_cache is None:
+        model_cache = {}
+    
+    # Fetch agent info if not provided
+    if agent_info is None:
+        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
+    
+    if not agent_info:
+        return False, ["agent_not_found"]
+    
+    # Check tool availability
+    tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
+    tool_id_list = [tool["tool_id"] for tool in tool_info if tool.get("tool_id") is not None]
+    if tool_id_list:
+        tool_statuses = check_tool_is_available(tool_id_list)
+        if not all(tool_statuses):
+            unavailable_reasons.append("tool_unavailable")
+    
+    # Check model availability
+    model_reasons = _collect_model_availability_reasons(
+        agent=agent_info,
+        tenant_id=tenant_id,
+        model_cache=model_cache
+    )
+    unavailable_reasons.extend(model_reasons)
+    
+    is_available = len(unavailable_reasons) == 0
+    return is_available, unavailable_reasons
 
 
 def insert_related_agent_impl(parent_agent_id, child_agent_id, tenant_id):

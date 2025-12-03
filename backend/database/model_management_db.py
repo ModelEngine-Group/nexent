@@ -185,6 +185,21 @@ def get_model_by_display_name(display_name: str, tenant_id: str) -> Optional[Dic
     return model
 
 
+def get_models_by_display_name(display_name: str, tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all model records by display name (for multi_embedding which creates two records)
+
+    Args:
+        display_name: Model display name
+        tenant_id: Tenant ID
+
+    Returns:
+        List[Dict[str, Any]]: List of model records with the same display_name
+    """
+    filters = {'display_name': display_name}
+    return get_model_records(filters, tenant_id)
+
+
 def get_model_id_by_display_name(display_name: str, tenant_id: str) -> Optional[int]:
     """
     Get a model ID by display name
@@ -252,3 +267,25 @@ def get_models_by_tenant_factory_type(tenant_id: str, model_factory: str, model_
         "model_type": model_type
     }
     return get_model_records(filters, tenant_id)
+
+
+def get_model_by_name_factory(model_name: str, model_factory: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a model record by model_name and model_factory for deduplication.
+    
+    Args:
+        model_name: Model name (e.g., "deepseek-r1-distill-qwen-14b")
+        model_factory: Model factory (e.g., "ModelEngine")
+        tenant_id: Tenant ID
+        
+    Returns:
+        Optional[Dict[str, Any]]: Model record if found, None otherwise
+    """
+    filters = {
+        'model_name': model_name,
+        'model_factory': model_factory
+    }
+    records = get_model_records(filters, tenant_id)
+    return records[0] if records else None
+
+

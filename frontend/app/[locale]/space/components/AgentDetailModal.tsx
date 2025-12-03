@@ -66,7 +66,7 @@ export default function AgentDetailModal({
               {agentDetails?.description || "-"}
             </Descriptions.Item>
             <Descriptions.Item label={t("space.detail.status", "Status")}>
-              {agentDetails?.enabled ? (
+              {agentDetails?.is_available ? (
                 <Tag icon={<CheckCircle className="h-3 w-3" />} color="success" className="inline-flex items-center gap-1">
                   <span className="whitespace-nowrap">{t("space.status.available", "Available")}</span>
                 </Tag>

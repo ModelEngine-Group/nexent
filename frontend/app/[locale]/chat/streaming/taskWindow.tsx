@@ -17,7 +17,7 @@ import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType, CardItem, MessageHandler } from "@/types/chat";
 import { useChatTaskMessage } from "@/hooks/useChatTaskMessage";
-import { storageService, extractObjectNameFromImageUrl } from "@/services/storageService";
+import { storageService, extractObjectNameFromUrl } from "@/services/storageService";
 import log from "@/lib/logger";
 
 // Icon mapping dictionary - map strings to corresponding icon components
@@ -148,7 +148,7 @@ const messageHandlers: MessageHandler[] = [
       const siteInfos: KnowledgeSiteInfo[] = uniqueSearchResults.map(
         (result: any, index: number) => {
           const pageUrl = result.url || "";
-          const filename = result.filename || "";
+          const filename = result.filename || result.title || "";
           const sourceType = result.source_type || (filename ? "file" : "url");
           const scoreDetails = result.score_details || {};
           const datamateDatasetId =
@@ -241,30 +241,6 @@ const messageHandlers: MessageHandler[] = [
         site: KnowledgeSiteInfo
       ): Promise<void> => {
         try {
-          // Check if URL is a direct http/https URL that can be accessed directly
-          // Exclude backend API endpoints (containing /api/file/download/)
-          if (
-            site.url &&
-            site.url !== "#" &&
-            (site.url.startsWith("http://") || site.url.startsWith("https://")) &&
-            !site.url.includes("/api/file/download/")
-          ) {
-            // Direct download from HTTP/HTTPS URL without backend
-            const link = document.createElement("a");
-            link.href = site.url;
-            link.download = site.filename || "download";
-            link.style.display = "none";
-            document.body.appendChild(link);
-            link.click();
-            setTimeout(() => {
-              document.body.removeChild(link);
-            }, 100);
-            message.success(
-              t("taskWindow.downloadSuccess", "File download started")
-            );
-            return;
-          }
-
           if (site.sourceType === "datamate") {
             if (
               !site.datamateDatasetId &&
@@ -288,10 +264,34 @@ const messageHandlers: MessageHandler[] = [
               filename: site.filename || undefined,
             });
           } else {
+            // Check if URL is a direct http/https URL that can be accessed directly
+            // Exclude backend API endpoints (containing /api/file/download/)
+            if (
+              site.url &&
+              site.url !== "#" &&
+              (site.url.startsWith("http://") || site.url.startsWith("https://")) &&
+              !site.url.includes("/api/file/download/")
+            ) {
+              // Direct download from HTTP/HTTPS URL without backend
+              const link = document.createElement("a");
+              link.href = site.url;
+              link.download = site.filename || "download";
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
+              message.success(
+                t("taskWindow.downloadSuccess", "File download started")
+              );
+              return;
+            }
+
             let objectName = site.objectName;
             if (!objectName && site.url) {
               objectName =
-                extractObjectNameFromImageUrl(site.url) || undefined;
+                extractObjectNameFromUrl(site.url) || undefined;
             }
             if (!objectName && site.filename) {
               objectName = site.filename.includes("/")
@@ -1119,6 +1119,19 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
     );
   };
 
+  // Error messages that should be completely hidden (including the node)
+  const suppressedErrorMessages = [
+    "Model is interrupted by stop event",
+    "Agent execution interrupted by external stop signal",
+  ];
+
+  // Check if a message should be suppressed (not displayed at all)
+  const shouldSuppressMessage = (message: any) => {
+    if (message.type !== "error") return false;
+    const content = message.content || "";
+    return suppressedErrorMessages.some((errText) => content.includes(errText));
+  };
+
   // Check if it is the last message
   const isLastMessage = (index: number, messages: any[]) => {
     return index === messages.length - 1;
@@ -1148,15 +1161,20 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
       );
     }
 
+    // Filter out messages that should be suppressed
+    const filteredGroupedMessages = groupedMessages.filter(
+      (group) => !shouldSuppressMessage(group.message)
+    );
+
     return (
       <div className="relative">
         <div className="absolute left-[0.2rem] top-[1.25rem] bottom-0 w-0.5 bg-gray-200"></div>
 
-        {groupedMessages.map((group, groupIndex) => {
+        {filteredGroupedMessages.map((group, groupIndex) => {
           const message = group.message;
           const isBlinking = shouldBlinkDot(
             groupIndex,
-            groupedMessages.map((g) => g.message)
+            filteredGroupedMessages.map((g) => g.message)
           );
 
           return (

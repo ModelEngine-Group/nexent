@@ -3,8 +3,9 @@ import base64
 from urllib.parse import unquote
 from io import BytesIO
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from http import HTTPStatus
 
 from services.image_service import proxy_image_impl
 
@@ -15,7 +16,6 @@ router = APIRouter()
 logger = logging.getLogger("image_app")
 
 
-# TODO: To remove this proxy service after frontend uses image filter service as image provider
 @router.get("/image")
 async def proxy_image(url: str, format: str = "json"):
     """
@@ -36,8 +36,6 @@ async def proxy_image(url: str, format: str = "json"):
             # Return image as stream for direct use in <img> tags
             result = await proxy_image_impl(decoded_url)
             if not result.get("success"):
-                from fastapi import HTTPException
-                from http import HTTPStatus
                 raise HTTPException(
                     status_code=HTTPStatus.BAD_GATEWAY,
                     detail=result.get("error", "Failed to fetch image")
@@ -63,8 +61,6 @@ async def proxy_image(url: str, format: str = "json"):
         logger.error(
             f"Error occurred while proxying image: {str(e)}, URL: {url[:50]}...")
         if format == "stream":
-            from fastapi import HTTPException
-            from http import HTTPStatus
             raise HTTPException(
                 status_code=HTTPStatus.BAD_GATEWAY,
                 detail=str(e)

@@ -45,60 +45,15 @@ export class ModelError extends Error {
 
 // Model service
 export const modelService = {
-  // Get official model list
-  getOfficialModels: async (): Promise<ModelOption[]> => {
-    try {
-      const response = await fetch(API_ENDPOINTS.model.officialModelList, {
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
-
-      if (response.status === STATUS_CODES.SUCCESS && result.data) {
-        const modelOptions: ModelOption[] = [];
-        const typeMap: Record<string, ModelType> = {
-          embed: MODEL_TYPES.EMBEDDING,
-          chat: MODEL_TYPES.LLM,
-          asr: MODEL_TYPES.STT,
-          tts: MODEL_TYPES.TTS,
-          rerank: MODEL_TYPES.RERANK,
-          vlm: MODEL_TYPES.VLM,
-        };
-
-        for (const model of result.data) {
-          if (typeMap[model.type]) {
-            modelOptions.push({
-              id: model.id,
-              name: model.id,
-              type: typeMap[model.type],
-              maxTokens: 0,
-              source: MODEL_SOURCES.OPENAI_API_COMPATIBLE,
-              apiKey: model.api_key,
-              apiUrl: model.base_url,
-              displayName: model.id,
-            });
-          }
-        }
-
-        return modelOptions;
-      }
-      // If API call was not successful, return empty array
-      return [];
-    } catch (error) {
-      // In case of any error, return empty array
-      log.warn("Failed to load official models:", error);
-      return [];
-    }
-  },
-
-  // Get custom model list
-  getCustomModels: async (): Promise<ModelOption[]> => {
+  // Get all models (unified method)
+  getAllModels: async (): Promise<ModelOption[]> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.customModelList, {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
 
-      if (response.status === 200 && result.data) {
+      if (response.status === STATUS_CODES.SUCCESS && result.data) {
         return result.data.map((model: any) => ({
           id: model.model_id,
           name: model.model_name,
@@ -114,17 +69,22 @@ export const modelService = {
           maximumChunkSize: model.maximum_chunk_size,
         }));
       }
-      // If API call was not successful, return empty array
-      log.warn(
-        "Failed to load custom models:",
-        result.message || "Unknown error"
-      );
       return [];
     } catch (error) {
-      // In case of any error, return empty array
-      log.warn("Failed to load custom models:", error);
+      log.warn("Failed to load models:", error);
       return [];
     }
+  },
+
+  // Legacy methods for backward compatibility (will be removed after refactoring)
+  getOfficialModels: async (): Promise<ModelOption[]> => {
+    const allModels = await modelService.getAllModels();
+    return allModels.filter((model) => model.source === "modelengine");
+  },
+
+  getCustomModels: async (): Promise<ModelOption[]> => {
+    const allModels = await modelService.getAllModels();
+    return allModels.filter((model) => model.source !== "modelengine");
   },
 
   // Add custom model
@@ -271,8 +231,8 @@ export const modelService = {
   },
 
   updateSingleModel: async (model: {
-    model_id: string;
-    displayName: string;
+    currentDisplayName: string;
+    displayName?: string;
     url: string;
     apiKey: string;
     maxTokens?: number;
@@ -281,26 +241,30 @@ export const modelService = {
     maximumChunkSize?: number;
   }): Promise<void> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.updateSingleModel, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          model_id: model.model_id,
-          display_name: model.displayName,
-          base_url: model.url,
-          api_key: model.apiKey,
-          ...(model.maxTokens !== undefined
-            ? { max_tokens: model.maxTokens }
-            : {}),
-          model_factory: model.source || "OpenAI-API-Compatible",
-          ...(model.expectedChunkSize !== undefined
-            ? { expected_chunk_size: model.expectedChunkSize }
-            : {}),
-          ...(model.maximumChunkSize !== undefined
-            ? { maximum_chunk_size: model.maximumChunkSize }
-            : {}),
-        }),
-      });
+      const response = await fetch(
+        API_ENDPOINTS.model.updateSingleModel(model.currentDisplayName),
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            ...(model.displayName !== undefined
+              ? { display_name: model.displayName }
+              : {}),
+            base_url: model.url,
+            api_key: model.apiKey,
+            ...(model.maxTokens !== undefined
+              ? { max_tokens: model.maxTokens }
+              : {}),
+            model_factory: model.source || "OpenAI-API-Compatible",
+            ...(model.expectedChunkSize !== undefined
+              ? { expected_chunk_size: model.expectedChunkSize }
+              : {}),
+            ...(model.maximumChunkSize !== undefined
+              ? { maximum_chunk_size: model.maximumChunkSize }
+              : {}),
+          }),
+        }
+      );
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(

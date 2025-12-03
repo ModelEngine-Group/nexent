@@ -17,7 +17,7 @@ from .analyze_text_file_tool import AnalyzeTextFileTool
 from .analyze_image_tool import AnalyzeImageTool
 
 __all__ = [
-    "ExaSearchTool", 
+    "ExaSearchTool",
     "KnowledgeBaseSearchTool",
     "DataMateSearchTool",
     "SendEmailTool", 

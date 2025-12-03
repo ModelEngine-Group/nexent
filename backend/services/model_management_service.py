@@ -9,6 +9,7 @@ from database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_display_name,
+    get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record,
@@ -133,6 +134,9 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
 
         if provider == ProviderEnum.SILICON.value:
             model_url = SILICON_BASE_URL
+        elif provider == ProviderEnum.MODELENGINE.value:
+            # ModelEngine models carry their own base_url in each model dict
+            model_url = ""
         else:
             model_url = ""
 
@@ -195,20 +199,63 @@ async def list_provider_models_for_tenant(tenant_id: str, provider: str, model_t
         raise Exception(f"Failed to list provider models: {str(e)}")
 
 
-async def update_single_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
-    """Update a single model by its model_id, ensuring display_name uniqueness."""
-    try:
-        existing_model_by_display = get_model_by_display_name(model_data["display_name"], tenant_id)
-        current_model_id = int(model_data["model_id"])
-        existing_model_id = existing_model_by_display["model_id"] if existing_model_by_display else None
-        
-        if existing_model_by_display and existing_model_id != current_model_id:
-            raise ValueError(
-                f"Name {model_data['display_name']} is already in use, please choose another display name")
+async def update_single_model_for_tenant(
+    user_id: str,
+    tenant_id: str,
+    current_display_name: str,
+    model_data: Dict[str, Any]
+):
+    """Update model(s) by current display_name. If embedding/multi_embedding, update both types.
 
-        update_model_record(current_model_id, model_data, user_id)
-        logging.debug(
-            f"Model {model_data['display_name']} updated successfully")
+    Args:
+        user_id: The user performing the update.
+        tenant_id: The tenant context.
+        current_display_name: The current display_name used to look up the model(s).
+        model_data: The fields to update, which may include a new display_name.
+
+    Raises:
+        LookupError: If no model is found with the current_display_name.
+        ValueError: If a new display_name conflicts with an existing model.
+    """
+    try:
+        # Get all models with the current display_name (may be 1 or 2 for embedding types)
+        existing_models = get_models_by_display_name(current_display_name, tenant_id)
+
+        if not existing_models:
+            raise LookupError(f"Model not found: {current_display_name}")
+
+        # Check if a new display_name is being set and if it conflicts
+        new_display_name = model_data.get("display_name")
+        if new_display_name and new_display_name != current_display_name:
+            conflict_models = get_models_by_display_name(new_display_name, tenant_id)
+            if conflict_models:
+                raise ValueError(
+                    f"Name {new_display_name} is already in use, please choose another display name"
+                )
+
+        # Check if any of the existing models is multi_embedding
+        has_multi_embedding = any(
+            m.get("model_type") == "multi_embedding" for m in existing_models
+        )
+
+        if has_multi_embedding:
+            # Update both embedding and multi_embedding records
+            for model in existing_models:
+                # Prepare update data, excluding model_type to preserve original type
+                update_data = {k: v for k, v in model_data.items() if k not in ["model_id", "model_type"]}
+                update_model_record(model["model_id"], update_data, user_id)
+            logging.debug(
+                f"Model {current_display_name} (embedding + multi_embedding) updated successfully")
+        else:
+            # Single model update
+            current_model_id = existing_models[0]["model_id"]
+            update_data = {k: v for k, v in model_data.items() if k != "model_id"}
+            update_model_record(current_model_id, update_data, user_id)
+            logging.debug(f"Model {current_display_name} updated successfully")
+    except LookupError:
+        raise
+    except ValueError:
+        raise
     except Exception as e:
         logging.error(f"Failed to update model: {str(e)}")
         raise Exception(f"Failed to update model: {str(e)}")
@@ -218,7 +265,7 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
     """Batch update models for a tenant."""
     try:
         for model in model_list:
-            update_model_record(model["model_id"], model, user_id)
+            update_model_record(model["model_id"], model, user_id, tenant_id)
 
         logging.debug("Batch update models successfully")
     except Exception as e:
@@ -229,24 +276,24 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
 async def delete_model_for_tenant(user_id: str, tenant_id: str, display_name: str):
     """Delete model(s) by display_name. If embedding/multi_embedding, delete both types."""
     try:
-        model = get_model_by_display_name(display_name, tenant_id)
-        if not model:
+        # Get all models with this display_name (may be 1 or 2 for embedding types)
+        models = get_models_by_display_name(display_name, tenant_id)
+        if not models:
             raise LookupError(f"Model not found: {display_name}")
 
         deleted_types: List[str] = []
-        if model.get("model_type") in ["embedding", "multi_embedding"]:
-            # Fetch both variants once to avoid repeated lookups
-            models_by_type: Dict[str, Dict[str, Any]] = {}
-            for t in ["embedding", "multi_embedding"]:
-                m = get_model_by_display_name(display_name, tenant_id)
-                if m and m.get("model_type") == t:
-                    models_by_type[t] = m
+        
+        # Check if any of the models is multi_embedding (which means we have both types)
+        has_multi_embedding = any(
+            m.get("model_type") == "multi_embedding" for m in models
+        )
 
-            # Best-effort memory cleanup using the fetched variants
+        if has_multi_embedding:
+            # Best-effort memory cleanup for embedding models
             try:
                 vdb_core = get_vector_db_core()
                 base_memory_config = build_memory_config_for_tenant(tenant_id)
-                for t, m in models_by_type.items():
+                for m in models:
                     try:
                         await clear_model_memories(
                             vdb_core=vdb_core,
@@ -267,17 +314,21 @@ async def delete_model_for_tenant(user_id: str, tenant_id: str, display_name: st
                 logger.warning(
                     "Memory cleanup preparation failed: %s", outer_cleanup_exc)
 
-            # Delete the fetched variants
-            for t, m in models_by_type.items():
+            # Delete all records with the same display_name
+            for m in models:
                 delete_model_record(m["model_id"], user_id, tenant_id)
-                deleted_types.append(t)
+                deleted_types.append(m.get("model_type", "unknown"))
         else:
+            # Single model delete
+            model = models[0]
             delete_model_record(model["model_id"], user_id, tenant_id)
             deleted_types.append(model.get("model_type", "unknown"))
 
         logging.debug(
             f"Successfully deleted model(s) in types: {', '.join(deleted_types)}")
         return display_name
+    except LookupError:
+        raise
     except Exception as e:
         logging.error(f"Failed to delete model: {str(e)}")
         raise Exception(f"Failed to delete model: {str(e)}")
@@ -288,6 +339,12 @@ async def list_models_for_tenant(tenant_id: str):
     try:
         records = get_model_records(None, tenant_id)
         result: List[Dict[str, Any]] = []
+        
+        # Type mapping for backwards compatibility (chat -> llm for frontend)
+        type_map = {
+            "chat": "llm",
+        }
+        
         for record in records:
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
@@ -295,6 +352,11 @@ async def list_models_for_tenant(tenant_id: str):
             )
             record["connect_status"] = ModelConnectStatusEnum.get_value(
                 record.get("connect_status"))
+            
+            # Map model_type if necessary (for ModelEngine compatibility)
+            if record.get("model_type") in type_map:
+                record["model_type"] = type_map[record["model_type"]]
+            
             result.append(record)
 
         logging.debug("Successfully retrieved model list")

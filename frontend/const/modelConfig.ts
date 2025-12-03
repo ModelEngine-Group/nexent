@@ -19,6 +19,7 @@ export const MODEL_TYPES = {
 export const MODEL_SOURCES = {
   OPENAI: "openai",
   SILICON: "silicon",
+  MODELENGINE: "modelengine",
   OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
   CUSTOM: "custom"
 } as const;
@@ -42,7 +43,6 @@ export const MODEL_PROVIDER_KEYS = [
   "qwen",
   "openai",
   "siliconflow",
-  "ponytoken",
   "jina",
   "deepseek",
   "aliyuncs",
@@ -55,7 +55,6 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   qwen: "qwen",
   openai: "openai",
   siliconflow: "siliconflow",
-  ponytoken: "ponytoken",
   jina: "jina",
   deepseek: "deepseek",
   aliyuncs: "aliyuncs",
@@ -66,7 +65,6 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   qwen: "/qwen.png",
   openai: "/openai.png",
   siliconflow: "/siliconflow.png",
-  ponytoken: "/ponytoken.png",
   jina: "/jina.png",
   deepseek: "/deepseek.png",
   aliyuncs: "/aliyuncs.png",

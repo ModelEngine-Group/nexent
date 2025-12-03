@@ -153,9 +153,16 @@ export const ModelEditDialog = ({
       let maxTokensValue = parseInt(form.maxTokens);
       if (isEmbeddingModel) maxTokensValue = 0;
 
+      // Use original displayName for lookup, pass new displayName in body if changed
+      const originalDisplayName = model.displayName || model.name;
+      const newDisplayName = form.displayName;
+
       await modelService.updateSingleModel({
-        model_id: model.id.toString(),
-        displayName: form.displayName,
+        currentDisplayName: originalDisplayName,
+        // Only send displayName if it changed
+        ...(newDisplayName !== originalDisplayName
+          ? { displayName: newDisplayName }
+          : {}),
         url: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
         ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
@@ -210,6 +217,7 @@ export const ModelEditDialog = ({
         message.error(t("model.dialog.error.serverError"));
       } else {
         message.error(t("model.dialog.error.editFailed"));
+        console.error(error);
       }
     } finally {
       setLoading(false);

@@ -15,6 +15,7 @@ class ModelConfig(BaseModel):
     url: str = Field(description="Model endpoint URL")
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
+    ssl_verify: Optional[bool] = Field(description="Whether to verify SSL certificates", default=True)
 
 
 class ToolConfig(BaseModel):

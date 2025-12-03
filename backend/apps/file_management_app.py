@@ -1,4 +1,5 @@
 import logging
+import re
 from http import HTTPStatus
 from typing import List, Optional
 from urllib.parse import urlparse, urlunparse, unquote, quote
@@ -15,50 +16,49 @@ from utils.file_management_utils import trigger_data_process
 logger = logging.getLogger("file_management_app")
 
 
-def build_content_disposition_header(filename: str) -> str:
+def build_content_disposition_header(filename: Optional[str]) -> str:
     """
-    Build Content-Disposition header with proper encoding for filenames containing non-ASCII characters.
-    
-    Uses RFC 5987 format to support UTF-8 encoded filenames:
-    - filename: ASCII-compatible fallback (URL-encoded ASCII string)
-    - filename*: UTF-8 encoded filename (RFC 5987 format)
-    
-    Args:
-        filename: Original filename (may contain non-ASCII characters)
-        
-    Returns:
-        Content-Disposition header value
+    Build a Content-Disposition header that keeps the original filename.
+
+    - ASCII filenames are returned directly.
+    - Non-ASCII filenames include both an ASCII fallback and RFC 5987 encoded value
+      so modern browsers keep the original name.
     """
+    safe_name = (filename or "download").strip() or "download"
+
+    def _sanitize_ascii(value: str) -> str:
+        # Replace problematic characters that break HTTP headers
+        # Remove control characters (newlines, carriage returns, tabs, etc.)
+        # Remove control characters (0x00-0x1F and 0x7F)
+        sanitized = re.sub(r'[\x00-\x1F\x7F]', '', value)
+        # Replace problematic characters that break HTTP headers
+        sanitized = sanitized.replace("\\", "_").replace('"', "_")
+        # Remove leading/trailing spaces and dots (Windows filename restrictions)
+        sanitized = sanitized.strip(' .')
+        return sanitized if sanitized else "download"
+
     try:
-        # Check if filename contains non-ASCII characters
+        safe_name.encode("ascii")
+        return f'attachment; filename="{_sanitize_ascii(safe_name)}"'
+    except UnicodeEncodeError:
         try:
-            filename.encode('ascii')
-            has_non_ascii = False
-        except UnicodeEncodeError:
-            has_non_ascii = True
-        
-        if has_non_ascii:
-            # Use RFC 5987 format for UTF-8 filenames
-            # Format: filename*=UTF-8''encoded_filename
-            # URL-encode the filename for the filename* parameter
-            encoded_filename = quote(filename, safe='')
-            
-            # Create ASCII-compatible fallback filename
-            # Extract file extension if available
-            import os
-            _, ext = os.path.splitext(filename)
-            # Use a generic ASCII name with the same extension
-            fallback_name = f"download{ext}" if ext else "download"
-            
-            # Return header with both filename (ASCII fallback) and filename* (UTF-8)
-            return f'attachment; filename="{fallback_name}"; filename*=UTF-8\'\'{encoded_filename}'
-        else:
-            # Pure ASCII filename, use simple format
-            return f'attachment; filename="{filename}"'
-    except Exception as e:
-        logger.warning(f"Failed to encode filename '{filename}': {e}, using fallback")
-        # Fallback: use generic name
-        return f'attachment; filename="download"'
+            encoded = quote(safe_name, safe="")
+        except Exception:
+            # quote failure, fallback to sanitized ASCII only
+            logger.warning("Failed to encode filename '%s', using fallback", safe_name)
+            return f'attachment; filename="{_sanitize_ascii(safe_name)}"'
+
+        fallback = _sanitize_ascii(
+            safe_name.encode("ascii", "ignore").decode("ascii") or "download"
+        )
+        return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "Failed to encode filename '%s': %s. Using fallback.",
+            safe_name,
+            exc,
+        )
+        return 'attachment; filename="download"'
 
 # Create API router
 file_management_runtime_router = APIRouter(prefix="/file")
@@ -187,7 +187,9 @@ async def get_storage_file(
                 file_stream,
                 media_type=content_type,
                 headers={
-                    "Content-Disposition": content_disposition
+                    "Content-Disposition": content_disposition,
+                    "Cache-Control": "public, max-age=3600",
+                    "ETag": f'"{object_name}"',
                 }
             )
         else:
@@ -262,11 +264,38 @@ async def get_storage_files(
         )
 
 
+def _ensure_http_scheme(raw_url: str) -> str:
+    """
+    Ensure the provided Datamate URL has an explicit HTTP or HTTPS scheme.
+    """
+    candidate = (raw_url or "").strip()
+    if not candidate:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="URL cannot be empty"
+        )
+
+    parsed = urlparse(candidate)
+    if parsed.scheme:
+        if parsed.scheme not in ("http", "https"):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="URL must start with http:// or https://"
+            )
+        return candidate
+
+    if candidate.startswith("//"):
+        return f"http:{candidate}"
+
+    return f"http://{candidate}"
+
+
 def _normalize_datamate_download_url(raw_url: str) -> str:
     """
     Normalize Datamate download URL to ensure it follows /data-management/datasets/{datasetId}/files/{fileId}/download
     """
-    parsed_url = urlparse(raw_url)
+    normalized_source = _ensure_http_scheme(raw_url)
+    parsed_url = urlparse(normalized_source)
     path_segments = [segment for segment in parsed_url.path.split("/") if segment]
 
     if "data-management" not in path_segments:
@@ -313,7 +342,8 @@ def _build_datamate_url_from_parts(base_url: str, dataset_id: str, file_id: str)
             detail="base_url is required when dataset_id and file_id are provided"
         )
 
-    parsed_base = urlparse(base_url)
+    base_with_scheme = _ensure_http_scheme(base_url)
+    parsed_base = urlparse(base_with_scheme)
     base_prefix = parsed_base.path.rstrip("/")
 
     if base_prefix and not base_prefix.endswith("/api"):
@@ -339,7 +369,7 @@ def _build_datamate_url_from_parts(base_url: str, dataset_id: str, file_id: str)
 @file_management_config_router.get("/datamate/download")
 async def download_datamate_file(
     url: Optional[str] = Query(None, description="Datamate file URL to download"),
-    base_url: Optional[str] = Query(None, description="Datamate base server URL (e.g., http://host:port or http://host:port/api)"),
+    base_url: Optional[str] = Query(None, description="Datamate base server URL (e.g., host:port)"),
     dataset_id: Optional[str] = Query(None, description="Datamate dataset ID"),
     file_id: Optional[str] = Query(None, description="Datamate file ID"),
     filename: Optional[str] = Query(None, description="Optional filename for download"),
@@ -349,7 +379,7 @@ async def download_datamate_file(
     Download file from Datamate knowledge base via HTTP URL
 
     - **url**: Full HTTP URL of the file to download (optional)
-    - **base_url**: Base server URL (e.g., http://host:port or http://host:port/api)
+    - **base_url**: Base server URL (e.g., host:port)
     - **dataset_id**: Datamate dataset ID
     - **file_id**: Datamate file ID
     - **filename**: Optional filename for the download (extracted automatically if not provided)
@@ -401,7 +431,6 @@ async def download_datamate_file(
             if not download_filename:
                 content_disposition = response.headers.get("Content-Disposition", "")
                 if content_disposition:
-                    import re
                     filename_match = re.search(r'filename="?(.+?)"?$', content_disposition)
                     if filename_match:
                         download_filename = filename_match.group(1)

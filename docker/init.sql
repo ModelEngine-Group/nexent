@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS "model_record_t" (
   "maximum_chunk_size" int4,
   "display_name" varchar(100) COLLATE "pg_catalog"."default",
   "connect_status" varchar(100) COLLATE "pg_catalog"."default",
+  "ssl_verify" boolean DEFAULT true,
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
@@ -189,6 +190,7 @@ COMMENT ON COLUMN "model_record_t".expected_chunk_size IS 'Expected chunk size f
 COMMENT ON COLUMN "model_record_t".maximum_chunk_size IS 'Maximum chunk size for embedding models, used during document chunking';
 COMMENT ON COLUMN "model_record_t"."display_name" IS 'Model name displayed directly in frontend, customized by user';
 COMMENT ON COLUMN "model_record_t"."connect_status" IS 'Model connectivity status from last check, optional values: "检测中"、"可用"、"不可用"';
+COMMENT ON COLUMN "model_record_t"."ssl_verify" IS 'Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.';
 COMMENT ON COLUMN "model_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "model_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
 COMMENT ON COLUMN "model_record_t"."update_time" IS 'Update time, audit field';

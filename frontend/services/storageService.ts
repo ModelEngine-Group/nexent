@@ -6,16 +6,17 @@ import { fetchWithAuth } from '@/lib/auth';
 const fetch = fetchWithAuth;
 
 /**
- * Extract object_name from image URL
+ * Extract object_name from file URL
  * Supports formats like:
  * - http://localhost:3000/nexent/attachments/filename.png
  * - /nexent/attachments/filename.png
  * - attachments/filename.png
  * - s3://nexent/attachments/filename.png
- * @param url Image URL
+ * Works for all file types: images, videos, documents, etc.
+ * @param url File URL (can be image, video, document, or any other file type)
  * @returns object_name or null
  */
-export function extractObjectNameFromImageUrl(url: string): string | null {
+export function extractObjectNameFromUrl(url: string): string | null {
   try {
     // Handle s3:// protocol URLs (e.g., s3://nexent/attachments/filename.png)
     if (url.startsWith("s3://")) {
@@ -113,7 +114,7 @@ export function convertImageUrlToApiUrl(url: string): string {
     return API_ENDPOINTS.proxy.image(url);
   }
   
-  const objectName = extractObjectNameFromImageUrl(url);
+  const objectName = extractObjectNameFromUrl(url);
   if (objectName) {
     // Use the same download endpoint with stream mode for images
     return API_ENDPOINTS.storage.file(objectName, "stream");
@@ -221,57 +222,20 @@ export const storageService = {
     filename?: string;
   }): Promise<void> {
     try {
-      // Use backend API to download file from HTTP URL
-      // Use fetchWithAuth to pass authorization header
       const downloadUrl = API_ENDPOINTS.storage.datamateDownload(options);
-      const response = await fetch(downloadUrl);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to download file: ${response.statusText}`);
-      }
-      
-      // Get the blob from response
-      const blob = await response.blob();
-      
-      // Get filename from Content-Disposition header or use provided filename
-      let downloadFilename = options.filename;
-      if (!downloadFilename) {
-        const contentDisposition = response.headers.get("Content-Disposition");
-        if (contentDisposition) {
-          const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
-          if (filenameMatch) {
-            downloadFilename = filenameMatch[1];
-          }
-        }
-      }
-      
-      // If still no filename, extract from URL
-      if (!downloadFilename) {
-        try {
-          const urlString = options.url || downloadUrl;
-          const urlObj = new URL(urlString);
-          const path = urlObj.pathname;
-          downloadFilename = path.split('/').pop() || "download";
-        } catch {
-          downloadFilename = "download";
-        }
-      }
-      
-      // Create download link and trigger download
-      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = downloadFilename;
+      link.href = downloadUrl;
+      // Only set download attribute when caller explicitly provides a filename.
+      // Otherwise, let the browser use the Content-Disposition header from backend,
+      // which already encodes the correct filename.
+      if (options.filename) {
+        link.download = options.filename;
+      }
       link.style.display = "none";
       document.body.appendChild(link);
-      
-      // Trigger download
       link.click();
-      
-      // Clean up
       setTimeout(() => {
         document.body.removeChild(link);
-        window.URL.revokeObjectURL(blobUrl);
       }, 100);
     } catch (error) {
       throw new Error(`Failed to download datamate file: ${error instanceof Error ? error.message : String(error)}`);

@@ -15,12 +15,11 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
-from nexent.core.nlp.tokenizer import calculate_term_weights
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, Database, X } from "lucide-react";
+import { ExternalLink, Database, X, Server } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -8,7 +8,7 @@ import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { API_ENDPOINTS } from "@/services/api";
 import { formatDate, formatUrl } from "@/lib/utils";
-import { convertImageUrlToApiUrl, extractObjectNameFromImageUrl, storageService } from "@/services/storageService";
+import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
 import { message } from "antd";
 import log from "@/lib/logger";
 
@@ -226,7 +226,7 @@ export function ChatRightPanel({
     const text = result.text || t("chatRightPanel.noContentDescription");
     const published_date = result.published_date || "";
     const source_type = result.source_type || "url";
-    const filename = result.filename || "";
+    const filename = result.filename || result.title || "";
     const datamateDatasetId = result.score_details?.datamate_dataset_id;
     const datamateFileId = result.score_details?.datamate_file_id;
     const datamateBaseUrl = result.score_details?.datamate_base_url;
@@ -241,31 +241,9 @@ export function ChatRightPanel({
         return;
       }
 
-      // Check if URL is a direct http/https URL that can be accessed directly
-      // Exclude backend API endpoints (containing /api/file/download/)
-      if (
-        url &&
-        url !== "#" &&
-        (url.startsWith("http://") || url.startsWith("https://")) &&
-        !url.includes("/api/file/download/")
-      ) {
-        // Direct download from HTTP/HTTPS URL without backend
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename || "download";
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          document.body.removeChild(link);
-        }, 100);
-        message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
-        return;
-      }
-
       setIsDownloading(true);
       try {
-        // Handle datamate source type separately
+        // Handle datamate source type
         if (source_type === "datamate") {
           if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
             if (!url || url === "#") {
@@ -284,13 +262,13 @@ export function ChatRightPanel({
           return;
         }
 
-        // Handle regular file source type
+        // Handle regular file source type (source_type === "file")
         // For knowledge base files, backend stores the MinIO object_name in path_or_url,
         // so we should always try to extract it from the URL and avoid guessing from filename.
         let objectName: string | undefined = undefined;
 
         if (url && url !== "#") {
-          objectName = extractObjectNameFromImageUrl(url) || undefined;
+          objectName = extractObjectNameFromUrl(url) || undefined;
         }
 
         if (!objectName) {
@@ -387,40 +365,57 @@ export function ChatRightPanel({
 
           <div className="mt-2 text-sm flex justify-between items-center">
             <div
-              className="flex items-center overflow-hidden"
+              className="flex flex-col overflow-hidden"
               style={{ flex: 1, minWidth: 0 }}
             >
-              <div className="w-3 h-3 flex-shrink-0 mr-1">
-                {source_type === "url" ? (
-                  <ExternalLink className="w-full h-full" />
-                ) : source_type === "file" || source_type === "datamate" ? (
-                  <Database className="w-full h-full" />
-                ) : null}
-              </div>
               {source_type === "file" || source_type === "datamate" ? (
-                <a
-                  href="#"
-                  onClick={handleFileDownload}
-                  className="text-blue-600 hover:underline truncate cursor-pointer"
-                  style={{
-                    maxWidth: "75%",
-                    display: "inline-block",
-                  }}
-                  title={formatUrl(result)}
-                >
-                  {filename || formatUrl(result)}
-                </a>
+                <>
+                  <div className="flex items-center min-w-0">
+                    <div className="w-3 h-3 flex-shrink-0 mr-1">
+                      <Database className="w-full h-full" />
+                    </div>
+                    <a
+                      href="#"
+                      onClick={handleFileDownload}
+                      className="text-blue-600 hover:underline truncate cursor-pointer"
+                      style={{
+                        maxWidth: "75%",
+                        display: "inline-block",
+                      }}
+                      title={formatUrl(result)}
+                    >
+                      {filename || formatUrl(result)}
+                    </a>
+                  </div>
+                  <div className="flex items-center mt-0.5 min-w-0">
+                    <div className="w-3 h-3 flex-shrink-0 mr-1">
+                      <Server className="w-full h-full" />
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {source_type === "datamate"
+                        ? t("chatRightPanel.source.datamate", "Source: Datamate")
+                        : source_type === "file"
+                        ? t("chatRightPanel.source.nexent", "Source: Nexent")
+                        : ""}
+                    </div>
+                  </div>
+                </>
               ) : (
-                <span
-                  className="text-gray-500 truncate"
-                  style={{
-                    maxWidth: "75%",
-                    display: "inline-block",
-                  }}
-                  title={formatUrl(result)}
-                >
-                  {formatUrl(result)}
-                </span>
+                <div className="flex items-center min-w-0">
+                  <div className="w-3 h-3 flex-shrink-0 mr-1">
+                    <ExternalLink className="w-full h-full" />
+                  </div>
+                  <span
+                    className="text-gray-500 truncate"
+                    style={{
+                      maxWidth: "75%",
+                      display: "inline-block",
+                    }}
+                    title={formatUrl(result)}
+                  >
+                    {formatUrl(result)}
+                  </span>
+                </div>
               )}
             </div>
 

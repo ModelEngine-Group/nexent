@@ -2,7 +2,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
-import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
+import { storageService, convertImageUrlToApiUrl, extractObjectNameFromUrl } from "@/services/storageService";
 import { message } from "antd";
 import log from "@/lib/logger";
 import {
@@ -80,28 +80,6 @@ const FileViewer = ({
   const { t } = useTranslation("common");
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Extract object_name from URL if not provided
-  const extractObjectNameFromUrl = (url: string): string | null => {
-    try {
-      // Try to extract object_name from MinIO URL
-      // MinIO URLs typically look like: http://host:port/bucket/object_name?signature
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
-      // Remove leading slash and bucket name if present
-      // Path format: /bucket/object_name or /object_name
-      const parts = pathname.split('/').filter(Boolean);
-      if (parts.length > 1) {
-        // Skip bucket name, return the rest as object_name
-        return parts.slice(1).join('/');
-      } else if (parts.length === 1) {
-        return parts[0];
-      }
-      return null;
-    } catch (error) {
-      log.error("Failed to extract object_name from URL:", error);
-      return null;
-    }
-  };
 
   // Handle file download
   const handleDownload = async (e: React.MouseEvent) => {
