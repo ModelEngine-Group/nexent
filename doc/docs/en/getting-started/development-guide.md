@@ -109,17 +109,23 @@ pnpm dev
 ```
 
 ### Service Startup
-Before starting services, you need to activate the virtual environment:
+Before starting services, you need to create and activate the virtual environment:
 
 ```bash
 # Execute in the backend directory of the project root directory
 cd backend
+python -m venv .venv
 source .venv/bin/activate  # Activate virtual environment
 ```
 
 ::: warning Important Notes
 On Windows, you need to execute the `source .venv/Scripts/activate` command to activate the virtual environment.
 :::
+
+generate .env in the root directory
+```bash
+bash docker/generate_env.sh
+```
 
 Nexent includes three core backend services that need to be started separately:
 

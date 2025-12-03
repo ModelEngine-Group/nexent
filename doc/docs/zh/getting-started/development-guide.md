@@ -109,17 +109,23 @@ pnpm run dev
 ```
 
 ### 服务启动
-在启动服务之前，需要先激活虚拟环境：
+在启动服务之前，需要先创建并激活虚拟环境：
 
 ```bash
 # 在项目根目录的backend目录下执行
 cd backend
+python -m venv .venv
 source .venv/bin/activate  # 激活虚拟环境
 ```
 
 ::: warning 重要提示
 Windows操作系统需执行`source .venv/Scripts/activate`命令激活虚拟环境。
 :::
+
+在根目录中生成.env
+```bash
+bash docker/generate_env.sh
+```
 
 Nexent 包含三个核心后端服务，需要分别启动：
 
