@@ -17,13 +17,14 @@ import {
   searchToolConfig,
   updateToolConfig,
 } from "@/services/agentConfigService";
-import { useAgentImport } from "@/hooks/useAgentImport";
+import { useAgentImport, ImportAgentData } from "@/hooks/useAgentImport";
 import {
   Agent,
   AgentSetupOrchestratorProps,
   Tool,
   ToolParam,
 } from "@/types/agentConfig";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import log from "@/lib/logger";
 
 import SubAgentPool from "./agent/SubAgentPool";
@@ -104,6 +105,10 @@ export default function AgentSetupOrchestrator({
   const [importingAction, setImportingAction] = useState<
     "force" | "regenerate" | null
   >(null);
+  
+  // Agent import wizard states
+  const [importWizardVisible, setImportWizardVisible] = useState(false);
+  const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
   // Use generation state passed from parent component, not local state
 
   // Delete confirmation popup status
@@ -1589,7 +1594,7 @@ export default function AgentSetupOrchestrator({
     [runNormalImport, runForceImport]
   );
 
-  // Handle importing agent
+  // Handle importing agent - use AgentImportWizard for ExportAndImportDataFormat
   const handleImportAgent = (t: TFunction) => {
     // Create a hidden file input element
     const fileInput = document.createElement("input");
@@ -1618,6 +1623,20 @@ export default function AgentSetupOrchestrator({
           return;
         }
 
+        // Check if it's ExportAndImportDataFormat (has agent_id and agent_info)
+        if (agentInfo.agent_id && agentInfo.agent_info && typeof agentInfo.agent_info === "object") {
+          // Use AgentImportWizard for full agent import with configuration
+          const importData: ImportAgentData = {
+            agent_id: agentInfo.agent_id,
+            agent_info: agentInfo.agent_info,
+            mcp_info: agentInfo.mcp_info || [],
+          };
+          setImportWizardData(importData);
+          setImportWizardVisible(true);
+          return;
+        }
+
+        // Fallback to legacy import logic for other formats
         const normalizeValue = (value?: string | null) =>
           typeof value === "string" ? value.trim() : "";
 
@@ -1698,6 +1717,13 @@ export default function AgentSetupOrchestrator({
     };
 
     fileInput.click();
+  };
+
+  // Handle import completion from wizard
+  const handleImportComplete = () => {
+    refreshAgentList(t, false);
+    setImportWizardVisible(false);
+    setImportWizardData(null);
   };
 
   const handleConfirmedDuplicateImport = useCallback(async () => {
@@ -2256,6 +2282,23 @@ export default function AgentSetupOrchestrator({
             {t("businessLogic.config.import.duplicateDescription")}
           </p>
         </Modal>
+        {/* Agent Import Wizard */}
+        <AgentImportWizard
+          visible={importWizardVisible}
+          onCancel={() => {
+            setImportWizardVisible(false);
+            setImportWizardData(null);
+          }}
+          initialData={importWizardData}
+          onImportComplete={handleImportComplete}
+          title={undefined} // Use default title
+          agentDisplayName={
+            importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.display_name
+          }
+          agentDescription={
+            importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.description
+          }
+        />
         {/* Auto unselect knowledge_base_search notice when embedding not configured */}
         <Modal
           title={t("embedding.agentToolAutoDeselectModal.title")}

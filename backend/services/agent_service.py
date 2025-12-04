@@ -41,7 +41,7 @@ from database.agent_db import (
     update_related_agents
 )
 from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
-from database.remote_mcp_db import check_mcp_name_exists, get_mcp_server_by_name_and_tenant
+from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import (
     check_tool_is_available,
     create_or_update_tool_by_tool_info,
@@ -53,8 +53,6 @@ from database.tool_db import (
 )
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
-from services.remote_mcp_service import add_remote_mcp_server_list
-from services.tool_configuration_service import update_tool_list
 from utils.auth_utils import get_current_user_info, get_user_language
 from utils.config_utils import tenant_config_manager
 from utils.memory_utils import build_memory_config
@@ -899,51 +897,16 @@ async def import_agent_impl(
     force_import: bool = False
 ):
     """
-    Import agent using DFS
+    Import agent using DFS.
+
+    Note:
+        MCP server registration and tool list refresh are now handled
+        on the frontend / dedicated MCP configuration flows.
+        The backend import logic only consumes the tools that already
+        exist for the current tenant.
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
     agent_id = agent_info.agent_id
-
-    # First, add MCP servers if any
-    if agent_info.mcp_info:
-        for mcp_info in agent_info.mcp_info:
-            if mcp_info.mcp_server_name and mcp_info.mcp_url:
-                try:
-                    # Check if MCP name already exists
-                    if check_mcp_name_exists(mcp_name=mcp_info.mcp_server_name, tenant_id=tenant_id):
-                        # Get existing MCP server info to compare URLs
-                        existing_mcp = get_mcp_server_by_name_and_tenant(mcp_name=mcp_info.mcp_server_name,
-                                                                         tenant_id=tenant_id)
-                        if existing_mcp and existing_mcp == mcp_info.mcp_url:
-                            # Same name and URL, skip
-                            logger.info(
-                                f"MCP server {mcp_info.mcp_server_name} with same URL already exists, skipping")
-                            continue
-                        else:
-                            # Same name but different URL, add import prefix
-                            import_mcp_name = f"import_{mcp_info.mcp_server_name}"
-                            logger.info(
-                                f"MCP server {mcp_info.mcp_server_name} exists with different URL, using name: {import_mcp_name}")
-                            mcp_server_name = import_mcp_name
-                    else:
-                        # Name doesn't exist, use original name
-                        mcp_server_name = mcp_info.mcp_server_name
-
-                    await add_remote_mcp_server_list(
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        remote_mcp_server=mcp_info.mcp_url,
-                        remote_mcp_server_name=mcp_server_name
-                    )
-                except Exception as e:
-                    raise Exception(
-                        f"Failed to add MCP server {mcp_info.mcp_server_name}: {str(e)}")
-
-    # Then, update tool list to include new MCP tools
-    try:
-        await update_tool_list(tenant_id=tenant_id, user_id=user_id)
-    except Exception as e:
-        raise Exception(f"Failed to update tool list: {str(e)}")
 
     agent_stack = deque([agent_id])
     agent_id_set = set()
@@ -1056,14 +1019,16 @@ async def import_agent_by_agent_id(
             regeneration_model_id = business_logic_model_id or model_id
             if regeneration_model_id:
                 try:
-                    agent_name = _regenerate_agent_name_with_llm(
+                    # Offload blocking LLM regeneration to a thread to avoid blocking the event loop
+                    agent_name = await asyncio.to_thread(
+                        _regenerate_agent_name_with_llm,
                         original_name=agent_name,
                         existing_names=existing_names,
                         task_description=import_agent_info.business_description or import_agent_info.description or "",
                         model_id=regeneration_model_id,
                         tenant_id=tenant_id,
                         language=LANGUAGE["ZH"],  # Default to Chinese, can be enhanced later
-                        agents_cache=all_agents
+                        agents_cache=all_agents,
                     )
                     logger.info(f"Regenerated agent name: '{agent_name}'")
                 except Exception as e:
@@ -1088,14 +1053,16 @@ async def import_agent_by_agent_id(
             regeneration_model_id = business_logic_model_id or model_id
             if regeneration_model_id:
                 try:
-                    agent_display_name = _regenerate_agent_display_name_with_llm(
+                    # Offload blocking LLM regeneration to a thread to avoid blocking the event loop
+                    agent_display_name = await asyncio.to_thread(
+                        _regenerate_agent_display_name_with_llm,
                         original_display_name=agent_display_name,
                         existing_display_names=existing_display_names,
                         task_description=import_agent_info.business_description or import_agent_info.description or "",
                         model_id=regeneration_model_id,
                         tenant_id=tenant_id,
                         language=LANGUAGE["ZH"],  # Default to Chinese, can be enhanced later
-                        agents_cache=all_agents
+                        agents_cache=all_agents,
                     )
                     logger.info(f"Regenerated agent display_name: '{agent_display_name}'")
                 except Exception as e:

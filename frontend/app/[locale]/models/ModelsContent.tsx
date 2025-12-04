@@ -130,16 +130,18 @@ export default function ModelsContent({
         transition={pageTransition}
         style={{width: "100%", height: "100%"}}
       >
-        {canAccessProtectedData ? (
-          <AppModelConfig
-            onSelectedModelsChange={(selected) =>
-              setLiveSelectedModels(selected)
-            }
-            onEmbeddingConnectivityChange={() => {}}
-            forwardedRef={modelConfigSectionRef}
-            canAccessProtectedData={canAccessProtectedData}
-          />
-        ) : null}
+        <div className="w-full h-full flex items-center justify-center">
+          {canAccessProtectedData ? (
+            <AppModelConfig
+              onSelectedModelsChange={(selected) =>
+                setLiveSelectedModels(selected)
+              }
+              onEmbeddingConnectivityChange={() => {}}
+              forwardedRef={modelConfigSectionRef}
+              canAccessProtectedData={canAccessProtectedData}
+            />
+          ) : null}
+        </div>
       </motion.div>
 
       <EmbedderCheckModal

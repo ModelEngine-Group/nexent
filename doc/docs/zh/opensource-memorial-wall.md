@@ -591,4 +591,19 @@ Nexent加油
 
 ::: info sbwrn - 2025-12-02
 祝nexent平台越来越好
+
+:::tip 开源新手 - 2025-12-02
+感谢 Nexent 让我踏上了开源之旅！这个项目的文档真的很棒，帮助我快速上手。
+:::
+
+::: info sbwrn - 2025-12-02
+祝nexent平台越来越好
+:::
+
+::: info dengpeiying - 2025-12-02
+Nexent开发者加油
+:::
+
+::: info jinhb - 2025-12-03
+祝nexent平台越来越好
 :::

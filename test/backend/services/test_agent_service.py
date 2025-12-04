@@ -2383,390 +2383,132 @@ async def test_clear_agent_memory_clear_memory_error(mock_build_config, mock_cle
     assert mock_clear_memory.call_count == 2
 
 
-# Import agent tests
+@patch('backend.services.agent_service.insert_related_agent')
 @patch('backend.services.agent_service.import_agent_by_agent_id')
-@patch('backend.services.agent_service.update_tool_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.add_remote_mcp_server_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
-@patch('backend.services.agent_service.check_mcp_name_exists')
 @patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_import_agent_impl_success_with_mcp(mock_get_current_user_info, mock_check_mcp_exists,
-                                                  mock_get_mcp_server,
-                                                  mock_add_mcp_server, mock_update_tool_list, mock_import_agent):
+async def test_import_agent_impl_imports_all_agents_and_links_relations(
+    mock_get_current_user_info,
+    mock_import_agent,
+    mock_insert_relationship,
+):
     """
-    Test successful import of agent with MCP servers.
+    Import agent implementation should import sub-agents before their parents
+    and create the relationship between the newly created agent IDs.
     """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
 
-    # Mock MCP server checks
-    mock_check_mcp_exists.return_value = False  # MCP server doesn't exist
-    mock_get_mcp_server.return_value = "http://existing-mcp-server.com"
-    mock_add_mcp_server.return_value = None  # Function returns None on success
-    mock_update_tool_list.return_value = None
-
-    # Create MCP info
-    mcp_info = MCPInfo(mcp_server_name="test_mcp_server",
-                       mcp_url="http://test-mcp-server.com")
-
-    # Create agent info
-    agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="Test Agent",
-        display_name="Test Agent Display",
-        description="A test agent",
-        business_description="For testing purposes",
-        max_steps=10,
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    # Sub-agent (ID 2) with no managed agents
+    sub_agent_info = ExportAndImportAgentInfo(
+        agent_id=2,
+        name="SubAgent",
+        display_name="Sub Agent",
+        description="Sub agent desc",
+        business_description="Business desc",
+        max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
+        duty_prompt="Sub duty",
+        constraint_prompt="Sub constraint",
+        few_shots_prompt="Sub few shots",
         enabled=True,
         tools=[],
         managed_agents=[]
     )
 
-    # Create export data format
-    export_data = ExportAndImportDataFormat(
-        agent_id=123,
-        agent_info={"123": agent_info},
-        mcp_info=[mcp_info]
-    )
-
-    # Mock import agent
-    mock_import_agent.return_value = 456  # New agent ID
-
-    # Execute
-    await import_agent_impl(export_data, authorization="Bearer token")
-
-    # Assert
-    mock_get_current_user_info.assert_called_once_with("Bearer token")
-    mock_check_mcp_exists.assert_called_once_with(
-        mcp_name="test_mcp_server", tenant_id="test_tenant")
-    mock_add_mcp_server.assert_called_once_with(
-        tenant_id="test_tenant",
-        user_id="test_user",
-        remote_mcp_server="http://test-mcp-server.com",
-        remote_mcp_server_name="test_mcp_server"
-    )
-    mock_update_tool_list.assert_called_once_with(
-        tenant_id="test_tenant", user_id="test_user")
-    mock_import_agent.assert_called_once_with(
-        import_agent_info=agent_info,
-        tenant_id="test_tenant",
-        user_id="test_user",
-        skip_duplicate_regeneration=False,
-    )
-
-
-@patch('backend.services.agent_service.import_agent_by_agent_id')
-@patch('backend.services.agent_service.update_tool_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.add_remote_mcp_server_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
-@patch('backend.services.agent_service.check_mcp_name_exists')
-@patch('backend.services.agent_service.get_current_user_info')
-@pytest.mark.asyncio
-async def test_import_agent_impl_mcp_exists_same_url(mock_get_current_user_info, mock_check_mcp_exists,
-                                                     mock_get_mcp_server,
-                                                     mock_add_mcp_server, mock_update_tool_list, mock_import_agent):
-    """
-    Test import of agent when MCP server exists with same URL (should skip).
-    """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-
-    # Mock MCP server exists with same URL
-    mock_check_mcp_exists.return_value = True
-    mock_get_mcp_server.return_value = "http://test-mcp-server.com"  # Same URL
-    mock_update_tool_list.return_value = None
-
-    # Create MCP info
-    mcp_info = MCPInfo(mcp_server_name="test_mcp_server",
-                       mcp_url="http://test-mcp-server.com")
-
-    # Create agent info
-    agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="Test Agent",
-        display_name="Test Agent Display",
-        description="A test agent",
-        business_description="For testing purposes",
+    # Main agent references sub agent id 2
+    main_agent_info = ExportAndImportAgentInfo(
+        agent_id=1,
+        name="MainAgent",
+        display_name="Main Agent",
+        description="Main desc",
+        business_description="Business main",
         max_steps=10,
         provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
+        duty_prompt="Main duty",
+        constraint_prompt="Main constraint",
+        few_shots_prompt="Main few shots",
         enabled=True,
         tools=[],
-        managed_agents=[]
+        managed_agents=[2]
     )
 
-    # Create export data format
     export_data = ExportAndImportDataFormat(
-        agent_id=123,
-        agent_info={"123": agent_info},
-        mcp_info=[mcp_info]
+        agent_id=1,
+        agent_info={
+            "1": main_agent_info,
+            "2": sub_agent_info,
+        },
+        mcp_info=[
+            MCPInfo(mcp_server_name="test_mcp_server",
+                    mcp_url="http://test-mcp-server.com")
+        ],
     )
 
-    # Mock import agent
-    mock_import_agent.return_value = 456
+    # The order of returns matches the import order: sub-agent first, then main agent
+    mock_import_agent.side_effect = [101, 202]
 
-    # Execute
     await import_agent_impl(export_data, authorization="Bearer token")
 
-    # Assert
-    mock_get_current_user_info.assert_called_once_with("Bearer token")
-    mock_check_mcp_exists.assert_called_once_with(
-        mcp_name="test_mcp_server", tenant_id="test_tenant")
-    mock_get_mcp_server.assert_called_once_with(
-        mcp_name="test_mcp_server", tenant_id="test_tenant")
-    mock_add_mcp_server.assert_not_called()  # Should not add since URL is the same
-    mock_update_tool_list.assert_called_once_with(
-        tenant_id="test_tenant", user_id="test_user")
-    mock_import_agent.assert_called_once()
+    # Sub-agent should be imported before main agent
+    assert mock_import_agent.call_count == 2
+    first_call = mock_import_agent.call_args_list[0]
+    second_call = mock_import_agent.call_args_list[1]
+
+    assert first_call.kwargs["import_agent_info"] is sub_agent_info
+    assert first_call.kwargs["skip_duplicate_regeneration"] is False
+
+    assert second_call.kwargs["import_agent_info"] is main_agent_info
+    assert second_call.kwargs["skip_duplicate_regeneration"] is False
+
+    # Relationship should link newly created ids (main -> sub)
+    mock_insert_relationship.assert_called_once_with(
+        parent_agent_id=202,
+        child_agent_id=101,
+        tenant_id="test_tenant",
+    )
 
 
 @patch('backend.services.agent_service.import_agent_by_agent_id')
-@patch('backend.services.agent_service.update_tool_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.add_remote_mcp_server_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
-@patch('backend.services.agent_service.check_mcp_name_exists')
 @patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_import_agent_impl_mcp_exists_different_url(mock_get_current_user_info, mock_check_mcp_exists,
-                                                          mock_get_mcp_server,
-                                                          mock_add_mcp_server, mock_update_tool_list, mock_import_agent):
+async def test_import_agent_impl_force_import_passes_skip_flag(
+    mock_get_current_user_info,
+    mock_import_agent,
+):
     """
-    Test import of agent when MCP server exists with different URL (should add with import prefix).
+    When force_import=True, skip_duplicate_regeneration should be True.
     """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
 
-    # Mock MCP server exists with different URL
-    mock_check_mcp_exists.return_value = True
-    mock_get_mcp_server.return_value = "http://different-mcp-server.com"  # Different URL
-    mock_add_mcp_server.return_value = None  # Function returns None on success
-    mock_update_tool_list.return_value = None
-
-    # Create MCP info
-    mcp_info = MCPInfo(mcp_server_name="test_mcp_server",
-                       mcp_url="http://test-mcp-server.com")
-
-    # Create agent info
     agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="Test Agent",
-        display_name="Test Agent Display",
-        description="A test agent",
-        business_description="For testing purposes",
-        max_steps=10,
+        agent_id=1,
+        name="Agent",
+        display_name="Agent Display",
+        description="desc",
+        business_description="biz",
+        max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
+        duty_prompt="duty",
+        constraint_prompt="constraint",
+        few_shots_prompt="few shots",
         enabled=True,
         tools=[],
         managed_agents=[]
     )
 
-    # Create export data format
     export_data = ExportAndImportDataFormat(
-        agent_id=123,
-        agent_info={"123": agent_info},
-        mcp_info=[mcp_info]
-    )
-
-    # Mock import agent
-    mock_import_agent.return_value = 456
-
-    # Execute
-    await import_agent_impl(export_data, authorization="Bearer token")
-
-    # Assert
-    mock_get_current_user_info.assert_called_once_with("Bearer token")
-    mock_check_mcp_exists.assert_called_once_with(
-        mcp_name="test_mcp_server", tenant_id="test_tenant")
-    mock_get_mcp_server.assert_called_once_with(
-        mcp_name="test_mcp_server", tenant_id="test_tenant")
-    # Should add with import prefix
-    mock_add_mcp_server.assert_called_once_with(
-        tenant_id="test_tenant",
-        user_id="test_user",
-        remote_mcp_server="http://test-mcp-server.com",
-        remote_mcp_server_name="import_test_mcp_server"
-    )
-    mock_update_tool_list.assert_called_once_with(
-        tenant_id="test_tenant", user_id="test_user")
-    mock_import_agent.assert_called_once()
-
-
-@patch('backend.services.agent_service.add_remote_mcp_server_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
-@patch('backend.services.agent_service.check_mcp_name_exists')
-@patch('backend.services.agent_service.get_current_user_info')
-@pytest.mark.asyncio
-async def test_import_agent_impl_mcp_add_failure(mock_get_current_user_info, mock_check_mcp_exists, mock_get_mcp_server,
-                                                 mock_add_mcp_server):
-    """
-    Test import of agent when MCP server addition fails.
-    """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-
-    # Mock MCP server checks
-    mock_check_mcp_exists.return_value = False  # MCP server doesn't exist
-    mock_get_mcp_server.return_value = "http://existing-mcp-server.com"
-
-    # Mock MCP server addition failure - the function raises an exception
-    mock_add_mcp_server.side_effect = Exception("MCP server connection failed")
-
-    # Create MCP info
-    mcp_info = MCPInfo(mcp_server_name="test_mcp_server",
-                       mcp_url="http://test-mcp-server.com")
-
-    # Create agent info
-    agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="Test Agent",
-        display_name="Test Agent Display",
-        description="A test agent",
-        business_description="For testing purposes",
-        max_steps=10,
-        provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
-        enabled=True,
-        tools=[],
-        managed_agents=[]
-    )
-
-    # Create export data format
-    export_data = ExportAndImportDataFormat(
-        agent_id=123,
-        agent_info={"123": agent_info},
-        mcp_info=[mcp_info]
-    )
-
-    # Execute & Assert
-    with pytest.raises(Exception) as context:
-        await import_agent_impl(export_data, authorization="Bearer token")
-
-    assert "Failed to add MCP server test_mcp_server" in str(context.value)
-    mock_add_mcp_server.assert_called_once_with(
-        tenant_id="test_tenant",
-        user_id="test_user",
-        remote_mcp_server="http://test-mcp-server.com",
-        remote_mcp_server_name="test_mcp_server"
-    )
-
-
-@patch('backend.services.agent_service.update_tool_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.get_current_user_info')
-@pytest.mark.asyncio
-async def test_import_agent_impl_update_tool_list_failure(mock_get_current_user_info, mock_update_tool_list):
-    """
-    Test import of agent when tool list update fails.
-    """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-
-    # Mock tool list update failure
-    mock_update_tool_list.side_effect = Exception("Tool list update failed")
-
-    # Create agent info
-    agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="Test Agent",
-        display_name="Test Agent Display",
-        description="A test agent",
-        business_description="For testing purposes",
-        max_steps=10,
-        provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
-        enabled=True,
-        tools=[],
-        managed_agents=[]
-    )
-
-    # Create export data format
-    export_data = ExportAndImportDataFormat(
-        agent_id=123,
-        agent_info={"123": agent_info},
+        agent_id=1,
+        agent_info={"1": agent_info},
         mcp_info=[]
     )
 
-    # Execute & Assert
-    with pytest.raises(Exception) as context:
-        await import_agent_impl(export_data, authorization="Bearer token")
+    await import_agent_impl(export_data, authorization="Bearer token", force_import=True)
 
-    assert "Failed to update tool list" in str(context.value)
-    mock_update_tool_list.assert_called_once_with(
-        tenant_id="test_tenant", user_id="test_user")
-
-
-@patch('backend.services.agent_service.import_agent_by_agent_id')
-@patch('backend.services.agent_service.update_tool_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.get_current_user_info')
-@pytest.mark.asyncio
-async def test_import_agent_impl_no_mcp_info(mock_get_current_user_info, mock_update_tool_list,
-                                             mock_import_agent):
-    """
-    Test import of agent without MCP info.
-    """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-    mock_update_tool_list.return_value = None
-
-    # Create agent info
-    agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="Test Agent",
-        display_name="Test Agent Display",
-        description="A test agent",
-        business_description="For testing purposes",
-        max_steps=10,
-        provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
-        enabled=True,
-        tools=[],
-        managed_agents=[]
-    )
-
-    # Create export data format without MCP info
-    export_data = ExportAndImportDataFormat(
-        agent_id=123,
-        agent_info={"123": agent_info},
-        mcp_info=[]
-    )
-
-    # Mock import agent
-    mock_import_agent.return_value = 456
-
-    # Execute
-    await import_agent_impl(export_data, authorization="Bearer token")
-
-    # Assert
     mock_get_current_user_info.assert_called_once_with("Bearer token")
-    mock_update_tool_list.assert_called_once_with(
-        tenant_id="test_tenant", user_id="test_user")
-    mock_import_agent.assert_called_once_with(
-        import_agent_info=agent_info,
-        tenant_id="test_tenant",
-        user_id="test_user",
-        skip_duplicate_regeneration=False,
-    )
+    mock_import_agent.assert_called_once()
+    call_kwargs = mock_import_agent.call_args.kwargs
+    assert call_kwargs["import_agent_info"] is agent_info
+    assert call_kwargs["skip_duplicate_regeneration"] is True
 
 
 if __name__ == '__main__':

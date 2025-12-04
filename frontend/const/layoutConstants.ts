@@ -68,18 +68,6 @@ export const TWO_COLUMN_LAYOUT = {
   },
 } as const;
 
-// Flex two column layout configuration (based on the KnowledgeBaseManager design)
-export const FLEX_TWO_COLUMN_LAYOUT = {
-  // Left knowledge base list width
-  LEFT_WIDTH: "33.333333%", // 1/3
-  
-  // Right content area width  
-  RIGHT_WIDTH: "66.666667%", // 2/3
-  
-  // Column spacing
-  GAP: "12px",
-} as const;
-
 // Standard card style configuration (based on the first page design)
 export const STANDARD_CARD = {
   // Base style class name
