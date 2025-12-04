@@ -1047,14 +1047,16 @@ async def import_agent_by_agent_id(
             regeneration_model_id = business_logic_model_id or model_id
             if regeneration_model_id:
                 try:
-                    agent_name = _regenerate_agent_name_with_llm(
+                    # Offload blocking LLM regeneration to a thread to avoid blocking the event loop
+                    agent_name = await asyncio.to_thread(
+                        _regenerate_agent_name_with_llm,
                         original_name=agent_name,
                         existing_names=existing_names,
                         task_description=import_agent_info.business_description or import_agent_info.description or "",
                         model_id=regeneration_model_id,
                         tenant_id=tenant_id,
                         language=LANGUAGE["ZH"],  # Default to Chinese, can be enhanced later
-                        agents_cache=all_agents
+                        agents_cache=all_agents,
                     )
                     logger.info(f"Regenerated agent name: '{agent_name}'")
                 except Exception as e:
@@ -1079,14 +1081,16 @@ async def import_agent_by_agent_id(
             regeneration_model_id = business_logic_model_id or model_id
             if regeneration_model_id:
                 try:
-                    agent_display_name = _regenerate_agent_display_name_with_llm(
+                    # Offload blocking LLM regeneration to a thread to avoid blocking the event loop
+                    agent_display_name = await asyncio.to_thread(
+                        _regenerate_agent_display_name_with_llm,
                         original_display_name=agent_display_name,
                         existing_display_names=existing_display_names,
                         task_description=import_agent_info.business_description or import_agent_info.description or "",
                         model_id=regeneration_model_id,
                         tenant_id=tenant_id,
                         language=LANGUAGE["ZH"],  # Default to Chinese, can be enhanced later
-                        agents_cache=all_agents
+                        agents_cache=all_agents,
                     )
                     logger.info(f"Regenerated agent display_name: '{agent_display_name}'")
                 except Exception as e:
