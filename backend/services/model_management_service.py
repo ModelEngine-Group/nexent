@@ -75,6 +75,9 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
         # If embedding or multi_embedding, set max_tokens via embedding dimension check
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
             model_data["max_tokens"] = await embedding_dimension_check(model_data)
+            # Set default chunk_batch if not provided
+            if model_data.get("chunk_batch") is None:
+                model_data["chunk_batch"] = 10
 
         is_multimodal = model_data.get("model_type") == "multi_embedding"
 
@@ -238,18 +241,46 @@ async def update_single_model_for_tenant(
             m.get("model_type") == "multi_embedding" for m in existing_models
         )
 
+        async def _try_update_embedding_dimension(model: Dict[str, Any], update_payload: Dict[str, Any]):
+            """Run embedding dimension check when updating embedding models so stored max_tokens stays accurate."""
+            model_type = model.get("model_type")
+            if model_type not in ("embedding", "multi_embedding"):
+                return
+
+            base_url = update_payload.get(
+                "base_url", model.get("base_url", ""))
+            api_key = update_payload.get("api_key", model.get("api_key", ""))
+
+            if not base_url or not api_key:
+                return
+
+            combined_config = {
+                "model_type": model_type,
+                "model_repo": model.get("model_repo", ""),
+                "model_name": add_repo_to_name(model.get("model_repo", ""), model.get("model_name", "")),
+                "base_url": base_url,
+                "api_key": api_key,
+            }
+
+            dimension = await embedding_dimension_check(combined_config)
+            if dimension:
+                update_payload["max_tokens"] = dimension
+
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
             for model in existing_models:
                 # Prepare update data, excluding model_type to preserve original type
                 update_data = {k: v for k, v in model_data.items() if k not in ["model_id", "model_type"]}
+                await _try_update_embedding_dimension(model, update_data)
                 update_model_record(model["model_id"], update_data, user_id)
             logging.debug(
                 f"Model {current_display_name} (embedding + multi_embedding) updated successfully")
         else:
             # Single model update
-            current_model_id = existing_models[0]["model_id"]
+            current_model = existing_models[0]
+            current_model_id = current_model["model_id"]
             update_data = {k: v for k, v in model_data.items() if k != "model_id"}
+            await _try_update_embedding_dimension(current_model, update_data)
             update_model_record(current_model_id, update_data, user_id)
             logging.debug(f"Model {current_display_name} updated successfully")
     except LookupError:

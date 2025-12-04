@@ -16,6 +16,7 @@ from celery.exceptions import Retry
 
 from consts.const import ELASTICSEARCH_SERVICE
 from utils.file_management_utils import get_file_size
+from services.redis_service import get_redis_service
 from .app import app
 from .ray_actors import DataProcessorRayActor
 from consts.const import (
@@ -23,6 +24,7 @@ from consts.const import (
     FORWARD_REDIS_RETRY_DELAY_S,
     FORWARD_REDIS_RETRY_MAX,
     DISABLE_RAY_DASHBOARD,
+    ROOT_DIR,
 )
 
 
@@ -30,6 +32,129 @@ logger = logging.getLogger("data_process.tasks")
 
 # Thread lock for initializing Ray to prevent race conditions
 ray_init_lock = threading.Lock()
+
+ROOT_DIR_DISPLAY = ROOT_DIR or "{ROOT_DIR}"
+
+# Internationalized error guide for user-friendly messages
+# Keys are stable error codes; each contains translations for supported languages.
+ERROR_GUIDE = {
+    "ray_init_failed": {
+        "zh": {
+            "message": "Ray集群初始化失败",
+            "solution": "请升级到最新版本并尝试重新部署",
+        },
+        "en": {
+            "message": "Failed to initialize Ray cluster",
+            "solution": "Please upgrade to the latest image version and redeploy.",
+        },
+    },
+    "no_valid_chunks": {
+        "zh": {
+            "message": "数据处理内核无法从文档中提取有效文本",
+            "solution": "请确保文档内容非纯图像",
+        },
+        "en": {
+            "message": "The data processing kernel could not extract valid text from the document",
+            "solution": "Please ensure the document format is supported and the content is not purely images.",
+        },
+    },
+    "vector_service_busy": {
+        "zh": {
+            "message": "向量化模型服务繁忙，无法获取文本向量",
+            "solution": "请更换模型服务提供商，或稍后重试",
+        },
+        "en": {
+            "message": "Vectorization model service is busy and cannot return vectors",
+            "solution": "Please switch the model service provider or try again later.",
+        },
+    },
+    "es_bulk_failed": {
+        "zh": {
+            "message": "向量录入数据库错误",
+            "solution": f"请确保{ROOT_DIR_DISPLAY}/nexent/docker/elasticsearch/ 路径拥有完整写入权限，且存储空间与内存充足",
+        },
+        "en": {
+            "message": "Failed to write vectors into the database",
+            "solution": "Please ensure the Elasticsearch data path has sufficient disk space and write permissions.",
+        },
+    },
+    "embedding_chunks_exceed_limit": {
+        "zh": {
+            "message": "当前切片数量超过向量化模型并行度",
+            "solution": "请增加切片大小以减少切片数量后再试",
+        },
+        "en": {
+            "message": "The current chunk count exceeds the embedding model concurrency limit",
+            "solution": "Please increase the chunk size to reduce the number of chunks and try again.",
+        },
+    },
+}
+
+
+def get_error_template(key: str, lang: str = "zh") -> Optional[Dict[str, str]]:
+    """Return localized error template for the given key."""
+    template = ERROR_GUIDE.get(key)
+    if not template:
+        return None
+    if lang in template:
+        return template[lang]
+    # Fallback to Chinese if specific language is not available
+    return template.get("zh") or next(iter(template.values()))
+
+
+def build_friendly_reason_from_key(key: str, lang: str = "zh") -> str:
+    """
+    Build a friendly_reason string from ERROR_GUIDE.
+
+    This is used only for internal storage; the app layer will split message
+    and solution for frontend display.
+    """
+    tpl = get_error_template(key, lang)
+    if not tpl:
+        return ""
+    message = tpl.get("message") or ""
+    solution = tpl.get("solution") or ""
+    if solution:
+        return f"{message}。建议：{solution}"
+    return message
+
+
+def enrich_error_reason(reason: str) -> Optional[str]:
+    if not reason:
+        return None
+    if "Failed to initialize Ray for Celery worker" in reason:
+        return build_friendly_reason_from_key("ray_init_failed")
+    return None
+
+
+def save_error_to_redis(task_id: str, error_reason: str, start_time: float):
+    """
+    Save error information to Redis
+
+    Args:
+        task_id: Celery task ID
+        error_reason: Short error reason summary
+        start_time: Task start timestamp (unused, kept for compatibility)
+    """
+    if not task_id:
+        logger.warning("Cannot save error info: task_id is empty")
+        return
+    if not error_reason:
+        logger.warning(
+            f"Cannot save error info for task {task_id}: error_reason is empty")
+        return
+    try:
+        redis_service = get_redis_service()
+        success = redis_service.save_error_info(task_id, error_reason)
+        if success:
+            logger.info(
+                f"Successfully saved error info for task {task_id}: {error_reason[:100]}...")
+        else:
+            logger.warning(
+                f"Failed to save error info for task {task_id}: save_error_info returned False")
+    except Exception as e:
+        logger.error(
+            f"Failed to save error info to Redis for task {task_id}: {str(e)}", exc_info=True)
 
 
 def init_ray_in_worker():
@@ -58,7 +183,7 @@ def init_ray_in_worker():
         logger.info("Ray initialized successfully for Celery worker.")
     except Exception as e:
         logger.error(f"Failed to initialize Ray for Celery worker: {e}")
-        raise
+        raise RuntimeError("Failed to initialize Ray for Celery worker") from e
 
 
 def run_async(coro):
@@ -282,6 +407,18 @@ def process(
             raise NotImplementedError(
                 f"Source type '{source_type}' not yet supported")
 
+        chunk_count = len(chunks) if chunks else 0
+        if chunk_count == 0:
+            friendly_reason = build_friendly_reason_from_key("no_valid_chunks")
+            raise Exception(json.dumps({
+                "message": "Ray processing completed but produced 0 chunks",
+                "index_name": index_name,
+                "task_name": "process",
+                "source": source,
+                "original_filename": original_filename,
+                "friendly_reason": friendly_reason
+            }, ensure_ascii=False))
+
         # Update task state to SUCCESS after Ray processing completes
         # This transitions from STARTED (PROCESSING) to SUCCESS (WAIT_FOR_FORWARDING)
         self.update_state(
@@ -316,31 +453,103 @@ def process(
 
     except Exception as e:
         logger.error(f"Error processing file {source}: {str(e)}")
+        # task_id is already defined at the start of the function
         try:
+            # Try to parse the exception as JSON (it might be our custom JSON error)
+            error_message = str(e)
+            friendly_reason = None
+            parsed_error = None
+
+            try:
+                parsed_error = json.loads(error_message)
+                if isinstance(parsed_error, dict):
+                    error_message = parsed_error.get("message", error_message)
+                    friendly_reason = parsed_error.get("friendly_reason")
+                    logger.debug(
+                        f"Parsed JSON error for task {task_id}: friendly_reason={friendly_reason}"
+                    )
+            except (json.JSONDecodeError, TypeError):
+                # Not a JSON string, use as-is
+                logger.debug(
+                    f"Exception is not JSON format for task {task_id}, using raw message"
+                )
+
+            # Build error_info for re-raising
             error_info = {
-                "message": str(e),
+                "message": error_message,
                 "index_name": index_name,
                 "task_name": "process",
                 "source": source,
-                "original_filename": original_filename
+                "original_filename": original_filename,
             }
+            if friendly_reason:
+                error_info["friendly_reason"] = friendly_reason
+
+            # Determine friendly reason for storage
+            if not friendly_reason:
+                friendly_reason = enrich_error_reason(error_message)
+            reason_to_store = friendly_reason or error_message
+            if len(reason_to_store) > 200:
+                reason_to_store = reason_to_store[:200] + "..."
+
+            # Save error info to Redis BEFORE re-raising
+            logger.info(
+                f"Attempting to save error info for task {task_id} with reason: {reason_to_store[:100]}..."
+            )
+            save_error_to_redis(task_id, reason_to_store, start_time)
+
             self.update_state(
                 meta={
-                    'source': error_info.get('source', ''),
-                    'index_name': error_info.get('index_name', ''),
-                    'task_name': error_info.get('task_name', ''),
-                    'original_filename': error_info.get('original_filename', ''),
-                    'custom_error': error_info.get('message', str(e)),
-                    'stage': 'text_extraction_failed'
+                    "source": error_info.get("source", ""),
+                    "index_name": error_info.get("index_name", ""),
+                    "task_name": error_info.get("task_name", ""),
+                    "original_filename": error_info.get(
+                        "original_filename", ""
+                    ),
+                    "custom_error": error_info.get("message", str(e)),
+                    "stage": "text_extraction_failed",
                 }
             )
             raise Exception(json.dumps(error_info, ensure_ascii=False))
         except Exception as ex:
             logger.error(f"Error serializing process exception: {str(ex)}")
+            # Try to save error even if serialization fails
+            try:
+                error_message = str(e)
+                friendly_reason = None
+                parsed_error = None
+
+                try:
+                    parsed_error = json.loads(error_message)
+                    if isinstance(parsed_error, dict):
+                        error_message = parsed_error.get(
+                            "message", error_message
+                        )
+                        friendly_reason = parsed_error.get("friendly_reason")
+                        logger.debug(
+                            "Fallback serialization: parsed JSON error for task "
+                            f"{task_id}, friendly_reason={friendly_reason}"
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug(
+                        "Fallback serialization: exception is not JSON format "
+                        f"for task {task_id}, using raw message"
+                    )
+
+                if not friendly_reason:
+                    friendly_reason = enrich_error_reason(error_message)
+
+                reason_to_store = friendly_reason or error_message
+                if len(reason_to_store) > 200:
+                    reason_to_store = reason_to_store[:200] + "..."
+
+                save_error_to_redis(task_id, reason_to_store, start_time)
+            except Exception:
+                pass
             self.update_state(
                 meta={
-                    'custom_error': str(e),
-                    'stage': 'text_extraction_failed'
+                    "custom_error": str(e),
+                    "stage": "text_extraction_failed",
                 }
             )
             raise
@@ -377,6 +586,38 @@ def forward(
     filename = original_filename
 
     try:
+        # Before doing any heavy work, check whether this task has been
+        # explicitly cancelled (for example, because the user deleted the
+        # document from the knowledge base configuration page).
+        try:
+            redis_service = get_redis_service()
+            if redis_service.is_task_cancelled(task_id):
+                logger.info(
+                    f"[{self.request.id}] FORWARD TASK: Detected cancellation flag for task {task_id}; "
+                    f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
+                )
+                # Treat this as a graceful early exit. We still return a
+                # structured payload so callers can consider the task done.
+                return {
+                    'task_id': task_id,
+                    'source': source,
+                    'index_name': index_name,
+                    'original_filename': original_filename,
+                    'chunks_stored': 0,
+                    'storage_time': 0,
+                    'es_result': {
+                        "success": False,
+                        "message": "Indexing cancelled because document was deleted.",
+                        "total_indexed": 0,
+                        "total_submitted": 0,
+                    },
+                }
+        except Exception as cancel_check_exc:
+            logger.warning(
+                f"[{self.request.id}] FORWARD TASK: Failed to check cancellation flag for task {task_id}: "
+                f"{cancel_check_exc}"
+            )
+
         chunks = processed_data.get('chunks')
         # If chunks are not in payload, try loading from Redis via the redis_key
         if (not chunks) and processed_data.get('redis_key'):
@@ -441,18 +682,8 @@ def forward(
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Received data for source '{original_source}' with {len(chunks) if chunks else 'None'} chunks")
 
-        # Update task state to FORWARDING
-        self.update_state(
-            state=states.STARTED,
-            meta={
-                'source': original_source,
-                'index_name': original_index_name,
-                'original_filename': filename,
-                'task_name': 'forward',
-                'start_time': start_time,
-                'stage': 'vectorizing_and_storing'
-            }
-        )
+        # Calculate total chunks for progress tracking
+        total_chunks = len(chunks) if chunks else 0
 
         if chunks is None:
             raise Exception(json.dumps({
@@ -495,12 +726,14 @@ def forward(
             formatted_chunks.append(formatted_chunk)
 
         if len(formatted_chunks) == 0:
+            friendly_reason = build_friendly_reason_from_key("no_valid_chunks")
             raise Exception(json.dumps({
                 "message": "No valid chunks to forward after formatting",
                 "index_name": original_index_name,
                 "task_name": "forward",
                 "source": original_source,
-                "original_filename": original_filename
+                "original_filename": original_filename,
+                "friendly_reason": friendly_reason
             }, ensure_ascii=False))
 
         async def index_documents():
@@ -518,84 +751,131 @@ def forward(
             headers = {"Content-Type": "application/json"}
             if authorization:
                 headers["Authorization"] = authorization
+            # Add task_id header for progress tracking
+            headers["X-Task-Id"] = task_id
 
-            max_retries = 5
-            retry_delay = 5
-            for retry in range(max_retries):
-                try:
-                    connector = aiohttp.TCPConnector(verify_ssl=False)
-                    # Increased timeout for large documents
-                    timeout = aiohttp.ClientTimeout(total=120)
+            try:
+                connector = aiohttp.TCPConnector(verify_ssl=False)
+                # Increased timeout for large documents and slow ES bulk operations
+                # Use generous total timeout to avoid marking long-running but successful
+                # indexing as failed.
+                timeout = aiohttp.ClientTimeout(total=600)
 
-                    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                        async with session.post(
-                            full_url,
-                            headers=headers,
-                            json=formatted_chunks,
-                            raise_for_status=True
-                        ) as response:
-                            result = await response.json()
-                            return result
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                    async with session.post(
+                        full_url,
+                        headers=headers,
+                        json=formatted_chunks,
+                        raise_for_status=True
+                    ) as response:
+                        result = await response.json()
+                        return result
 
-                except aiohttp.ClientResponseError as e:
-                    if e.status == 503 and retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"ElasticSearch service unavailable: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
-                except aiohttp.ClientConnectorError as e:
-                    logger.error(
-                        f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
-                    if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        logger.warning(
-                            f"[{self.request.id}] FORWARD TASK: Connection error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"Failed to connect to API: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
-                except asyncio.TimeoutError as e:
-                    if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        logger.warning(
-                            f"[{self.request.id}] FORWARD TASK: Timeout when indexing documents: {str(e)}. Retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"Timeout after {max_retries} attempts: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
-                except Exception as e:
-                    if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        logger.warning(
-                            f"[{self.request.id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"Unexpected error when indexing documents: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
+            except aiohttp.ClientResponseError as e:
+                # 400: embedding model reports chunk count exceeds concurrency
+                if e.status == 400:
+                    friendly_reason = build_friendly_reason_from_key(
+                        "embedding_chunks_exceed_limit"
+                    )
+                    raise Exception(json.dumps({
+                        "message": f"ElasticSearch service returned 400 Bad Request: {str(e)}",
+                        "index_name": original_index_name,
+                        "task_name": "forward",
+                        "source": original_source,
+                        "original_filename": original_filename,
+                        "friendly_reason": friendly_reason
+                    }, ensure_ascii=False))
+
+                # Timeout from Elasticsearch refresh / bulk operations: stop retrying and treat as es_bulk_failed
+                timeout_markers = [
+                    "Connection timeout caused by",
+                    "Read timed out",
+                    "ReadTimeoutError"
+                ]
+                if any(marker in str(e) for marker in timeout_markers):
+                    friendly_reason = build_friendly_reason_from_key(
+                        "es_bulk_failed"
+                    )
+                    raise Exception(json.dumps({
+                        "message": f"ElasticSearch operation timed out: {str(e)}",
+                        "index_name": original_index_name,
+                        "task_name": "forward",
+                        "source": original_source,
+                        "original_filename": original_filename,
+                        "friendly_reason": friendly_reason
+                    }, ensure_ascii=False))
+
+                # 503: vector service busy: bubble up immediately, let caller decide
+                if e.status == 503:
+                    friendly_reason = build_friendly_reason_from_key(
+                        "vector_service_busy"
+                    )
+                    raise Exception(json.dumps({
+                        "message": f"ElasticSearch service unavailable: {str(e)}",
+                        "index_name": original_index_name,
+                        "task_name": "forward",
+                        "source": original_source,
+                        "original_filename": original_filename,
+                        "friendly_reason": friendly_reason
+                    }, ensure_ascii=False))
+
+                # Other client response errors: bubble up
+                raise Exception(json.dumps({
+                    "message": f"ElasticSearch service unavailable: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
+            except aiohttp.ClientConnectorError as e:
+                logger.error(
+                    f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
+                raise Exception(json.dumps({
+                    "message": f"Failed to connect to API: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
+            except asyncio.TimeoutError as e:
+                logger.warning(
+                    f"[{self.request.id}] FORWARD TASK: Timeout when indexing documents: {str(e)}.")
+                raise Exception(json.dumps({
+                    "message": f"Timeout when indexing documents: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
+            except Exception as e:
+                logger.error(
+                    f"[{self.request.id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}.")
+                raise Exception(json.dumps({
+                    "message": f"Unexpected error when indexing documents: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
 
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Starting ES indexing for {len(formatted_chunks)} chunks to index '{original_index_name}'...")
+
+        # Update task state with total chunks before starting vectorization
+        self.update_state(
+            state=states.STARTED,
+            meta={
+                'source': original_source,
+                'index_name': original_index_name,
+                'original_filename': filename,
+                'task_name': 'forward',
+                'start_time': start_time,
+                'stage': 'vectorizing_and_storing',
+                'total_chunks': total_chunks,
+                'processed_chunks': 0  # Will be updated during vectorization via Redis
+            }
+        )
+
         es_result = run_async(index_documents())
         logger.debug(
             f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
@@ -612,12 +892,15 @@ def forward(
                 logger.info(f"original_index_name: {original_index_name}")
                 logger.info("task_name: forward")
                 logger.info(f"source: {original_source}")
+                friendly_reason = build_friendly_reason_from_key(
+                    "es_bulk_failed")
                 raise Exception(json.dumps({
                     "message": f"Failure reported by main_server. Expected {total_submitted} chunks, indexed {total_indexed} chunks.",
                     "index_name": original_index_name,
                     "task_name": "forward",
                     "source": original_source,
-                    "original_filename": original_filename
+                    "original_filename": original_filename,
+                    "friendly_reason": friendly_reason
                 }, ensure_ascii=False))
         elif isinstance(es_result, dict) and not es_result.get("success"):
             error_message = es_result.get(
@@ -638,6 +921,12 @@ def forward(
                 "original_filename": original_filename
             }, ensure_ascii=False))
         end_time = time.time()
+
+        # Get final indexed count from result
+        final_processed = 0
+        if isinstance(es_result, dict) and es_result.get("success"):
+            final_processed = es_result.get("total_indexed", len(chunks))
+
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Updating task state to SUCCESS after ES indexing completion")
         self.update_state(
@@ -650,7 +939,9 @@ def forward(
                 'original_filename': original_filename,
                 'task_name': 'forward',
                 'es_result': es_result,
-                'stage': 'completed'
+                'stage': 'completed',
+                'total_chunks': total_chunks,
+                'processed_chunks': final_processed
             }
         )
 
@@ -667,22 +958,46 @@ def forward(
         }
     except Exception as e:
         # If it's an Exception, all go here (including our custom JSON message)
+        task_id = self.request.id
         try:
             error_info = json.loads(str(e))
+            error_message = error_info.get('message', str(e))
             logger.error(
-                f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_info.get('message', str(e))}")
+                f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_message}")
+
+            friendly_reason = error_info.get(
+                'friendly_reason') or enrich_error_reason(error_message)
+            reason_to_store = friendly_reason or error_message
+            if len(reason_to_store) > 200:
+                reason_to_store = reason_to_store[:200] + "..."
+
+            # Save error info to Redis BEFORE re-raising
+            logger.info(
+                f"Attempting to save error info for task {task_id} with reason: {reason_to_store[:100]}...")
+            save_error_to_redis(task_id, reason_to_store, start_time)
+
             self.update_state(
                 meta={
                     'source': error_info.get('source', ''),
                     'index_name': error_info.get('index_name', ''),
                     'task_name': error_info.get('task_name', ''),
                     'original_filename': error_info.get('original_filename', ''),
-                    'custom_error': error_info.get('message', str(e)),
+                    'custom_error': error_message,
                     'stage': 'forward_task_failed'
                 }
             )
-        except Exception as e:
+        except Exception:
             logger.error(f"Error forwarding chunks: {str(e)}")
+            # Try to save error even if parsing fails
+            try:
+                error_message = str(e)
+                friendly_reason = enrich_error_reason(error_message)
+                reason_to_store = friendly_reason or error_message
+                if len(reason_to_store) > 200:
+                    reason_to_store = reason_to_store[:200] + "..."
+                save_error_to_redis(task_id, reason_to_store, start_time)
+            except Exception:
+                pass
             self.update_state(
                 meta={
                     'custom_error': str(e),

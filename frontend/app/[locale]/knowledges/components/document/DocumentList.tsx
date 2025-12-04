@@ -23,7 +23,7 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
 import { Document } from "@/types/knowledgeBase";
 import { ModelOption } from "@/types/modelConfig";
-import { formatFileSize, sortByStatusAndDate } from "@/lib/utils";
+import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
 
@@ -47,7 +47,10 @@ const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
 interface DocumentListProps {
   documents: Document[];
   onDelete: (id: string) => void;
+  // User-facing knowledge base name (display name)
   knowledgeBaseName?: string;
+  // Internal knowledge base ID / Elasticsearch index name
+  knowledgeBaseId?: string;
   modelMismatch?: boolean;
   currentModel?: string;
   knowledgeBaseModel?: string;
@@ -77,6 +80,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     {
       documents,
       onDelete,
+      knowledgeBaseId = "",
       knowledgeBaseName = "",
       modelMismatch = false,
       currentModel = "",
@@ -108,8 +112,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
     const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
 
-    // Sort documents by status and date
-    const sortedDocuments = sortByStatusAndDate(documents);
+    // Sort documents by create_time (latest first)
+    const sortedDocuments = [...documents].sort((a, b) => {
+      const aTime = new Date(a.create_time).getTime();
+      const bTime = new Date(b.create_time).getTime();
+      const safeA = Number.isNaN(aTime) ? 0 : aTime;
+      const safeB = Number.isNaN(bTime) ? 0 : bTime;
+      return safeB - safeA;
+    });
 
     // Get file icon
     const getFileIcon = (type: string): string => {
@@ -244,10 +254,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     // Get summary when showing detailed content
     React.useEffect(() => {
       const fetchSummary = async () => {
-        if (showDetail && knowledgeBaseName) {
+        if (showDetail && knowledgeBaseId) {
           try {
             const result = await knowledgeBaseService.getSummary(
-              knowledgeBaseName
+              knowledgeBaseId
             );
             setSummary(result);
           } catch (error) {
@@ -261,7 +271,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     // Handle auto summary
     const handleAutoSummary = async () => {
-      if (!knowledgeBaseName) {
+      if (!knowledgeBaseId) {
         message.warning(t("document.summary.selectKnowledgeBase"));
         return;
       }
@@ -271,7 +281,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
       try {
         const result = await knowledgeBaseService.summaryIndex(
-          knowledgeBaseName,
+          knowledgeBaseId,
           1000,
           (newText) => {
             setSummary((prev) => prev + newText);
@@ -295,7 +305,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     // Handle save summary
     const handleSaveSummary = async () => {
-      if (!knowledgeBaseName) {
+      if (!knowledgeBaseId) {
         message.warning(t("document.summary.selectKnowledgeBase"));
         return;
       }
@@ -307,7 +317,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
       setIsSaving(true);
       try {
-        await knowledgeBaseService.changeSummary(knowledgeBaseName, summary);
+        await knowledgeBaseService.changeSummary(knowledgeBaseId, summary);
         message.success(t("document.summary.saveSuccess"));
       } catch (error: any) {
         log.error(t("document.summary.saveError"), error);
@@ -518,14 +528,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               <div className="text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
                 <p className="text-sm text-gray-600">
-                  {isNewlyCreatedAndWaiting 
+                  {isNewlyCreatedAndWaiting
                     ? t("document.status.waitingForTask")
                     : t("document.status.loadingList")}
                 </p>
               </div>
             </div>
           ) : isCreatingMode ? (
-            (hasDocuments || isUploading || docState.isLoadingDocuments) ? (
+            hasDocuments || isUploading || docState.isLoadingDocuments ? (
               <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
@@ -603,7 +613,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       </td>
                       <td className={LAYOUT.CELL_PADDING}>
                         <div className="flex items-center">
-                          <DocumentStatus status={doc.status} showIcon={true} />
+                          <DocumentStatus
+                            status={doc.status}
+                            showIcon={true}
+                            kbId={knowledgeBaseId}
+                            docId={doc.id}
+                            processedChunkNum={doc.processed_chunk_num}
+                            totalChunkNum={doc.total_chunk_num}
+                          />
                         </div>
                       </td>
                       <td
@@ -620,13 +637,11 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         <button
                           onClick={() => onDelete(doc.id)}
                           className={LAYOUT.ACTION_TEXT}
-                          disabled={
-                            doc.status ===
-                              DOCUMENT_STATUS.WAIT_FOR_PROCESSING ||
+                          title={
                             doc.status === DOCUMENT_STATUS.PROCESSING ||
-                            doc.status ===
-                              DOCUMENT_STATUS.WAIT_FOR_FORWARDING ||
                             doc.status === DOCUMENT_STATUS.FORWARDING
+                              ? t("document.delete.terminateTask")
+                              : undefined
                           }
                         >
                           {t("common.delete")}
@@ -660,10 +675,11 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
-            disabled={!isCreatingMode && !knowledgeBaseName}
+            disabled={!isCreatingMode && !knowledgeBaseId}
             componentHeight={uploadHeight}
             isCreatingMode={isCreatingMode}
-            indexName={knowledgeBaseName}
+            // Use internal ID for backend operations; fall back to name in creation mode
+            indexName={knowledgeBaseId || knowledgeBaseName}
             newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
             modelMismatch={modelMismatch}
           />

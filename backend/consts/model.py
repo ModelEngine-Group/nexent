@@ -59,6 +59,7 @@ class ModelRequest(BaseModel):
     connect_status: Optional[str] = ''
     expected_chunk_size: Optional[int] = None
     maximum_chunk_size: Optional[int] = None
+    chunk_batch: Optional[int] = None
 
 
 class ProviderModelRequest(BaseModel):

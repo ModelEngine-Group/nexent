@@ -523,6 +523,10 @@
   "document.status.completed": "Ready",
   "document.status.processFailed": "Process Failed",
   "document.status.forwardFailed": "Forward Failed",
+  "document.progress.chunksProcessed": "Processed {{processed}}/{{total}} chunks ({{percent}}%)",
+  "document.error.reason": "Error Reason",
+  "document.error.suggestion": "Suggestion",
+  "document.error.noReason": "No error reason available",
   "document.modal.deleteConfirm.title": "Confirm Delete Document",
   "document.modal.deleteConfirm.content": "Are you sure you want to delete this document? This action cannot be undone.",
   "document.message.noFiles": "Please select files first",
@@ -656,6 +660,7 @@
   "model.group.silicon": "Silicon Flow Models",
   "model.group.custom": "Custom Models",
   "model.status.tooltip": "Click to verify connectivity",
+  "model.dialog.embeddingConfig.title": "Edit Embedding Model: {{modelName}}",
 
   "appConfig.appName.label": "Application Name",
   "appConfig.appName.placeholder": "Please enter your application name",
@@ -703,6 +708,7 @@
   "modelConfig.slider.chunkingSize": "Chunk Size",
   "modelConfig.slider.expectedChunkSize": "Expected Chunk Size",
   "modelConfig.slider.maximumChunkSize": "Maximum Chunk Size",
+  "modelConfig.input.chunkingBatchSize": "Concurrent Request Count",
 
   "businessLogic.title": "Describe how should this agent work",
   "businessLogic.placeholder": "Please describe your business scenario and requirements...",
@@ -1126,7 +1132,7 @@
   "market.totalAgents": "Total {{total}} agents",
   "market.error.loadCategories": "Failed to load categories",
   "market.error.loadAgents": "Failed to load agents",
-  
+
   "market.detail.title": "Agent Details",
   "market.detail.subtitle": "Complete information and configuration",
   "market.detail.tabs.basic": "Basic Info",
@@ -1219,7 +1225,7 @@
   "market.error.server.description": "The market server encountered an error. Our team has been notified. Please try again later.",
   "market.error.unknown.title": "Something Went Wrong",
   "market.error.unknown.description": "An unexpected error occurred. Please try again.",
-  
+
   "common.loading": "Loading",
   "common.save": "Save",
   "common.cancel": "Cancel",

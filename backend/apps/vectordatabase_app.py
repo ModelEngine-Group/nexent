@@ -15,6 +15,7 @@ from services.vectordatabase_service import (
 )
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
+from utils.file_management_utils import get_all_files_status
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -49,7 +50,8 @@ def create_new_index(
     """Create a new vector index and store it in the knowledge table"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        return ElasticSearchService.create_index(index_name, embedding_dim, vdb_core, user_id, tenant_id)
+        # Treat path parameter as user-facing knowledge base name for new creations
+        return ElasticSearchService.create_knowledge_base(index_name, embedding_dim, vdb_core, user_id, tenant_id)
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -99,7 +101,9 @@ def create_index_documents(
         data: List[Dict[str, Any]
                    ] = Body(..., description="Document List to process"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
-        authorization: Optional[str] = Header(None)
+        authorization: Optional[str] = Header(None),
+        task_id: Optional[str] = Header(
+            None, alias="X-Task-Id", description="Task ID for progress tracking"),
 ):
     """
     Index documents with embeddings, creating the index if it doesn't exist.
@@ -108,7 +112,13 @@ def create_index_documents(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         embedding_model = get_embedding_model(tenant_id)
-        return ElasticSearchService.index_documents(embedding_model, index_name, data, vdb_core)
+        return ElasticSearchService.index_documents(
+            embedding_model=embedding_model,
+            index_name=index_name,
+            data=data,
+            vdb_core=vdb_core,
+            task_id=task_id,
+        )
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -185,6 +195,87 @@ def delete_documents(
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error delete indexing documents: {e}")
+
+
+@router.get("/{index_name}/documents/{path_or_url:path}/error-info")
+async def get_document_error_info(
+        index_name: str = Path(..., description="Name of the index"),
+        path_or_url: str = Path(...,
+                                description="Path or URL of the document"),
+        authorization: Optional[str] = Header(None)
+):
+    """Get error information for a document"""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+
+        # Get task_id from file status
+        celery_task_files = await get_all_files_status(index_name)
+        file_status = celery_task_files.get(path_or_url)
+
+        if not file_status:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Document {path_or_url} not found in index {index_name}"
+            )
+
+        task_id = file_status.get('latest_task_id', '')
+        if not task_id:
+            return {
+                "status": "success",
+                "error_reason": None,
+                "suggestion": None,
+            }
+
+        # Get raw error info from Redis
+        redis_service = get_redis_service()
+        raw_error = redis_service.get_error_info(task_id)
+
+        # Parse into reason + suggestion
+        error_reason = None
+        suggestion = None
+
+        if raw_error:
+            text = raw_error
+
+            # Try to parse JSON (legacy format where full JSON string was stored)
+            if isinstance(text, str) and text.strip().startswith("{"):
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        friendly = parsed.get("friendly_reason")
+                        message = parsed.get("message")
+                        if isinstance(friendly, str):
+                            text = friendly
+                        elif isinstance(message, str):
+                            text = message
+                except Exception:
+                    # If JSON parsing fails, fall back to raw text
+                    pass
+
+            if isinstance(text, str):
+                # Split our friendly_reason format: "<reason>。建议：<suggestion>"
+                marker = "。建议："
+                if marker in text:
+                    reason_part, suggestion_part = text.split(marker, 1)
+                    error_reason = reason_part or None
+                    suggestion = suggestion_part or None
+                else:
+                    error_reason = text
+
+        return {
+            "status": "success",
+            "error_reason": error_reason,
+            "suggestion": suggestion,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error getting error info for document {path_or_url}: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error getting error info: {str(e)}"
+        )
 
 
 # Health check

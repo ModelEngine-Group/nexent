@@ -524,6 +524,10 @@
   "document.status.completed": "已就绪",
   "document.status.processFailed": "解析失败",
   "document.status.forwardFailed": "入库失败",
+  "document.progress.chunksProcessed": "已处理 {{processed}}/{{total}} 个切片 ({{percent}}%)",
+  "document.error.reason": "错误原因",
+  "document.error.suggestion": "建议",
+  "document.error.noReason": "暂无错误原因",
   "document.modal.deleteConfirm.title": "确认删除文档",
   "document.modal.deleteConfirm.content": "确定要删除这个文档吗？删除后无法恢复。",
   "document.message.noFiles": "请先选择文件",
@@ -656,6 +660,7 @@
   "model.group.custom": "自定义模型",
   "model.status.tooltip": "点击可验证连通性",
   "model.dialog.success.updateSuccess": "更新成功",
+  "model.dialog.embeddingConfig.title": "修改向量模型: {{modelName}}",
 
   "appConfig.appName.label": "应用名称",
   "appConfig.appName.placeholder": "请输入您的应用名称",
@@ -703,6 +708,7 @@
   "modelConfig.slider.chunkingSize": "文档切片大小",
   "modelConfig.slider.expectedChunkSize": "期望切片大小",
   "modelConfig.slider.maximumChunkSize": "最大切片大小",
+  "modelConfig.input.chunkingBatchSize": "单次请求切片量",
 
   "businessLogic.title": "描述 Agent 应该如何工作",
   "businessLogic.placeholder": "请描述您的业务场景和需求...",
@@ -1105,7 +1111,7 @@
   "market.totalAgents": "共 {{total}} 个智能体",
   "market.error.loadCategories": "加载分类失败",
   "market.error.loadAgents": "加载智能体失败",
-  
+
   "market.detail.title": "智能体详情",
   "market.detail.subtitle": "完整信息和配置",
   "market.detail.tabs.basic": "基础信息",
@@ -1212,14 +1218,14 @@
   "mcpTools.comingSoon.feature2": "同步、查看和组织 MCP 工具列表",
   "mcpTools.comingSoon.feature3": "监控 MCP 连接状态和使用情况",
   "mcpTools.comingSoon.badge": "即将推出",
-  
+
   "monitoring.comingSoon.title": "监控与运维中心即将推出",
   "monitoring.comingSoon.description": "面向智能体的统一监控与运维中心，用于实时跟踪健康状态、性能指标与异常事件。",
   "monitoring.comingSoon.feature1": "监控智能体健康状态、延迟与错误率",
   "monitoring.comingSoon.feature2": "查看并筛选智能体运行日志和历史任务",
   "monitoring.comingSoon.feature3": "配置告警策略与关键事件的运维操作",
   "monitoring.comingSoon.badge": "即将推出",
-  
+
   "common.loading": "加载中",
   "common.save": "保存",
   "common.cancel": "取消",

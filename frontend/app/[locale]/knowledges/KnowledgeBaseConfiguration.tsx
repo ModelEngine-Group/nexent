@@ -618,6 +618,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         knowledgeBasePollingService
           .handleNewKnowledgeBaseCreation(
+            newKB.id,
             newKB.name,
             0,
             filesToUpload.length,
@@ -695,9 +696,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     kbState.activeKnowledgeBase?.name || (isCreatingMode ? newKbName : "");
 
   // Check if current knowledge base is newly created and waiting for documents
-  const isNewlyCreatedAndWaiting = 
-    newlyCreatedKbId !== null && 
-    kbState.activeKnowledgeBase?.id === newlyCreatedKbId && 
+  const isNewlyCreatedAndWaiting =
+    newlyCreatedKbId !== null &&
+    kbState.activeKnowledgeBase?.id === newlyCreatedKbId &&
     viewingDocuments.length === 0;
 
   // As long as any document upload succeeds, immediately switch creation mode to false
@@ -760,8 +761,6 @@ function DataConfig({ isActive }: DataConfigProps) {
       knowledgeBasePollingService.setActiveKnowledgeBase(
         kbState.activeKnowledgeBase.id
       );
-    } else if (isCreatingMode && newKbName) {
-      knowledgeBasePollingService.setActiveKnowledgeBase(newKbName);
     } else {
       knowledgeBasePollingService.setActiveKnowledgeBase(null);
     }
@@ -889,6 +888,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 documents={[]}
                 onDelete={() => {}}
                 isCreatingMode={true}
+                knowledgeBaseId={""}
                 knowledgeBaseName={newKbName}
                 onNameChange={handleNameChange}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
@@ -906,6 +906,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               <DocumentList
                 documents={viewingDocuments}
                 onDelete={handleDeleteDocument}
+                knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
                 modelMismatch={
                   !isKnowledgeBaseSelectable(kbState.activeKnowledgeBase)

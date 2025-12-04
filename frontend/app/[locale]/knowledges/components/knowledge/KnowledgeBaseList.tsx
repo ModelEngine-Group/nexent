@@ -73,27 +73,53 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const { t } = useTranslation();
 
   // Format date function, only keep date part
-  const formatDate = (dateString: number) => {
+  const formatDate = (dateValue: any) => {
     try {
-      const date = new Date(dateString);
-      return date.toISOString().split('T')[0]; // Only return YYYY-MM-DD part
+      const date =
+        typeof dateValue === "number"
+          ? new Date(dateValue)
+          : new Date(dateValue);
+      return isNaN(date.getTime())
+        ? String(dateValue ?? "")
+        : date.toISOString().split("T")[0]; // Only return YYYY-MM-DD part
     } catch (e) {
-      return dateString; // If parsing fails, return original string
+      return String(dateValue ?? ""); // If parsing fails, return original string
     }
   };
 
+  // Helper to safely extract timestamp for sorting
+  const getTimestamp = (value: any): number => {
+    if (!value) return 0;
+    if (typeof value === "number") return value;
+    const t = Date.parse(value);
+    return Number.isNaN(t) ? 0 : t;
+  };
+
+  // Sort knowledge bases by update time (fallback to creation time), latest first
+  const sortedKnowledgeBases = [...knowledgeBases].sort((a, b) => {
+    const aTime = getTimestamp(a.updatedAt ?? a.createdAt);
+    const bTime = getTimestamp(b.updatedAt ?? b.createdAt);
+    return bTime - aTime;
+  });
 
   return (
-    <div className="w-full bg-white border border-gray-200 rounded-md flex flex-col" style={{ height: containerHeight }}>
+    <div
+      className="w-full bg-white border border-gray-200 rounded-md flex flex-col"
+      style={{ height: containerHeight }}
+    >
       {/* Fixed header area */}
-      <div className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}>
+      <div
+        className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}
+      >
         <div className="flex items-center justify-between">
           <div>
-            <h3 className={`${KB_LAYOUT.TITLE_MARGIN} ${KB_LAYOUT.TITLE_TEXT} text-gray-800`}>
-              {t('knowledgeBase.list.title')}
+            <h3
+              className={`${KB_LAYOUT.TITLE_MARGIN} ${KB_LAYOUT.TITLE_TEXT} text-gray-800`}
+            >
+              {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center" style={{ gap: '6px' }}>
+          <div className="flex items-center" style={{ gap: "6px" }}>
             <Button
               style={{
                 padding: "4px 15px",
@@ -103,14 +129,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 gap: "8px",
                 backgroundColor: "#1677ff",
                 color: "white",
-                border: "none"
+                border: "none",
               }}
               className="hover:!bg-blue-600"
               type="primary"
               onClick={onCreateNew}
               icon={<PlusOutlined />}
             >
-              {t('knowledgeBase.button.create')}
+              {t("knowledgeBase.button.create")}
             </Button>
             <Button
               style={{
@@ -121,22 +147,24 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 gap: "8px",
                 backgroundColor: "#1677ff",
                 color: "white",
-                border: "none"
+                border: "none",
               }}
               className="hover:!bg-blue-600"
               type="primary"
               onClick={onSync}
             >
-              <span style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "14px",
-                height: "14px"
-              }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "14px",
+                  height: "14px",
+                }}
+              >
                 <SyncOutlined spin={isLoading} style={{ color: "white" }} />
               </span>
-              <span>{t('knowledgeBase.button.sync')}</span>
+              <span>{t("knowledgeBase.button.sync")}</span>
             </Button>
           </div>
         </div>
@@ -146,9 +174,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
       <div className="border-b border-gray-200 shrink-0 relative z-10 shadow-md">
         <div className="px-5 py-2 bg-blue-50">
           <div className="flex items-center">
-            <span className="font-medium text-blue-700">{t('knowledgeBase.selected.prefix')} </span>
-            <span className="mx-1 text-blue-600 font-bold text-lg">{selectedIds.length}</span>
-            <span className="font-medium text-blue-700">{t('knowledgeBase.selected.suffix')}</span>
+            <span className="font-medium text-blue-700">
+              {t("knowledgeBase.selected.prefix")}{" "}
+            </span>
+            <span className="mx-1 text-blue-600 font-bold text-lg">
+              {selectedIds.length}
+            </span>
+            <span className="font-medium text-blue-700">
+              {t("knowledgeBase.selected.suffix")}
+            </span>
           </div>
 
           {selectedIds.length > 0 && (
@@ -190,23 +224,29 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
       {/* Scrollable knowledge base list area */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        {knowledgeBases.length > 0 ? (
+        {sortedKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
-            {knowledgeBases.map((kb, index) => {
-              const canSelect = isSelectable(kb)
-              const isSelected = selectedIds.includes(kb.id)
-              const isActive = activeKnowledgeBase?.id === kb.id
-              const isMismatchedAndSelected = isSelected && !canSelect
+            {sortedKnowledgeBases.map((kb, index) => {
+              const canSelect = isSelectable(kb);
+              const isSelected = selectedIds.includes(kb.id);
+              const isActive = activeKnowledgeBase?.id === kb.id;
+              const isMismatchedAndSelected = isSelected && !canSelect;
 
               return (
                 <div
                   key={kb.id}
-                  className={`${KB_LAYOUT.ROW_PADDING} px-2 hover:bg-gray-50 cursor-pointer transition-colors ${index > 0 ? "border-t border-gray-200" : ""}`}
+                  className={`${
+                    KB_LAYOUT.ROW_PADDING
+                  } px-2 hover:bg-gray-50 cursor-pointer transition-colors ${
+                    index > 0 ? "border-t border-gray-200" : ""
+                  }`}
                   style={{
-                    borderLeftWidth: '4px',
-                    borderLeftStyle: 'solid',
-                    borderLeftColor: isActive ? '#3b82f6' : 'transparent',
-                    backgroundColor: isActive ? 'rgb(226, 240, 253)' : 'inherit'
+                    borderLeftWidth: "4px",
+                    borderLeftStyle: "solid",
+                    borderLeftColor: isActive ? "#3b82f6" : "transparent",
+                    backgroundColor: isActive
+                      ? "rgb(226, 240, 253)"
+                      : "inherit",
                   }}
                   onClick={() => {
                     onClick(kb);
@@ -215,37 +255,45 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 >
                   <div className="flex items-start">
                     <div className="flex-shrink-0">
-                      <div className="px-2" onClick={(e) => {
-                        e.stopPropagation();
-                        if (canSelect || isSelected) {
-                          onSelect(kb.id);
-                        }
-                      }}
+                      <div
+                        className="px-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (canSelect || isSelected) {
+                            onSelect(kb.id);
+                          }
+                        }}
                         style={{
-                          minWidth: '40px',
-                          minHeight: '40px',
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'center'
-                        }}>
+                          minWidth: "40px",
+                          minHeight: "40px",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          justifyContent: "center",
+                        }}
+                      >
                         <ConfigProvider
                           theme={{
                             token: {
                               // If selected with model mismatch, use light blue, otherwise default blue
-                              colorPrimary: isMismatchedAndSelected ? '#90caf9' : '#1677ff',
+                              colorPrimary: isMismatchedAndSelected
+                                ? "#90caf9"
+                                : "#1677ff",
                             },
                           }}
                         >
                           <Checkbox
                             checked={isSelected}
                             onChange={(e) => {
-                              e.stopPropagation()
-                              onSelect(kb.id)
+                              e.stopPropagation();
+                              onSelect(kb.id);
                             }}
                             disabled={!canSelect && !isSelected}
                             style={{
-                              cursor: (canSelect || isSelected) ? 'pointer' : 'not-allowed',
-                              transform: 'scale(1.5)',
+                              cursor:
+                                canSelect || isSelected
+                                  ? "pointer"
+                                  : "not-allowed",
+                              transform: "scale(1.5)",
                             }}
                           />
                         </ConfigProvider>
@@ -257,7 +305,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           className="text-base font-medium text-gray-800 truncate"
                           style={{
                             maxWidth: KB_LAYOUT.KB_NAME_MAX_WIDTH,
-                            ...KB_LAYOUT.KB_NAME_OVERFLOW
+                            ...KB_LAYOUT.KB_NAME_OVERFLOW,
                           }}
                           title={kb.name}
                         >
@@ -266,63 +314,93 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         <button
                           className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
                           onClick={(e) => {
-                            e.stopPropagation()
-                            onDelete(kb.id)
+                            e.stopPropagation();
+                            onDelete(kb.id);
                           }}
                         >
-                          {t('common.delete')}
+                          {t("common.delete")}
                         </button>
                       </div>
-                      <div className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}>
+                      <div
+                        className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+                      >
                         {/* Document count tag */}
-                        <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
-                          {t('knowledgeBase.tag.documents', { count: kb.documentCount || 0 })}
+                        <span
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                        >
+                          {t("knowledgeBase.tag.documents", {
+                            count: kb.documentCount || 0,
+                          })}
                         </span>
 
                         {/* Chunk count tag */}
-                        <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
-                          {t('knowledgeBase.tag.chunks', { count: kb.chunkCount || 0 })}
+                        <span
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                        >
+                          {t("knowledgeBase.tag.chunks", {
+                            count: kb.chunkCount || 0,
+                          })}
                         </span>
 
                         {/* Only show source, creation date, and model tags when there are valid documents or chunks */}
-                        {((kb.documentCount || 0) > 0 || (kb.chunkCount || 0) > 0) && (
+                        {((kb.documentCount || 0) > 0 ||
+                          (kb.chunkCount || 0) > 0) && (
                           <>
                             {/* Knowledge base source tag */}
-                            <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
-                              {t('knowledgeBase.tag.source', { source: kb.source })}
+                            <span
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                            >
+                              {t("knowledgeBase.tag.source", {
+                                source: kb.source,
+                              })}
                             </span>
 
                             {/* Creation date tag - only show date */}
-                            <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}>
-                              {t('knowledgeBase.tag.createdAt', { date: formatDate(kb.createdAt) })}
+                            <span
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                            >
+                              {t("knowledgeBase.tag.createdAt", {
+                                date: formatDate(kb.createdAt),
+                              })}
                             </span>
 
                             {/* Force line break */}
-                            <div className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}></div>
+                            <div
+                              className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
+                            ></div>
 
                             {/* Model tag - only show when model is not "unknown" */}
                             {kb.embeddingModel !== "unknown" && (
-                              <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}>
-                                {t('knowledgeBase.tag.model', { model: getModelDisplayName(kb.embeddingModel) })}
+                              <span
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}
+                              >
+                                {t("knowledgeBase.tag.model", {
+                                  model: getModelDisplayName(kb.embeddingModel),
+                                })}
                               </span>
                             )}
-                            {kb.embeddingModel !== "unknown" && kb.embeddingModel !== currentEmbeddingModel && (
-                              <span className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}>
-                                {t('knowledgeBase.tag.modelMismatch')}
-                              </span>
-                            )}
+                            {kb.embeddingModel !== "unknown" &&
+                              kb.embeddingModel !== currentEmbeddingModel && (
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}
+                                >
+                                  {t("knowledgeBase.tag.modelMismatch")}
+                                </span>
+                              )}
                           </>
                         )}
                       </div>
                     </div>
                   </div>
                 </div>
-              )
+              );
             })}
           </div>
         ) : (
-          <div className={`${KB_LAYOUT.EMPTY_STATE_PADDING} text-center text-gray-500`}>
-            {t('knowledgeBase.list.empty')}
+          <div
+            className={`${KB_LAYOUT.EMPTY_STATE_PADDING} text-center text-gray-500`}
+          >
+            {t("knowledgeBase.list.empty")}
           </div>
         )}
       </div>
