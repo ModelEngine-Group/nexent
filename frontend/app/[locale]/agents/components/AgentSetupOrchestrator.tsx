@@ -2292,6 +2292,12 @@ export default function AgentSetupOrchestrator({
           initialData={importWizardData}
           onImportComplete={handleImportComplete}
           title={undefined} // Use default title
+          agentDisplayName={
+            importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.display_name
+          }
+          agentDescription={
+            importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.description
+          }
         />
         {/* Auto unselect knowledge_base_search notice when embedding not configured */}
         <Modal

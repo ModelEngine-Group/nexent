@@ -425,6 +425,12 @@ export default function Home() {
               initialData={importWizardData}
               onImportComplete={handleImportComplete}
               title={undefined} // Use default title
+              agentDisplayName={
+                importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.display_name
+              }
+              agentDescription={
+                importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.description
+              }
             />
           </>
           );

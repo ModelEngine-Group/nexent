@@ -646,61 +646,79 @@ export default function AgentImportWizard({
                   {t("market.install.model.description.individual", "Select a model for each agent (main agent and sub-agents).")}
                 </p>
 
-                {initialData?.agent_info && (
-                  <div className="space-y-4">
-                    {Object.entries(initialData.agent_info as Record<string, any>).map(([agentKey, agentInfo]: [string, any]) => {
-                      const agentDisplayName = agentInfo.display_name || agentInfo.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
-                      const isMainAgent = agentKey === String(initialData.agent_id);
-                      const currentSelection = selectedModelsByAgent[agentKey] || { modelId: null, modelName: "" };
+                {initialData?.agent_info && (() => {
+                  // Sort agents: main agent first, then sub-agents
+                  const agentEntries = Object.entries(initialData.agent_info as Record<string, any>);
+                  const mainAgentKey = String(initialData.agent_id);
+                  const sortedEntries = agentEntries.sort(([keyA], [keyB]) => {
+                    if (keyA === mainAgentKey) return -1;
+                    if (keyB === mainAgentKey) return 1;
+                    return 0;
+                  });
 
-                      return (
-                        <div key={agentKey} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-3">
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                              {agentDisplayName}
-                            </label>
-                            {isMainAgent && (
-                              <Tag color="blue" className="text-xs">
-                                {t("market.install.agent.main", "Main")}
-                              </Tag>
-                            )}
-                            <span className="text-red-500 ml-1">*</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                              {t("market.install.model.label", "Model")}:
-                            </label>
-                            <div className="flex-1">
-                              {loadingModels ? (
-                                <Spin />
-                              ) : (
-                                <Select
-                                  value={currentSelection.modelName || undefined}
-                                  onChange={(value, option) => {
-                                    const modelId = option && 'key' in option ? Number(option.key) : null;
-                                    setSelectedModelsByAgent(prev => ({
-                                      ...prev,
-                                      [agentKey]: { modelId, modelName: value },
-                                    }));
-                                  }}
-                                  size="large"
-                                  style={{ width: "100%" }}
-                                  placeholder={t("market.install.model.placeholder", "Select a model")}
-                                >
-                                  {llmModels.map((model) => (
-                                    <Select.Option key={model.id} value={model.displayName}>
-                                      {model.displayName}
-                                    </Select.Option>
-                                  ))}
-                                </Select>
+                  return (
+                    <div className="space-y-4">
+                      {sortedEntries.map(([agentKey, agentInfo]: [string, any]) => {
+                        const agentDisplayName = agentInfo.display_name || agentInfo.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
+                        const isMainAgent = agentKey === mainAgentKey;
+                        const currentSelection = selectedModelsByAgent[agentKey] || { modelId: null, modelName: "" };
+
+                        return (
+                          <div 
+                            key={agentKey} 
+                            className={`border rounded-lg p-4 ${
+                              isMainAgent 
+                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800" 
+                                : "border-gray-200 dark:border-gray-700"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 mb-3">
+                              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                {agentDisplayName}
+                              </label>
+                              {isMainAgent && (
+                                <Tag color="blue" className="text-xs">
+                                  {t("market.install.agent.main", "Main")}
+                                </Tag>
                               )}
                             </div>
+                            <div className="flex items-center gap-3">
+                              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                {t("market.install.model.label", "Model")}
+                                <span className="text-red-500 ml-1">*</span>
+                              </label>
+                              <div className="flex-1">
+                                {loadingModels ? (
+                                  <Spin />
+                                ) : (
+                                  <Select
+                                    value={currentSelection.modelName || undefined}
+                                    onChange={(value, option) => {
+                                      const modelId = option && 'key' in option ? Number(option.key) : null;
+                                      setSelectedModelsByAgent(prev => ({
+                                        ...prev,
+                                        [agentKey]: { modelId, modelName: value },
+                                      }));
+                                    }}
+                                    size="large"
+                                    style={{ width: "100%" }}
+                                    placeholder={t("market.install.model.placeholder", "Select a model")}
+                                  >
+                                    {llmModels.map((model) => (
+                                      <Select.Option key={model.id} value={model.displayName}>
+                                        {model.displayName}
+                                      </Select.Option>
+                                    ))}
+                                  </Select>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
 
                 {llmModels.length === 0 && !loadingModels && (
                   <div className="text-sm text-red-600 mt-2">
