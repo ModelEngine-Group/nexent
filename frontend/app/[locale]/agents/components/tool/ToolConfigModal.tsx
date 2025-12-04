@@ -722,7 +722,7 @@ export default function ToolConfigModal({
                           <Tooltip
                             title={param.description}
                             placement="topLeft"
-                            overlayStyle={{ maxWidth: 400 }}
+                            styles={{ root: { maxWidth: 400 } }}
                           >
                             <Input
                               placeholder={param.description || param.name}
@@ -895,7 +895,7 @@ export default function ToolConfigModal({
                                 <Tooltip
                                   title={description}
                                   placement="topLeft"
-                                  overlayStyle={{ maxWidth: 400 }}
+                                  styles={{ root: { maxWidth: 400 } }}
                                 >
                                   <Input
                                     placeholder={description}

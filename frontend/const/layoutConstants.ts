@@ -48,7 +48,7 @@ export const SETUP_PAGE_CONTAINER = {
 // Two column layout responsive configuration (based on the first page design)
 export const TWO_COLUMN_LAYOUT = {
   // Row/Col spacing configuration
-  GUTTER: [24, 16] as [number, number],
+  GUTTER: [16, 16] as [number, number],
   
   // Responsive column ratio
   LEFT_COLUMN: {
