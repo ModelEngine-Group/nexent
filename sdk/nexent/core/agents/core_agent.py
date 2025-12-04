@@ -128,9 +128,6 @@ class CoreAgent(CodeAgent):
         # Add new step in logs
         memory_step.model_input_messages = input_messages
         stop_sequences = ["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"]
-        if self.code_block_tags[1] not in self.code_block_tags[0]:
-            # If the closing tag is contained in the opening tag, adding it as a stop sequence would cut short any code generation
-            stop_sequences.append(self.code_block_tags[1])
 
         try:
             additional_args: dict[str, Any] = {}

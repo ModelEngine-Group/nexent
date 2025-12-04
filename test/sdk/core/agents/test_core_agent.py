@@ -752,7 +752,7 @@ def test_step_stream_parse_success(core_agent_instance):
 
 
 def test_step_stream_structured_outputs_with_stop_sequence(core_agent_instance):
-    """Ensure _step_stream handles structured outputs and adds closing stop sequence."""
+    """Ensure _step_stream handles structured outputs correctly."""
     mock_memory_step = MagicMock()
     mock_chat_message = MagicMock()
     mock_chat_message.content = json.dumps({"code": "print('hello')"})
@@ -776,7 +776,6 @@ def test_step_stream_structured_outputs_with_stop_sequence(core_agent_instance):
     mock_extract.assert_called_once_with("print('hello')", core_agent_instance.code_block_tags)
     call_kwargs = core_agent_instance.model.call_args.kwargs
     assert call_kwargs["response_format"] == core_agent_module.CODEAGENT_RESPONSE_FORMAT
-    assert "[CLOSE]" in call_kwargs["stop_sequences"]
 
 
 def test_step_stream_skips_execution_for_display_only(core_agent_instance):
