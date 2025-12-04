@@ -26,6 +26,8 @@ import {
   FilePlus2,
   Goal,
   X,
+  Server,
+  Database,
 } from "lucide-react";
 import { FieldNumberOutlined } from "@ant-design/icons";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -47,6 +49,7 @@ interface Chunk {
   filename?: string;
   create_time?: string;
   score?: number; // Search score (0-1 range) - only present in search results
+  source_type?: string; // Source type: "file" (nexent) or "datamate"
 }
 
 interface ChunkFormValues {
@@ -289,6 +292,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           filename: item.filename,
           create_time: item.create_time,
           score: item.score, // Preserve search score for display
+          source_type: item.source_type, // Preserve source type for display
         };
       });
 
@@ -657,6 +661,37 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                       </div>
                     }
                   >
+                    {/* Display filename and source type if available */}
+                    {chunk.filename && (
+                      <div className="mb-2 pb-2 border-b border-gray-200">
+                        <div className="flex flex-col">
+                          <div className="flex items-center">
+                            <div className="w-3 h-3 flex-shrink-0 mr-1">
+                              <Database className="w-full h-full" />
+                            </div>
+                            <div className="text-sm font-medium text-gray-700">
+                              {chunk.filename}
+                            </div>
+                          </div>
+                          {chunk.source_type && (
+                            <div className="flex items-center mt-0.5">
+                              <div className="w-3 h-3 flex-shrink-0 mr-1">
+                                <Server className="w-full h-full" />
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {chunk.source_type === "datamate"
+                                  ? t("document.chunk.source.datamate", "来源: Datamate")
+                                  : chunk.source_type === "file" ||
+                                    chunk.source_type === "minio" ||
+                                    chunk.source_type === "local"
+                                  ? t("document.chunk.source.nexent", "来源: Nexent")
+                                  : ""}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="max-h-[150px] overflow-y-auto break-words whitespace-pre-wrap text-sm">
                       {chunk.content || ""}
                     </div>
