@@ -349,29 +349,31 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
         style={{ width: "100%", height: "100%" }}
       >
         {canAccessProtectedData ? (
-          <div
-            className="w-full mx-auto"
-            style={{
-              maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-              padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
-            }}
-          >
+          <div className="w-full h-full flex items-center justify-center">
             <div
-              className={STANDARD_CARD.BASE_CLASSES}
+              className="w-full mx-auto"
               style={{
-                height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
-                padding: "25px",
+                maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
+                padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
               }}
             >
-              <Tabs
-                size="middle"
-                items={tabItems}
-                activeKey={memory.activeTabKey}
-                onChange={(key) => memory.setActiveTabKey(key)}
-                tabBarStyle={{
-                  marginBottom: "16px",
+              <div
+                className={STANDARD_CARD.BASE_CLASSES}
+                style={{
+                  height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
+                  padding: "25px",
                 }}
-              />
+              >
+                <Tabs
+                  size="middle"
+                  items={tabItems}
+                  activeKey={memory.activeTabKey}
+                  onChange={(key) => memory.setActiveTabKey(key)}
+                  tabBarStyle={{
+                    marginBottom: "16px",
+                  }}
+                />
+              </div>
             </div>
           </div>
         ) : null}
