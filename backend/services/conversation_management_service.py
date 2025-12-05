@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from jinja2 import StrictUndefined, Template
-from smolagents import OpenAIServerModel
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, ConversationResponse, MessageRequest, MessageUnit
@@ -27,7 +26,8 @@ from database.conversation_db import (
     rename_conversation,
     update_message_opinion
 )
-from nexent.core.utils.observer import ProcessType
+from nexent.core.utils.observer import MessageObserver, ProcessType
+from nexent.core.models import OpenAIModel
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.prompt_template_utils import get_generate_title_prompt_template
 from utils.str_utils import remove_think_blocks
@@ -262,8 +262,8 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["Z
     model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
 
-    # Create OpenAIServerModel instance
-    llm = OpenAIServerModel(
+    # Create OpenAIModel instance
+    llm = OpenAIModel(
         model_id=get_model_name_from_config(model_config) if model_config.get("model_name") else "",
         api_base=model_config.get("base_url", ""),
         api_key=model_config.get("api_key", ""),

@@ -74,7 +74,7 @@ class TestCallLLMForSystemPrompt(unittest.TestCase):
     def setUp(self):
         self.test_model_id = 1
 
-    @patch('backend.utils.llm_utils.OpenAIServerModel')
+    @patch('backend.utils.llm_utils.OpenAIModel')
     @patch('backend.utils.llm_utils.get_model_name_from_config')
     @patch('backend.utils.llm_utils.get_model_by_model_id')
     def test_call_llm_for_system_prompt_success(
@@ -118,7 +118,7 @@ class TestCallLLMForSystemPrompt(unittest.TestCase):
             top_p=0.95,
         )
 
-    @patch('backend.utils.llm_utils.OpenAIServerModel')
+    @patch('backend.utils.llm_utils.OpenAIModel')
     @patch('backend.utils.llm_utils.get_model_name_from_config')
     @patch('backend.utils.llm_utils.get_model_by_model_id')
     def test_call_llm_for_system_prompt_exception(

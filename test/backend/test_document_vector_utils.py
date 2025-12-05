@@ -10,10 +10,38 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# Add backend to path
+# Mock consts module before patching backend.database.client to avoid ImportError
+# backend.database.client imports from consts.const, so we need to mock it first
+consts_mock = MagicMock()
+consts_const_mock = MagicMock()
+# Set required constants that backend.database.client might use
+consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
+consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
+consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
+consts_const_mock.MINIO_REGION = "us-east-1"
+consts_const_mock.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_const_mock.POSTGRES_HOST = "localhost"
+consts_const_mock.POSTGRES_USER = "test_user"
+consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_const_mock.POSTGRES_DB = "test_db"
+consts_const_mock.POSTGRES_PORT = 5432
+consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
+consts_mock.const = consts_const_mock
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_const_mock
+
+# Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../backend"))
 sys.path.insert(0, backend_dir)
+
+# Patch storage factory and MinIO config validation to avoid errors during initialization
+# These patches must be started before any imports that use MinioClient
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
 from backend.utils.document_vector_utils import (
     calculate_document_embedding,
@@ -226,6 +254,28 @@ class TestSummarizeDocument:
         assert isinstance(result, str)
         assert len(result) > 0
 
+    def test_summarize_document_with_model_success(self):
+        """Test document summarization when model config exists and LLM returns value"""
+        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
+             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+            mock_get_model.return_value = {"id": 1}
+            mock_llm.return_value = "Generated summary\n"
+
+            result = summarize_document(
+                document_content="LLM content",
+                filename="doc.pdf",
+                language="en",
+                max_words=50,
+                model_id=1,
+                tenant_id="tenant"
+            )
+
+            assert result == "Generated summary"
+            mock_llm.assert_called_once()
+            call_args = mock_llm.call_args.kwargs
+            assert call_args["model_id"] == 1
+            assert call_args["tenant_id"] == "tenant"
+
 
 class TestSummarizeCluster:
     """Test cluster summarization"""
@@ -249,6 +299,27 @@ class TestSummarizeCluster:
         )
         assert isinstance(result, str)
         assert len(result) > 0
+
+    def test_summarize_cluster_with_model_success(self):
+        """Test cluster summarization when model config exists and LLM returns value"""
+        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
+             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+            mock_get_model.return_value = {"id": 1}
+            mock_llm.return_value = "Cluster summary text  "
+
+            result = summarize_cluster(
+                document_summaries=["Doc 1 summary", "Doc 2 summary"],
+                language="en",
+                max_words=120,
+                model_id=1,
+                tenant_id="tenant"
+            )
+
+            assert result == "Cluster summary text"
+            mock_llm.assert_called_once()
+            call_args = mock_llm.call_args.kwargs
+            assert call_args["model_id"] == 1
+            assert call_args["tenant_id"] == "tenant"
 
 
 class TestSummarizeClustersMapReduce:

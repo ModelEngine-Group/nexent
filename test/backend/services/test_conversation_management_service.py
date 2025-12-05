@@ -327,7 +327,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertIn("Give me examples of AI applications", result)
         self.assertIn("AI stands for Artificial Intelligence.", result)
 
-    @patch('backend.services.conversation_management_service.OpenAIServerModel')
+    @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
@@ -360,7 +360,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
 
-    @patch('backend.services.conversation_management_service.OpenAIServerModel')
+    @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title_response_none_zh(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
@@ -392,7 +392,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
 
-    @patch('backend.services.conversation_management_service.OpenAIServerModel')
+    @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title_response_none_en(self, mock_get_model_config, mock_get_prompt_template, mock_openai):

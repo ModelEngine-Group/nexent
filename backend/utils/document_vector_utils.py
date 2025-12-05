@@ -14,12 +14,16 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from jinja2 import Template, StrictUndefined
-from nexent.vector_database.base import VectorDatabaseCore
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 
 from consts.const import LANGUAGE
+from database.model_management_db import get_model_by_model_id
+from nexent.core.utils.observer import MessageObserver
+from nexent.core.models import OpenAIModel
+from nexent.vector_database.base import VectorDatabaseCore
+from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_document_summary_prompt_template,
     get_cluster_summary_reduce_prompt_template,
@@ -568,37 +572,22 @@ def summarize_document(document_content: str, filename: str, language: str = LAN
         
         # Call LLM if model_id and tenant_id are provided
         if model_id and tenant_id:
-            from smolagents import OpenAIServerModel
-            from database.model_management_db import get_model_by_model_id
-            from utils.config_utils import get_model_name_from_config
-            from consts.const import MESSAGE_ROLE
-            
+
             # Get model configuration
             llm_model_config = get_model_by_model_id(model_id=model_id, tenant_id=tenant_id)
             if not llm_model_config:
                 logger.warning(f"No model configuration found for model_id: {model_id}, tenant_id: {tenant_id}")
                 return f"[Document Summary: {filename}] (max {max_words} words) - Content: {document_content[:200]}..."
-            
-            # Create LLM instance
-            llm = OpenAIServerModel(
-                model_id=get_model_name_from_config(llm_model_config) if llm_model_config else "",
-                api_base=llm_model_config.get("base_url", ""),
-                api_key=llm_model_config.get("api_key", ""),
-                temperature=0.3,
-                top_p=0.95
+
+            document_summary = call_llm_for_system_prompt(
+                model_id=model_id,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                callback=None,
+                tenant_id=tenant_id
             )
-            
-            # Build messages
-            messages = [
-                {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
-                {"role": MESSAGE_ROLE["USER"], "content": user_prompt}
-            ]
-            
-            # Call LLM, allow more tokens for generation
-            response = llm(messages, max_tokens=max_words * 2)
-            if not response or not response.content:
-                return ""
-            return response.content.strip()
+
+            return (document_summary or "").strip()
         else:
             # Fallback to placeholder if no model configuration
             logger.warning("No model_id or tenant_id provided, using placeholder summary")
@@ -642,10 +631,6 @@ def summarize_cluster(document_summaries: List[str], language: str = LANGUAGE["Z
         
         # Call LLM if model_id and tenant_id are provided
         if model_id and tenant_id:
-            from smolagents import OpenAIServerModel
-            from database.model_management_db import get_model_by_model_id
-            from utils.config_utils import get_model_name_from_config
-            from consts.const import MESSAGE_ROLE
             
             # Get model configuration
             llm_model_config = get_model_by_model_id(model_id=model_id, tenant_id=tenant_id)
@@ -654,25 +639,15 @@ def summarize_cluster(document_summaries: List[str], language: str = LANGUAGE["Z
                 return f"[Cluster Summary] (max {max_words} words) - Based on {len(document_summaries)} documents"
             
             # Create LLM instance
-            llm = OpenAIServerModel(
-                model_id=get_model_name_from_config(llm_model_config) if llm_model_config else "",
-                api_base=llm_model_config.get("base_url", ""),
-                api_key=llm_model_config.get("api_key", ""),
-                temperature=0.3,
-                top_p=0.95
+            cluster_summary = call_llm_for_system_prompt(
+                model_id=model_id,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                callback=None,
+                tenant_id=tenant_id
             )
-            
-            # Build messages
-            messages = [
-                {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
-                {"role": MESSAGE_ROLE["USER"], "content": user_prompt}
-            ]
-            
-            # Call LLM
-            response = llm(messages, max_tokens=max_words * 2)  # Allow more tokens for generation
-            if not response or not response.content:
-                return ""
-            return response.content.strip()
+
+            return (cluster_summary or "").strip()
         else:
             # Fallback to placeholder if no model configuration
             logger.warning("No model_id or tenant_id provided, using placeholder summary")

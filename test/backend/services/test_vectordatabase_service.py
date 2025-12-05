@@ -35,11 +35,19 @@ sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.core'] = _create_package_mock('nexent.core')
 sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
 sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
+# Mock nexent.core.models with OpenAIModel
+openai_model_module = ModuleType('nexent.core.models')
+openai_model_module.OpenAIModel = MagicMock
+sys.modules['nexent.core.models'] = openai_model_module
 sys.modules['nexent.core.models.embedding_model'] = MagicMock()
 sys.modules['nexent.core.models.stt_model'] = MagicMock()
 sys.modules['nexent.core.nlp'] = _create_package_mock('nexent.core.nlp')
 sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
+# Mock nexent.core.utils and observer module
+sys.modules['nexent.core.utils'] = _create_package_mock('nexent.core.utils')
+observer_module = ModuleType('nexent.core.utils.observer')
+observer_module.MessageObserver = MagicMock
+sys.modules['nexent.core.utils.observer'] = observer_module
 sys.modules['nexent.vector_database'] = _create_package_mock('nexent.vector_database')
 vector_db_base_module = ModuleType('nexent.vector_database.base')
 
@@ -96,6 +104,8 @@ patch('backend.database.attachment_db.minio_client', minio_client_mock).start()
 # Apply the patches before importing the module being tested
 with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
+    # Import utils.document_vector_utils to ensure it's available for patching
+    import utils.document_vector_utils
     from backend.services.vectordatabase_service import ElasticSearchService, check_knowledge_base_exist_impl
 
 
