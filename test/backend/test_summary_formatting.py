@@ -26,6 +26,9 @@ consts_mock.const = consts_const_mock
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
 
+# Add backend to path before patching backend modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
+
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()
@@ -33,9 +36,6 @@ minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
-
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
 
 from utils.document_vector_utils import merge_cluster_summaries
 
