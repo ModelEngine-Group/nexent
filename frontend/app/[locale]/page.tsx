@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
 import { NavigationLayout } from "@/components/navigation/NavigationLayout";
 import { HomepageContent } from "@/components/homepage/HomepageContent";
 import { AuthDialogs } from "@/components/homepage/AuthDialogs";
@@ -21,8 +20,9 @@ import AgentsContent from "./agents/AgentsContent";
 import KnowledgesContent from "./knowledges/KnowledgesContent";
 import { SpaceContent } from "./space/components/SpaceContent";
 import { fetchAgentList } from "@/services/agentConfigService";
-import { useAgentImport } from "@/hooks/useAgentImport";
+import { useAgentImport, ImportAgentData } from "@/hooks/useAgentImport";
 import SetupLayout from "./setup/SetupLayout";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ChatContent } from "./chat/internal/ChatContent";
 import { ChatTopNavContent } from "./chat/internal/ChatTopNavContent";
 import { Badge, Button as AntButton } from "antd";
@@ -30,10 +30,24 @@ import { FiRefreshCw } from "react-icons/fi";
 import { USER_ROLES } from "@/const/modelConfig";
 import MarketContent from "./market/MarketContent";
 import UsersContent from "./users/UsersContent";
+import McpToolsContent from "./mcp-tools/McpToolsContent";
+import MonitoringContent from "./monitoring/MonitoringContent";
 import { getSavedView, saveView } from "@/lib/viewPersistence";
 
 // View type definition
-type ViewType = "home" | "memory" | "models" | "agents" | "knowledges" | "space" | "setup" | "chat" | "market" | "users";
+type ViewType =
+  | "home"
+  | "memory"
+  | "models"
+  | "agents"
+  | "knowledges"
+  | "space"
+  | "setup"
+  | "chat"
+  | "market"
+  | "users"
+  | "mcpTools"
+  | "monitoring";
 type SetupStep = "models" | "knowledges" | "agents";
 
 export default function Home() {
@@ -81,6 +95,10 @@ export default function Home() {
     const [agents, setAgents] = useState<any[]>([]);
     const [isLoadingAgents, setIsLoadingAgents] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
+    
+    // Agent import wizard states
+    const [importWizardVisible, setImportWizardVisible] = useState(false);
+    const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
     
     // Setup-specific states
     const [currentSetupStep, setCurrentSetupStep] = useState<SetupStep>("models");
@@ -188,11 +206,13 @@ export default function Home() {
     };
     
     // Use unified import hook for space view
-    const { importFromFile: importAgentFile } = useAgentImport({
+    const { importFromData } = useAgentImport({
       onSuccess: () => {
         message.success(t("businessLogic.config.error.agentImportSuccess"));
         loadAgents();
         setIsImporting(false);
+        setImportWizardVisible(false);
+        setImportWizardData(null);
       },
       onError: (error) => {
         log.error(t("agentConfig.agents.importFailed"), error);
@@ -201,7 +221,7 @@ export default function Home() {
       },
     });
 
-    // Handle import agent for space view
+    // Handle import agent for space view - open wizard instead of direct import
     const handleImportAgent = () => {
       const fileInput = document.createElement("input");
       fileInput.type = "file";
@@ -215,15 +235,43 @@ export default function Home() {
           return;
         }
 
-        setIsImporting(true);
         try {
-          await importAgentFile(file);
+          // Read and parse file
+          const fileContent = await file.text();
+          let agentData: ImportAgentData;
+          
+          try {
+            agentData = JSON.parse(fileContent);
+          } catch (parseError) {
+            message.error(t("businessLogic.config.error.invalidFileType"));
+            return;
+          }
+
+          // Validate structure
+          if (!agentData.agent_id || !agentData.agent_info) {
+            message.error(t("businessLogic.config.error.invalidFileType"));
+            return;
+          }
+
+          // Open wizard with parsed data
+          setImportWizardData(agentData);
+          setImportWizardVisible(true);
         } catch (error) {
-          // Error already handled by hook's onError callback
+          log.error("Failed to read import file:", error);
+          message.error(t("businessLogic.config.error.agentImportFailed"));
         }
       };
 
       fileInput.click();
+    };
+
+    // Handle import completion from wizard
+    // Note: AgentImportWizard already handles the import internally,
+    // so we just need to refresh the agent list
+    const handleImportComplete = () => {
+      loadAgents();
+      setImportWizardVisible(false);
+      setImportWizardData(null);
     };
     
     // Setup navigation handlers
@@ -324,7 +372,7 @@ export default function Home() {
         
         case "models":
           return (
-            <div className="w-full h-full p-1">
+            <div className="w-full h-full p-8">
               <ModelsContent
                 connectionStatus={connectionStatus}
                 isCheckingConnection={isCheckingConnection}
@@ -358,25 +406,46 @@ export default function Home() {
         
         case "space":
           return (
-            <SpaceContent
-              agents={agents}
-              isLoading={isLoadingAgents}
-              isImporting={isImporting}
-              onRefresh={loadAgents}
-              onLoadAgents={loadAgents}
-              onImportAgent={handleImportAgent}
-              onChatNavigate={(agentId) => {
-                // TODO: Store the selected agentId and pass it to ChatContent
-                // For now, just navigate to chat view
-                setCurrentView("chat");
-                saveView("chat");
-              }}
+            <>
+              <SpaceContent
+                agents={agents}
+                isLoading={isLoadingAgents}
+                isImporting={isImporting}
+                onRefresh={loadAgents}
+                onLoadAgents={loadAgents}
+                onImportAgent={handleImportAgent}
+                onChatNavigate={(agentId) => {
+                  // Update URL with agent_id parameter for auto-selection in ChatAgentSelector
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("agent_id", agentId);
+                  window.history.replaceState({}, "", url.toString());
+                
+                  setCurrentView("chat");
+                  saveView("chat");
+                }}
               onEditNavigate={() => {
                 // Navigate to agents development view
                 setCurrentView("agents");
                 saveView("agents");
               }}
             />
+            <AgentImportWizard
+              visible={importWizardVisible}
+              onCancel={() => {
+                setImportWizardVisible(false);
+                setImportWizardData(null);
+              }}
+              initialData={importWizardData}
+              onImportComplete={handleImportComplete}
+              title={undefined} // Use default title
+              agentDisplayName={
+                importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.display_name
+              }
+              agentDescription={
+                importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.description
+              }
+            />
+          </>
           );
         
         case "chat":
@@ -397,6 +466,28 @@ export default function Home() {
           return (
             <div className="w-full h-full">
               <UsersContent
+                connectionStatus={connectionStatus}
+                isCheckingConnection={isCheckingConnection}
+                onCheckConnection={checkModelEngineConnection}
+              />
+            </div>
+          );
+
+        case "mcpTools":
+          return (
+            <div className="w-full h-full p-8">
+              <McpToolsContent
+                connectionStatus={connectionStatus}
+                isCheckingConnection={isCheckingConnection}
+                onCheckConnection={checkModelEngineConnection}
+              />
+            </div>
+          );
+
+        case "monitoring":
+          return (
+            <div className="w-full h-full p-8">
+              <MonitoringContent
                 connectionStatus={connectionStatus}
                 isCheckingConnection={isCheckingConnection}
                 onCheckConnection={checkModelEngineConnection}
@@ -497,12 +588,15 @@ export default function Home() {
         onAdminRequired={handleAdminRequired}
         onViewChange={handleViewChange}
         currentView={currentView}
-        showFooter={currentView !== "setup"}
+        showFooter={true}
         contentMode={
-          currentView === "home" 
-            ? "centered" 
-            : currentView === "memory" || currentView === "models" 
-            ? "centered" 
+          currentView === "home"
+            ? "centered"
+            : currentView === "memory" ||
+              currentView === "models" ||
+              currentView === "knowledges" ||
+              currentView === "setup"
+            ? "centered"
             : currentView === "chat"
             ? "fullscreen"
             : "scrollable"

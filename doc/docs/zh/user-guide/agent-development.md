@@ -15,6 +15,14 @@
   <img src="./assets/agent-development/import.png" style="width: 80%; height: auto;" />
 </div>
 
+> ⚠️ **提示**：如果导入了重名的智能体，系统会弹出提示弹窗。您可以选择：
+> - **直接导入**：保留重复名称，导入后的智能体会处于不可用状态，需手动修改 Agent 名称和变量名后才能使用
+> - **重新生成并导入**：系统将调用 LLM 对 Agent 进行重命名，会消耗一定的模型 token 数，可能耗时较长
+
+<div style="display: flex; justify-content: left;">
+  <img src="./assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
+</div>
+
 ## 👥 配置协作智能体/工具
 
 您可以为创建的智能体配置其他协作智能体，也可以为它配置可使用的工具，以赋予智能体能力完成复杂任务。

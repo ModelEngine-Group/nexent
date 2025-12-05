@@ -17,6 +17,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Home,
+  Puzzle,
+  Activity,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,7 +52,9 @@ function getMenuKeyFromPathname(pathname: string): string {
     'knowledges': '6', // Knowledge base
     'models': '7',     // Model management
     'memory': '8',     // Memory management
-    'users': '9',      // User management
+    'users': '9',       // User management
+    'mcp-tools': '10',  // MCP tools management
+    'monitoring': '11', // Monitoring and operations
   };
   
   return pathToKeyMap[pathWithoutLocale] || '0';
@@ -80,16 +84,18 @@ export function SideNavigation({
     // If we have a currentView from parent, use it to determine the key
     if (currentView) {
       const viewToKeyMap: Record<string, string> = {
-        'home': '0',
-        'chat': '1',
-        'setup': '2',
-        'space': '3',
-        'market': '4',
-        'agents': '5',
-        'knowledges': '6',
-        'models': '7',
-        'memory': '8',
-        'users': '9',
+        home: "0",
+        chat: "1",
+        setup: "2",
+        space: "3",
+        market: "4",
+        agents: "5",
+        knowledges: "6",
+        models: "7",
+        memory: "8",
+        users: "9",
+        mcpTools: "10",
+        monitoring: "11",
       };
       setSelectedKey(viewToKeyMap[currentView] || '0');
     } else {
@@ -178,6 +184,30 @@ export function SideNavigation({
           onAuthRequired?.();
         } else {
           onViewChange?.("knowledges");
+        }
+      },
+    },
+    {
+      key: "10",
+      icon: <Puzzle className="h-4 w-4" />,
+      label: t("sidebar.mcpToolsManagement"),
+      onClick: () => {
+        if (!isSpeedMode && user?.role !== "admin") {
+          onAdminRequired?.();
+        } else {
+          onViewChange?.("mcpTools");
+        }
+      },
+    },
+    {
+      key: "11",
+      icon: <Activity className="h-4 w-4" />,
+      label: t("sidebar.monitoringManagement"),
+      onClick: () => {
+        if (!isSpeedMode && user?.role !== "admin") {
+          onAdminRequired?.();
+        } else {
+          onViewChange?.("monitoring");
         }
       },
     },

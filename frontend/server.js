@@ -2,6 +2,15 @@ const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 const { createProxyServer } = require('http-proxy');
+const path = require('path');
+
+// Load environment variables from .env file in parent directory (project root)
+// In container environments, env vars are injected directly by Docker, so .env file may not exist
+// Using optional: true to avoid errors if .env file is not found
+require('dotenv').config({ 
+  path: path.resolve(__dirname, '../.env'),
+  override: false // Don't override existing environment variables (important for Docker)
+});
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ 
@@ -14,7 +23,7 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || 'http://localhost:5010'; // con
 const WS_BACKEND = process.env.WS_BACKEND || 'ws://localhost:5014'; // runtime
 const RUNTIME_HTTP_BACKEND = process.env.RUNTIME_HTTP_BACKEND || 'http://localhost:5014'; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || 'http://localhost:9010';
-const MARKET_BACKEND = process.env.MARKET_BACKEND || 'http://localhost:8010'; // market
+const MARKET_BACKEND = process.env.MARKET_BACKEND || 'https://market.nexent.tech'; // market
 const PORT = 3000;
 
 const proxy = createProxyServer();

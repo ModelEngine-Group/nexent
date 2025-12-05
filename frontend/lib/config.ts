@@ -42,6 +42,7 @@ class ConfigStoreClass {
   // Deep merge configuration
   private deepMerge<T>(target: T, source: Partial<T>): T {
     if (!source) return target;
+    if (!target) return source as T;
     
     const result = { ...target } as T;
     
@@ -50,7 +51,12 @@ class ConfigStoreClass {
       const sourceValue = (source as any)[key];
       
       if (sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)) {
-        (result as any)[key] = this.deepMerge(targetValue, sourceValue);
+        // If target has no value for this key, use source value directly
+        if (targetValue !== undefined && targetValue !== null) {
+          (result as any)[key] = this.deepMerge(targetValue, sourceValue);
+        } else {
+          (result as any)[key] = sourceValue;
+        }
       } else if (sourceValue !== undefined) {
         (result as any)[key] = sourceValue;
       }

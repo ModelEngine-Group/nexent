@@ -202,3 +202,159 @@ async def test_proxy_image_logging(monkeypatch):
 
         # Verify the mock was called with the expected URL
         mock_session.get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_stream_format(monkeypatch):
+    """Test proxy_image with format=stream"""
+    import base64
+    from io import BytesIO
+    
+    # Create mock response with base64 image data
+    test_image_bytes = b"fake image data"
+    test_base64 = base64.b64encode(test_image_bytes).decode('utf-8')
+    
+    success_response_stream = {
+        "success": True,
+        "base64": test_base64,
+        "content_type": "image/png"
+    }
+    
+    async def fake_proxy_image_impl(decoded_url):
+        return success_response_stream
+    
+    from backend.apps import image_app
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    resp = await image_app.proxy_image(url=encoded_test_url, format="stream")
+    
+    # Should return StreamingResponse
+    assert hasattr(resp, 'media_type')
+    assert resp.media_type == "image/png"
+    assert "Cache-Control" in resp.headers
+    assert resp.headers["Cache-Control"] == "public, max-age=3600"
+    
+    # Verify content
+    content = b""
+    async for chunk in resp.body_iterator:
+        content += chunk
+    assert content == test_image_bytes
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_stream_format_error(monkeypatch):
+    """Test proxy_image with format=stream when proxy_image_impl returns error"""
+    error_response = {
+        "success": False,
+        "error": "Failed to fetch image"
+    }
+    
+    async def fake_proxy_image_impl(decoded_url):
+        return error_response
+    
+    from backend.apps import image_app
+    from fastapi import HTTPException
+    
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await image_app.proxy_image(url=encoded_test_url, format="stream")
+    
+    assert exc_info.value.status_code == 502
+    assert "Failed to fetch image" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_stream_format_base64_decode_error(monkeypatch):
+    """Test proxy_image with format=stream when base64 decoding fails"""
+    import base64
+    
+    # Invalid base64 data
+    success_response_invalid = {
+        "success": True,
+        "base64": "invalid base64!!!",
+        "content_type": "image/png"
+    }
+    
+    async def fake_proxy_image_impl(decoded_url):
+        return success_response_invalid
+    
+    from backend.apps import image_app
+    from fastapi import HTTPException
+    
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await image_app.proxy_image(url=encoded_test_url, format="stream")
+    
+    assert exc_info.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_stream_format_exception(monkeypatch):
+    """Test proxy_image with format=stream when exception occurs"""
+    async def fake_proxy_image_impl(decoded_url):
+        raise ValueError("Unexpected error")
+    
+    from backend.apps import image_app
+    from fastapi import HTTPException
+    
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await image_app.proxy_image(url=encoded_test_url, format="stream")
+    
+    assert exc_info.value.status_code == 502
+    assert "Unexpected error" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_json_format_default(monkeypatch):
+    """Test proxy_image with format=json (default)"""
+    async def fake_proxy_image_impl(decoded_url):
+        return success_response
+    
+    from backend.apps import image_app
+    
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    result = await image_app.proxy_image(url=encoded_test_url, format="json")
+    
+    assert result == success_response
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_json_format_exception(monkeypatch):
+    """Test proxy_image with format=json when exception occurs"""
+    async def fake_proxy_image_impl(decoded_url):
+        raise RuntimeError("Service unavailable")
+    
+    from backend.apps import image_app
+    
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    result = await image_app.proxy_image(url=encoded_test_url, format="json")
+    
+    assert result["success"] is False
+    assert "Service unavailable" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_proxy_image_url_decoding(monkeypatch):
+    """Test proxy_image correctly decodes URL"""
+    special_url = "https://example.com/image with spaces.jpg"
+    encoded_special_url = "https%3A%2F%2Fexample.com%2Fimage%20with%20spaces.jpg"
+    
+    call_urls = []
+    async def fake_proxy_image_impl(decoded_url):
+        call_urls.append(decoded_url)
+        return success_response
+    
+    from backend.apps import image_app
+    
+    monkeypatch.setattr(image_app, "proxy_image_impl", fake_proxy_image_impl)
+    
+    await image_app.proxy_image(url=encoded_special_url, format="json")
+    
+    assert len(call_urls) == 1
+    assert call_urls[0] == special_url

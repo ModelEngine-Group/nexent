@@ -48,7 +48,7 @@ export const SETUP_PAGE_CONTAINER = {
 // Two column layout responsive configuration (based on the first page design)
 export const TWO_COLUMN_LAYOUT = {
   // Row/Col spacing configuration
-  GUTTER: [24, 16] as [number, number],
+  GUTTER: [16, 16] as [number, number],
   
   // Responsive column ratio
   LEFT_COLUMN: {
@@ -66,18 +66,6 @@ export const TWO_COLUMN_LAYOUT = {
     xl: 15,
     xxl: 16,
   },
-} as const;
-
-// Flex two column layout configuration (based on the KnowledgeBaseManager design)
-export const FLEX_TWO_COLUMN_LAYOUT = {
-  // Left knowledge base list width
-  LEFT_WIDTH: "33.333333%", // 1/3
-  
-  // Right content area width  
-  RIGHT_WIDTH: "66.666667%", // 2/3
-  
-  // Column spacing
-  GAP: "12px",
 } as const;
 
 // Standard card style configuration (based on the first page design)

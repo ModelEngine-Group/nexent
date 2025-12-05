@@ -61,23 +61,44 @@ export const API_ENDPOINTS = {
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
     files: `${API_BASE_URL}/file/storage`,
-    file: (objectName: string, download: string = "ignore") =>
-      `${API_BASE_URL}/file/storage/${objectName}?download=${download}`,
+    file: (objectName: string, download: string = "ignore", filename?: string) => {
+      const queryParams = new URLSearchParams();
+      queryParams.append("download", download);
+      if (filename) queryParams.append("filename", filename);
+      return `${API_BASE_URL}/file/download/${objectName}?${queryParams.toString()}`;
+    },
+    datamateDownload: (params: {
+      url?: string;
+      baseUrl?: string;
+      datasetId?: string;
+      fileId?: string;
+      filename?: string;
+    }) => {
+      const queryParams = new URLSearchParams();
+      if (params.url) queryParams.append("url", params.url);
+      if (params.baseUrl) queryParams.append("base_url", params.baseUrl);
+      if (params.datasetId) queryParams.append("dataset_id", params.datasetId);
+      if (params.fileId) queryParams.append("file_id", params.fileId);
+      if (params.filename) queryParams.append("filename", params.filename);
+      return `${API_BASE_URL}/file/datamate/download?${queryParams.toString()}`;
+    },
     delete: (objectName: string) =>
       `${API_BASE_URL}/file/storage/${objectName}`,
     preprocess: `${API_BASE_URL}/file/preprocess`,
   },
   proxy: {
-    image: (url: string) =>
-      `${API_BASE_URL}/image?url=${encodeURIComponent(url)}`,
+    image: (url: string, format: string = "stream") =>
+      `${API_BASE_URL}/image?url=${encodeURIComponent(url)}&format=${format}`,
   },
   model: {
-    // Official model service
-    officialModelList: `${API_BASE_URL}/me/model/list`,
-    officialModelHealthcheck: `${API_BASE_URL}/me/healthcheck`,
+    // ModelEngine health check
+    modelEngineHealthcheck: `${API_BASE_URL}/me/healthcheck`,
 
-    // Custom model service
+    // Model lists
+    officialModelList: `${API_BASE_URL}/model/list`, // ModelEngine models are also in this list
     customModelList: `${API_BASE_URL}/model/list`,
+    
+    // Custom model service
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,
@@ -91,7 +112,8 @@ export const API_ENDPOINTS = {
         displayName
       )}`,
     verifyModelConfig: `${API_BASE_URL}/model/temporary_healthcheck`,
-    updateSingleModel: `${API_BASE_URL}/model/update`,
+    updateSingleModel: (displayName: string) =>
+      `${API_BASE_URL}/model/update?display_name=${encodeURIComponent(displayName)}`,
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,

@@ -157,25 +157,35 @@ async def get_provider_list(request: ProviderModelRequest, authorization: Option
 
 
 @router.post("/update")
-async def update_single_model(request: dict, authorization: Optional[str] = Header(None)):
-    """Update a single model by its `model_id`.
+async def update_single_model(
+    request: dict,
+    display_name: str = Query(..., description="Current display name of the model to update"),
+    authorization: Optional[str] = Header(None)
+):
+    """Update a single model by its current `display_name`.
 
-    Performs a uniqueness check on `display_name` within the tenant and updates
-    the record if valid.
+    The model is looked up using the `display_name` query parameter. The request
+    body contains the fields to update, which may include a new `display_name`.
 
     Args:
-        request: Arbitrary model fields with required `model_id`.
+        request: Arbitrary model fields to update (may include new display_name).
+        display_name: Current display name of the model (query parameter for lookup).
         authorization: Bearer token header used to derive identity context.
 
     Raises:
-        HTTPException: 409 if `display_name` conflicts, 500 for unexpected errors.
+        HTTPException: 404 if model not found, 409 if new `display_name` conflicts,
+                       500 for unexpected errors.
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        await update_single_model_for_tenant(user_id, tenant_id, request)
+        await update_single_model_for_tenant(user_id, tenant_id, display_name, request)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model updated successfully"
         })
+    except LookupError as e:
+        logging.error(f"Failed to update model: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                            detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,

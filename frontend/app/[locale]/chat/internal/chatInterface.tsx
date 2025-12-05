@@ -13,7 +13,7 @@ import { USER_ROLES } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useAuth } from "@/hooks/useAuth";
 import { conversationService } from "@/services/conversationService";
-import { storageService } from "@/services/storageService";
+import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
@@ -1502,7 +1502,7 @@ export function ChatInterface() {
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={viewingImage}
+              src={convertImageUrlToApiUrl(viewingImage)}
               alt={t("chatInterface.imagePreview")}
               className="max-w-full max-h-[90vh] object-contain"
               onError={() => {

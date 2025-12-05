@@ -199,6 +199,7 @@ services:
       - WS_BACKEND=ws://nexent-runtime:5014
       - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
       - MINIO_ENDPOINT=http://nexent-minio:9000
+      - MARKET_BACKEND=https://market.nexent.tech
     logging:
       driver: "json-file"
       options:

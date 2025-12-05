@@ -19,7 +19,8 @@ export type ModelSource =
   | "openai"
   | "custom"
   | "silicon"
-  | "OpenAI-API-Compatible";
+  | "OpenAI-API-Compatible"
+  | "modelengine";
 
 // Model type
 export type ModelType =

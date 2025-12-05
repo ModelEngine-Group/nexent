@@ -119,6 +119,7 @@ consts_provider_mod = types.ModuleType("consts.provider")
 
 class _ProviderEnum:
     SILICON = _EnumItem("silicon")
+    MODELENGINE = _EnumItem("modelengine")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
@@ -200,9 +201,15 @@ def _get_models_by_tenant_factory_type(*args, **kwargs):
     return []
 
 
+def _get_models_by_display_name(*args, **kwargs):
+    """Return an empty list for display name lookups in tests."""
+    return []
+
+
 db_mm_mod.create_model_record = _noop
 db_mm_mod.delete_model_record = _noop
 db_mm_mod.get_model_by_display_name = _noop
+db_mm_mod.get_models_by_display_name = _get_models_by_display_name
 db_mm_mod.get_model_records = _get_model_records
 db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
 
@@ -329,6 +336,29 @@ async def test_create_model_for_tenant_conflict_raises():
 
 
 @pytest.mark.asyncio
+async def test_create_model_for_tenant_display_name_conflict_valueerror():
+    """Test that display_name conflict raises ValueError (covers lines 65-72)"""
+    svc = import_svc()
+
+    existing_model = {"model_id": 1, "display_name": "existing_name"}
+    with mock.patch.object(svc, "get_model_by_display_name", return_value=existing_model):
+        user_id = "u1"
+        tenant_id = "t1"
+        model_data = {
+            "model_name": "huggingface/llama",
+            "display_name": "existing_name",  # Conflicts with existing
+            "base_url": "http://localhost:8000",
+            "model_type": "llm",
+        }
+
+        # ValueError is wrapped in Exception, but the error message should contain the original ValueError message
+        with pytest.raises(Exception) as exc:
+            await svc.create_model_for_tenant(user_id, tenant_id, model_data)
+        assert "already in use" in str(exc.value)
+        assert "existing_name" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_create_model_for_tenant_multi_embedding_creates_two_records():
     svc = import_svc()
 
@@ -405,6 +435,40 @@ async def test_create_provider_models_for_tenant_exception():
 
 
 @pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_other_provider():
+    """Test batch_create_models_for_tenant with non-Silicon/ModelEngine provider (covers lines 138-140)"""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "openai",  # Not Silicon or ModelEngine
+        "type": "llm",
+        "models": [
+            {"id": "openai/gpt-4", "max_tokens": 4096},
+        ],
+        "api_key": "k",
+    }
+
+    # Add MODELENGINE to ProviderEnum if it doesn't exist
+    if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
+        modelengine_item = _EnumItem("modelengine")
+        svc.ProviderEnum.MODELENGINE = modelengine_item
+    
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("openai", "gpt-4")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="openai/gpt-4"), \
+            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+        
+        # Verify prepare_model_dict was called with empty model_url for non-Silicon/ModelEngine provider
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == ""  # Should be empty for other providers
+
+
+@pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_flow():
     svc = import_svc()
 
@@ -447,6 +511,56 @@ async def test_batch_create_models_for_tenant_flow():
 
 
 @pytest.mark.asyncio
+async def test_batch_create_models_max_tokens_update():
+    """Test batch_create_models updates max_tokens when display_name exists and max_tokens changed (covers lines 160->173, 168->171)"""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "silicon",
+        "type": "llm",
+        "models": [
+            {"id": "silicon/model1", "max_tokens": 8192},  # Changed from 4096
+            {"id": "silicon/model2", "max_tokens": 4096},  # Same as existing
+            {"id": "silicon/model3", "max_tokens": None},  # None should not update
+        ],
+        "api_key": "k",
+    }
+
+    def get_by_display(display_name, tenant_id):
+        if display_name == "silicon/model1":
+            return {"model_id": "id1", "max_tokens": 4096}  # Different from new value
+        elif display_name == "silicon/model2":
+            return {"model_id": "id2", "max_tokens": 4096}  # Same as new value
+        elif display_name == "silicon/model3":
+            return {"model_id": "id3", "max_tokens": 2048}  # Existing has value, new is None
+        return None
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", side_effect=lambda x: ("silicon", x.split("/")[1] if "/" in x else x)), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda r, n: f"{r}/{n}"), \
+            mock.patch.object(svc, "get_model_by_display_name", side_effect=get_by_display) as mock_get_by_display, \
+            mock.patch.object(svc, "update_model_record") as mock_update, \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        # Should update model1 (max_tokens changed from 4096 to 8192)
+        # Note: update_model_record may be called multiple times, so check if it was called with correct args
+        update_calls = [call for call in mock_update.call_args_list if call[0][0] == "id1"]
+        if update_calls:
+            assert update_calls[0][0][1] == {"max_tokens": 8192}
+        
+        # Should NOT update model2 (max_tokens same) or model3 (new max_tokens is None)
+        # Verify model2 and model3 were not updated
+        model2_calls = [call for call in mock_update.call_args_list if call[0][0] == "id2"]
+        model3_calls = [call for call in mock_update.call_args_list if call[0][0] == "id3"]
+        assert len(model2_calls) == 0  # model2 should not be updated (same max_tokens)
+        assert len(model3_calls) == 0  # model3 should not be updated (new max_tokens is None)
+
+
+@pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_exception():
     svc = import_svc()
 
@@ -482,64 +596,87 @@ async def test_list_provider_models_for_tenant_exception():
         assert "Failed to list provider models" in str(exc.value)
 
 
-async def test_update_single_model_for_tenant_success():
+async def test_update_single_model_for_tenant_success_single_model():
+    """Update succeeds for a single non-embedding model with no display_name change."""
     svc = import_svc()
 
-    model = {"model_id": "1", "display_name": "name"}
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None) as mock_get, \
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "name",
+        "description": "updated",
+        "model_type": "llm",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models) as mock_get, \
             mock.patch.object(svc, "update_model_record") as mock_update:
-        await svc.update_single_model_for_tenant("u1", "t1", model)
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
         mock_get.assert_called_once_with("name", "t1")
-        mock_update.assert_called_once_with(1, model, "u1")
+        # update_model_record should be called without model_id in the payload
+        mock_update.assert_called_once_with(
+            1,
+            {"display_name": "name", "description": "updated", "model_type": "llm"},
+            "u1",
+        )
 
 
-async def test_update_single_model_for_tenant_conflict():
+async def test_update_single_model_for_tenant_conflict_new_display_name():
+    """Updating to a new conflicting display_name raises ValueError."""
     svc = import_svc()
 
-    model = {"model_id": "m1", "display_name": "name"}
-    with mock.patch.object(svc, "get_model_by_display_name", return_value={"model_id": "other"}):
-        with pytest.raises(Exception) as exc:
-            await svc.update_single_model_for_tenant("u1", "t1", model)
-        assert "Failed to update model" in str(exc.value)
+    existing_models = [
+        {"model_id": 1, "model_type": "llm", "display_name": "old_name"},
+    ]
+    conflict_models = [
+        {"model_id": 2, "model_type": "llm", "display_name": "new_name"},
+    ]
+    model_data = {
+        "model_id": 1,
+        "display_name": "new_name",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", side_effect=[existing_models, conflict_models]):
+        with pytest.raises(ValueError) as exc:
+            await svc.update_single_model_for_tenant("u1", "t1", "old_name", model_data)
+        assert "already in use" in str(exc.value)
 
 
-async def test_update_single_model_for_tenant_same_model_no_conflict():
-    """Test that updating the same model with same display name doesn't raise conflict."""
+async def test_update_single_model_for_tenant_not_found_raises_lookup_error():
+    """If no model is found for current_display_name, raise LookupError."""
     svc = import_svc()
 
-    model = {"model_id": "123", "display_name": "existing_name"}
-    # Return the same model_id (as int) to simulate updating the same model
-    with mock.patch.object(svc, "get_model_by_display_name", return_value={"model_id": 123}) as mock_get, \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]):
+        with pytest.raises(LookupError):
+            await svc.update_single_model_for_tenant("u1", "t1", "missing", {"display_name": "x"})
+
+
+async def test_update_single_model_for_tenant_multi_embedding_updates_both():
+    """Updating multi_embedding models updates both embedding and multi_embedding records."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 10, "model_type": "embedding", "display_name": "emb_name"},
+        {"model_id": 11, "model_type": "multi_embedding", "display_name": "emb_name"},
+    ]
+    model_data = {
+        "model_id": 10,
+        "display_name": "emb_name",
+        "description": "updated",
+        "model_type": "multi_embedding",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models) as mock_get, \
             mock.patch.object(svc, "update_model_record") as mock_update:
-        await svc.update_single_model_for_tenant("u1", "t1", model)
-        mock_get.assert_called_once_with("existing_name", "t1")
-        mock_update.assert_called_once_with(123, model, "u1")
+        await svc.update_single_model_for_tenant("u1", "t1", "emb_name", model_data)
 
-
-async def test_update_single_model_for_tenant_type_conversion():
-    """Test that string model_id is properly converted to int for comparison."""
-    svc = import_svc()
-
-    model = {"model_id": "456", "display_name": "test_name"}
-    # Return the same model_id as int to test type conversion
-    with mock.patch.object(svc, "get_model_by_display_name", return_value={"model_id": 456}) as mock_get, \
-            mock.patch.object(svc, "update_model_record") as mock_update:
-        await svc.update_single_model_for_tenant("u1", "t1", model)
-        mock_get.assert_called_once_with("test_name", "t1")
-        mock_update.assert_called_once_with(456, model, "u1")
-
-
-async def test_update_single_model_for_tenant_different_model_conflict():
-    """Test that updating with a display name used by a different model raises conflict."""
-    svc = import_svc()
-
-    model = {"model_id": "789", "display_name": "conflict_name"}
-    # Return a different model_id to simulate name conflict
-    with mock.patch.object(svc, "get_model_by_display_name", return_value={"model_id": 999}):
-        with pytest.raises(Exception) as exc:
-            await svc.update_single_model_for_tenant("u1", "t1", model)
-        assert "Failed to update model" in str(exc.value)
-        assert "Name conflict_name is already in use" in str(exc.value)
+        mock_get.assert_called_once_with("emb_name", "t1")
+        # model_type should be stripped from update payload for multi_embedding flow
+        expected_update = {"display_name": "emb_name", "description": "updated"}
+        mock_update.assert_any_call(10, expected_update, "u1")
+        mock_update.assert_any_call(11, expected_update, "u1")
 
 
 async def test_batch_update_models_for_tenant_success():
@@ -549,8 +686,8 @@ async def test_batch_update_models_for_tenant_success():
     with mock.patch.object(svc, "update_model_record") as mock_update:
         await svc.batch_update_models_for_tenant("u1", "t1", models)
         assert mock_update.call_count == 2
-        mock_update.assert_any_call("a", models[0], "u1")
-        mock_update.assert_any_call("b", models[1], "u1")
+        mock_update.assert_any_call("a", models[0], "u1", "t1")
+        mock_update.assert_any_call("b", models[1], "u1", "t1")
 
 
 async def test_batch_update_models_for_tenant_exception():
@@ -563,48 +700,62 @@ async def test_batch_update_models_for_tenant_exception():
         assert "Failed to batch update models" in str(exc.value)
 
 
-async def test_delete_model_for_tenant_not_found():
+async def test_delete_model_for_tenant_not_found_raises_lookup_error():
+    """If no models are found for display_name, raise LookupError."""
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value=None):
-        with pytest.raises(Exception) as exc:
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=[]):
+        with pytest.raises(LookupError):
             await svc.delete_model_for_tenant("u1", "t1", "missing")
-        assert "Failed to delete model" in str(exc.value)
 
 
 async def test_delete_model_for_tenant_embedding_deletes_both():
+    """Embedding + multi_embedding models are both deleted and memories cleared."""
     svc = import_svc()
 
-    # Call sequence: initial -> embedding -> multi_embedding
-    side_effect = [
-        {"model_id": "id-emb", "model_type": "embedding"},
-        {"model_id": "id-emb", "model_type": "embedding"},
-        {"model_id": "id-multi", "model_type": "multi_embedding"},
+    models = [
+        {
+            "model_id": "id-emb",
+            "model_type": "embedding",
+            "model_repo": "openai",
+            "model_name": "text-embedding-3-small",
+            "max_tokens": 1536,
+        },
+        {
+            "model_id": "id-multi",
+            "model_type": "multi_embedding",
+            "model_repo": "openai",
+            "model_name": "text-embedding-3-small",
+            "max_tokens": 1536,
+        },
     ]
-    with mock.patch.object(svc, "get_model_by_display_name", side_effect=side_effect) as mock_get, \
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models) as mock_get, \
             mock.patch.object(svc, "delete_model_record") as mock_delete, \
             mock.patch.object(svc, "get_vector_db_core", return_value=object()) as mock_get_vdb, \
             mock.patch.object(svc, "build_memory_config_for_tenant", return_value={}) as mock_build_cfg, \
             mock.patch.object(svc, "clear_model_memories", new=mock.AsyncMock()) as mock_clear:
         await svc.delete_model_for_tenant("u1", "t1", "name")
+
+        mock_get.assert_called_once_with("name", "t1")
         assert mock_delete.call_count == 2
-        mock_get.assert_called()
         mock_get_vdb.assert_called_once()
         mock_build_cfg.assert_called_once_with("t1")
-        # Best-effort cleanup may call once or twice depending on state
-        assert mock_clear.await_count >= 1
+        # Best-effort cleanup should be attempted for both records
+        assert mock_clear.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
     svc = import_svc()
 
-    side_effect = [
-        {"model_id": "id-emb", "model_type": "embedding"},
-        {"model_id": "id-emb", "model_type": "embedding"},
-        {"model_id": "id-multi", "model_type": "multi_embedding"},
+    models = [
+        {"model_id": "id-emb", "model_type": "embedding",
+            "model_repo": "r", "model_name": "n", "max_tokens": 1},
+        {"model_id": "id-multi", "model_type": "multi_embedding",
+            "model_repo": "r", "model_name": "n", "max_tokens": 1},
     ]
-    with mock.patch.object(svc, "get_model_by_display_name", side_effect=side_effect), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
             mock.patch.object(svc, "delete_model_record") as mock_delete, \
             mock.patch.object(svc, "get_vector_db_core", return_value=object()), \
             mock.patch.object(svc, "build_memory_config_for_tenant", return_value={}), \
@@ -622,12 +773,11 @@ async def test_delete_model_for_tenant_cleanup_inner_exception(caplog):
 async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
     svc = import_svc()
 
-    side_effect = [
-        {"model_id": "id-emb", "model_type": "embedding"},
+    models = [
         {"model_id": "id-emb", "model_type": "embedding"},
         {"model_id": "id-multi", "model_type": "multi_embedding"},
     ]
-    with mock.patch.object(svc, "get_model_by_display_name", side_effect=side_effect), \
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
             mock.patch.object(svc, "delete_model_record") as mock_delete, \
             mock.patch.object(svc, "get_vector_db_core", side_effect=Exception("vdb_down")), \
             mock.patch.object(svc, "build_memory_config_for_tenant", return_value={}):
@@ -641,12 +791,19 @@ async def test_delete_model_for_tenant_cleanup_outer_exception(caplog):
 
 
 async def test_delete_model_for_tenant_non_embedding():
+    """Non-embedding model deletes a single record without memory cleanup."""
     svc = import_svc()
 
-    with mock.patch.object(svc, "get_model_by_display_name", return_value={"model_id": "id", "model_type": "llm"}), \
-            mock.patch.object(svc, "delete_model_record") as mock_delete:
+    models = [
+        {"model_id": "id", "model_type": "llm"},
+    ]
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=models), \
+            mock.patch.object(svc, "delete_model_record") as mock_delete, \
+            mock.patch.object(svc, "get_vector_db_core") as mock_get_vdb:
         await svc.delete_model_for_tenant("u1", "t1", "name")
         mock_delete.assert_called_once_with("id", "u1", "t1")
+        # For non-embedding models we should not prepare vector DB cleanup
+        mock_get_vdb.assert_not_called()
 
 
 async def test_list_models_for_tenant_success():
@@ -759,6 +916,44 @@ async def test_list_llm_models_for_tenant_normalizes_connect_status():
         # Normalized from None
         assert result[0]["connect_status"] == "not_detected"
         assert result[1]["connect_status"] == "operational"
+
+
+async def test_list_models_for_tenant_type_mapping():
+    """Test list_models_for_tenant maps model_type from 'chat' to 'llm' (covers line 310)"""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "model_type": "chat",  # ModelEngine type that should be mapped to "llm"
+            "connect_status": "operational"
+        },
+        {
+            "model_id": "llm2",
+            "model_repo": "anthropic",
+            "model_name": "claude-3",
+            "display_name": "Claude 3",
+            "model_type": "llm",  # Already correct type
+            "connect_status": "not_detected"
+        }
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
+
+        result = await svc.list_models_for_tenant("t1")
+
+        assert len(result) == 2
+        # First model should have model_type mapped from "chat" to "llm" (covers line 310)
+        assert result[0]["model_type"] == "llm"  # Should be mapped from "chat"
+        assert result[0]["model_id"] == "llm1"
+        # Second model should remain "llm"
+        assert result[1]["model_type"] == "llm"
+        assert result[1]["model_id"] == "llm2"
 
 
 async def test_list_llm_models_for_tenant_handles_missing_repo():

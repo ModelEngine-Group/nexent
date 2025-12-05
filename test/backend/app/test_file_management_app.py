@@ -267,7 +267,7 @@ async def test_get_storage_file_redirect(monkeypatch):
         return {"success": True, "url": "http://example.com/a"}
 
     monkeypatch.setattr(file_management_app, "get_file_url_impl", fake_get_url)
-    resp = await file_management_app.get_storage_file(object_name="a.txt", download="redirect", expires=60)
+    resp = await file_management_app.get_storage_file(object_name="a.txt", download="redirect", expires=60, filename="a.txt")
     # Starlette RedirectResponse defaults to 307
     assert 300 <= resp.status_code < 400
     assert resp.headers["location"] == "http://example.com/a"
@@ -281,9 +281,13 @@ async def test_get_storage_file_stream(monkeypatch):
         return gen(), "text/plain"
 
     monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
-    resp = await file_management_app.get_storage_file(object_name="a.txt", download="stream", expires=60)
+    resp = await file_management_app.get_storage_file(object_name="a.txt", download="stream", expires=60, filename="a.txt")
+    assert resp.headers["content-type"].startswith("text/plain")
     assert resp.media_type == "text/plain"
-    assert "inline; filename=\"a.txt\"" in resp.headers.get("content-disposition", "")
+    # Content-Disposition should be "attachment" not "inline", and filename should be extracted from object_name
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "attachment" in content_disposition
+    assert "a.txt" in content_disposition
     # consume stream
     chunks = []
     async for part in resp.body_iterator:  # type: ignore[attr-defined]
@@ -297,7 +301,7 @@ async def test_get_storage_file_metadata(monkeypatch):
         return {"success": True, "url": "http://example.com/x"}
 
     monkeypatch.setattr(file_management_app, "get_file_url_impl", fake_get_url)
-    result = await file_management_app.get_storage_file(object_name="x", download="ignore", expires=10)
+    result = await file_management_app.get_storage_file(object_name="x", download="ignore", expires=10, filename="x.txt")
     assert result["url"] == "http://example.com/x"
 
 
@@ -308,7 +312,7 @@ async def test_get_storage_file_error(monkeypatch):
 
     monkeypatch.setattr(file_management_app, "get_file_url_impl", boom_url)
     with pytest.raises(Exception) as ei:
-        await file_management_app.get_storage_file(object_name="x", download="ignore", expires=1)
+        await file_management_app.get_storage_file(object_name="x", download="ignore", expires=1, filename="x.txt")
     assert "Failed to get file information" in str(ei.value)
 
 
@@ -355,5 +359,469 @@ async def test_get_storage_file_batch_urls_mixed(monkeypatch):
     assert out["total"] == 2
     assert out["success_count"] == 1
     assert any(item["object_name"] == "bad" and item["success"] is False for item in out["results"])
+
+
+# --- Tests for build_content_disposition_header ---
+
+def test_build_content_disposition_header_ascii():
+    """Test build_content_disposition_header with ASCII filename"""
+    result = file_management_app.build_content_disposition_header("test.pdf")
+    assert result == 'attachment; filename="test.pdf"'
+
+
+def test_build_content_disposition_header_non_ascii():
+    """Test build_content_disposition_header with non-ASCII filename"""
+    result = file_management_app.build_content_disposition_header("测试文件.pdf")
+    assert 'attachment; filename=' in result
+    assert 'filename*=UTF-8' in result
+    assert '测试文件' in result or '%E6%B5%8B%E8%AF%95' in result
+
+
+def test_build_content_disposition_header_non_ascii_with_extension():
+    """Test build_content_disposition_header with non-ASCII filename and extension"""
+    result = file_management_app.build_content_disposition_header("文档.docx")
+    assert 'attachment; filename=' in result
+    assert 'filename*=UTF-8' in result
+    assert '.docx' in result
+
+
+def test_build_content_disposition_header_exception_handling(monkeypatch):
+    """Test build_content_disposition_header exception handling"""
+    def boom(_value: str, safe: str = "") -> str:
+        raise RuntimeError("quote failure")
+
+    monkeypatch.setattr("backend.apps.file_management_app.quote", boom)
+
+    result = file_management_app.build_content_disposition_header("测试.pdf")
+    assert 'attachment; filename=' in result
+    assert 'filename*=UTF-8' not in result
+
+
+# --- Tests for get_storage_file with filename parameter ---
+
+@pytest.mark.asyncio
+async def test_get_storage_file_stream_with_filename(monkeypatch):
+    """Test get_storage_file stream mode with filename parameter"""
+    async def fake_get_stream(object_name):
+        async def gen():
+            yield b"chunk1"
+        return gen(), "application/pdf"
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+    resp = await file_management_app.get_storage_file(
+        object_name="attachments/file.pdf", 
+        download="stream", 
+        expires=60,
+        filename="原始文件名.pdf"
+    )
+    assert resp.media_type == "application/pdf"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "原始文件名.pdf" in content_disposition or "filename*=UTF-8" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_stream_without_filename(monkeypatch):
+    """Test get_storage_file stream mode without filename parameter (extract from object_name)"""
+    async def fake_get_stream(object_name):
+        async def gen():
+            yield b"chunk1"
+        return gen(), "text/plain"
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+    resp = await file_management_app.get_storage_file(
+        object_name="attachments/test.txt", 
+        download="stream", 
+        expires=60,
+        filename=None
+    )
+    assert resp.media_type == "text/plain"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "test.txt" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_stream_error(monkeypatch):
+    """Test get_storage_file stream mode error handling"""
+    async def fake_get_stream(object_name):
+        raise RuntimeError("Stream error")
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+    with pytest.raises(Exception) as ei:
+        await file_management_app.get_storage_file(
+            object_name="test.txt", 
+            download="stream", 
+            expires=60,
+            filename="test.txt"
+        )
+    assert "Failed to get file information" in str(ei.value)
+
+
+# --- Tests for download_datamate_file ---
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_with_url(monkeypatch):
+    """Test download_datamate_file with full URL"""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"file content"
+    mock_response.headers = {"Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="test.pdf"'}
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    resp = await file_management_app.download_datamate_file(
+        url="http://example.com/api/data-management/datasets/123/files/456/download",
+        base_url=None,
+        dataset_id=None,
+        file_id=None,
+        filename="test.pdf",
+        authorization=None,
+    )
+    assert resp.media_type == "application/pdf"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "test.pdf" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_with_parts(monkeypatch):
+    """Test download_datamate_file with base_url, dataset_id, file_id"""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"file content"
+    mock_response.headers = {"Content-Type": "application/pdf"}
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    resp = await file_management_app.download_datamate_file(
+        url=None,
+        base_url="http://example.com",
+        dataset_id="123",
+        file_id="456",
+        filename=None,
+        authorization=None,
+    )
+    assert resp.media_type == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_404_error(monkeypatch):
+    """Test download_datamate_file with 404 error"""
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_response.headers = {}
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    with pytest.raises(Exception) as ei:
+        await file_management_app.download_datamate_file(
+            url="http://example.com/api/data-management/datasets/123/files/456/download",
+            base_url=None,
+            dataset_id=None,
+            file_id=None,
+            filename=None,
+            authorization=None,
+        )
+    assert "File not found" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_http_error(monkeypatch):
+    """Test download_datamate_file with HTTP error"""
+    import httpx
+    
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=httpx.HTTPError("Network error"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    with pytest.raises(Exception) as ei:
+        await file_management_app.download_datamate_file(
+            url="http://example.com/api/data-management/datasets/123/files/456/download",
+            base_url=None,
+            dataset_id=None,
+            file_id=None,
+            filename=None,
+            authorization=None,
+        )
+    assert "Failed to download file from URL" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_missing_params():
+    """Test download_datamate_file with missing parameters"""
+    with pytest.raises(Exception) as ei:
+        await file_management_app.download_datamate_file(
+            url=None,
+            base_url=None,
+            dataset_id=None,
+            file_id=None,
+            filename=None,
+            authorization=None,
+        )
+    assert "Either url or (base_url, dataset_id, file_id) must be provided" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_extract_filename_from_content_disposition(monkeypatch):
+    """Test download_datamate_file extracting filename from Content-Disposition header"""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"file content"
+    mock_response.headers = {"Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="extracted.pdf"'}
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    resp = await file_management_app.download_datamate_file(
+        url="http://example.com/api/data-management/datasets/123/files/456/download",
+        base_url=None,
+        dataset_id=None,
+        file_id=None,
+        filename=None,
+        authorization=None,
+    )
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "extracted.pdf" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_extract_filename_from_url(monkeypatch):
+    """Test download_datamate_file extracting filename from URL path"""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"file content"
+    mock_response.headers = {"Content-Type": "application/pdf"}
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    resp = await file_management_app.download_datamate_file(
+        url="http://example.com/api/data-management/datasets/123/files/456/download",
+        base_url=None,
+        dataset_id=None,
+        file_id=None,
+        filename=None,
+        authorization=None,
+    )
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "attachment" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_with_authorization(monkeypatch):
+    """Test download_datamate_file with authorization header"""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b"file content"
+    mock_response.headers = {"Content-Type": "application/pdf"}
+    mock_response.raise_for_status = MagicMock()
+
+    call_args_list = []
+    async def fake_httpx_get(url, headers=None, follow_redirects=True):
+        call_args_list.append((url, headers))
+        return mock_response
+
+    mock_client = MagicMock()
+    mock_client.get = fake_httpx_get
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+    
+    await file_management_app.download_datamate_file(
+        url="http://example.com/api/data-management/datasets/123/files/456/download",
+        base_url=None,
+        dataset_id=None,
+        file_id=None,
+        filename=None,
+        authorization="Bearer token123",
+    )
+    assert len(call_args_list) > 0
+    assert call_args_list[0][1].get("Authorization") == "Bearer token123"
+
+
+@pytest.mark.asyncio
+async def test_download_datamate_file_unexpected_exception(monkeypatch):
+    """Unexpected exceptions should surface with new 500 message."""
+
+    def fail_normalize(_url: str):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(
+        file_management_app,
+        "_normalize_datamate_download_url",
+        fail_normalize,
+    )
+
+    with pytest.raises(Exception) as exc:
+        await file_management_app.download_datamate_file(
+            url="http://example.com/api/data-management/datasets/123/files/456/download",
+            base_url=None,
+            dataset_id=None,
+            file_id=None,
+            filename=None,
+            authorization=None,
+        )
+    assert "Failed to download file: boom" in str(exc.value)
+
+
+# --- Tests for _normalize_datamate_download_url ---
+
+def test_normalize_datamate_download_url_valid():
+    """Test _normalize_datamate_download_url with valid URL"""
+    url = "http://example.com/api/data-management/datasets/123/files/456/download"
+    result = file_management_app._normalize_datamate_download_url(url)
+    assert result == url
+
+
+def test_normalize_datamate_download_url_adds_scheme():
+    """URLs without scheme should default to https://"""
+    url = "example.com/api/data-management/datasets/123/files/456/download"
+    result = file_management_app._normalize_datamate_download_url(url)
+    assert result.startswith("http://example.com")
+
+
+def test_normalize_datamate_download_url_with_prefix():
+    """Test _normalize_datamate_download_url with URL prefix"""
+    url = "http://example.com/prefix/api/data-management/datasets/123/files/456/download"
+    result = file_management_app._normalize_datamate_download_url(url)
+    assert "/prefix/api/data-management/datasets/123/files/456/download" in result
+
+
+def test_normalize_datamate_download_url_missing_data_management():
+    """Test _normalize_datamate_download_url with missing data-management segment"""
+    with pytest.raises(Exception) as ei:
+        file_management_app._normalize_datamate_download_url("http://example.com/invalid/url")
+    assert "missing 'data-management' segment" in str(ei.value)
+
+
+def test_normalize_datamate_download_url_invalid_structure():
+    """Test _normalize_datamate_download_url with invalid URL structure"""
+    with pytest.raises(Exception) as ei:
+        file_management_app._normalize_datamate_download_url("http://example.com/data-management/invalid")
+    assert "unable to parse dataset_id or file_id" in str(ei.value)
+
+
+# --- Tests for _build_datamate_url_from_parts ---
+
+def test_build_datamate_url_from_parts_with_api():
+    """Test _build_datamate_url_from_parts with base_url ending with /api"""
+    result = file_management_app._build_datamate_url_from_parts(
+        "http://example.com/api",
+        "123",
+        "456"
+    )
+    assert "/api/data-management/datasets/123/files/456/download" in result
+
+
+def test_build_datamate_url_from_parts_without_scheme():
+    """base_url without scheme should default to https://"""
+    result = file_management_app._build_datamate_url_from_parts(
+        "example.com",
+        "123",
+        "456"
+    )
+    assert result.startswith("http://example.com/api/")
+
+
+def test_build_datamate_url_from_parts_without_api():
+    """Test _build_datamate_url_from_parts with base_url without /api"""
+    result = file_management_app._build_datamate_url_from_parts(
+        "http://example.com",
+        "123",
+        "456"
+    )
+    assert "/api/data-management/datasets/123/files/456/download" in result
+
+
+def test_build_datamate_url_from_parts_with_slash():
+    """Test _build_datamate_url_from_parts with base_url ending with slash"""
+    result = file_management_app._build_datamate_url_from_parts(
+        "http://example.com/",
+        "123",
+        "456"
+    )
+    assert "/api/data-management/datasets/123/files/456/download" in result
+
+
+def test_build_datamate_url_from_parts_appends_api_segment():
+    """Ensure /api is appended when missing from base path"""
+    result = file_management_app._build_datamate_url_from_parts(
+        "http://example.com/service",
+        "123",
+        "456"
+    )
+    assert result.startswith("http://example.com/service/api/")
+
+
+def test_build_datamate_url_from_parts_defaults_api_when_no_path():
+    """Ensure empty base path defaults to /api"""
+    result = file_management_app._build_datamate_url_from_parts(
+        "http://example.com",
+        "123",
+        "456"
+    )
+    assert result.startswith("http://example.com/api/")
+
+
+def test_build_datamate_url_from_parts_trailing_slash_branch(monkeypatch):
+    """Force branch where rstrip result still ends with slash."""
+
+    class DummyPath:
+        def rstrip(self, chars=None):
+            return "/prefix/"
+
+    class DummyParseResult:
+        scheme = "http"
+        netloc = "example.com"
+        path = DummyPath()
+
+    def fake_urlparse(_url: str):
+        return DummyParseResult()
+
+    monkeypatch.setattr("backend.apps.file_management_app.urlparse", fake_urlparse)
+
+    result = file_management_app._build_datamate_url_from_parts(
+        "http://placeholder",
+        "123",
+        "456"
+    )
+    assert result.startswith("http://example.com/prefix/api/")
+
+
+def test_build_datamate_url_from_parts_empty_base_url():
+    """Test _build_datamate_url_from_parts with empty base_url"""
+    with pytest.raises(Exception) as ei:
+        file_management_app._build_datamate_url_from_parts("", "123", "456")
+    assert "base_url is required" in str(ei.value)
 
 

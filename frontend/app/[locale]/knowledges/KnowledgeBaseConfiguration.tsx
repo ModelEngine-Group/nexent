@@ -4,7 +4,7 @@ import type React from "react";
 import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal } from "antd";
+import { App, Modal, Row, Col } from "antd";
 import { InfoCircleFilled, WarningFilled } from "@ant-design/icons";
 import {
   DOCUMENT_ACTION_TYPES,
@@ -19,7 +19,7 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import {
   SETUP_PAGE_CONTAINER,
-  FLEX_TWO_COLUMN_LAYOUT,
+  TWO_COLUMN_LAYOUT,
   STANDARD_CARD,
 } from "@/const/layoutConstants";
 
@@ -757,6 +757,40 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbName(name);
   };
 
+  // If Embedding model is not configured, show warning container instead of content
+  if (showEmbeddingWarning) {
+    return (
+      <div
+        className="w-full mx-auto relative"
+        style={{
+          maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
+          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+        }}
+      >
+        <div
+          className={STANDARD_CARD.BASE_CLASSES}
+          style={{
+            height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
+            padding: STANDARD_CARD.PADDING,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div className="text-center">
+            <WarningFilled
+              className="text-yellow-500 mb-4"
+              style={{ fontSize: 48 }}
+            />
+            <div className="text-base text-gray-800 font-semibold">
+              {t("embedding.knowledgeBaseDisabledWarningModal.title")}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div
@@ -770,32 +804,6 @@ function DataConfig({ isActive }: DataConfigProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {showEmbeddingWarning && (
-          <div className="absolute inset-0 bg-gray-500/45 z-40" />
-        )}
-        <Modal
-          open={showEmbeddingWarning && !!contentRef.current}
-          title={null}
-          footer={null}
-          closable={false}
-          maskClosable={false}
-          mask={false}
-          centered
-          getContainer={() => contentRef.current || document.body}
-          styles={{ body: { padding: 0 } }}
-          rootClassName="kb-embedding-warning"
-        >
-          <div className="py-2">
-            <div className="flex items-center">
-              <WarningFilled className="text-yellow-500 mt-1 mr-2 text-3xl" />
-              <div className="ml-3 mt-2">
-                <div className="text-base text-gray-800 font-semibold">
-                  {t("embedding.knowledgeBaseDisabledWarningModal.title")}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
         <Modal
           open={showAutoDeselectModal}
           title={t("embedding.knowledgeBaseAutoDeselectModal.title")}
@@ -820,12 +828,14 @@ function DataConfig({ isActive }: DataConfigProps) {
             </div>
           </div>
         </Modal>
-        <div
-          className="flex h-full"
-          style={{ gap: FLEX_TWO_COLUMN_LAYOUT.GAP }}
-        >
-          {/* Left knowledge base list - occupies 1/3 space */}
-          <div style={{ width: FLEX_TWO_COLUMN_LAYOUT.LEFT_WIDTH }}>
+        <Row gutter={TWO_COLUMN_LAYOUT.GUTTER} className="h-full">
+          <Col
+            xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
+            md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
+            lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
+            xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
+            xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
+          >
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
               selectedIds={kbState.selectedIds}
@@ -842,10 +852,15 @@ function DataConfig({ isActive }: DataConfigProps) {
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
             />
-          </div>
+          </Col>
 
-          {/* Right content area - occupies 2/3 space, now unified with config.tsx style */}
-          <div style={{ width: FLEX_TWO_COLUMN_LAYOUT.RIGHT_WIDTH }}>
+          <Col
+            xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
+            md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
+            lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
+            xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
+            xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
+          >
             {isCreatingMode ? (
               <DocumentList
                 documents={[]}
@@ -917,8 +932,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                 />
               </div>
             )}
-          </div>
-        </div>
+          </Col>
+        </Row>
       </div>
     </>
   );
