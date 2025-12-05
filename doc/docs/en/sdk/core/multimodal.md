@@ -14,8 +14,8 @@ This module provides a native multimodal data processing bus designed for agents
 Before using the decorators, you need to initialize a `LoadSaveObjectManager` instance and pass in a storage client (for example, a MinIO client):
 
 ```python
-from sdk.nexent.multi_modal.load_save_object import LoadSaveObjectManager
-from backend.database.client import minio_client
+from nexent.multi_modal.load_save_object import LoadSaveObjectManager
+from database.client import minio_client
 
 
 # Create manager instance
@@ -277,8 +277,8 @@ In practice, `@load_object` and `@save_object` are often used together to build 
 from typing import Union, List
 from PIL import Image, ImageFilter
 
-from backend.database.client import minio_client
-from sdk.nexent.multi_modal.load_save_object import LoadSaveObjectManager
+from database.client import minio_client
+from nexent.multi_modal.load_save_object import LoadSaveObjectManager
 
 
 Multimodal = LoadSaveObjectManager(storage_client=minio_client)

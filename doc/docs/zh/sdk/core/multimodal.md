@@ -15,8 +15,8 @@
 在使用装饰器之前，需要先初始化 `LoadSaveObjectManager` 实例，并传入存储客户端（如 MinIO 客户端）：
 
 ```python
-from sdk.nexent.multi_modal.load_save_object import LoadSaveObjectManager
-from backend.database.client import minio_client
+from nexent.multi_modal.load_save_object import LoadSaveObjectManager
+from database.client import minio_client
 
 
 # 创建管理器实例
@@ -263,8 +263,8 @@ def process_two_images(img1: Image.Image, img2: Image.Image) -> Tuple[Image.Imag
 ```python
 from PIL import Image, ImageFilter
 from typing import Union, List
-from backend.database.client import minio_client
-from nexent.multi_modal.load_save_object import LoadSaveObjectManager
+from database.client import minio_client
+from multi_modal.load_save_object import LoadSaveObjectManager
 
 Multimodal = LoadSaveObjectManager(storage_client=minio_client)
 
