@@ -152,7 +152,7 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_index") as mock_create:
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
 
         expected_response = {"status": "success",
                              "index_name": auth_data["index_name"]}
@@ -165,7 +165,13 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         # Verify
         assert response.status_code == 200
         assert response.json() == expected_response
+        # vdb_core is constructed inside router; accept ANY for instance
         mock_create.assert_called_once()
+        called_args = mock_create.call_args[0]
+        assert called_args[0] == auth_data["index_name"]
+        assert called_args[1] == 768
+        assert called_args[3] == auth_data["user_id"]
+        assert called_args[4] == auth_data["tenant_id"]
 
 
 @pytest.mark.asyncio
@@ -177,7 +183,7 @@ async def test_create_new_index_error(vdb_core_mock, auth_data):
     # Setup mocks
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_index") as mock_create:
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
 
         mock_create.side_effect = Exception("Test error")
 
@@ -702,10 +708,11 @@ async def test_get_index_chunks_success(vdb_core_mock):
     Test retrieving index chunks successfully.
     Verifies that the endpoint forwards query params and returns the service payload.
     """
+    index_name = "test_index"
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value="resolved_index"), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.get_index_chunks") as mock_get_chunks:
 
-        index_name = "test_index"
         expected_response = {
             "status": "success",
             "message": "ok",
@@ -724,7 +731,7 @@ async def test_get_index_chunks_success(vdb_core_mock):
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_get_chunks.assert_called_once_with(
-            index_name=index_name,
+            index_name="resolved_index",
             page=2,
             page_size=50,
             path_or_url="/foo",
@@ -738,10 +745,11 @@ async def test_get_index_chunks_error(vdb_core_mock):
     Test retrieving index chunks with service error.
     Ensures the endpoint maps the exception to HTTP 500.
     """
+    index_name = "test_index"
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value="resolved_index"), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.get_index_chunks") as mock_get_chunks:
 
-        index_name = "test_index"
         mock_get_chunks.side_effect = Exception("Chunk failure")
 
         response = client.post(f"/indices/{index_name}/chunks")
@@ -749,7 +757,7 @@ async def test_get_index_chunks_error(vdb_core_mock):
         assert response.status_code == 500
         assert response.json() == {"detail": "Error getting chunks: Chunk failure"}
         mock_get_chunks.assert_called_once_with(
-            index_name=index_name,
+            index_name="resolved_index",
             page=None,
             page_size=None,
             path_or_url=None,
@@ -765,6 +773,7 @@ async def test_create_chunk_success(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_chunk") as mock_create:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
@@ -794,6 +803,7 @@ async def test_create_chunk_error(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.create_chunk") as mock_create:
 
         mock_create.side_effect = Exception("Create failed")
@@ -822,6 +832,7 @@ async def test_update_chunk_success(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_chunk") as mock_update:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
@@ -850,6 +861,7 @@ async def test_update_chunk_value_error(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_chunk") as mock_update:
 
         mock_update.side_effect = ValueError("Invalid update payload")
@@ -864,7 +876,8 @@ async def test_update_chunk_value_error(vdb_core_mock, auth_data):
             headers=auth_data["auth_header"],
         )
 
-        assert response.status_code == 400
+        # ValueError is mapped to NOT_FOUND in app layer
+        assert response.status_code == 404
         assert response.json() == {"detail": "Invalid update payload"}
         mock_update.assert_called_once()
 
@@ -877,6 +890,7 @@ async def test_update_chunk_exception(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.update_chunk") as mock_update:
 
         mock_update.side_effect = Exception("Update failed")
@@ -904,6 +918,7 @@ async def test_delete_chunk_success(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_chunk") as mock_delete:
 
         expected_response = {"status": "success", "chunk_id": "chunk-1"}
@@ -927,6 +942,7 @@ async def test_delete_chunk_not_found(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_chunk") as mock_delete:
 
         mock_delete.side_effect = ValueError("Chunk not found")
@@ -949,6 +965,7 @@ async def test_delete_chunk_exception(vdb_core_mock, auth_data):
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
             patch("backend.apps.vectordatabase_app.get_current_user_id",
                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_chunk") as mock_delete:
 
         mock_delete.side_effect = Exception("Delete failed")
