@@ -49,6 +49,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION update_mcp_record_update_time() IS 'Function to update the update_time column when a record in mcp_record_t is updated';
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_mcp_record_update_time_trigger ON nexent.mcp_record_t;
 CREATE TRIGGER update_mcp_record_update_time_trigger
 BEFORE UPDATE ON nexent.mcp_record_t
 FOR EACH ROW

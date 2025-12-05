@@ -1,4 +1,4 @@
-CREATE SEQUENCE "nexent"."partner_mapping_id_t_mapping_id_seq" 
+CREATE SEQUENCE IF NOT EXISTS "nexent"."partner_mapping_id_t_mapping_id_seq" 
 INCREMENT 1
 MINVALUE  1
 MAXVALUE 2147483647
@@ -41,6 +41,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS "update_partner_mapping_update_time_trigger" ON "nexent"."partner_mapping_id_t";
 CREATE TRIGGER "update_partner_mapping_update_time_trigger"
 BEFORE UPDATE ON "nexent"."partner_mapping_id_t"
 FOR EACH ROW

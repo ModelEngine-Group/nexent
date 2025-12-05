@@ -3,11 +3,26 @@
 # Ensure the script is executed with bash (required for arrays and [[ ]])
 if [ -z "$BASH_VERSION" ]; then
   echo "❌ This script must be run with bash. Please use: bash deploy.sh or ./deploy.sh"
-  exit 0
+  exit 1
 fi
 
 # Exit immediately if a command exits with a non-zero status
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
+DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
+
+MODE_CHOICE_SAVED=""
+VERSION_CHOICE_SAVED=""
+IS_MAINLAND_SAVED=""
+ENABLE_TERMINAL_SAVED="N"
+TERMINAL_MOUNT_DIR_SAVED="${TERMINAL_MOUNT_DIR:-}"
+APP_VERSION=""
+
+cd "$SCRIPT_DIR"
+
 set -a
 source .env
 
@@ -210,7 +225,7 @@ check_ports_in_env_files() {
     confirm_continue=$(sanitize_input "$confirm_continue")
     if ! [[ "$confirm_continue" =~ ^[Yy]$ ]]; then
       echo "🚫 Deployment aborted due to port conflicts."
-      exit 0
+      exit 1
     fi
 
     echo "⚠️  Continuing deployment even though some required ports are already in use."
@@ -219,6 +234,41 @@ check_ports_in_env_files() {
   echo ""
   echo "--------------------------------"
   echo ""
+}
+
+trim_quotes() {
+  local value="$1"
+  value="${value%$'\r'}"
+  value="${value%\"}"
+  value="${value#\"}"
+  echo "$value"
+}
+
+get_app_version() {
+  if [ ! -f "$CONST_FILE" ]; then
+    echo ""
+    return
+  fi
+
+  local line
+  line=$(grep -E 'APP_VERSION' "$CONST_FILE" | tail -n 1 || true)
+  line="${line##*=}"
+  line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  local value
+  value="$(trim_quotes "$line")"
+  echo "$value"
+}
+
+persist_deploy_options() {
+  {
+    echo "APP_VERSION=\"${APP_VERSION}\""
+    echo "ROOT_DIR=\"${ROOT_DIR}\""
+    echo "MODE_CHOICE=\"${MODE_CHOICE_SAVED}\""
+    echo "VERSION_CHOICE=\"${VERSION_CHOICE_SAVED}\""
+    echo "IS_MAINLAND=\"${IS_MAINLAND_SAVED}\""
+    echo "ENABLE_TERMINAL=\"${ENABLE_TERMINAL_SAVED}\""
+    echo "TERMINAL_MOUNT_DIR=\"${TERMINAL_MOUNT_DIR_SAVED}\""
+  } > "$DEPLOY_OPTIONS_FILE"
 }
 
 generate_minio_ak_sk() {
@@ -395,6 +445,7 @@ select_deployment_mode() {
 
   # Sanitize potential Windows CR in input
   mode_choice=$(sanitize_input "$mode_choice")
+  MODE_CHOICE_SAVED="$mode_choice"
   
   case $mode_choice in
       2)
@@ -544,7 +595,7 @@ deploy_core_services() {
   echo "👀 Starting core services..."
   if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; then
     echo "   ❌ ERROR Failed to start core services"
-    return 0
+    return 1
   fi
 }
 
@@ -561,7 +612,7 @@ deploy_infrastructure() {
 
   if ! ${docker_compose_command} -p nexent -f "docker-compose${COMPOSE_FILE_SUFFIX}" up -d $INFRA_SERVICES; then
     echo "   ❌ ERROR Failed to start infrastructure services"
-    return 0
+    return 1
   fi
 
   if [ "$ENABLE_TERMINAL_TOOL_CONTAINER" = "true" ]; then
@@ -606,7 +657,7 @@ select_deployment_version() {
 
   # Sanitize potential Windows CR in input
   version_choice=$(sanitize_input "$version_choice")
-
+  VERSION_CHOICE_SAVED="${version_choice}"
   case $version_choice in
       2)
           export DEPLOYMENT_VERSION="full"
@@ -653,7 +704,7 @@ setup_package_install_script() {
       echo "   ✅ Package installation script created/updated"
   else
       echo "   ❌ ERROR openssh-install-script.sh not found"
-      return 0
+      return 1
   fi
 }
 
@@ -692,6 +743,7 @@ select_terminal_tool() {
     enable_terminal=$(sanitize_input "$enable_terminal")
 
     if [[ "$enable_terminal" =~ ^[Yy]$ ]]; then
+        ENABLE_TERMINAL_SAVED="Y"
         export ENABLE_TERMINAL_TOOL_CONTAINER="true"
         export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}terminal"
         echo "✅ Terminal tool container will be created 🔧"
@@ -707,6 +759,7 @@ select_terminal_tool() {
         read -p "   📁 Enter host directory to mount to container (default: /opt/terminal): " terminal_mount_dir
         terminal_mount_dir=$(sanitize_input "$terminal_mount_dir")
         TERMINAL_MOUNT_DIR="${terminal_mount_dir:-$default_terminal_dir}"
+        TERMINAL_MOUNT_DIR_SAVED="$TERMINAL_MOUNT_DIR"
         
         # Save to environment variables
         export TERMINAL_MOUNT_DIR
@@ -770,6 +823,7 @@ select_terminal_tool() {
         fi
         echo ""
     else
+        ENABLE_TERMINAL_SAVED="N"
         export ENABLE_TERMINAL_TOOL_CONTAINER="false"
         echo "🚫 Terminal tool container disabled"
     fi
@@ -814,9 +868,11 @@ choose_image_env() {
   # Sanitize potential Windows CR in input
   is_mainland=$(sanitize_input "$is_mainland")
   if [[ "$is_mainland" =~ ^[Yy]$ ]]; then
+    IS_MAINLAND_SAVED="Y"
     echo "🌐 Detected mainland China network, using .env.mainland for image sources."
     source .env.mainland
   else
+    IS_MAINLAND_SAVED="N"
     echo "🌐 Using general image sources from .env.general."
     source .env.general
   fi
@@ -833,28 +889,35 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
+  APP_VERSION="$(get_app_version)"
+  if [ -z "$APP_VERSION" ]; then
+    echo "❌ Failed to get app version, please check the backend/consts/const.py file"
+    exit 1
+  fi
+  echo "🌐 App version: $APP_VERSION"
+
   # Check all relevant ports from environment files before starting deployment
   check_ports_in_env_files
 
   # Select deployment version, mode and image source
-  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 0; }
-  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 0; }
-  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 0; }
-  choose_image_env || { echo "❌ Image environment setup failed"; exit 0; }
+  select_deployment_version || { echo "❌ Deployment version selection failed"; exit 1; }
+  select_deployment_mode || { echo "❌ Deployment mode selection failed"; exit 1; }
+  select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
+  choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
 
   # Add permission
-  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 0; }
-  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 0; }
+  prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
+  generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
 
 
   # Generate Supabase secrets
-  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 0; }
+  generate_supabase_keys || { echo "❌ Supabase secrets generation failed"; exit 1; }
 
   # Deploy infrastructure services
-  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 0; }
+  deploy_infrastructure || { echo "❌ Infrastructure deployment failed"; exit 1; }
 
   # Generate Elasticsearch API key
-  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 0; }
+  generate_elasticsearch_api_key || { echo "❌ Elasticsearch API key generation failed"; exit 1; }
 
   echo ""
   echo "--------------------------------"
@@ -862,16 +925,17 @@ main_deploy() {
 
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
-    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 0; }
+    generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
     echo "💡 Use 'source .env' to load environment variables in your development shell"
+    persist_deploy_options
     return 0
   fi
 
   # Start core services
-  deploy_core_services || { echo "❌ Core services deployment failed"; exit 0; }
+  deploy_core_services || { echo "❌ Core services deployment failed"; exit 1; }
 
   echo "   ✅ Core services started successfully"
   echo ""
@@ -880,9 +944,10 @@ main_deploy() {
 
   # Create default admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 0; }
+    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 1; }
   fi
 
+  persist_deploy_options
   echo "🎉  Deployment completed successfully!"
   echo "🌐  You can now access the application at http://localhost:3000"
 }
@@ -891,7 +956,7 @@ main_deploy() {
 version_info=$(get_compose_version)
 if [[ $version_info == "unknown" ]]; then
     echo "Error: Docker Compose not found or version detection failed"
-    exit 0
+    exit 1
 fi
 
 # extract version
@@ -906,7 +971,7 @@ case $version_type in
         # The version ​​v1.28.0​​ is the minimum requirement in Docker Compose v1 that explicitly supports interpolation syntax with default values like ${VAR:-default}
         if [[ $version_number < "1.28.0" ]]; then
             echo "Warning: V1 version is too old, consider upgrading to V2"
-            exit 0
+            exit 1
         fi
         docker_compose_command="docker-compose"
         ;;
@@ -916,14 +981,14 @@ case $version_type in
         ;;
     *)
         echo "Error: Unknown docker compose version type."
-        exit 0
+        exit 1
         ;;
 esac
 
 # Execute main deployment with error handling
 if ! main_deploy; then
   echo "❌ Deployment failed. Please check the error messages above and try again."
-  exit 0
+  exit 1
 fi
 
 clean

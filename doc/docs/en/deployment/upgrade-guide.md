@@ -2,18 +2,62 @@
 
 ## 🚀 Upgrade Overview
 
-Follow these four steps to upgrade Nexent safely:
+Follow these steps to upgrade Nexent safely:
 
-1. Clean up existing containers and images
-2. Pull the latest code and run the deployment script
-3. Apply database migrations
-4. Verify the deployment in your browser
+1. Pull the latest code
+2. Execute the upgrade script
+3. Open the site to confirm service availability
 
 ---
 
-## 🧹 Step 1: Clean up old images
+## 🔄 Step 1: Update Code
 
-Remove cached resources to avoid conflicts when redeploying:
+Before updating, record the current deployment version and data directory information.
+
+- Current Deployment Version Location: APP_VERSION in backend/consts/const.py
+- Data Directory Location: ROOT_DIR in docker/.env
+
+**Code downloaded via git**
+
+Update the code using git commands:
+
+```bash
+git pull
+```
+
+**Code downloaded via ZIP package or other means**
+
+1. Re-download the latest code from GitHub and extract it.
+2. If it exists, copy the deploy.options file from the docker directory of your previous deployment script directory to the docker directory of the new code directory. (If the file doesn't exist, you can ignore this step).
+
+## 🔄 Step 2: Execute the Upgrade
+
+Navigate to the docker directory of the updated code and run the upgrade script:
+
+```bash
+bash upgrade.sh
+```
+
+If deploy.options is missing, the script will prompt you to manually enter configuration details from the previous deployment, such as the current version and data directory. Enter the information you recorded earlier.
+
+>💡 Tip
+> The default scenario is quick deployment, which uses .env.example.
+> If you need to configure voice models (STT/TTS), please add the relevant variables to .env.example in advance. We will provide a front-end configuration interface as soon as possible.
+
+
+## 🌐 Step 3: Verify the deployment
+
+After deployment:
+
+1. Open `http://localhost:3000` in your browser.
+2. Review the [User Guide](https://doc.nexent.tech/en/user-guide/home-page) to validate agent functionality.
+
+
+## Optional Operations
+
+### 🧹 Clean Up Old Version Images
+
+If images were not updated correctly, you can clean up old containers and images before upgrading:
 
 ```bash
 # Stop and remove existing containers
@@ -38,24 +82,9 @@ docker system prune -af
 
 ---
 
-## 🔄 Step 2: Update code and redeploy
+## 🗄️ Manual Database Update
 
-```bash
-git pull
-cd nexent/docker
-cp .env.example .env
-bash deploy.sh
-```
-
-> 💡 Tip
-> - `.env.example` works for default deployments.
-> - Configure speech models (STT/TTS) in `.env` when needed. A frontend configuration flow is coming soon.
-
----
-
-## 🗄️ Step 3: Apply database migrations
-
-Run the SQL scripts shipped with each release to keep your schema up to date.
+If some SQL files fail to execute during the upgrade, you can perform the update manually.
 
 ### ✅ Method A: Use a SQL editor (recommended)
 
@@ -68,8 +97,8 @@ Run the SQL scripts shipped with each release to keep your schema up to date.
    - Password
 3. Test the connection. When successful, you should see tables under the `nexent` schema.
 4. Open a new query window.
-5. Navigate to `/nexent/docker/sql`. Each file contains one migration script with its release date in the filename.
-6. Execute every script dated after your previous deployment, in chronological order.
+5. Navigate to the /nexent/docker/sql directory and open the failed SQL file(s) to view the script.
+6. Execute the failed SQL file(s) and any subsequent version SQL files in order.
 
 > ⚠️ Important
 > - Always back up the database first, especially in production.
@@ -97,14 +126,12 @@ Run the SQL scripts shipped with each release to keep your schema up to date.
 3. Execute SQL files sequentially (host machine example):
 
    ```bash
-   # Example: If today is November 6th and your last update was on October 20th, 
-   # and there are two new files 1030-update.sql and 1105-update.sql, 
    # execute the following commands (please replace the placeholders with your actual values)
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/1030-update.sql
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/1105-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.1_1030-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.2_1105-update.sql
    ```
 
-   Execute the scripts in chronological order based on your deployment date.
+   Execute the corresponding scripts for your deployment versions in version order.
 
 > 💡 Tips
 > - Load environment variables first if they are defined in `.env`:
@@ -126,14 +153,3 @@ Run the SQL scripts shipped with each release to keep your schema up to date.
 >   ```bash
 >   docker exec -i nexent-postgres pg_dump -U [YOUR_POSTGRES_USER] [YOUR_POSTGRES_DB] > backup_$(date +%F).sql
 >   ```
-
----
-
-## 🌐 Step 4: Verify the deployment
-
-After deployment:
-
-1. Open `http://localhost:3000` in your browser.
-2. Review the [User Guide](https://doc.nexent.tech/en/user-guide/home-page) to validate agent functionality.
-
-

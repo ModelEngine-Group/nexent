@@ -50,6 +50,7 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION update_tenant_config_update_time() IS 'Function to update the update_time column when a record in tenant_config_t is updated';
 
 -- 创建触发器
+DROP TRIGGER IF EXISTS update_tenant_config_update_time_trigger ON nexent.tenant_config_t;
 CREATE TRIGGER update_tenant_config_update_time_trigger
 BEFORE UPDATE ON nexent.tenant_config_t
 FOR EACH ROW
@@ -60,5 +61,5 @@ COMMENT ON TRIGGER update_tenant_config_update_time_trigger ON nexent.tenant_con
 IS 'Trigger to call update_tenant_config_update_time function before each update on tenant_config_t table';
 
 ALTER TABLE model_record_t
-ADD COLUMN tenant_id varchar(100) COLLATE pg_catalog.default DEFAULT 'tenant_id';
+ADD COLUMN IF NOT EXISTS tenant_id varchar(100) COLLATE pg_catalog.default DEFAULT 'tenant_id';
 COMMENT ON COLUMN "model_record_t"."tenant_id" IS 'Tenant ID for filtering';

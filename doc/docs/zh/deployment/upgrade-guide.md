@@ -2,18 +2,59 @@
 
 ## 🚀 升级流程概览
 
-升级 Nexent 时建议依次完成以下四个步骤：
+升级 Nexent 时建议依次完成以下几个步骤：
 
-1. 清理旧版本容器与镜像
-2. 拉取最新代码并执行部署脚本
-3. 同步数据库结构
-4. 打开站点确认服务可用
+1. 拉取最新代码
+2. 执行升级脚本
+3. 打开站点确认服务可用
 
 ---
 
-## 🧹 步骤一：清理旧版本镜像
+## 🔄 步骤一：更新代码
 
-为避免缓存或版本冲突，先清理旧容器与镜像：
+更新之前，先记录下当前部署的版本和数据目录
+
+- 当前部署版本信息的位置：`backend/consts/const.py`中的 APP_VERSION
+- 数据目录信息的位置：`docker/.env`中的 ROOT_DIR
+
+**git 方式下载的代码**
+
+通过 git 指令更新代码
+
+```bash
+git pull
+```
+
+**zip 包等方式下载的代码**
+
+需要去 github 上重新下载一份最新代码，并解压缩。另外，需要从之前执行部署脚本目录下 docker 目录中拷贝 deploy.options 到新代码目录下的 docker 目录中（如果不存在该文件则忽略）。
+
+## 🔄 步骤二：执行升级
+
+进入更新后代码目录的docker目录，执行升级脚本：
+
+```bash
+bash upgrade.sh
+```
+
+缺少 deploy.options 的情况下，会提示需要手动输入之前部署的一些配置，比如：当前部署版本、数据目录等。按照提示输入之前记录的信息即可。
+
+> 💡 提示
+> - 默认为快速部署场景，使用 `.env.example`。
+> - 若需配置语音模型（STT/TTS），请提前在 `.env.example` 中补充相关变量，我们将尽快提供前端配置入口。
+
+## 🌐 步骤三：验证部署
+
+部署完成后：
+
+1. 在浏览器打开 `http://localhost:3000`
+2. 参考 [用户指南](https://doc.nexent.tech/zh/user-guide/home-page) 完成智能体配置与验证
+
+## 可选操作
+
+### 🧹 清理旧版本镜像
+
+如果镜像未正确更新，可以在升级前先清理旧容器与镜像：
 
 ```bash
 # 停止并删除现有容器
@@ -39,26 +80,11 @@ docker system prune -af
 
 ---
 
-## 🔄 步骤二：更新代码并部署
+### 🗄️ 手动更新数据库
 
-```bash
-git pull
-cd nexent/docker
-cp .env.example .env
-bash deploy.sh
-```
+升级时如果存在部分 sql 文件执行失败，则可以手动执行更新。
 
-> 💡 提示
-> - 默认为快速部署场景，可直接使用 `.env.example`。
-> - 若需配置语音模型（STT/TTS），请在 `.env` 中补充相关变量，我们将尽快提供前端配置入口。
-
----
-
-## 🗄️ 步骤三：同步数据库
-
-升级后需要执行数据库迁移脚本，使 schema 保持最新。
-
-### ✅ 方法一：使用 SQL 编辑器（推荐）
+#### ✅ 方法一：使用 SQL 编辑器（推荐）
 
 1. 打开 SQL 编辑器，新建 PostgreSQL 连接。
 2. 在 `/nexent/docker/.env` 中找到以下信息：
@@ -69,15 +95,15 @@ bash deploy.sh
    - Password
 3. 填写连接信息后测试连接，确认成功后可在 `nexent` schema 中查看所有表。
 4. 新建查询窗口。
-5. 打开 `/nexent/docker/sql` 目录，按文件名中的日期顺序查看 SQL 脚本。
-6. 根据上次部署日期，依次执行之后的每个 SQL 文件。
+5. 打开 `/nexent/docker/sql` 目录，通过失败的sql文件查看 SQL 脚本。
+6. 将失败的sql文件和后续版本的sql文件依次执行。
 
 > ⚠️ 注意事项
 > - 升版本前请备份数据库，生产环境尤为重要。
 > - SQL 脚本需按时间顺序执行，避免依赖冲突。
 > - `.env` 变量可能命名为 `POSTGRES_HOST`、`POSTGRES_PORT` 等，请在客户端对应填写。
 
-### 🧰 方法二：命令行执行（无需客户端）
+#### 🧰 方法二：命令行执行（无需客户端）
 
 1. 进入 Docker 目录：
 
@@ -98,14 +124,12 @@ bash deploy.sh
 3. 通过容器执行 SQL 脚本（示例）：
 
    ```bash
-   # 假如现在是11月6日，上次更新版本的时间是10月20日
-   # 此时新增了1030-update.sql和1105-update.sql两个文件
    # 我们需要执行以下命令（请注意替换占位符中的变量）
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/1030-update.sql
-   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/1105-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.1_1030-update.sql
+   docker exec -i nexent-postgresql psql -U [YOUR_POSTGRES_USER] -d [YOUR_POSTGRES_DB] < ./sql/v1.1.2_1105-update.sql
    ```
 
-   请根据自己的部署时间，按时间顺序执行对应脚本。
+   请根据自己的部署版本，按版本顺序执行对应脚本。
 
 > 💡 提示
 > - 若 `.env` 中定义了数据库变量，可先导入：
@@ -127,12 +151,3 @@ bash deploy.sh
 >   ```bash
 >   docker exec -i nexent-postgres pg_dump -U [YOUR_POSTGRES_USER] [YOUR_POSTGRES_DB] > backup_$(date +%F).sql
 >   ```
-
----
-
-## 🌐 步骤四：验证部署
-
-部署完成后：
-
-1. 在浏览器打开 `http://localhost:3000`
-2. 参考 [用户指南](https://doc.nexent.tech/zh/user-guide/home-page) 完成智能体配置与验证
