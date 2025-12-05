@@ -16,25 +16,28 @@ import log from "@/lib/logger";
 const inter = Inter({ subsets: ["latin"] });
 
 export async function generateMetadata(props: {
-  params: Promise<{ locale: string }>;
+  params: Promise<{ locale?: string }>;
 }): Promise<Metadata> {
   const { locale } = await props.params;
+  const resolvedLocale = (["zh", "en"].includes(locale ?? "")
+    ? locale
+    : "zh") as "zh" | "en";
   let messages: any = {};
 
-  if (["zh", "en"].includes(locale)) {
+  if (["zh", "en"].includes(resolvedLocale)) {
     try {
       const filePath = path.join(
         process.cwd(),
         "public",
         "locales",
-        locale,
+        resolvedLocale,
         "common.json"
       );
       const fileContent = await fs.readFile(filePath, "utf8");
       messages = JSON.parse(fileContent);
     } catch (error) {
       log.error(
-        `Failed to load i18n messages for locale: ${locale}`,
+        `Failed to load i18n messages for locale: ${resolvedLocale}`,
         error
       );
     }
@@ -54,15 +57,20 @@ export async function generateMetadata(props: {
   };
 }
 
-export default async function RootLayout(props: {
+export default async function RootLayout({
+  children,
+  params,
+}: {
   children: ReactNode;
-  params: Promise<{ locale: string }>;
+  params: Promise<{ locale?: string }>;
 }) {
-  const { children, params } = props;
   const { locale } = await params;
+  const resolvedLocale = (["zh", "en"].includes(locale ?? "")
+    ? locale
+    : "zh") as "zh" | "en";
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html lang={resolvedLocale} suppressHydrationWarning>
       <body className={inter.className}>
         <NextThemesProvider
           attribute="class"
