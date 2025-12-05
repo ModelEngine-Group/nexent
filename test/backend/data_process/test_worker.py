@@ -2,6 +2,7 @@ import sys
 import types
 import importlib
 import pytest
+import os
 
 
 class FakeRay:
@@ -44,6 +45,7 @@ def setup_mocks_for_worker(mocker, initialized=False):
         const_mod.FORWARD_REDIS_RETRY_MAX = 1
         const_mod.DISABLE_RAY_DASHBOARD = False
         const_mod.DATA_PROCESS_SERVICE = "http://data-process"
+        const_mod.ROOT_DIR = "/mock/root"
         sys.modules["consts.const"] = const_mod
     
     # Stub celery module and submodules (required by tasks.py imported via __init__.py)
@@ -481,6 +483,23 @@ def test_setup_worker_environment_ray_init_success(mocker):
     assert len(init_called) == 1
     assert init_called[0] == "auto"
     assert worker_module.worker_state['initialized'] is True
+
+
+def test_setup_worker_environment_sets_ray_preallocate_env(mocker):
+    """Ensure setup_worker_environment sets RAY_preallocate_plasma env var"""
+    worker_module, _ = setup_mocks_for_worker(mocker, initialized=False)
+
+    # Force init success to avoid fallback path exceptions
+    class FakeRayConfig:
+        @classmethod
+        def init_ray_for_worker(cls, address):
+            return True
+
+    mocker.patch.object(worker_module, "RayConfig", FakeRayConfig)
+
+    worker_module.setup_worker_environment()
+
+    assert os.environ.get("RAY_preallocate_plasma") == str(worker_module.RAY_preallocate_plasma).lower()
 
 
 def test_setup_worker_environment_ray_init_fallback(mocker):
