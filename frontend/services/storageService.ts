@@ -123,6 +123,68 @@ export function convertImageUrlToApiUrl(url: string): string {
   return url;
 }
 
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+};
+
+const fetchBase64ViaStorage = async (objectName: string) => {
+  const response = await fetch(API_ENDPOINTS.storage.file(objectName, "base64"));
+  if (!response.ok) {
+    throw new Error(`Failed to resolve S3 URL via storage: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (!data?.success || !data?.base64) {
+    throw new Error(data?.error || "Storage response missing base64 content");
+  }
+
+  const contentType = data.content_type || "application/octet-stream";
+  return { base64: data.base64 as string, contentType };
+};
+
+// Cache for S3 URL to data URL resolution to avoid duplicate network requests
+const s3ResolutionCache = new Map<string, Promise<string | null>>();
+
+// Internal helper: for s3:// URLs, resolve directly via storage download endpoint.
+async function resolveS3UrlToDataUrlInternal(url: string): Promise<string | null> {
+  const objectName = extractObjectNameFromUrl(url);
+  if (!objectName) {
+    return null;
+  }
+
+  const { base64, contentType } = await fetchBase64ViaStorage(objectName);
+  return `data:${contentType};base64,${base64}`;
+}
+
+export async function resolveS3UrlToDataUrl(url: string): Promise<string | null> {
+  if (!url || !url.startsWith("s3://")) {
+    return null;
+  }
+
+  const cached = s3ResolutionCache.get(url);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = resolveS3UrlToDataUrlInternal(url).catch((error) => {
+    // Remove from cache on failure so that future attempts can retry.
+    s3ResolutionCache.delete(url);
+    throw error;
+  });
+
+  s3ResolutionCache.set(url, promise);
+  return promise;
+}
+
 export const storageService = {
   /**
    * Upload files to storage service

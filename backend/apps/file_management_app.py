@@ -1,5 +1,6 @@
 import logging
 import re
+import base64
 from http import HTTPStatus
 from typing import List, Optional
 from urllib.parse import urlparse, urlunparse, unquote, quote
@@ -149,7 +150,16 @@ async def process_files(
 @file_management_config_router.get("/download/{object_name:path}")
 async def get_storage_file(
     object_name: str = PathParam(..., description="File object name"),
-    download: str = Query("ignore", description="How to get the file"),
+    download: str = Query(
+        "ignore",
+        description=(
+            "How to get the file: "
+            "'ignore' (default, return file info), "
+            "'stream' (return file stream), "
+            "'redirect' (redirect to download URL), "
+            "'base64' (return base64-encoded content for images)."
+        ),
+    ),
     expires: int = Query(3600, description="URL validity period (seconds)"),
     filename: Optional[str] = Query(None, description="Original filename for download (optional)")
 ):
@@ -191,6 +201,28 @@ async def get_storage_file(
                     "Cache-Control": "public, max-age=3600",
                     "ETag": f'"{object_name}"',
                 }
+            )
+        elif download == "base64":
+            # Return base64 encoded file content (primarily for images)
+            file_stream, content_type = await get_file_stream_impl(object_name=object_name)
+            try:
+                data = file_stream.read()
+            except Exception as exc:
+                logger.error("Failed to read file stream for base64: %s", str(exc))
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail="Failed to read file content for base64 encoding",
+                )
+
+            base64_content = base64.b64encode(data).decode("utf-8")
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    "success": True,
+                    "base64": base64_content,
+                    "content_type": content_type,
+                    "object_name": object_name,
+                },
             )
         else:
             # return file metadata

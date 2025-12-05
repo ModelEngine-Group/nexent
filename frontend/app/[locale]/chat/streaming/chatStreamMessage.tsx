@@ -231,6 +231,7 @@ export function ChatStreamMessage({
                   <MarkdownRenderer
                     content={message.finalAnswer}
                     searchResults={message?.searchResults}
+                    resolveS3Media
                   />
 
                   {/* Button group */}

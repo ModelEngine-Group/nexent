@@ -296,6 +296,53 @@ async def test_get_storage_file_stream(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_storage_file_base64_success(monkeypatch):
+    """get_storage_file should return JSON with base64 content when download=base64."""
+    async def fake_get_stream(object_name):
+        class FakeStream:
+            def read(self):
+                return b"hello-bytes"
+
+        return FakeStream(), "image/png"
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+
+    resp = await file_management_app.get_storage_file(
+        object_name="attachments/img.png",
+        download="base64",
+        expires=60,
+        filename=None,
+    )
+
+    assert resp.status_code == 200
+    data = resp.body.decode()
+    assert '"success":true' in data
+    assert '"content_type":"image/png"' in data
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_base64_read_error(monkeypatch):
+    """get_storage_file should raise HTTPException when reading stream fails in base64 mode."""
+    async def fake_get_stream(object_name):
+        class FakeStream:
+            def read(self):
+                raise RuntimeError("read-failed")
+
+        return FakeStream(), "image/png"
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+
+    with pytest.raises(Exception) as exc_info:
+        await file_management_app.get_storage_file(
+            object_name="attachments/img.png",
+            download="base64",
+            expires=60,
+            filename=None,
+        )
+
+    assert "Failed to read file content for base64 encoding" in str(exc_info.value)
+
+@pytest.mark.asyncio
 async def test_get_storage_file_metadata(monkeypatch):
     async def fake_get_url(object_name, expires):
         return {"success": True, "url": "http://example.com/x"}

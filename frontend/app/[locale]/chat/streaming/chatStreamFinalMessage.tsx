@@ -272,6 +272,9 @@ export function ChatStreamFinalMessage({
                 content={message.finalAnswer || message.content || ""}
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
+                // For historical messages, content already represents the final answer
+                // when finalAnswer is not present, so enable S3 resolution in both cases.
+                resolveS3Media={Boolean(message.finalAnswer || message.content)}
               />
 
               {/* Button group - only show when hideButtons is false and message is complete */}
