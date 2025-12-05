@@ -22,7 +22,7 @@ RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
     "start": "NODE_ENV=production HOSTNAME=localhost node server.js"\
   },\
   "dependencies": {\
-    "next": "15.4.5",\
+    "next": "15.5.7",\
     "react": "18.2.0",\
     "react-dom": "18.2.0",\
     "http-proxy": "^1.18.1",\
@@ -46,8 +46,13 @@ LABEL authors="nexent"
 RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/main" > /etc/apk/repositories && \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/community" >> /etc/apk/repositories; \
-    fi && \
-    apk add --no-cache curl
+    fi
+
+# Update package index, upgrade busybox first, then install curl
+# This avoids trigger script issues in cross-platform builds with QEMU emulation
+RUN apk update && \
+    apk upgrade --no-cache busybox || true && \
+    apk add --no-cache --no-scripts curl
 
 WORKDIR /opt/frontend-dist
 
