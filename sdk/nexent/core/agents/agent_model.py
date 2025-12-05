@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from threading import Event
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -50,7 +50,12 @@ class AgentRunInfo(BaseModel):
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")
     observer: MessageObserver = Field(description="Return data")
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")
-    mcp_host: Optional[List[str]] = Field(description="MCP server address", default=None)
+    mcp_host: Optional[List[Union[str, Dict[str, Any]]]] = Field(
+        description="MCP server address(es). Can be a string (URL) or dict with 'url' and 'transport' keys. "
+        "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
+        "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport.",
+        default=None
+    )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
 
