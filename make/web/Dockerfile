@@ -48,8 +48,11 @@ RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/community" >> /etc/apk/repositories; \
     fi
 
-# Update package index and install curl
-RUN apk update && apk add --no-cache curl
+# Update package index, upgrade busybox first, then install curl
+# This avoids trigger script issues in cross-platform builds with QEMU emulation
+RUN apk update && \
+    apk upgrade --no-cache busybox || true && \
+    apk add --no-cache --no-scripts curl
 
 WORKDIR /opt/frontend-dist
 
