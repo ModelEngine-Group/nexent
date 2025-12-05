@@ -25,6 +25,7 @@ consts_const_mock.POSTGRES_USER = "test_user"
 consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_const_mock.POSTGRES_DB = "test_db"
 consts_const_mock.POSTGRES_PORT = 5432
+consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
 consts_mock.const = consts_const_mock
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
@@ -253,6 +254,28 @@ class TestSummarizeDocument:
         assert isinstance(result, str)
         assert len(result) > 0
 
+    def test_summarize_document_with_model_success(self):
+        """Test document summarization when model config exists and LLM returns value"""
+        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
+             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+            mock_get_model.return_value = {"id": 1}
+            mock_llm.return_value = "Generated summary\n"
+
+            result = summarize_document(
+                document_content="LLM content",
+                filename="doc.pdf",
+                language="en",
+                max_words=50,
+                model_id=1,
+                tenant_id="tenant"
+            )
+
+            assert result == "Generated summary"
+            mock_llm.assert_called_once()
+            call_args = mock_llm.call_args.kwargs
+            assert call_args["model_id"] == 1
+            assert call_args["tenant_id"] == "tenant"
+
 
 class TestSummarizeCluster:
     """Test cluster summarization"""
@@ -276,6 +299,27 @@ class TestSummarizeCluster:
         )
         assert isinstance(result, str)
         assert len(result) > 0
+
+    def test_summarize_cluster_with_model_success(self):
+        """Test cluster summarization when model config exists and LLM returns value"""
+        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
+             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+            mock_get_model.return_value = {"id": 1}
+            mock_llm.return_value = "Cluster summary text  "
+
+            result = summarize_cluster(
+                document_summaries=["Doc 1 summary", "Doc 2 summary"],
+                language="en",
+                max_words=120,
+                model_id=1,
+                tenant_id="tenant"
+            )
+
+            assert result == "Cluster summary text"
+            mock_llm.assert_called_once()
+            call_args = mock_llm.call_args.kwargs
+            assert call_args["model_id"] == 1
+            assert call_args["tenant_id"] == "tenant"
 
 
 class TestSummarizeClustersMapReduce:
