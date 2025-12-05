@@ -150,7 +150,7 @@ class DataMateSearchTool(Tool):
                 entity_data = single_search_result.get("entity", {})
                 metadata = self._parse_metadata(entity_data.get("metadata"))
                 dataset_id = self._extract_dataset_id(metadata.get("absolute_directory_path", ""))
-                file_id = entity_data.get("id")
+                file_id = metadata.get("original_file_id")
                 download_url = self._build_file_download_url(dataset_id, file_id)
 
                 score_details = entity_data.get("scoreDetails", {}) or {}
@@ -162,7 +162,7 @@ class DataMateSearchTool(Tool):
                 })
 
                 search_result_message = SearchResultTextMessage(
-                    title=metadata.get("file_name", "") or "Untitled",
+                    title=metadata.get("file_name", ""),
                     text=entity_data.get("text", ""),
                     source_type="datamate",
                     url=download_url,
@@ -308,6 +308,6 @@ class DataMateSearchTool(Tool):
 
     def _build_file_download_url(self, dataset_id: str, file_id: str) -> str:
         """Build the download URL for a dataset file."""
-        if not (self.server_ip and dataset_id and file_id):
+        if not (self.server_base_url and dataset_id and file_id):
             return ""
-        return f"{self.server_ip}/api/data-management/datasets/{dataset_id}/files/{file_id}/download"
+        return f"{self.server_base_url}/api/data-management/datasets/{dataset_id}/files/{file_id}/download"
