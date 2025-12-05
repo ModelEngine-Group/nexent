@@ -607,3 +607,7 @@ Nexent开发者加油
 ::: info jinhb - 2025-12-03
 祝nexent平台越来越好
 :::
+
+::: info zmu.1s - 2025-12-04
+打ICT大赛接触到了Nexent平台，祝越来越好！
+:::
