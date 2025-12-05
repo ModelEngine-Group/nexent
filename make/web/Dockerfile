@@ -46,8 +46,10 @@ LABEL authors="nexent"
 RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/main" > /etc/apk/repositories && \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/community" >> /etc/apk/repositories; \
-    fi && \
-    apk add --no-cache curl
+    fi
+
+# Update package index and install curl
+RUN apk update && apk add --no-cache curl
 
 WORKDIR /opt/frontend-dist
 
