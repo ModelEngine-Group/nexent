@@ -10,12 +10,24 @@ from unittest.mock import MagicMock, patch, mock_open
 import numpy as np
 import pytest
 
-# Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
+# Mock consts module before patching backend.database.client to avoid ImportError
+# backend.database.client imports from consts.const, so we need to mock it first
+consts_mock = MagicMock()
+consts_const_mock = MagicMock()
+# Set required constants that backend.database.client might use
+consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
+consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
+consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
+consts_const_mock.MINIO_REGION = "us-east-1"
+consts_const_mock.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_const_mock.POSTGRES_HOST = "localhost"
+consts_const_mock.POSTGRES_USER = "test_user"
+consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_const_mock.POSTGRES_DB = "test_db"
+consts_const_mock.POSTGRES_PORT = 5432
+consts_mock.const = consts_const_mock
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_const_mock
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
