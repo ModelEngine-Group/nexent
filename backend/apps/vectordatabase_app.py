@@ -1,4 +1,5 @@
 import logging
+import json
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,7 @@ from services.vectordatabase_service import (
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
+from database.knowledge_db import get_index_name_by_knowledge_name
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -206,9 +208,6 @@ async def get_document_error_info(
 ):
     """Get error information for a document"""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-
-        # Get task_id from file status
         celery_task_files = await get_all_files_status(index_name)
         file_status = celery_task_files.get(path_or_url)
 
@@ -222,50 +221,29 @@ async def get_document_error_info(
         if not task_id:
             return {
                 "status": "success",
-                "error_reason": None,
-                "suggestion": None,
+                "error_code": None,
             }
 
-        # Get raw error info from Redis
         redis_service = get_redis_service()
         raw_error = redis_service.get_error_info(task_id)
-
-        # Parse into reason + suggestion
-        error_reason = None
-        suggestion = None
+        error_code = None
 
         if raw_error:
             text = raw_error
 
-            # Try to parse JSON (legacy format where full JSON string was stored)
+            # Try to parse JSON (new format with error_code only)
             if isinstance(text, str) and text.strip().startswith("{"):
                 try:
                     parsed = json.loads(text)
                     if isinstance(parsed, dict):
-                        friendly = parsed.get("friendly_reason")
-                        message = parsed.get("message")
-                        if isinstance(friendly, str):
-                            text = friendly
-                        elif isinstance(message, str):
-                            text = message
+                        if "error_code" in parsed:
+                            error_code = parsed.get("error_code")
                 except Exception:
-                    # If JSON parsing fails, fall back to raw text
                     pass
-
-            if isinstance(text, str):
-                # Split our friendly_reason format: "<reason>。建议：<suggestion>"
-                marker = "。建议："
-                if marker in text:
-                    reason_part, suggestion_part = text.split(marker, 1)
-                    error_reason = reason_part or None
-                    suggestion = suggestion_part or None
-                else:
-                    error_reason = text
 
         return {
             "status": "success",
-            "error_reason": error_reason,
-            "suggestion": suggestion,
+            "error_code": error_code,
         }
     except HTTPException:
         raise
@@ -292,25 +270,35 @@ def health_check(vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)):
 @router.post("/{index_name}/chunks")
 def get_index_chunks(
         index_name: str = Path(...,
-                               description="Name of the index to get chunks from"),
+                               description="Name of the index (or knowledge_name) to get chunks from"),
         page: int = Query(
             None, description="Page number (1-based) for pagination"),
         page_size: int = Query(
             None, description="Number of records per page for pagination"),
         path_or_url: Optional[str] = Query(
             None, description="Filter chunks by document path_or_url"),
-        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        authorization: Optional[str] = Header(None)
 ):
     """Get chunks from the specified index, with optional pagination support"""
     try:
+        _, tenant_id = get_current_user_id(authorization)
+        actual_index_name = get_index_name_by_knowledge_name(
+            index_name, tenant_id)
+
         result = ElasticSearchService.get_index_chunks(
-            index_name=index_name,
+            index_name=actual_index_name,
             page=page,
             page_size=page_size,
             path_or_url=path_or_url,
             vdb_core=vdb_core,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as e:
         error_msg = str(e)
         logger.error(
@@ -321,21 +309,29 @@ def get_index_chunks(
 
 @router.post("/{index_name}/chunk")
 def create_chunk(
-        index_name: str = Path(..., description="Name of the index"),
+        index_name: str = Path(...,
+                               description="Name of the index (or knowledge_name)"),
         payload: ChunkCreateRequest = Body(..., description="Chunk data"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """Create a manual chunk."""
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        actual_index_name = get_index_name_by_knowledge_name(
+            index_name, tenant_id)
         result = ElasticSearchService.create_chunk(
-            index_name=index_name,
+            index_name=actual_index_name,
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as exc:
         logger.error(
             "Error creating chunk for index %s: %s", index_name, exc, exc_info=True
@@ -347,7 +343,8 @@ def create_chunk(
 
 @router.put("/{index_name}/chunk/{chunk_id}")
 def update_chunk(
-        index_name: str = Path(..., description="Name of the index"),
+        index_name: str = Path(...,
+                               description="Name of the index (or knowledge_name)"),
         chunk_id: str = Path(..., description="Chunk identifier"),
         payload: ChunkUpdateRequest = Body(...,
                                            description="Chunk update payload"),
@@ -356,18 +353,22 @@ def update_chunk(
 ):
     """Update an existing chunk."""
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        actual_index_name = get_index_name_by_knowledge_name(
+            index_name, tenant_id)
         result = ElasticSearchService.update_chunk(
-            index_name=index_name,
+            index_name=actual_index_name,
             chunk_id=chunk_id,
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except ValueError as exc:
+    except ValueError as e:
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as exc:
         logger.error(
             "Error updating chunk %s for index %s: %s",
@@ -383,22 +384,28 @@ def update_chunk(
 
 @router.delete("/{index_name}/chunk/{chunk_id}")
 def delete_chunk(
-        index_name: str = Path(..., description="Name of the index"),
+        index_name: str = Path(...,
+                               description="Name of the index (or knowledge_name)"),
         chunk_id: str = Path(..., description="Chunk identifier"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """Delete a chunk."""
     try:
-        get_current_user_id(authorization)
+        _, tenant_id = get_current_user_id(authorization)
+        actual_index_name = get_index_name_by_knowledge_name(
+            index_name, tenant_id)
         result = ElasticSearchService.delete_chunk(
-            index_name=index_name,
+            index_name=actual_index_name,
             chunk_id=chunk_id,
             vdb_core=vdb_core,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except ValueError as exc:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as exc:
         logger.error(
             "Error deleting chunk %s for index %s: %s",

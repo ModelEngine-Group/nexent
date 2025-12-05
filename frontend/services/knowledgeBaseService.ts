@@ -826,7 +826,9 @@ class KnowledgeBaseService {
   async getDocumentErrorInfo(
     kbId: string,
     docId: string
-  ): Promise<{ reason: string | null; suggestion: string | null }> {
+  ): Promise<{
+    errorCode: string | null;
+  }> {
     try {
       const response = await fetch(
         API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId),
@@ -844,12 +846,10 @@ class KnowledgeBaseService {
         throw new Error(data.message || "Failed to get error info");
       }
 
-      const reason = (data.error_reason && String(data.error_reason)) || null;
-      const suggestion = (data.suggestion && String(data.suggestion)) || null;
+      const errorCode = (data.error_code && String(data.error_code)) || null;
 
       return {
-        reason,
-        suggestion,
+        errorCode,
       };
     } catch (error) {
       log.error("Failed to get document error info:", error);

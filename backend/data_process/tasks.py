@@ -35,96 +35,19 @@ ray_init_lock = threading.Lock()
 
 ROOT_DIR_DISPLAY = ROOT_DIR or "{ROOT_DIR}"
 
-# Internationalized error guide for user-friendly messages
-# Keys are stable error codes; each contains translations for supported languages.
-ERROR_GUIDE = {
-    "ray_init_failed": {
-        "zh": {
-            "message": "Ray集群初始化失败",
-            "solution": "请升级到最新版本并尝试重新部署",
-        },
-        "en": {
-            "message": "Failed to initialize Ray cluster",
-            "solution": "Please upgrade to the latest image version and redeploy.",
-        },
-    },
-    "no_valid_chunks": {
-        "zh": {
-            "message": "数据处理内核无法从文档中提取有效文本",
-            "solution": "请确保文档内容非纯图像",
-        },
-        "en": {
-            "message": "The data processing kernel could not extract valid text from the document",
-            "solution": "Please ensure the document format is supported and the content is not purely images.",
-        },
-    },
-    "vector_service_busy": {
-        "zh": {
-            "message": "向量化模型服务繁忙，无法获取文本向量",
-            "solution": "请更换模型服务提供商，或稍后重试",
-        },
-        "en": {
-            "message": "Vectorization model service is busy and cannot return vectors",
-            "solution": "Please switch the model service provider or try again later.",
-        },
-    },
-    "es_bulk_failed": {
-        "zh": {
-            "message": "向量录入数据库错误",
-            "solution": f"请确保{ROOT_DIR_DISPLAY}/nexent/docker/elasticsearch/ 路径拥有完整写入权限，且存储空间与内存充足",
-        },
-        "en": {
-            "message": "Failed to write vectors into the database",
-            "solution": "Please ensure the Elasticsearch data path has sufficient disk space and write permissions.",
-        },
-    },
-    "embedding_chunks_exceed_limit": {
-        "zh": {
-            "message": "当前切片数量超过向量化模型并行度",
-            "solution": "请增加切片大小以减少切片数量后再试",
-        },
-        "en": {
-            "message": "The current chunk count exceeds the embedding model concurrency limit",
-            "solution": "Please increase the chunk size to reduce the number of chunks and try again.",
-        },
-    },
-}
 
-
-def get_error_template(key: str, lang: str = "zh") -> Optional[Dict[str, str]]:
-    """Return localized error template for the given key."""
-    template = ERROR_GUIDE.get(key)
-    if not template:
-        return None
-    if lang in template:
-        return template[lang]
-    # Fallback to Chinese if specific language is not available
-    return template.get("zh") or next(iter(template.values()))
-
-
-def build_friendly_reason_from_key(key: str, lang: str = "zh") -> str:
+def extract_error_code(reason: str, parsed_error: Optional[Dict] = None) -> Optional[str]:
     """
-    Build a friendly_reason string from ERROR_GUIDE.
-
-    This is used only for internal storage; the app layer will split message
-    and solution for frontend display.
+    Extract error code from error message or parsed error dict.
+    Returns error code if matched, None otherwise.
     """
-    tpl = get_error_template(key, lang)
-    if not tpl:
-        return ""
-    message = tpl.get("message") or ""
-    solution = tpl.get("solution") or ""
-    if solution:
-        return f"{message}。建议：{solution}"
-    return message
+    # First check if error_code is already in parsed_error
+    if parsed_error and isinstance(parsed_error, dict):
+        error_code = parsed_error.get("error_code")
+        if error_code:
+            return error_code
 
-
-def enrich_error_reason(reason: str) -> Optional[str]:
-    if not reason:
-        return None
-    if "Failed to initialize Ray for Celery worker" in reason:
-        return build_friendly_reason_from_key("ray_init_failed")
-    return None
+    return "unknown_error"
 
 
 def save_error_to_redis(task_id: str, error_reason: str, start_time: float):
@@ -409,14 +332,13 @@ def process(
 
         chunk_count = len(chunks) if chunks else 0
         if chunk_count == 0:
-            friendly_reason = build_friendly_reason_from_key("no_valid_chunks")
             raise Exception(json.dumps({
                 "message": "Ray processing completed but produced 0 chunks",
                 "index_name": index_name,
                 "task_name": "process",
                 "source": source,
                 "original_filename": original_filename,
-                "friendly_reason": friendly_reason
+                "error_code": "no_valid_chunks"
             }, ensure_ascii=False))
 
         # Update task state to SUCCESS after Ray processing completes
@@ -457,16 +379,14 @@ def process(
         try:
             # Try to parse the exception as JSON (it might be our custom JSON error)
             error_message = str(e)
-            friendly_reason = None
             parsed_error = None
 
             try:
                 parsed_error = json.loads(error_message)
                 if isinstance(parsed_error, dict):
                     error_message = parsed_error.get("message", error_message)
-                    friendly_reason = parsed_error.get("friendly_reason")
                     logger.debug(
-                        f"Parsed JSON error for task {task_id}: friendly_reason={friendly_reason}"
+                        f"Parsed JSON error for task {task_id}"
                     )
             except (json.JSONDecodeError, TypeError):
                 # Not a JSON string, use as-is
@@ -482,15 +402,22 @@ def process(
                 "source": source,
                 "original_filename": original_filename,
             }
-            if friendly_reason:
-                error_info["friendly_reason"] = friendly_reason
 
-            # Determine friendly reason for storage
-            if not friendly_reason:
-                friendly_reason = enrich_error_reason(error_message)
-            reason_to_store = friendly_reason or error_message
-            if len(reason_to_store) > 200:
-                reason_to_store = reason_to_store[:200] + "..."
+            # Extract error code from parsed error or error message
+            error_code = extract_error_code(error_message, parsed_error)
+            if error_code:
+                error_info["error_code"] = error_code
+
+            # Store only error code (if available) or raw error message
+            if error_code:
+                reason_to_store = json.dumps({
+                    "error_code": error_code
+                }, ensure_ascii=False)
+            else:
+                # Fallback: store raw error message (truncated if too long)
+                reason_to_store = error_message
+                if len(reason_to_store) > 200:
+                    reason_to_store = reason_to_store[:200] + "..."
 
             # Save error info to Redis BEFORE re-raising
             logger.info(
@@ -516,7 +443,6 @@ def process(
             # Try to save error even if serialization fails
             try:
                 error_message = str(e)
-                friendly_reason = None
                 parsed_error = None
 
                 try:
@@ -525,23 +451,30 @@ def process(
                         error_message = parsed_error.get(
                             "message", error_message
                         )
-                        friendly_reason = parsed_error.get("friendly_reason")
                         logger.debug(
                             "Fallback serialization: parsed JSON error for task "
-                            f"{task_id}, friendly_reason={friendly_reason}"
+                            f"{task_id}"
                         )
                 except (json.JSONDecodeError, TypeError):
                     logger.debug(
                         "Fallback serialization: exception is not JSON format "
                         f"for task {task_id}, using raw message"
                     )
+                    parsed_error = None
 
-                if not friendly_reason:
-                    friendly_reason = enrich_error_reason(error_message)
+                # Extract error code from parsed error or error message
+                error_code = extract_error_code(error_message, parsed_error)
 
-                reason_to_store = friendly_reason or error_message
-                if len(reason_to_store) > 200:
-                    reason_to_store = reason_to_store[:200] + "..."
+                # Store only error code (if available) or raw error message
+                if error_code:
+                    reason_to_store = json.dumps({
+                        "error_code": error_code
+                    }, ensure_ascii=False)
+                else:
+                    # Fallback: store raw error message (truncated if too long)
+                    reason_to_store = error_message
+                    if len(reason_to_store) > 200:
+                        reason_to_store = reason_to_store[:200] + "..."
 
                 save_error_to_redis(task_id, reason_to_store, start_time)
             except Exception:
@@ -726,14 +659,13 @@ def forward(
             formatted_chunks.append(formatted_chunk)
 
         if len(formatted_chunks) == 0:
-            friendly_reason = build_friendly_reason_from_key("no_valid_chunks")
             raise Exception(json.dumps({
                 "message": "No valid chunks to forward after formatting",
                 "index_name": original_index_name,
                 "task_name": "forward",
                 "source": original_source,
                 "original_filename": original_filename,
-                "friendly_reason": friendly_reason
+                "error_code": "no_valid_chunks"
             }, ensure_ascii=False))
 
         async def index_documents():
@@ -774,16 +706,13 @@ def forward(
             except aiohttp.ClientResponseError as e:
                 # 400: embedding model reports chunk count exceeds concurrency
                 if e.status == 400:
-                    friendly_reason = build_friendly_reason_from_key(
-                        "embedding_chunks_exceed_limit"
-                    )
                     raise Exception(json.dumps({
                         "message": f"ElasticSearch service returned 400 Bad Request: {str(e)}",
                         "index_name": original_index_name,
                         "task_name": "forward",
                         "source": original_source,
                         "original_filename": original_filename,
-                        "friendly_reason": friendly_reason
+                        "error_code": "embedding_chunks_exceed_limit"
                     }, ensure_ascii=False))
 
                 # Timeout from Elasticsearch refresh / bulk operations: stop retrying and treat as es_bulk_failed
@@ -793,30 +722,24 @@ def forward(
                     "ReadTimeoutError"
                 ]
                 if any(marker in str(e) for marker in timeout_markers):
-                    friendly_reason = build_friendly_reason_from_key(
-                        "es_bulk_failed"
-                    )
                     raise Exception(json.dumps({
                         "message": f"ElasticSearch operation timed out: {str(e)}",
                         "index_name": original_index_name,
                         "task_name": "forward",
                         "source": original_source,
                         "original_filename": original_filename,
-                        "friendly_reason": friendly_reason
+                        "error_code": "es_bulk_failed"
                     }, ensure_ascii=False))
 
                 # 503: vector service busy: bubble up immediately, let caller decide
                 if e.status == 503:
-                    friendly_reason = build_friendly_reason_from_key(
-                        "vector_service_busy"
-                    )
                     raise Exception(json.dumps({
                         "message": f"ElasticSearch service unavailable: {str(e)}",
                         "index_name": original_index_name,
                         "task_name": "forward",
                         "source": original_source,
                         "original_filename": original_filename,
-                        "friendly_reason": friendly_reason
+                        "error_code": "vector_service_busy"
                     }, ensure_ascii=False))
 
                 # Other client response errors: bubble up
@@ -892,15 +815,13 @@ def forward(
                 logger.info(f"original_index_name: {original_index_name}")
                 logger.info("task_name: forward")
                 logger.info(f"source: {original_source}")
-                friendly_reason = build_friendly_reason_from_key(
-                    "es_bulk_failed")
                 raise Exception(json.dumps({
                     "message": f"Failure reported by main_server. Expected {total_submitted} chunks, indexed {total_indexed} chunks.",
                     "index_name": original_index_name,
                     "task_name": "forward",
                     "source": original_source,
                     "original_filename": original_filename,
-                    "friendly_reason": friendly_reason
+                    "error_code": "es_bulk_failed"
                 }, ensure_ascii=False))
         elif isinstance(es_result, dict) and not es_result.get("success"):
             error_message = es_result.get(
@@ -965,11 +886,19 @@ def forward(
             logger.error(
                 f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_message}")
 
-            friendly_reason = error_info.get(
-                'friendly_reason') or enrich_error_reason(error_message)
-            reason_to_store = friendly_reason or error_message
-            if len(reason_to_store) > 200:
-                reason_to_store = reason_to_store[:200] + "..."
+            # Extract error code from parsed error or error message
+            error_code = extract_error_code(error_message, error_info)
+
+            # Store only error code (if available) or raw error message
+            if error_code:
+                reason_to_store = json.dumps({
+                    "error_code": error_code
+                }, ensure_ascii=False)
+            else:
+                # Fallback: store raw error message (truncated if too long)
+                reason_to_store = error_message
+                if len(reason_to_store) > 200:
+                    reason_to_store = reason_to_store[:200] + "..."
 
             # Save error info to Redis BEFORE re-raising
             logger.info(
@@ -991,10 +920,20 @@ def forward(
             # Try to save error even if parsing fails
             try:
                 error_message = str(e)
-                friendly_reason = enrich_error_reason(error_message)
-                reason_to_store = friendly_reason or error_message
-                if len(reason_to_store) > 200:
-                    reason_to_store = reason_to_store[:200] + "..."
+                # Extract error code from error message
+                error_code = extract_error_code(error_message, None)
+
+                # Store only error code (if available) or raw error message
+                if error_code:
+                    reason_to_store = json.dumps({
+                        "error_code": error_code
+                    }, ensure_ascii=False)
+                else:
+                    # Fallback: store raw error message (truncated if too long)
+                    reason_to_store = error_message
+                    if len(reason_to_store) > 200:
+                        reason_to_store = reason_to_store[:200] + "..."
+
                 save_error_to_redis(task_id, reason_to_store, start_time)
             except Exception:
                 pass

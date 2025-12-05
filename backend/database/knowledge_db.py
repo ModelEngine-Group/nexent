@@ -241,3 +241,34 @@ def update_model_name_by_index_name(index_name: str, embedding_model_name: str, 
             return True
     except SQLAlchemyError as e:
         raise e
+
+
+def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str:
+    """
+    Get the internal index_name from user-facing knowledge_name.
+
+    Args:
+        knowledge_name: User-facing knowledge base name
+        tenant_id: Tenant ID to filter by
+
+    Returns:
+        str: The internal index_name if found
+
+    Raises:
+        ValueError: If knowledge base with the given name is not found for the tenant
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.knowledge_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+
+            if result:
+                return result.index_name
+            raise ValueError(
+                f"Knowledge base '{knowledge_name}' not found for the current tenant"
+            )
+    except SQLAlchemyError as e:
+        raise e

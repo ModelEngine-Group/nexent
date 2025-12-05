@@ -29,22 +29,16 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
   totalChunkNum,
 }) => {
   const { t } = useTranslation();
-  const [reasonState, setReasonState] = useState<string | null>(
-    errorReason ?? null
-  );
-  const [suggestionState, setSuggestionState] = useState<string | null>(
-    suggestion ?? null
-  );
+  const [errorCodeState, setErrorCodeState] = useState<string | null>(null);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
 
   useEffect(() => {
-    // If parent props change (e.g. list refreshed), sync initial values
-    setReasonState(errorReason ?? null);
-    setSuggestionState(suggestion ?? null);
+    // If parent props change (e.g. list refreshed), reset state
+    setErrorCodeState(null);
     setHasFetched(false);
-  }, [errorReason, suggestion, kbId, docId]);
+  }, [kbId, docId]);
 
   // Map API status to display status
   const getDisplayStatus = (apiStatus: string): string => {
@@ -157,6 +151,22 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
       )
     : 0;
 
+  // Get localized error message from error code
+  const getLocalizedError = (errorCode: string | null) => {
+    if (!errorCode) return { message: null, suggestion: null };
+
+    const messageKey = `document.error.code.${errorCode}.message`;
+    const suggestionKey = `document.error.code.${errorCode}.suggestion`;
+
+    const message = t(messageKey, { defaultValue: null });
+    const suggestion = t(suggestionKey, { defaultValue: null });
+
+    return {
+      message: message !== messageKey ? message : null,
+      suggestion: suggestion !== suggestionKey ? suggestion : null,
+    };
+  };
+
   const fetchErrorInfo = async () => {
     if (!kbId || !docId) return;
     setIsFetching(true);
@@ -165,8 +175,9 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
         kbId,
         docId
       );
-      setReasonState(result.reason ?? null);
-      setSuggestionState(result.suggestion ?? null);
+
+      // Set error code - frontend will handle localization
+      setErrorCodeState(result.errorCode ?? null);
     } catch (error) {
       log.error("Failed to fetch document error info:", error);
     } finally {
@@ -183,27 +194,34 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
       docId &&
       !isFetching &&
       !hasFetched &&
-      !reasonState
+      !errorCodeState
     ) {
       fetchErrorInfo();
     }
   };
 
+  // Get localized error messages from error code
+  const localizedError = getLocalizedError(errorCodeState);
+
   const popoverContent = (
     <div className="max-w-md">
       {isFetching ? (
         <div className="text-sm text-gray-500">{t("common.loading")}</div>
-      ) : reasonState ? (
+      ) : localizedError.message ? (
         <div>
           <div className="mb-2">
-            <div className="text-sm text-gray-700">{reasonState}</div>
+            <div className="text-sm text-gray-700">
+              {localizedError.message}
+            </div>
           </div>
-          {suggestionState && (
+          {localizedError.suggestion && (
             <div className="mt-1">
               <div className="text-sm font-medium mb-1">
                 {t("document.error.suggestion")}
               </div>
-              <div className="text-sm text-gray-700">{suggestionState}</div>
+              <div className="text-sm text-gray-700">
+                {localizedError.suggestion}
+              </div>
             </div>
           )}
         </div>
