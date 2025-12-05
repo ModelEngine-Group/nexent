@@ -115,6 +115,7 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
         # New defaults required by ray_actors import
         const_mod.DEFAULT_EXPECTED_CHUNK_SIZE = 1024
         const_mod.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+        const_mod.ROOT_DIR = "/mock/root"
         sys.modules["consts.const"] = const_mod
     # Minimal stub for consts.model used by utils.file_management_utils
     if "consts.model" not in sys.modules:
@@ -328,7 +329,7 @@ def test_init_ray_in_worker_raises_on_init_failure(monkeypatch):
     # Verify that the exception is re-raised
     with pytest.raises(RuntimeError) as exc_info:
         tasks.init_ray_in_worker()
-    assert exc_info.value == init_exception
+    assert "Failed to initialize Ray for Celery worker" in str(exc_info.value)
 
 
 def test_run_async_no_running_loop(monkeypatch):
@@ -552,6 +553,37 @@ def test_forward_redis_cached_invalid_json_raises(monkeypatch):
                       "redis_key": "dp:rid:badjson"}, index_name="idx", source="/a.txt")
     # Should be JSON-wrapped error
     json.loads(str(ei.value))
+
+
+def test_forward_returns_when_task_cancelled(monkeypatch):
+    """forward should exit early when cancellation flag is set"""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
+
+    class FakeRedisService:
+        def __init__(self):
+            self.calls = 0
+
+        def is_task_cancelled(self, task_id):
+            self.calls += 1
+            return True
+
+    fake_service = FakeRedisService()
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: fake_service)
+
+    self = FakeSelf("cancel-1")
+    result = tasks.forward(
+        self,
+        processed_data={"chunks": [{"content": "keep", "metadata": {}}]},
+        index_name="idx",
+        source="/a.txt",
+    )
+
+    assert result["chunks_stored"] == 0
+    assert "cancelled" in result["es_result"]["message"].lower()
+    assert fake_service.calls == 1
+    # No state updates should occur because we returned early
+    assert self.states == []
 
 
 def test_forward_redis_client_from_url_failure(monkeypatch):
@@ -1080,6 +1112,48 @@ def test_process_zero_file_size_speed_calculation(monkeypatch, tmp_path):
     success_state = [s for s in self.states if s.get(
         "state") == tasks.states.SUCCESS][0]
     assert success_state.get("meta", {}).get("processing_speed_mb_s") == 0
+
+
+def test_process_no_chunks_saves_error(monkeypatch, tmp_path):
+    """process should save error info when no chunks are produced"""
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch, initialized=True)
+
+    class FakeActor:
+        def __init__(self):
+            self.process_file = types.SimpleNamespace(
+                remote=lambda *a, **k: "ref-empty")
+            self.store_chunks_in_redis = types.SimpleNamespace(
+                remote=lambda *a, **k: None)
+
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: FakeActor())
+    fake_ray.get_returns = []  # no chunks returned from ray.get
+
+    saved_reason = {}
+    monkeypatch.setattr(
+        tasks,
+        "save_error_to_redis",
+        lambda task_id, reason, start_time: saved_reason.setdefault(
+            "reason", reason),
+    )
+
+    f = tmp_path / "empty_file.txt"
+    f.write_text("data")
+
+    self = FakeSelf("no-chunks")
+    with pytest.raises(Exception) as exc_info:
+        tasks.process(
+            self,
+            source=str(f),
+            source_type="local",
+            chunking_strategy="basic",
+            index_name="idx",
+            original_filename="empty_file.txt",
+        )
+
+    assert '"error_code": "no_valid_chunks"' in saved_reason.get("reason", "")
+    assert any(state.get("meta", {}).get("stage") ==
+               "text_extraction_failed" for state in self.states)
+    json.loads(str(exc_info.value))
 
 
 def test_process_url_source_with_many_chunks(monkeypatch):

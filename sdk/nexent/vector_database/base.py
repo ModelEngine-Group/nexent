@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 
 from ..core.models.embedding_model import BaseEmbedding
 
@@ -79,6 +79,8 @@ class VectorDatabaseCore(ABC):
         documents: List[Dict[str, Any]],
         batch_size: int = 64,
         content_field: str = "content",
+        embedding_batch_size: int = 10,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """
         Index documents with embeddings.

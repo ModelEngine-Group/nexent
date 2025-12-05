@@ -142,6 +142,11 @@ export const API_ENDPOINTS = {
     // File upload service
     upload: `${API_BASE_URL}/file/upload`,
     process: `${API_BASE_URL}/file/process`,
+    // Error info service
+    getErrorInfo: (indexName: string, pathOrUrl: string) =>
+      `${API_BASE_URL}/indices/${indexName}/documents/${encodeURIComponent(
+        pathOrUrl
+      )}/error-info`,
   },
   config: {
     save: `${API_BASE_URL}/config/save_config`,

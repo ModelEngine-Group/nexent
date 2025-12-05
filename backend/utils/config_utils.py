@@ -220,8 +220,9 @@ class TenantConfigManager:
             update_config_by_tenant_config_id_and_data(
                 existing_config["tenant_config_id"], update_data)
 
-            # Clear cache for this tenant after updating config
-            # self.clear_cache(tenant_id)
+            # Clear cache for this tenant after updating config so that
+            # subsequent reads immediately see the latest configuration
+            self.clear_cache(tenant_id)
             return
 
     def clear_cache(self, tenant_id: str | None = None):

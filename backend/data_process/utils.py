@@ -123,6 +123,25 @@ async def get_task_info(task_id: str) -> Dict[str, Any]:
 
                         if 'original_filename' in metadata:
                             status_info['original_filename'] = metadata['original_filename']
+                        
+                        # Get progress info from metadata
+                        if 'total_chunks' in metadata:
+                            status_info['total_chunks'] = metadata['total_chunks']
+                        if 'processed_chunks' in metadata:
+                            status_info['processed_chunks'] = metadata['processed_chunks']
+                        
+                        # Always try to get latest progress from Redis (real-time updates during vectorization)
+                        # Redis progress takes precedence over metadata for active tasks
+                        try:
+                            from services.redis_service import get_redis_service
+                            redis_service = get_redis_service()
+                            progress_info = redis_service.get_progress_info(task_id)
+                            if progress_info:
+                                # Use Redis progress as primary source (updated in real-time)
+                                status_info['processed_chunks'] = progress_info.get('processed_chunks', status_info.get('processed_chunks'))
+                                status_info['total_chunks'] = progress_info.get('total_chunks', status_info.get('total_chunks'))
+                        except Exception as e:
+                            logger.debug(f"Failed to get progress from Redis for task {task_id}: {str(e)}")
                 # Add error information for failed tasks
                 if result.failed():
                     try:

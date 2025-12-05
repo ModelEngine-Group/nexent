@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import redis
 
@@ -35,9 +35,95 @@ class RedisService:
             self._backend_client = redis.from_url(redis_backend_url, socket_timeout=5, socket_connect_timeout=5)
         return self._backend_client
 
+    # ------------------------------------------------------------------
+    # Cancellation helpers
+    # ------------------------------------------------------------------
+
+    def mark_task_cancelled(self, task_id: str, ttl_hours: int = 24) -> bool:
+        """
+        Mark a Celery task as cancelled in Redis so that long-running
+        consumers (for example, chunk indexing) can detect the flag
+        and stop further processing.
+        """
+        if not task_id:
+            logger.warning("Cannot mark task as cancelled: empty task_id")
+            return False
+        try:
+            cancel_key = f"cancel:{task_id}"
+            ttl_seconds = ttl_hours * 3600
+            self.client.setex(cancel_key, ttl_seconds, "1")
+            logger.info(f"Marked task {task_id} as cancelled in Redis (key={cancel_key})")
+            return True
+        except Exception as exc:
+            logger.error(f"Failed to mark task {task_id} as cancelled: {exc}")
+            return False
+
+    def is_task_cancelled(self, task_id: str) -> bool:
+        """
+        Check whether a Celery task has been marked as cancelled.
+        """
+        if not task_id:
+            return False
+        try:
+            cancel_key = f"cancel:{task_id}"
+            value = self.client.get(cancel_key)
+            return bool(value)
+        except Exception as exc:
+            logger.warning(f"Failed to check cancellation flag for task {task_id}: {exc}")
+            return False
+
+    # ------------------------------------------------------------------
+    # High-level cleanup helpers
+    # ------------------------------------------------------------------
+
+    def _cleanup_single_task_related_keys(self, task_id: str) -> int:
+        """
+        Delete all known Redis keys that are related to a specific task.
+
+        This includes:
+        - Progress info
+        - Error info
+        - Cancellation flag
+        - Chunk cache used by the forward task (dp:{task_id}:chunks)
+        """
+        if not task_id:
+            return 0
+
+        deleted_count = 0
+        try:
+            # Keys stored in the main Redis client
+            progress_key = f"progress:{task_id}"
+            error_key = f"error:reason:{task_id}"
+            cancel_key = f"cancel:{task_id}"
+
+            for key in (progress_key, error_key, cancel_key):
+                try:
+                    deleted = self.client.delete(key)
+                    deleted_count += deleted
+                    if deleted:
+                        logger.debug(f"Deleted task-related key: {key}")
+                except Exception as exc:
+                    logger.warning(f"Error deleting key {key}: {exc}")
+
+            # Chunk payload is stored in the backend Redis used by Celery
+            chunk_key = f"dp:{task_id}:chunks"
+            try:
+                deleted = self.backend_client.delete(chunk_key)
+                deleted_count += deleted
+                if deleted:
+                    logger.debug(f"Deleted chunk cache key: {chunk_key}")
+            except Exception as exc:
+                logger.warning(f"Error deleting chunk cache key {chunk_key}: {exc}")
+
+        except Exception as exc:
+            logger.error(f"Error cleaning up task-related keys for task {task_id}: {exc}")
+
+        return deleted_count
+
     def delete_knowledgebase_records(self, index_name: str) -> Dict[str, Any]:
         """
-        Delete all Redis records related to a specific knowledge base
+        Delete all Redis records related to a specific knowledge base.
+        Also marks all related tasks as cancelled to stop ongoing processing.
 
         Args:
             index_name: Name of the knowledge base (index) to clean up
@@ -51,14 +137,18 @@ class RedisService:
             "index_name": index_name,
             "celery_tasks_deleted": 0,
             "cache_keys_deleted": 0,
+            "tasks_cancelled": 0,
             "total_deleted": 0,
             "errors": []
         }
 
         try:
             # 1. Clean up Celery task results related to this knowledge base
+            # This also marks tasks as cancelled and cleans up all related keys
             celery_deleted = self._cleanup_celery_tasks(index_name)
             result["celery_tasks_deleted"] = celery_deleted
+            # Count cancelled tasks (approximate, based on processed tasks)
+            result["tasks_cancelled"] = celery_deleted  # Each deleted task was also cancelled
 
             # 2. Clean up any cache keys related to this knowledge base
             cache_deleted = self._cleanup_cache_keys(index_name)
@@ -67,7 +157,8 @@ class RedisService:
             result["total_deleted"] = celery_deleted + cache_deleted
 
             logger.info(f"Redis cleanup completed for {index_name}: "
-                       f"Celery tasks: {celery_deleted}, Cache keys: {cache_deleted}")
+                       f"Celery tasks: {celery_deleted}, Cache keys: {cache_deleted}, "
+                       f"Tasks marked as cancelled: {result['tasks_cancelled']}")
 
         except Exception as e:
             error_msg = f"Error during Redis cleanup for {index_name}: {str(e)}"
@@ -174,6 +265,7 @@ class RedisService:
     def _cleanup_celery_tasks(self, index_name: str) -> int:
         """
         Clean up Celery task results related to the knowledge base and their parents.
+        Also marks all related tasks as cancelled before deletion to stop ongoing processing.
 
         Args:
             index_name: Name of the knowledge base
@@ -183,11 +275,13 @@ class RedisService:
         """
         total_deleted_count = 0
         processed_tasks = set()  # Track tasks that have been processed to avoid redundant work
+        task_ids_to_cancel = set()  # Collect all task IDs to mark as cancelled
 
         try:
             # Get all Celery task result keys
             task_keys = self.backend_client.keys('celery-task-meta-*')
 
+            # First pass: Collect all task IDs related to this knowledge base
             for key in task_keys:
                 try:
                     # Get task data
@@ -225,9 +319,72 @@ class RedisService:
                             key_str = key.decode('utf-8') if isinstance(key, bytes) else key
                             task_id = key_str.replace('celery-task-meta-', '')
                             if task_id not in processed_tasks:
+                                # Collect task ID and its parent chain
+                                # We need to get the parent chain before deleting
+                                task_ids_to_cancel.add(task_id)
+                                # Also get parent chain by reading task data
+                                try:
+                                    parent_id = task_info.get('parent_id')
+                                    if parent_id:
+                                        task_ids_to_cancel.add(parent_id)
+                                except Exception:
+                                    pass
+
+                except Exception as e:
+                    logger.warning(f"Error processing task key {key} for cleanup: {str(e)}")
+                    continue
+
+            # Mark all collected task IDs as cancelled BEFORE deleting them
+            # This ensures ongoing processing tasks will detect cancellation and stop
+            for task_id in task_ids_to_cancel:
+                try:
+                    self.mark_task_cancelled(task_id)
+                    logger.info(f"Marked task {task_id} as cancelled for knowledge base {index_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to mark task {task_id} as cancelled: {str(e)}")
+
+            # Second pass: Delete task records and clean up related keys
+            for key in task_keys:
+                try:
+                    task_data = self.backend_client.get(key)
+                    if task_data:
+                        import json
+                        task_info = json.loads(task_data)
+                        result = task_info.get('result', {})
+                        task_index_name = None
+
+                        if isinstance(result, dict):
+                            task_index_name = (
+                                result.get('index_name') or
+                                task_info.get('index_name') or
+                                result.get('kwargs', {}).get('index_name')
+                            )
+
+                            if task_index_name is None and 'exc_message' in result:
+                                try:
+                                    exc_str = str(result['exc_message'])
+                                    if '{' in exc_str and '}' in exc_str:
+                                        json_part = exc_str[exc_str.find('{'):exc_str.rfind('}')+1]
+                                        cleaned_json_part = json_part.replace('\\"', '"')
+                                        error_data = json.loads(cleaned_json_part)
+                                        task_index_name = error_data.get('index_name')
+                                except (json.JSONDecodeError, TypeError, IndexError):
+                                    pass
+
+                        if task_index_name == index_name:
+                            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                            task_id = key_str.replace('celery-task-meta-', '')
+                            if task_id not in processed_tasks:
+                                # Delete task record and its parent chain
                                 deleted, processed_chain = self._recursively_delete_task_and_parents(task_id)
                                 total_deleted_count += deleted
                                 processed_tasks.update(processed_chain)
+                                # Clean up all related keys (progress, error, chunks) for each task
+                                for tid in processed_chain:
+                                    try:
+                                        self._cleanup_single_task_related_keys(tid)
+                                    except Exception as e:
+                                        logger.warning(f"Failed to clean up keys for task {tid}: {str(e)}")
 
                 except Exception as e:
                     logger.warning(f"Error processing task key {key} for cleanup: {str(e)}")
@@ -350,9 +507,22 @@ class RedisService:
                         if task_index_name == index_name and task_source == path_or_url:
                             # Recursively delete this task and its parents
                             if task_id not in processed_tasks:
+                                # Mark this task as cancelled so any in-flight
+                                # processing can observe the flag and stop.
+                                try:
+                                    self.mark_task_cancelled(task_id)
+                                except Exception as cancel_exc:
+                                    logger.warning(
+                                        f"Failed to mark task {task_id} as cancelled during document cleanup: {cancel_exc}"
+                                    )
+
                                 deleted, processed_chain = self._recursively_delete_task_and_parents(task_id)
                                 total_deleted_count += deleted
                                 processed_tasks.update(processed_chain)
+
+                                # Clean up all known keys for each task in the chain
+                                for processed_task_id in processed_chain:
+                                    self._cleanup_single_task_related_keys(processed_task_id)
 
                 except Exception as e:
                     logger.warning(f"Error processing task key {key} for document cleanup: {str(e)}")
@@ -472,6 +642,133 @@ class RedisService:
             logger.error(f"Redis ping failed: {str(e)}")
             return False
 
+    def save_error_info(self, task_id: str, error_reason: str, ttl_days: int = 30) -> bool:
+        """
+        Save error information to Redis for a specific task
+
+        Args:
+            task_id: Celery task ID
+            error_reason: Short error reason summary
+            ttl_days: Time to live in days (default 30 days)
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            if not task_id:
+                logger.error("Cannot save error info: task_id is empty")
+                return False
+            if not error_reason:
+                logger.error(f"Cannot save error info for task {task_id}: error_reason is empty")
+                return False
+            
+            ttl_seconds = ttl_days * 24 * 60 * 60
+            reason_key = f"error:reason:{task_id}"
+
+            # Save error reason
+            result = self.client.setex(reason_key, ttl_seconds, error_reason)
+            
+            if result:
+                logger.info(f"Successfully saved error info to Redis for task {task_id}, key: {reason_key}")
+                # Verify the save by reading it back
+                verify = self.client.get(reason_key)
+                if verify:
+                    if isinstance(verify, bytes):
+                        verify = verify.decode('utf-8')
+                    logger.debug(f"Verified error info saved for task {task_id}: {verify[:100]}...")
+                else:
+                    logger.warning(f"Failed to verify error info save for task {task_id}")
+                return True
+            else:
+                logger.error(f"Redis setex returned False for task {task_id}")
+                return False
+        except Exception as e:
+            logger.error(
+                f"Failed to save error info for task {task_id}: {str(e)}", exc_info=True)
+            return False
+
+    def save_progress_info(self, task_id: str, processed_chunks: int, total_chunks: int, ttl_hours: int = 24) -> bool:
+        """
+        Save progress information to Redis for a specific task
+
+        Args:
+            task_id: Celery task ID
+            processed_chunks: Number of chunks processed so far
+            total_chunks: Total number of chunks to process
+            ttl_hours: Time to live in hours (default 24 hours)
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            if not task_id:
+                logger.error("Cannot save progress info: task_id is empty")
+                return False
+            
+            progress_key = f"progress:{task_id}"
+            progress_data = {
+                'processed_chunks': processed_chunks,
+                'total_chunks': total_chunks
+            }
+            
+            ttl_seconds = ttl_hours * 3600
+            progress_json = json.dumps(progress_data)
+            self.client.setex(
+                progress_key,
+                ttl_seconds,
+                progress_json
+            )
+            # Use info level for better visibility during debugging
+            logger.info(f"[REDIS PROGRESS] Saved progress for task {task_id}: {processed_chunks}/{total_chunks} (key: {progress_key}, TTL: {ttl_hours}h)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save progress info for task {task_id}: {str(e)}")
+            return False
+
+    def get_progress_info(self, task_id: str) -> Optional[Dict[str, int]]:
+        """
+        Get progress information for a specific task
+
+        Args:
+            task_id: Celery task ID
+
+        Returns:
+            Dict with 'processed_chunks' and 'total_chunks' or None if not found
+        """
+        try:
+            progress_key = f"progress:{task_id}"
+            progress_data = self.client.get(progress_key)
+            if progress_data:
+                if isinstance(progress_data, bytes):
+                    progress_data = progress_data.decode('utf-8')
+                return json.loads(progress_data)
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get progress info for task {task_id}: {str(e)}")
+            return None
+
+    def get_error_info(self, task_id: str) -> Optional[str]:
+        """
+        Get error reason for a specific task
+
+        Args:
+            task_id: Celery task ID
+
+        Returns:
+            Error reason string or None if not found
+        """
+        try:
+            reason_key = f"error:reason:{task_id}"
+            reason = self.client.get(reason_key)
+            if reason:
+                if isinstance(reason, bytes):
+                    return reason.decode('utf-8')
+                return reason
+            return None
+        except Exception as e:
+            logger.error(
+                f"Failed to get error info for task {task_id}: {str(e)}")
+            return None
 
 # Global Redis service instance
 _redis_service = None

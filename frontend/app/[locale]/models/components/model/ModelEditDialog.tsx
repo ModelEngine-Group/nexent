@@ -42,6 +42,7 @@ export const ModelEditDialog = ({
       DEFAULT_EXPECTED_CHUNK_SIZE,
       DEFAULT_MAXIMUM_CHUNK_SIZE,
     ] as [number, number],
+    chunkingBatchSize: "10",
   });
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
@@ -67,6 +68,7 @@ export const ModelEditDialog = ({
           model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
           model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
         ] as [number, number],
+        chunkingBatchSize: (model.chunkingBatchSize || 10).toString(),
       });
     }
   }, [model]);
@@ -172,6 +174,7 @@ export const ModelEditDialog = ({
           ? {
               expectedChunkSize: form.chunkSizeRange[0],
               maximumChunkSize: form.chunkSizeRange[1],
+              chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
             }
           : {}),
       });
@@ -296,6 +299,28 @@ export const ModelEditDialog = ({
                   chunkSizeRange: value,
                 }));
               }}
+            />
+          </div>
+        )}
+
+        {/* Concurrent Request Count (Embedding model only) */}
+        {isEmbeddingModel && (
+          <div>
+            <label
+              htmlFor="chunkingBatchSize"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("modelConfig.input.chunkingBatchSize")}
+            </label>
+            <Input
+              id="chunkingBatchSize"
+              type="number"
+              min="1"
+              placeholder="10"
+              value={form.chunkingBatchSize}
+              onChange={(e) =>
+                handleFormChange("chunkingBatchSize", e.target.value)
+              }
             />
           </div>
         )}

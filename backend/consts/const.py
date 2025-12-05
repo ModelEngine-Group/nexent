@@ -38,6 +38,7 @@ CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+ROOT_DIR = os.getenv("ROOT_DIR")
 
 
 # Supabase Configuration

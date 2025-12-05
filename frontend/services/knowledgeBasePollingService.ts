@@ -11,8 +11,12 @@ class KnowledgeBasePollingService {
   private knowledgeBasePollingInterval: number = 1000; // 1 second
   private documentPollingInterval: number = 3000; // 3 seconds
   private maxKnowledgeBasePolls: number = 60; // Maximum 60 polling attempts
-  private maxDocumentPolls: number = 20; // Maximum 20 polling attempts
+  private maxDocumentPolls: number = 200; // Maximum 200 polling attempts (10 minutes for long-running tasks)
   private activeKnowledgeBaseId: string | null = null; // Record current active knowledge base ID
+  private pendingRequests: Map<string, Promise<Document[]>> = new Map();
+  
+  // Debounce timers for batching multiple rapid requests
+  private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 
   // Set current active knowledge base ID 
   setActiveKnowledgeBase(kbId: string | null): void {
@@ -29,11 +33,16 @@ class KnowledgeBasePollingService {
     // Initialize polling counter
     let pollCount = 0;
     
+    // Track if we're in extended polling mode (after initial timeout)
+    let isExtendedPolling = false;
+    
     // Define the polling logic function
     const pollDocuments = async () => {
       try {
-        // Increment polling counter
-        pollCount++;
+        // Increment polling counter only if not in extended polling mode
+        if (!isExtendedPolling) {
+          pollCount++;
+        }
         
         // If there is an active knowledge base and polling knowledge base doesn't match active one, stop polling
         if (this.activeKnowledgeBaseId !== null && this.activeKnowledgeBaseId !== kbId) {
@@ -41,23 +50,27 @@ class KnowledgeBasePollingService {
           return;
         }
         
-        // If exceeded maximum polling count, handle timeout
-        if (pollCount > this.maxDocumentPolls) {
-          log.warn(`Document polling for knowledge base ${kbId} timed out after ${this.maxDocumentPolls} attempts`);
-          await this.handlePollingTimeout(kbId, 'document', callback);
-          // Push documents to UI
-          try {
-            const documents = await knowledgeBaseService.getAllFiles(kbId);
-            this.triggerDocumentsUpdate(kbId, documents);
-          } catch (e) {
-            // Ignore error
-          }
-          this.stopPolling(kbId);
-          return;
-        }
+        // Use request deduplication to avoid concurrent duplicate requests
+        let documents: Document[];
+        const requestKey = `poll:${kbId}`;
         
-        // Get latest document status
-        const documents = await knowledgeBaseService.getAllFiles(kbId);
+        // Check if there's already a pending request for this KB
+        const pendingRequest = this.pendingRequests.get(requestKey);
+        if (pendingRequest) {
+          // Reuse existing request to avoid duplicate API calls
+          documents = await pendingRequest;
+        } else {
+          // Create new request and track it
+          const requestPromise = knowledgeBaseService.getAllFiles(kbId);
+          this.pendingRequests.set(requestKey, requestPromise);
+          
+          try {
+            documents = await requestPromise;
+          } finally {
+            // Clean up after request completes
+            this.pendingRequests.delete(requestKey);
+          }
+        }
         
         // Call callback function with latest documents first to ensure UI updates immediately
         callback(documents);
@@ -66,6 +79,18 @@ class KnowledgeBasePollingService {
         const hasProcessingDocs = documents.some(doc => 
           NON_TERMINAL_STATUSES.includes(doc.status)
         );
+        
+        // If exceeded maximum polling count and still processing, switch to extended polling mode
+        if (pollCount > this.maxDocumentPolls && hasProcessingDocs && !isExtendedPolling) {
+          log.warn(`Document polling for knowledge base ${kbId} exceeded ${this.maxDocumentPolls} attempts, switching to extended polling mode (reduced frequency)`);
+          isExtendedPolling = true;
+          // Stop the current interval and restart with longer interval
+          this.stopPolling(kbId);
+          // Continue polling with reduced frequency (every 10 seconds)
+          const extendedInterval = setInterval(pollDocuments, 10000);
+          this.pollingIntervals.set(kbId, extendedInterval);
+          return;
+        }
         
         // If there are processing documents, continue polling
         if (hasProcessingDocs) {
@@ -141,6 +166,7 @@ class KnowledgeBasePollingService {
    * @param expectedIncrement The number of new files uploaded
    */
   pollForKnowledgeBaseReady(
+    kbId: string,
     kbName: string,
     originalDocumentCount: number = 0,
     expectedIncrement: number = 0
@@ -150,29 +176,14 @@ class KnowledgeBasePollingService {
       const checkForStats = async () => {
         try {
           const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(true) as KnowledgeBase[];
-          const kb = kbs.find(k => k.name === kbName);
+          const kb = kbs.find(k => k.id === kbId || k.name === kbName);
 
           // Check if KB exists and its stats are populated
           if (kb) {
-            // If expectedIncrement > 0, check if documentCount increased as expected
-            if (
-              expectedIncrement > 0 &&
-              kb.documentCount >= (originalDocumentCount + expectedIncrement)
-            ) {
-              log.log(
-                `Knowledge base ${kbName} documentCount increased as expected: ${kb.documentCount} (was ${originalDocumentCount}, expected increment ${expectedIncrement})`
-              );
-              this.triggerKnowledgeBaseListUpdate(true);
-              resolve(kb);
-              return;
-            }
-            // Fallback: for new KB or no increment specified, use old logic
-            if (expectedIncrement === 0 && (kb.documentCount > 0 || kb.chunkCount > 0)) {
-              log.log(`Knowledge base ${kbName} is ready and stats are populated.`);
-              this.triggerKnowledgeBaseListUpdate(true);
-              resolve(kb);
-              return;
-            }
+            log.log(`Knowledge base ${kbName} detected.`);
+            this.triggerKnowledgeBaseListUpdate(true);
+            resolve(kb);
+            return;
           }
 
           count++;
@@ -183,11 +194,11 @@ class KnowledgeBasePollingService {
             log.error(`Knowledge base ${kbName} readiness check timed out after ${this.maxKnowledgeBasePolls} attempts.`);
             
             // Handle knowledge base polling timeout - mark related tasks as failed
-            await this.handlePollingTimeout(kbName, 'knowledgeBase');
+            await this.handlePollingTimeout(kbId, 'knowledgeBase');
             // Push documents to UI
             try {
-              const documents = await knowledgeBaseService.getAllFiles(kbName);
-              this.triggerDocumentsUpdate(kbName, documents);
+              const documents = await knowledgeBaseService.getAllFiles(kbId);
+              this.triggerDocumentsUpdate(kbId, documents);
             } catch (e) {
               // Ignore error
             }
@@ -201,11 +212,11 @@ class KnowledgeBasePollingService {
             setTimeout(checkForStats, this.knowledgeBasePollingInterval);
           } else {
             // Handle knowledge base polling timeout on error as well
-            await this.handlePollingTimeout(kbName, 'knowledgeBase');
+            await this.handlePollingTimeout(kbId, 'knowledgeBase');
             // Push documents to UI
             try {
-              const documents = await knowledgeBaseService.getAllFiles(kbName);
-              this.triggerDocumentsUpdate(kbName, documents);
+              const documents = await knowledgeBaseService.getAllFiles(kbId);
+              this.triggerDocumentsUpdate(kbId, documents);
             } catch (e) {
               // Ignore error
             }
@@ -218,14 +229,14 @@ class KnowledgeBasePollingService {
   }
 
   // Simplified method for new knowledge base creation workflow
-  async handleNewKnowledgeBaseCreation(kbName: string, originalDocumentCount: number = 0, expectedIncrement: number = 0, callback: (kb: KnowledgeBase) => void) {
+  async handleNewKnowledgeBaseCreation(kbId: string, kbName: string, originalDocumentCount: number = 0, expectedIncrement: number = 0, callback: (kb: KnowledgeBase) => void) {
     // Start document polling
-    this.startDocumentStatusPolling(kbName, (documents) => {
-      this.triggerDocumentsUpdate(kbName, documents);
+    this.startDocumentStatusPolling(kbId, (documents) => {
+      this.triggerDocumentsUpdate(kbId, documents);
     });
     try {
       // Start knowledge base polling parallelly
-      const populatedKB = await this.pollForKnowledgeBaseReady(kbName, originalDocumentCount, expectedIncrement);
+      const populatedKB = await this.pollForKnowledgeBaseReady(kbId, kbName, originalDocumentCount, expectedIncrement);
       // callback with populated knowledge base when everything is ready
       callback(populatedKB);
     } catch (error) {
@@ -249,6 +260,13 @@ class KnowledgeBasePollingService {
       clearInterval(interval);
     });
     this.pollingIntervals.clear();
+    
+    // Clear pending requests and debounce timers to prevent memory leaks
+    this.pendingRequests.clear();
+    this.debounceTimers.forEach((timer) => {
+      clearTimeout(timer);
+    });
+    this.debounceTimers.clear();
   }
   
   // Trigger knowledge base list update (optionally force refresh)

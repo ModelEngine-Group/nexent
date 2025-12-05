@@ -151,7 +151,8 @@ async def get_all_files_status(index_name: str):
             logger.warning(f"No tasks found for index '{index_name}'")
             return {}
         
-        # Dictionary to store file statuses: {path_or_url: {process_state, forward_state, timestamps}}
+        # Dictionary to store file statuses:
+        # {path_or_url: {process_state, forward_state, timestamps, progress fields}}
         file_states = {}
         for task_info in tasks_list:
             # No need to check index_name since get_index_tasks already filters by it
@@ -172,7 +173,10 @@ async def get_all_files_status(index_name: str):
                         'latest_forward_created_at': 0,
                         'latest_task_id': '',
                         'original_filename': '',
-                        'source_type': ''
+                        'source_type': '',
+                        # Optional progress fields provided by data-process service
+                        'processed_chunks': None,
+                        'total_chunks': None,
                     }
                 file_state = file_states[task_path_or_url]
                 # Process task
@@ -182,6 +186,11 @@ async def get_all_files_status(index_name: str):
                     file_state['latest_task_id'] = task_id
                     file_state['original_filename'] = original_filename
                     file_state['source_type'] = source_type
+                    # Update optional progress metrics if present
+                    file_state['processed_chunks'] = task_info.get(
+                        'processed_chunks', file_state.get('processed_chunks'))
+                    file_state['total_chunks'] = task_info.get(
+                        'total_chunks', file_state.get('total_chunks'))
                 # Forward task
                 elif task_name == 'forward' and task_created_at > file_state['latest_forward_created_at']:
                     file_state['latest_forward_created_at'] = task_created_at
@@ -189,6 +198,11 @@ async def get_all_files_status(index_name: str):
                     file_state['latest_task_id'] = task_id
                     file_state['original_filename'] = original_filename
                     file_state['source_type'] = source_type
+                    # Forward tasks may also carry progress metrics
+                    file_state['processed_chunks'] = task_info.get(
+                        'processed_chunks', file_state.get('processed_chunks'))
+                    file_state['total_chunks'] = task_info.get(
+                        'total_chunks', file_state.get('total_chunks'))
         result = {}
         for path_or_url, file_state in file_states.items():
             # Call remote state conversion API so this service no longer depends on Celery
@@ -196,11 +210,44 @@ async def get_all_files_status(index_name: str):
                 process_celery_state=file_state['process_state'] or '',
                 forward_celery_state=file_state['forward_state'] or ''
             )
+            # Try to get progress from Redis - always check Redis for real-time progress
+            # especially when task is in progress (FORWARDING or PROCESSING)
+            processed_chunks = file_state.get('processed_chunks')
+            total_chunks = file_state.get('total_chunks')
+            task_id = file_state['latest_task_id'] or ''
+
+            # Always try to get latest progress from Redis if task_id exists
+            # Redis has the most up-to-date progress during vectorization
+            if task_id:
+                try:
+                    from services.redis_service import get_redis_service
+                    redis_service = get_redis_service()
+                    progress_info = redis_service.get_progress_info(task_id)
+                    if progress_info:
+                        # Use Redis progress as primary source (it's updated in real-time)
+                        redis_processed = progress_info.get('processed_chunks')
+                        redis_total = progress_info.get('total_chunks')
+                        if redis_processed is not None:
+                            processed_chunks = redis_processed
+                        if redis_total is not None:
+                            total_chunks = redis_total
+                        logger.debug(
+                            f"Retrieved progress from Redis for task {task_id}: {processed_chunks}/{total_chunks}")
+                    else:
+                        logger.debug(
+                            f"No progress info in Redis for task {task_id}, using task state values: {processed_chunks}/{total_chunks}")
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to get progress from Redis for task {task_id}: {str(e)}")
+
             result[path_or_url] = {
                 'state': custom_state,
-                'latest_task_id': file_state['latest_task_id'] or '',
+                'latest_task_id': task_id,
                 'original_filename': file_state['original_filename'] or '',
-                'source_type': file_state['source_type'] or ''
+                'source_type': file_state['source_type'] or '',
+                # Expose optional progress metrics for downstream consumers
+                'processed_chunks': processed_chunks,
+                'total_chunks': total_chunks,
             }
         return result
     except Exception as e:

@@ -4,21 +4,23 @@ import { DOCUMENT_ACTION_TYPES, KNOWLEDGE_BASE_ACTION_TYPES, UI_ACTION_TYPES, NO
 
 // Knowledge base basic type
 export interface KnowledgeBase {
-  id: string
-  name: string
-  description: string | null
-  chunkCount: number
-  documentCount: number
-  createdAt: any
-  embeddingModel: string
-  avatar: string
-  chunkNum: number
-  language: string
-  nickname: string
-  parserId: string
-  permission: string
-  tokenNum: number
-  source: string
+  id: string;
+  name: string;
+  description: string | null;
+  chunkCount: number;
+  documentCount: number;
+  createdAt: any;
+  // Last update time of the knowledge base/index (may fall back to createdAt)
+  updatedAt?: any;
+  embeddingModel: string;
+  avatar: string;
+  chunkNum: number;
+  language: string;
+  nickname: string;
+  parserId: string;
+  permission: string;
+  tokenNum: number;
+  source: string;
 }
 
 // Create knowledge base parameter type
@@ -31,17 +33,21 @@ export interface KnowledgeBaseCreateParams {
 
 // Document type
 export interface Document {
-  id: string
-  kb_id: string
-  name: string
-  type: string
-  size: number
-  create_time: string
-  chunk_num: number
-  token_num: number
-  status: string
-  selected?: boolean // For UI selection status
-  latest_task_id: string // For marking the latest celery task
+  id: string;
+  kb_id: string;
+  name: string;
+  type: string;
+  size: number;
+  create_time: string;
+  chunk_num: number;
+  token_num: number;
+  status: string;
+  selected?: boolean; // For UI selection status
+  latest_task_id: string; // For marking the latest celery task
+  error_reason?: string; // Error reason for failed documents
+  // Optional ingestion progress metrics
+  processed_chunk_num?: number | null;
+  total_chunk_num?: number | null;
 }
 
 // Document state interface
