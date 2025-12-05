@@ -5,17 +5,19 @@
 
 const VIEW_STORAGE_KEY = 'nexent_current_view';
 
-type ViewType = 
-  | "home" 
-  | "memory" 
-  | "models" 
-  | "agents" 
-  | "knowledges" 
-  | "space" 
-  | "setup" 
-  | "chat" 
-  | "market" 
-  | "users";
+type ViewType =
+  | "home"
+  | "memory"
+  | "models"
+  | "agents"
+  | "knowledges"
+  | "space"
+  | "setup"
+  | "chat"
+  | "market"
+  | "users"
+  | "mcpTools"
+  | "monitoring";
 
 const VALID_VIEWS: ViewType[] = [
   "home",
@@ -28,6 +30,8 @@ const VALID_VIEWS: ViewType[] = [
   "chat",
   "market",
   "users",
+  "mcpTools",
+  "monitoring",
 ];
 
 /**

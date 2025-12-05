@@ -288,6 +288,7 @@ export default function SubAgentPool({
                   const isCurrentlyEditing =
                     editingAgent &&
                     String(editingAgent.id) === String(agent.id); // Ensure type matching
+                  const displayName = agent.display_name || agent.name;
 
                   const agentItem = (
                     <div
@@ -322,24 +323,15 @@ export default function SubAgentPool({
                               !isAvailable ? "text-gray-500" : ""
                             }`}
                           >
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 max-w-full pr-1">
                               {!isAvailable && (
                                 <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0" />
                               )}
-                              {agent.display_name && (
-                                <span className="text-base leading-normal">
-                                  {agent.display_name}
+                              {displayName && (
+                                <span className="text-base leading-normal max-w-[220px] truncate break-all">
+                                  {displayName}
                                 </span>
                               )}
-                              <span
-                                className={`leading-normal ${
-                                  agent.display_name
-                                    ? "ml-2 text-sm"
-                                    : "text-base"
-                                }`}
-                              >
-                                {agent.name}
-                              </span>
                               {unsavedAgentId !== null &&
                                 String(unsavedAgentId) === String(agent.id) && (
                                   <span
@@ -351,7 +343,7 @@ export default function SubAgentPool({
                             </div>
                           </div>
                           <div
-                            className={`text-xs transition-colors duration-300 leading-[1.25] agent-description ${
+                            className={`text-xs transition-colors duration-300 leading-[1.25] agent-description break-words ${
                               !isAvailable ? "text-gray-400" : "text-gray-500"
                             }`}
                           >
