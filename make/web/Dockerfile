@@ -7,10 +7,30 @@ COPY frontend /opt/frontend
 
 # Build Next.js application
 WORKDIR /opt/frontend
+# Configure npm with increased timeout and retry settings
 RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
-    npm install --verbose && \
-    NODE_ENV=production npm run build && \
-    mkdir -p ../frontend-dist && \
+    npm config set fetch-timeout 600000 && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000
+
+# Install dependencies with retry mechanism
+RUN npm install --verbose || \
+    (echo "First install attempt failed, retrying..." && sleep 5 && npm install --verbose) || \
+    (echo "Second install attempt failed, retrying..." && sleep 10 && npm install --verbose)
+
+# Build Next.js with increased timeout and memory
+# Set environment variables for Next.js build
+# Add retry mechanism for network timeouts during build (e.g., Google Fonts loading)
+RUN NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=4096" \
+    NEXT_TELEMETRY_DISABLED=1 \
+    (npm run build || \
+     (echo "Build failed, retrying after 10 seconds..." && sleep 10 && npm run build) || \
+     (echo "Second build attempt failed, retrying after 20 seconds..." && sleep 20 && npm run build))
+
+# Prepare production distribution
+RUN mkdir -p ../frontend-dist && \
     cp -r .next ../frontend-dist/ && \
     cp -r public ../frontend-dist/ && \
     cp server.js ../frontend-dist/server.js && \
@@ -28,10 +48,18 @@ RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
     "http-proxy": "^1.18.1",\
     "dotenv": "^16.4.7"\
   }\
-}' > ../frontend-dist/package.json && \
-    cd ../frontend-dist && \
-    if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
-    npm install --verbose --omit=dev --production && \
+}' > ../frontend-dist/package.json
+
+# Install production dependencies with retry mechanism
+WORKDIR /opt/frontend-dist
+RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
+    npm config set fetch-timeout 600000 && \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    (npm install --verbose --omit=dev --production || \
+     (echo "First install attempt failed, retrying..." && sleep 5 && npm install --verbose --omit=dev --production) || \
+     (echo "Second install attempt failed, retrying..." && sleep 10 && npm install --verbose --omit=dev --production)) && \
     npm cache clean --force && \
     rm -rf /root/.npm && \
     rm -rf /root/.cache && \
