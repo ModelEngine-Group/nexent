@@ -53,6 +53,44 @@ const extractPromptHint = (value: string): string | undefined => {
   return match ? match[1] : undefined;
 };
 
+// Parse Markdown links in text and convert to React elements
+const parseMarkdownLinks = (text: string): React.ReactNode[] => {
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    // Add the link
+    parts.push(
+      <a
+        key={key++}
+        href={match[2]}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        {match[1]}
+      </a>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [text];
+};
+
 export default function AgentImportWizard({
   visible,
   onCancel,
@@ -409,7 +447,6 @@ export default function AgentImportWizard({
 
     // Clone agent data structure
     const agentJson = JSON.parse(JSON.stringify(initialData));
-    const mainAgentId = String(initialData.agent_id);
 
     // Update model information based on selection mode
     if (modelSelectionMode === "unified") {
@@ -819,47 +856,22 @@ export default function AgentImportWizard({
               {mcpServers.map((mcp, index) => (
                 <div
                   key={`${mcp.mcp_server_name}-${index}`}
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 min-h-[120px] flex items-center"
+                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
                 >
-                  <div className="flex items-center justify-between w-full gap-4">
-                    <div className="flex-1 flex flex-col justify-center">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="font-medium text-base">
-                          {mcp.mcp_server_name}
-                        </span>
-                        {mcp.isInstalled ? (
-                          <Tag icon={<CheckCircleOutlined />} color="success" className="text-sm">
-                            {t("market.install.mcp.installed", "Installed")}
-                          </Tag>
-                        ) : (
-                          <Tag icon={<CloseCircleOutlined />} color="default" className="text-sm">
-                            {t("market.install.mcp.notInstalled", "Not Installed")}
-                          </Tag>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                          MCP URL:
-                        </span>
-                        {(mcp.isUrlEditable || !mcp.isInstalled) ? (
-                          <Input
-                            value={mcp.editedUrl || ""}
-                            onChange={(e) => handleMcpUrlChange(index, e.target.value)}
-                            placeholder={mcp.isUrlEditable 
-                              ? t("market.install.mcp.urlPlaceholder", "Enter MCP server URL")
-                              : mcp.mcp_url
-                            }
-                            size="middle"
-                            disabled={mcp.isInstalled}
-                            style={{ maxWidth: "400px" }}
-                          />
-                        ) : (
-                          <span className="text-sm text-gray-700 dark:text-gray-300 break-all">
-                            {mcp.editedUrl || mcp.mcp_url}
-                          </span>
-                        )}
-                      </div>
+                  <div className="flex items-center justify-between w-full gap-4 mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-base">
+                        {mcp.mcp_server_name}
+                      </span>
+                      {mcp.isInstalled ? (
+                        <Tag icon={<CheckCircleOutlined />} color="success" className="text-xs">
+                          {t("market.install.mcp.installed", "Installed")}
+                        </Tag>
+                      ) : (
+                        <Tag icon={<CloseCircleOutlined />} color="default" className="text-xs">
+                          {t("market.install.mcp.notInstalled", "Not Installed")}
+                        </Tag>
+                      )}
                     </div>
 
                     {!mcp.isInstalled && (
@@ -875,6 +887,44 @@ export default function AgentImportWizard({
                         {t("market.install.mcp.install", "Install")}
                       </Button>
                     )}
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                        MCP URL:
+                      </span>
+                      {(mcp.isUrlEditable || !mcp.isInstalled) ? (
+                        <Input
+                          value={mcp.editedUrl || ""}
+                          onChange={(e) => handleMcpUrlChange(index, e.target.value)}
+                          placeholder={mcp.isUrlEditable 
+                            ? t("market.install.mcp.urlPlaceholder", "Enter MCP server URL")
+                            : mcp.mcp_url
+                          }
+                          size="middle"
+                          disabled={mcp.isInstalled}
+                          style={{ maxWidth: "400px" }}
+                          className={mcp.isUrlEditable && needsConfig(mcp.mcp_url) ? "bg-gray-100 dark:bg-gray-800" : ""}
+                        />
+                      ) : (
+                        <span className="text-sm text-gray-700 dark:text-gray-300 break-all">
+                          {mcp.editedUrl || mcp.mcp_url}
+                        </span>
+                      )}
+                    </div>
+                    {/* Show hint if URL needs configuration */}
+                    {mcp.isUrlEditable && needsConfig(mcp.mcp_url) && (() => {
+                      const hint = extractPromptHint(mcp.mcp_url);
+                      const hintText = hint || t("market.install.mcp.defaultConfigHint", "Please enter the MCP server URL");
+                      return (
+                        <div className="ml-0 text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                          <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
+                            {parseMarkdownLinks(hintText)}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}

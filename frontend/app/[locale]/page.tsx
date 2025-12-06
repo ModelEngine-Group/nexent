@@ -116,18 +116,6 @@ export default function Home() {
       setLoginPromptOpen(false);
     };
 
-    // Handle login button click
-    const handleLoginClick = () => {
-      setLoginPromptOpen(false);
-      openLoginModal();
-    };
-
-    // Handle register button click
-    const handleRegisterClick = () => {
-      setLoginPromptOpen(false);
-      openRegisterModal();
-    };
-
     // Handle operations that require admin privileges
     const handleAdminRequired = () => {
       if (!isSpeedMode && user?.role !== "admin") {
