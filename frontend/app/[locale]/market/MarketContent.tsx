@@ -262,12 +262,7 @@ export default function MarketContent({
     },
     ...categories.map((cat) => ({
       key: cat.name,
-      label: (
-        <span className="flex items-center gap-2">
-          <span>{cat.icon}</span>
-          <span>{isZh ? cat.display_name_zh : cat.display_name}</span>
-        </span>
-      ),
+      label: isZh ? cat.display_name_zh : cat.display_name,
     })),
   ];
 
