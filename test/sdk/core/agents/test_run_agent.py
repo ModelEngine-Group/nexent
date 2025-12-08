@@ -49,7 +49,7 @@ for _sub in [
     sub_mod = ModuleType(f"smolagents.{_sub}")
     # Populate required attributes with MagicMocks to satisfy import-time `from smolagents.<sub> import ...`.
     if _sub == "agents":
-        for _name in ["CodeAgent", "populate_template", "handle_agent_output_types", "AgentError", "AgentType"]:
+        for _name in ["CodeAgent", "populate_template", "handle_agent_output_types", "AgentError", "AgentType", "ActionOutput", "RunResult"]:
             setattr(sub_mod, _name, MagicMock(name=f"smolagents.agents.{_name}"))
     elif _sub == "local_python_executor":
         setattr(sub_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
@@ -59,6 +59,7 @@ for _sub in [
     elif _sub == "models":
         setattr(sub_mod, "ChatMessage", MagicMock(name="smolagents.models.ChatMessage"))
         setattr(sub_mod, "MessageRole", MagicMock(name="smolagents.models.MessageRole"))
+        setattr(sub_mod, "CODEAGENT_RESPONSE_FORMAT", MagicMock(name="smolagents.models.CODEAGENT_RESPONSE_FORMAT"))
         # Provide a simple base class so that OpenAIModel can inherit from it
         class _DummyOpenAIServerModel:
             def __init__(self, *args, **kwargs):
@@ -67,13 +68,18 @@ for _sub in [
         setattr(sub_mod, "OpenAIServerModel", _DummyOpenAIServerModel)
     elif _sub == "monitoring":
         setattr(sub_mod, "LogLevel", MagicMock(name="smolagents.monitoring.LogLevel"))
+        setattr(sub_mod, "Timing", MagicMock(name="smolagents.monitoring.Timing"))
+        setattr(sub_mod, "YELLOW_HEX", MagicMock(name="smolagents.monitoring.YELLOW_HEX"))
+        setattr(sub_mod, "TokenUsage", MagicMock(name="smolagents.monitoring.TokenUsage"))
     elif _sub == "utils":
         for _name in [
             "AgentExecutionError",
             "AgentGenerationError",
             "AgentParsingError",
+            "AgentMaxStepsError",
             "parse_code_blobs",
             "truncate_content",
+            "extract_code_from_text",
         ]:
             setattr(sub_mod, _name, MagicMock(name=f"smolagents.utils.{_name}"))
     setattr(mock_smolagents, _sub, sub_mod)
@@ -82,6 +88,8 @@ for _sub in [
 # Top-level exports expected directly from `smolagents` by nexent_agent.py
 for _name in ["ActionStep", "TaskStep", "AgentText", "handle_agent_output_types"]:
     setattr(mock_smolagents, _name, MagicMock(name=f"smolagents.{_name}"))
+# Export Timing from monitoring submodule to top-level
+setattr(mock_smolagents, "Timing", mock_smolagents.monitoring.Timing)
 # Also export Tool at top-level so that `from smolagents import Tool` works
 setattr(mock_smolagents, "Tool", mock_smolagents_tool_cls)
 
@@ -237,9 +245,9 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
 
 
 def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, monkeypatch):
-    """Verify behaviour when an MCP host list is provided."""
-    # Give the AgentRunInfo an MCP host list
-    basic_agent_run_info.mcp_host = ["http://mcp.server"]
+    """Verify behaviour when an MCP host list is provided with auto-detected transport."""
+    # Give the AgentRunInfo an MCP host list (string format, auto-detect transport)
+    basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
 
     # Prepare ToolCollection.from_mcp to return a context manager
     mock_tool_collection = MagicMock(name="ToolCollectionInstance")
@@ -257,7 +265,7 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     basic_agent_run_info.observer.add_message.assert_any_call("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
 
     # ToolCollection.from_mcp should be called with the expected client list and trust_remote_code=True
-    expected_client_list = [{"url": "http://mcp.server"}]
+    expected_client_list = [{"url": "http://mcp.server/mcp", "transport": "streamable-http"}]
     run_agent.ToolCollection.from_mcp.assert_called_once_with(expected_client_list, trust_remote_code=True)
 
     # NexentAgent should be instantiated with mcp_tool_collection
@@ -273,6 +281,116 @@ def test_agent_run_thread_mcp_flow(basic_agent_run_info, mock_memory_context, mo
     mock_nexent_instance.set_agent.assert_called_once()
     mock_nexent_instance.add_history_to_agent.assert_called_once_with(basic_agent_run_info.history)
     mock_nexent_instance.agent_run_with_observer.assert_called_once_with(query=basic_agent_run_info.query, reset=False)
+
+
+def test_agent_run_thread_mcp_flow_with_explicit_transport(basic_agent_run_info, mock_memory_context, monkeypatch):
+    """Verify behaviour when MCP host is provided with explicit transport in dict format."""
+    # Give the AgentRunInfo an MCP host list with explicit transport
+    basic_agent_run_info.mcp_host = [{"url": "http://mcp.server", "transport": "sse"}]
+
+    # Prepare ToolCollection.from_mcp to return a context manager
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    # Patch NexentAgent
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    # Execute
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    # ToolCollection.from_mcp should be called with the expected client list
+    expected_client_list = [{"url": "http://mcp.server", "transport": "sse"}]
+    run_agent.ToolCollection.from_mcp.assert_called_once_with(expected_client_list, trust_remote_code=True)
+
+
+def test_agent_run_thread_mcp_flow_mixed_formats(basic_agent_run_info, mock_memory_context, monkeypatch):
+    """Verify behaviour when MCP host list contains both string and dict formats."""
+    # Mix of string (auto-detect) and dict (explicit) formats
+    basic_agent_run_info.mcp_host = [
+        "http://mcp1.server/mcp",  # Auto-detect: streamable-http
+        "http://mcp2.server/sse",  # Auto-detect: sse
+        {"url": "http://mcp3.server/mcp", "transport": "streamable-http"},  # Explicit: streamable-http
+    ]
+
+    # Prepare ToolCollection.from_mcp to return a context manager
+    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
+    mock_context_manager = MagicMock(__enter__=MagicMock(return_value=mock_tool_collection), __exit__=MagicMock(return_value=None))
+    monkeypatch.setattr(run_agent.ToolCollection, "from_mcp", MagicMock(return_value=mock_context_manager))
+
+    # Patch NexentAgent
+    mock_nexent_instance = MagicMock(name="NexentAgentInstance")
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=mock_nexent_instance))
+
+    # Execute
+    run_agent.agent_run_thread(basic_agent_run_info)
+
+    # ToolCollection.from_mcp should be called with normalized client list
+    expected_client_list = [
+        {"url": "http://mcp1.server/mcp", "transport": "streamable-http"},
+        {"url": "http://mcp2.server/sse", "transport": "sse"},
+        {"url": "http://mcp3.server/mcp", "transport": "streamable-http"},
+    ]
+    run_agent.ToolCollection.from_mcp.assert_called_once_with(expected_client_list, trust_remote_code=True)
+
+
+def test_detect_transport():
+    """Test transport auto-detection logic based on URL ending."""
+    # Test URLs ending with /sse
+    assert run_agent._detect_transport("http://server/sse") == "sse"
+    assert run_agent._detect_transport("https://api.example.com/sse") == "sse"
+    assert run_agent._detect_transport("http://localhost:3000/sse") == "sse"
+    
+    # Test URLs ending with /mcp
+    assert run_agent._detect_transport("http://server/mcp") == "streamable-http"
+    assert run_agent._detect_transport("https://api.example.com/mcp") == "streamable-http"
+    assert run_agent._detect_transport("http://localhost:3000/mcp") == "streamable-http"
+    
+    # Test default fallback (no /sse or /mcp ending)
+    assert run_agent._detect_transport("http://server") == "streamable-http"
+    assert run_agent._detect_transport("https://api.example.com") == "streamable-http"
+    assert run_agent._detect_transport("http://server/other") == "streamable-http"
+
+
+def test_normalize_mcp_config():
+    """Test MCP configuration normalization."""
+    # Test string format (auto-detect based on URL ending)
+    result = run_agent._normalize_mcp_config("http://server/mcp")
+    assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+    
+    result = run_agent._normalize_mcp_config("http://server/sse")
+    assert result == {"url": "http://server/sse", "transport": "sse"}
+    
+    # Test string format without /sse or /mcp ending (defaults to streamable-http)
+    result = run_agent._normalize_mcp_config("http://server")
+    assert result == {"url": "http://server", "transport": "streamable-http"}
+    
+    # Test dict format with explicit transport
+    result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "sse"})
+    assert result == {"url": "http://server/mcp", "transport": "sse"}
+    
+    # Test dict format without transport (auto-detect)
+    result = run_agent._normalize_mcp_config({"url": "http://server/sse"})
+    assert result == {"url": "http://server/sse", "transport": "sse"}
+    
+    result = run_agent._normalize_mcp_config({"url": "http://server/mcp"})
+    assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+    
+    # Test invalid dict (missing url)
+    with pytest.raises(ValueError, match="must contain 'url' key"):
+        run_agent._normalize_mcp_config({"transport": "sse"})
+    
+    # Test invalid transport type
+    with pytest.raises(ValueError, match="Invalid transport type"):
+        run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "stdio"})
+    
+    with pytest.raises(ValueError, match="Invalid transport type"):
+        run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "invalid"})
+    
+    # Test invalid type
+    with pytest.raises(ValueError, match="Invalid MCP host item type"):
+        run_agent._normalize_mcp_config(123)
 
 
 def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):
