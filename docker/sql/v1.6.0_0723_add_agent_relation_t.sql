@@ -24,6 +24,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create a trigger to call the function before each update
+DROP TRIGGER IF EXISTS update_ag_agent_relation_update_time_trigger ON nexent.ag_agent_relation_t;
 CREATE TRIGGER update_ag_agent_relation_update_time_trigger
 BEFORE UPDATE ON nexent.ag_agent_relation_t
 FOR EACH ROW
