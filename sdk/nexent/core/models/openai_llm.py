@@ -14,7 +14,7 @@ from ..utils.observer import MessageObserver, ProcessType
 logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
-    def __init__(self, observer: MessageObserver, temperature=0.2, top_p=0.95, 
+    def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
