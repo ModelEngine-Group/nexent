@@ -165,11 +165,13 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Initialize chunk size variables for all model types; only embeddings use them
     expected_chunk_size = None
     maximum_chunk_size = None
+    chunk_batch = None
 
     # For embedding models, apply default values when chunk sizes are null
     if model["model_type"] in ["embedding", "multi_embedding"]:
         expected_chunk_size = model.get("expected_chunk_size", DEFAULT_EXPECTED_CHUNK_SIZE)
         maximum_chunk_size = model.get("maximum_chunk_size", DEFAULT_MAXIMUM_CHUNK_SIZE)
+        chunk_batch = model.get("chunk_batch", 10)
 
     # For ModelEngine provider, extract the host from model's base_url
     # We'll append the correct path later
@@ -193,7 +195,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         max_tokens=model["max_tokens"],
         display_name=model_display_name,
         expected_chunk_size=expected_chunk_size,
-        maximum_chunk_size=maximum_chunk_size
+        maximum_chunk_size=maximum_chunk_size,
+        chunk_batch=chunk_batch
     )
 
     model_dict = model_obj.model_dump()

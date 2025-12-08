@@ -67,6 +67,7 @@ export const modelService = {
             (model.connect_status as ModelConnectStatus) || "not_detected",
           expectedChunkSize: model.expected_chunk_size,
           maximumChunkSize: model.maximum_chunk_size,
+          chunkingBatchSize: model.chunk_batch,
         }));
       }
       return [];
@@ -97,6 +98,7 @@ export const modelService = {
     displayName?: string;
     expectedChunkSize?: number;
     maximumChunkSize?: number;
+    chunkingBatchSize?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.customModelCreate, {
@@ -112,6 +114,7 @@ export const modelService = {
           display_name: model.displayName,
           expected_chunk_size: model.expectedChunkSize,
           maximum_chunk_size: model.maximumChunkSize,
+          chunk_batch: model.chunkingBatchSize,
         }),
       });
 
@@ -239,6 +242,7 @@ export const modelService = {
     source?: ModelSource;
     expectedChunkSize?: number;
     maximumChunkSize?: number;
+    chunkingBatchSize?: number;
   }): Promise<void> => {
     try {
       const response = await fetch(
@@ -261,6 +265,9 @@ export const modelService = {
               : {}),
             ...(model.maximumChunkSize !== undefined
               ? { maximum_chunk_size: model.maximumChunkSize }
+              : {}),
+            ...(model.chunkingBatchSize !== undefined
+              ? { chunk_batch: model.chunkingBatchSize }
               : {}),
           }),
         }

@@ -155,6 +155,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
   const [showAutoDeselectModal, setShowAutoDeselectModal] = useState(false);
+  const [newlyCreatedKbId, setNewlyCreatedKbId] = useState<string | null>(null); // Track newly created KB waiting for documents
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   // Open warning modal when single Embedding model is not configured (ignore multi-embedding)
@@ -411,9 +412,13 @@ function DataConfig({ isActive }: DataConfigProps) {
     const isChangingKB =
       !kbState.activeKnowledgeBase || kb.id !== kbState.activeKnowledgeBase.id;
 
-    // If switching knowledge base, update active state
+    // If switching knowledge base, update active state and clear newly created flag
     if (isChangingKB) {
       setActiveKnowledgeBase(kb);
+      // Clear newly created flag when switching to a different knowledge base
+      if (newlyCreatedKbId !== null && newlyCreatedKbId !== kb.id) {
+        setNewlyCreatedKbId(null);
+      }
     }
 
     // Set active knowledge base ID to polling service
@@ -606,22 +611,28 @@ function DataConfig({ isActive }: DataConfigProps) {
         setActiveKnowledgeBase(newKB);
         knowledgeBasePollingService.setActiveKnowledgeBase(newKB.id);
         setHasClickedUpload(false);
+        setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
 
         await uploadDocuments(newKB.id, filesToUpload);
         setUploadFiles([]);
 
         knowledgeBasePollingService
           .handleNewKnowledgeBaseCreation(
+            newKB.id,
             newKB.name,
             0,
             filesToUpload.length,
             (populatedKB) => {
               setActiveKnowledgeBase(populatedKB);
               knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
+              // Clear the newly created flag when documents are ready
+              setNewlyCreatedKbId(null);
             }
           )
           .catch((pollingError) => {
             log.error("Knowledge base creation polling failed:", pollingError);
+            // Clear the flag even on error to avoid stuck loading state
+            setNewlyCreatedKbId(null);
           });
       } catch (error) {
         log.error(t("knowledgeBase.error.createUpload"), error);
@@ -684,12 +695,25 @@ function DataConfig({ isActive }: DataConfigProps) {
   const viewingKbName =
     kbState.activeKnowledgeBase?.name || (isCreatingMode ? newKbName : "");
 
+  // Check if current knowledge base is newly created and waiting for documents
+  const isNewlyCreatedAndWaiting =
+    newlyCreatedKbId !== null &&
+    kbState.activeKnowledgeBase?.id === newlyCreatedKbId &&
+    viewingDocuments.length === 0;
+
   // As long as any document upload succeeds, immediately switch creation mode to false
   useEffect(() => {
     if (isCreatingMode && viewingDocuments.length > 0) {
       setIsCreatingMode(false);
     }
   }, [isCreatingMode, viewingDocuments.length]);
+
+  // Clear newly created flag when documents arrive
+  useEffect(() => {
+    if (newlyCreatedKbId !== null && viewingDocuments.length > 0) {
+      setNewlyCreatedKbId(null);
+    }
+  }, [newlyCreatedKbId, viewingDocuments.length]);
 
   // Handle knowledge base selection
   const handleSelectKnowledgeBase = (id: string) => {
@@ -737,8 +761,6 @@ function DataConfig({ isActive }: DataConfigProps) {
       knowledgeBasePollingService.setActiveKnowledgeBase(
         kbState.activeKnowledgeBase.id
       );
-    } else if (isCreatingMode && newKbName) {
-      knowledgeBasePollingService.setActiveKnowledgeBase(newKbName);
     } else {
       knowledgeBasePollingService.setActiveKnowledgeBase(null);
     }
@@ -866,6 +888,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 documents={[]}
                 onDelete={() => {}}
                 isCreatingMode={true}
+                knowledgeBaseId={""}
                 knowledgeBaseName={newKbName}
                 onNameChange={handleNameChange}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
@@ -883,6 +906,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               <DocumentList
                 documents={viewingDocuments}
                 onDelete={handleDeleteDocument}
+                knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
                 modelMismatch={
                   !isKnowledgeBaseSelectable(kbState.activeKnowledgeBase)
@@ -900,6 +924,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 }
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 hasDocuments={viewingDocuments.length > 0}
+                isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}

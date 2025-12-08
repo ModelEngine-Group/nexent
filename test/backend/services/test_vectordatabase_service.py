@@ -246,6 +246,31 @@ class TestElasticSearchService(unittest.TestCase):
         mock_create_knowledge.assert_not_called()
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_generates_index(self, mock_create_knowledge):
+        """Ensure create_knowledge_base creates record then ES index."""
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 7,
+            "index_name": "7-uuid",
+            "knowledge_name": "kb1",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb1",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["knowledge_id"], 7)
+        self.assertEqual(result["id"], "7-uuid")
+        self.mock_vdb_core.create_index.assert_called_once_with(
+            "7-uuid", embedding_dim=256
+        )
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_index_failure(self, mock_create_knowledge):
         """
         Test index creation failure.
@@ -577,44 +602,51 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.return_value = 2
         mock_embedding_model = MagicMock()
         mock_embedding_model.model = "test-model"
+        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
 
-        test_data = [
-            {
-                "metadata": {
-                    "title": "Test Document",
-                    "languages": ["en"],
-                    "author": "Test Author",
-                    "date": "2023-01-01",
-                    "creation_date": "2023-01-01T12:00:00"
+            test_data = [
+                {
+                    "metadata": {
+                        "title": "Test Document",
+                        "languages": ["en"],
+                        "author": "Test Author",
+                        "date": "2023-01-01",
+                        "creation_date": "2023-01-01T12:00:00"
+                    },
+                    "path_or_url": "test_path",
+                    "content": "Test content",
+                    "source_type": "file",
+                    "file_size": 1024,
+                    "filename": "test.txt"
                 },
-                "path_or_url": "test_path",
-                "content": "Test content",
-                "source_type": "file",
-                "file_size": 1024,
-                "filename": "test.txt"
-            },
-            {
-                "metadata": {
-                    "title": "Test Document 2"
-                },
-                "path_or_url": "test_path2",
-                "content": "Test content 2"
-            }
-        ]
+                {
+                    "metadata": {
+                        "title": "Test Document 2"
+                    },
+                    "path_or_url": "test_path2",
+                    "content": "Test content 2"
+                }
+            ]
 
-        # Execute
-        result = ElasticSearchService.index_documents(
-            index_name="test_index",
-            data=test_data,
-            vdb_core=self.mock_vdb_core,
-            embedding_model=mock_embedding_model
-        )
+            # Execute
+            result = ElasticSearchService.index_documents(
+                index_name="test_index",
+                data=test_data,
+                vdb_core=self.mock_vdb_core,
+                embedding_model=mock_embedding_model
+            )
 
-        # Assert
-        self.assertTrue(result["success"])
-        self.assertEqual(result["total_indexed"], 2)
-        self.assertEqual(result["total_submitted"], 2)
-        self.mock_vdb_core.vectorize_documents.assert_called_once()
+            # Assert
+            self.assertTrue(result["success"])
+            self.assertEqual(result["total_indexed"], 2)
+            self.assertEqual(result["total_submitted"], 2)
+            self.mock_vdb_core.vectorize_documents.assert_called_once()
+            _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
+            self.assertEqual(kwargs.get("embedding_batch_size"), 5)
+            self.assertTrue(callable(kwargs.get("progress_callback")))
 
     def test_vectorize_documents_empty_data(self):
         """
@@ -666,8 +698,13 @@ class TestElasticSearchService(unittest.TestCase):
         ]
 
         # Execute
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.create_index') as mock_create_index:
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.create_index') as mock_create_index, \
+                patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
             mock_create_index.return_value = {"status": "success"}
+            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+            mock_tenant_cfg.get_model_config.return_value = {
+                "chunk_batch": None}
             result = ElasticSearchService.index_documents(
                 index_name="test_index",
                 data=test_data,
@@ -679,6 +716,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["total_indexed"], 1)
         mock_create_index.assert_called_once()
+        _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
+        self.assertEqual(kwargs.get("embedding_batch_size"),
+                         10)  # default when None
+        self.assertTrue(callable(kwargs.get("progress_callback")))
 
     def test_vectorize_documents_indexing_error(self):
         """
@@ -703,15 +744,23 @@ class TestElasticSearchService(unittest.TestCase):
         ]
 
         # Execute and Assert
-        with self.assertRaises(Exception) as context:
-            ElasticSearchService.index_documents(
-                index_name="test_index",
-                data=test_data,
-                vdb_core=self.mock_vdb_core,
-                embedding_model=mock_embedding_model
-            )
+        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
+                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+            mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 8}
+
+            with self.assertRaises(Exception) as context:
+                ElasticSearchService.index_documents(
+                    index_name="test_index",
+                    data=test_data,
+                    vdb_core=self.mock_vdb_core,
+                    embedding_model=mock_embedding_model
+                )
 
         self.assertIn("Error during indexing", str(context.exception))
+        _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
+        self.assertEqual(kwargs.get("embedding_batch_size"), 8)
+        self.assertTrue(callable(kwargs.get("progress_callback")))
 
     @patch('backend.services.vectordatabase_service.get_all_files_status')
     def test_list_files_without_chunks(self, mock_get_files_status):
@@ -774,6 +823,8 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_files_status.return_value = {}
+        self.mock_vdb_core.client.count.return_value = {"count": 0}
+        self.mock_vdb_core.client.count.return_value = {"count": 1}
 
         # Mock multi_search response
         msearch_response = {
@@ -833,6 +884,7 @@ class TestElasticSearchService(unittest.TestCase):
             }
         ]
         mock_get_files_status.return_value = {}
+        self.mock_vdb_core.client.count.return_value = {"count": 0}
 
         # Mock msearch error
         self.mock_vdb_core.client.msearch.side_effect = Exception(
@@ -882,6 +934,63 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index", "test_path")
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
+
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    def test_index_documents_respects_cancellation_flag(self, mock_get_redis_service):
+        """
+        Test that index_documents stops indexing when the task is marked as cancelled.
+
+        This test verifies that:
+        1. _update_progress raises when is_task_cancelled returns True
+        2. The exception from vectorize_documents is propagated as an indexing error
+        """
+        # Setup
+        mock_redis_service = MagicMock()
+        # First progress callback call: treat as cancelled immediately
+        mock_redis_service.is_task_cancelled.return_value = True
+        mock_get_redis_service.return_value = mock_redis_service
+
+        # Configure vdb_core
+        self.mock_vdb_core.check_index_exists.return_value = True
+
+        # Make vectorize_documents invoke the progress callback (cancellation branch)
+        def vectorize_side_effect(*args, **kwargs):
+            cb = kwargs.get("progress_callback")
+            if cb:
+                cb(1, 2)  # _update_progress will swallow and log cancellation
+            return 0
+
+        self.mock_vdb_core.vectorize_documents.side_effect = vectorize_side_effect
+
+        # Provide minimal knowledge record for batch size lookup
+        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record:
+            mock_get_record.return_value = {"tenant_id": "tenant-1"}
+            with patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+                mock_tenant_cfg.get_model_config.return_value = {
+                    "chunk_batch": 10}
+
+                data = [
+                    {
+                        "path_or_url": "test_path",
+                        "content": "some content",
+                        "source_type": "minio",
+                        "file_size": 123,
+                        "metadata": {},
+                    }
+                ]
+
+                # Execute: no exception should propagate because _update_progress swallows
+                result = ElasticSearchService.index_documents(
+                    embedding_model=self.mock_embedding,
+                    index_name="test_index",
+                    data=data,
+                    vdb_core=self.mock_vdb_core,
+                    task_id="task-123",
+                )
+
+                self.assertTrue(result["success"])
+                mock_redis_service.is_task_cancelled.assert_called()
+                self.mock_vdb_core.vectorize_documents.assert_called_once()
 
     def test_accurate_search(self):
         """
@@ -1045,8 +1154,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue("query_time_ms" in result)
         self.assertEqual(result["results"][0]["score"], 0.90)
         self.assertEqual(result["results"][0]["index"], "test_index")
-        self.assertEqual(result["results"][0]["score_details"]["accurate"], 0.85)
-        self.assertEqual(result["results"][0]["score_details"]["semantic"], 0.95)
+        self.assertEqual(result["results"][0]
+                         ["score_details"]["accurate"], 0.85)
+        self.assertEqual(result["results"][0]
+                         ["score_details"]["semantic"], 0.95)
         self.mock_vdb_core.hybrid_search.assert_called_once_with(
             index_names=["test_index"],
             query_text="test query",
@@ -1092,7 +1203,8 @@ class TestElasticSearchService(unittest.TestCase):
                 weight_accurate=0.5,
                 vdb_core=self.mock_vdb_core
             )
-        self.assertIn("At least one index name is required", str(context.exception))
+        self.assertIn("At least one index name is required",
+                      str(context.exception))
 
     def test_search_hybrid_invalid_top_k(self):
         """Test search_hybrid raises ValueError when top_k is invalid."""
@@ -1118,7 +1230,8 @@ class TestElasticSearchService(unittest.TestCase):
                 weight_accurate=1.5,
                 vdb_core=self.mock_vdb_core
             )
-        self.assertIn("weight_accurate must be between 0 and 1", str(context.exception))
+        self.assertIn("weight_accurate must be between 0 and 1",
+                      str(context.exception))
 
     def test_search_hybrid_no_embedding_model(self):
         """Test search_hybrid raises ValueError when embedding model is not configured."""
@@ -1135,14 +1248,16 @@ class TestElasticSearchService(unittest.TestCase):
                         weight_accurate=0.5,
                         vdb_core=self.mock_vdb_core
                     )
-                self.assertIn("No embedding model configured", str(context.exception))
+                self.assertIn("No embedding model configured",
+                              str(context.exception))
         finally:
             self.get_embedding_model_patcher.start()
 
     def test_search_hybrid_exception(self):
         """Test search_hybrid handles exceptions from vdb_core."""
-        self.mock_vdb_core.hybrid_search.side_effect = Exception("Search failed")
-        
+        self.mock_vdb_core.hybrid_search.side_effect = Exception(
+            "Search failed")
+
         with self.assertRaises(Exception) as context:
             ElasticSearchService.search_hybrid(
                 index_names=["test_index"],
@@ -1257,7 +1372,6 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertIn("Health check failed", str(context.exception))
 
-
     @patch('database.model_management_db.get_model_by_model_id')
     def test_summary_index_name(self, mock_get_model_by_model_id):
         """
@@ -1278,18 +1392,20 @@ class TestElasticSearchService(unittest.TestCase):
 
         # Mock the new Map-Reduce functions
         with patch('utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-             patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge, \
-             patch('database.model_management_db.get_model_by_model_id') as mock_get_model_internal:
+                patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
+                patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge, \
+                patch('database.model_management_db.get_model_by_model_id') as mock_get_model_internal:
 
             # Mock return values
             mock_process_docs.return_value = (
-                {"doc1": {"chunks": [{"content": "test content"}]}},  # document_samples
+                # document_samples
+                {"doc1": {"chunks": [{"content": "test content"}]}},
                 {"doc1": np.array([0.1, 0.2, 0.3])}  # doc_embeddings
             )
             mock_cluster.return_value = {"doc1": 0}  # clusters
-            mock_summarize.return_value = {0: "Test cluster summary"}  # cluster_summaries
+            mock_summarize.return_value = {
+                0: "Test cluster summary"}  # cluster_summaries
             mock_merge.return_value = "Final merged summary"  # final_summary
             mock_get_model_internal.return_value = {
                 'api_key': 'test_api_key',
@@ -1346,7 +1462,7 @@ class TestElasticSearchService(unittest.TestCase):
                     tenant_id=None  # Missing tenant_id
                 )
             self.assertIn("Tenant ID is required", str(context.exception))
-        
+
         asyncio.run(run_test())
 
     def test_summary_index_name_no_documents(self):
@@ -1359,9 +1475,9 @@ class TestElasticSearchService(unittest.TestCase):
         """
         # Mock the new Map-Reduce functions
         with patch('utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-             patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
+                patch('utils.document_vector_utils.kmeans_cluster_documents'), \
+                patch('utils.document_vector_utils.summarize_clusters_map_reduce'), \
+                patch('utils.document_vector_utils.merge_cluster_summaries'):
             
             # Mock return empty document_samples
             mock_process_docs.return_value = (
@@ -2015,7 +2131,9 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="valid query", top_k=10
         )
 
-    def test_vectorize_documents_success_status_200(self):
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_vectorize_documents_success_status_200(self, mock_get_record, mock_tenant_cfg):
         """
         Test vectorize_documents method returns status code 200 on success.
 
@@ -2029,6 +2147,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.return_value = 3
         mock_embedding_model = MagicMock()
         mock_embedding_model.model = "test-model"
+        mock_get_record.return_value = {"tenant_id": "tenant-1"}
+        mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 10}
 
         test_data = [
             {

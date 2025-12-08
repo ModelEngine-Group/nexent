@@ -71,6 +71,7 @@ class MockKnowledgeRecord:
     def __init__(self, **kwargs):
         self.knowledge_id = kwargs.get('knowledge_id', 1)
         self.index_name = kwargs.get('index_name', 'test_index')
+        self.knowledge_name = kwargs.get('knowledge_name', 'test_index')
         self.knowledge_describe = kwargs.get('knowledge_describe', 'test description')
         self.created_by = kwargs.get('created_by', 'test_user')
         self.updated_by = kwargs.get('updated_by', 'test_user')
@@ -83,6 +84,7 @@ class MockKnowledgeRecord:
     # Mock SQLAlchemy column attributes
     knowledge_id = MagicMock(name="knowledge_id_column")
     index_name = MagicMock(name="index_name_column")
+    knowledge_name = MagicMock(name="knowledge_name_column")
     knowledge_describe = MagicMock(name="knowledge_describe_column")
     created_by = MagicMock(name="created_by_column")
     updated_by = MagicMock(name="updated_by_column")
@@ -125,8 +127,9 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
     session, _ = mock_session
     
     # Create mock knowledge record
-    mock_record = MockKnowledgeRecord()
+    mock_record = MockKnowledgeRecord(knowledge_name="test_knowledge")
     mock_record.knowledge_id = 123
+    mock_record.index_name = "test_knowledge"
     
     # Mock database session context
     mock_ctx = MagicMock()
@@ -140,16 +143,21 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "knowledge_describe": "Test knowledge description",
         "user_id": "test_user",
         "tenant_id": "test_tenant",
-        "embedding_model_name": "test_model"
+        "embedding_model_name": "test_model",
+        "knowledge_name": "test_knowledge"
     }
     
     # Mock KnowledgeRecord constructor
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
     
-    assert result == 123
+    assert result == {
+        "knowledge_id": 123,
+        "index_name": "test_knowledge",
+        "knowledge_name": "test_knowledge",
+    }
     session.add.assert_called_once_with(mock_record)
-    session.flush.assert_called_once()
+    assert session.flush.call_count == 1
     session.commit.assert_called_once()
 
 
@@ -177,6 +185,42 @@ def test_create_knowledge_record_exception(monkeypatch, mock_session):
             create_knowledge_record(test_query)
     
     session.rollback.assert_called_once()
+
+
+def test_create_knowledge_record_generates_index_name(monkeypatch, mock_session):
+    """Test create_knowledge_record generates index_name when not provided"""
+    session, _ = mock_session
+
+    mock_record = MockKnowledgeRecord(knowledge_name="kb1")
+    mock_record.knowledge_id = 7
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    # Deterministic index name
+    monkeypatch.setattr("backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
+
+    test_query = {
+        "knowledge_describe": "desc",
+        "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "embedding_model_name": "model-x",
+        "knowledge_name": "kb1",
+    }
+
+    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+        result = create_knowledge_record(test_query)
+
+    assert result == {
+        "knowledge_id": 7,
+        "index_name": "7-generated",
+        "knowledge_name": "kb1",
+    }
+    assert mock_record.index_name == "7-generated"
+    assert session.flush.call_count == 2  # initial insert + index_name update
+    session.commit.assert_called_once()
 
 
 def test_update_knowledge_record_success(monkeypatch, mock_session):

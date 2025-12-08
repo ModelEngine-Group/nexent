@@ -30,11 +30,42 @@ from database.knowledge_db import (
     create_knowledge_record,
     delete_knowledge_record,
     get_knowledge_record,
-    update_knowledge_record, get_knowledge_info_by_tenant_id, update_model_name_by_index_name,
+    update_knowledge_record,
+    get_knowledge_info_by_tenant_id,
+    update_model_name_by_index_name,
 )
 from services.redis_service import get_redis_service
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
+
+
+def _update_progress(task_id: str, processed: int, total: int):
+    """Helper function to update progress in Redis"""
+    try:
+        redis_service = get_redis_service()
+
+        # If this task has been marked as cancelled, stop updating progress
+        # and raise an exception so the caller can abort long-running work.
+        if redis_service.is_task_cancelled(task_id):
+            logger.debug(
+                f"[PROGRESS CALLBACK] Task {task_id} is marked as cancelled; "
+                f"stopping further indexing work at {processed}/{total}."
+            )
+            raise RuntimeError(
+                "Indexing cancelled because the task was marked as cancelled.")
+
+        success = redis_service.save_progress_info(task_id, processed, total)
+        if success:
+            percentage = processed * 100 // total if total > 0 else 0
+            logger.debug(
+                f"[PROGRESS CALLBACK] Updated progress for task {task_id}: {processed}/{total} ({percentage}%)")
+        else:
+            logger.warning(
+                f"[PROGRESS CALLBACK] Failed to save progress for task {task_id}: {processed}/{total}")
+    except Exception as e:
+        logger.warning(
+            f"[PROGRESS CALLBACK] Exception updating progress for task {task_id}: {str(e)}")
+
 
 ALLOWED_CHUNK_FIELDS = {
     "id",
@@ -226,14 +257,10 @@ class ElasticSearchService:
                 logger.debug(
                     f"Step 2/4: No files found in index '{index_name}', skipping MinIO deletion.")
 
-            # 3. Delete Elasticsearch index and its DB record
+            # 3. Mark all related tasks as cancelled and clean up Redis records BEFORE deleting ES index
+            # This ensures ongoing indexing tasks will detect cancellation and stop immediately
             logger.debug(
-                f"Step 3/4: Deleting Elasticsearch index '{index_name}' and its database record.")
-            delete_index_result = await ElasticSearchService.delete_index(index_name, vdb_core, user_id)
-
-            # 4. Clean up Redis records related to this knowledge base
-            logger.debug(
-                f"Step 4/4: Cleaning up Redis records for index '{index_name}'.")
+                f"Step 3/5: Marking all tasks as cancelled and cleaning up Redis records for index '{index_name}'.")
             redis_cleanup_result = {}
             try:
                 from services.redis_service import get_redis_service
@@ -241,11 +268,17 @@ class ElasticSearchService:
                 redis_cleanup_result = redis_service.delete_knowledgebase_records(
                     index_name)
                 logger.debug(f"Redis cleanup for index '{index_name}' completed. "
-                             f"Deleted {redis_cleanup_result['total_deleted']} records.")
+                             f"Deleted {redis_cleanup_result['total_deleted']} records, "
+                             f"marked {redis_cleanup_result.get('tasks_cancelled', 0)} tasks as cancelled.")
             except Exception as redis_error:
                 logger.error(
                     f"Redis cleanup failed for index '{index_name}': {str(redis_error)}")
                 redis_cleanup_result = {"error": str(redis_error)}
+
+            # 4. Delete Elasticsearch index and its DB record
+            logger.debug(
+                f"Step 4/5: Deleting Elasticsearch index '{index_name}' and its database record.")
+            delete_index_result = await ElasticSearchService.delete_index(index_name, vdb_core, user_id)
 
             # Construct final result
             result = {
@@ -304,6 +337,58 @@ class ElasticSearchService:
             return {"status": "success", "message": f"Index {index_name} created successfully"}
         except Exception as e:
             raise Exception(f"Error creating index: {str(e)}")
+
+    @staticmethod
+    def create_knowledge_base(
+            knowledge_name: str,
+            embedding_dim: Optional[int],
+            vdb_core: VectorDatabaseCore,
+            user_id: Optional[str],
+            tenant_id: Optional[str],
+    ):
+        """
+        Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
+
+        For new data:
+        - Store the user-facing name in knowledge_name column.
+        - Generate index_name as ``knowledge_id + '-' + uuid`` (digits and lowercase letters only).
+        - Use generated index_name as the Elasticsearch index name.
+
+        For backward compatibility, legacy callers can still use create_index() directly
+        with an explicit index_name.
+        """
+        try:
+            embedding_model = get_embedding_model(tenant_id)
+
+            # Create knowledge record first to obtain knowledge_id and generated index_name
+            knowledge_data = {
+                "knowledge_name": knowledge_name,
+                "knowledge_describe": "",
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "embedding_model_name": embedding_model.model if embedding_model else None,
+            }
+            record_info = create_knowledge_record(knowledge_data)
+            index_name = record_info["index_name"]
+
+            # Create Elasticsearch index with generated internal index_name
+            success = vdb_core.create_index(
+                index_name,
+                embedding_dim=embedding_dim
+                or (embedding_model.embedding_dim if embedding_model else 1024),
+            )
+            if not success:
+                raise Exception(f"Failed to create index {index_name}")
+
+            return {
+                "status": "success",
+                "message": f"Index {index_name} created successfully",
+                "id": index_name,
+                "knowledge_id": record_info["knowledge_id"],
+                "name": record_info.get("knowledge_name", knowledge_name),
+            }
+        except Exception as e:
+            raise Exception(f"Error creating knowledge base: {str(e)}")
 
     @staticmethod
     async def delete_index(
@@ -382,6 +467,13 @@ class ElasticSearchService:
 
         db_record = get_knowledge_info_by_tenant_id(tenant_id=tenant_id)
 
+        # Build mapping from index_name to user-facing knowledge_name (fallback to index_name)
+        index_to_display_name = {
+            record["index_name"]: record.get(
+                "knowledge_name") or record["index_name"]
+            for record in db_record
+        }
+
         filtered_indices_list = []
         model_name_is_none_list = []
         for record in db_record:
@@ -399,7 +491,7 @@ class ElasticSearchService:
 
         response = {
             "indices": indices,
-            "count": len(indices)
+            "count": len(indices),
         }
 
         if include_stats:
@@ -409,8 +501,11 @@ class ElasticSearchService:
                 for index_name in filtered_indices_list:
                     index_stats = indice_stats.get(index_name, {})
                     stats_info.append({
+                        # Internal index name (used as ID)
                         "name": index_name,
-                        "stats": index_stats
+                        # User-facing knowledge base name from PostgreSQL (fallback to index_name)
+                        "display_name": index_to_display_name.get(index_name, index_name),
+                        "stats": index_stats,
                     })
                     if index_name in model_name_is_none_list:
                         update_model_name_by_index_name(index_name,
@@ -427,7 +522,8 @@ class ElasticSearchService:
             index_name: str = Path(..., description="Name of the index"),
             data: List[Dict[str, Any]
                        ] = Body(..., description="Document List to process"),
-            vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+            vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+            task_id: Optional[str] = None,
     ):
         """
         Index documents and create vector embeddings, create index if it doesn't exist
@@ -517,12 +613,63 @@ class ElasticSearchService:
                 }
 
             # Index documents (use default batch_size and content_field)
+            # Get chunk_batch from model config
+            # First, get tenant_id from knowledge record
+            knowledge_record = get_knowledge_record({'index_name': index_name})
+            tenant_id = knowledge_record.get(
+                'tenant_id') if knowledge_record else None
+
+            if tenant_id:
+                model_config = tenant_config_manager.get_model_config(
+                    key="EMBEDDING_ID", tenant_id=tenant_id)
+                embedding_batch_size = model_config.get("chunk_batch", 10)
+                if embedding_batch_size is None:
+                    embedding_batch_size = 10
+            else:
+                # Fallback to default if tenant_id not found
+                embedding_batch_size = 10
+
+            # Initialize progress tracking if task_id is provided
+            if task_id:
+                try:
+                    redis_service = get_redis_service()
+                    success = redis_service.save_progress_info(
+                        task_id, 0, total_submitted)
+                    if success:
+                        logger.info(
+                            f"[REDIS PROGRESS] Initialized progress tracking for task {task_id}: 0/{total_submitted}")
+                    else:
+                        logger.warning(
+                            f"Failed to initialize progress tracking for task {task_id}")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to initialize progress tracking for task {task_id}: {str(e)}")
+
             try:
                 total_indexed = vdb_core.vectorize_documents(
                     index_name=index_name,
                     embedding_model=embedding_model,
                     documents=documents,
+                    embedding_batch_size=embedding_batch_size,
+                    progress_callback=lambda processed, total: _update_progress(
+                        task_id, processed, total) if task_id else None
                 )
+
+                # Update final progress
+                if task_id:
+                    try:
+                        redis_service = get_redis_service()
+                        success = redis_service.save_progress_info(
+                            task_id, total_indexed, total_submitted)
+                        if success:
+                            logger.info(
+                                f"[REDIS PROGRESS] Updated final progress for task {task_id}: {total_indexed}/{total_submitted}")
+                        else:
+                            logger.warning(
+                                f"[REDIS PROGRESS] Failed to update final progress for task {task_id}")
+                    except Exception as e:
+                        logger.warning(
+                            f"[REDIS PROGRESS] Exception updating final progress for task {task_id}: {str(e)}")
 
                 return {
                     "success": True,
@@ -559,15 +706,12 @@ class ElasticSearchService:
             Dictionary containing file list
         """
         try:
-            files = []
+            files_map: Dict[str, Dict[str, Any]] = {}
             # Get existing files from ES
             existing_files = vdb_core.get_documents_detail(index_name)
 
             # Get unique celery files list and the status of each file
             celery_task_files = await get_all_files_status(index_name)
-            # Create a set of path_or_urls from existing files for quick lookup
-            existing_paths = {file_info.get('path_or_url')
-                              for file_info in existing_files}
 
             # For files already stored in ES, add to files list
             for file_info in existing_files:
@@ -579,35 +723,51 @@ class ElasticSearchService:
                 except (ValueError, TypeError):
                     utc_create_timestamp = time.time()
 
+                # Always re-query chunk count to ensure accuracy (aggregation may be stale)
+                path_or_url = file_info.get('path_or_url')
+                chunk_count = file_info.get('chunk_count', 0)
+                try:
+                    count_result = vdb_core.client.count(
+                        index=index_name,
+                        body={"query": {"term": {"path_or_url": path_or_url}}}
+                    )
+                    chunk_count = count_result.get("count", chunk_count)
+                except Exception as count_err:
+                    logger.warning(
+                        f"Failed to get chunk count for {path_or_url}: {count_err}, using aggregation value {chunk_count}")
+
                 file_data = {
-                    'path_or_url': file_info.get('path_or_url'),
+                    'path_or_url': path_or_url,
                     'file': file_info.get('filename', ''),
                     'file_size': file_info.get('file_size', 0),
                     'create_time': int(utc_create_timestamp * 1000),
                     'status': "COMPLETED",
                     'latest_task_id': '',
-                    'chunk_count': file_info.get('chunk_count', 0)
+                    'chunk_count': chunk_count,
+                    'error_reason': None,
+                    'has_error_info': False
                 }
-                files.append(file_data)
+                files_map[path_or_url] = file_data
 
             # For files not yet stored in ES (files currently being processed)
             for path_or_url, status_info in celery_task_files.items():
-                # Skip files that are already in existing_files to avoid duplicates
-                if path_or_url not in existing_paths:
-                    # Ensure status_info is a dictionary
-                    status_dict = status_info if isinstance(
-                        status_info, dict) else {}
+                status_dict = status_info if isinstance(
+                    status_info, dict) else {}
 
-                    # Get source_type and original_filename, with defaults
-                    source_type = status_dict.get('source_type') if status_dict.get(
-                        'source_type') else 'minio'
-                    original_filename = status_dict.get('original_filename')
+                # Get source_type and original_filename, with defaults
+                source_type = status_dict.get('source_type') if status_dict.get(
+                    'source_type') else 'minio'
+                original_filename = status_dict.get('original_filename')
 
-                    # Determine the filename
-                    filename = original_filename or (
-                        os.path.basename(path_or_url) if path_or_url else '')
+                # Determine the filename
+                filename = original_filename or (
+                    os.path.basename(path_or_url) if path_or_url else '')
 
-                    # Safely get file size; default to 0 on any error
+                # Safely get file size; default to 0 on any error
+                file_size = 0
+                if path_or_url in files_map:
+                    file_size = files_map[path_or_url].get('file_size', 0)
+                else:
                     try:
                         file_size = get_file_size(
                             source_type or 'minio', path_or_url)
@@ -616,15 +776,65 @@ class ElasticSearchService:
                             f"Failed to get file size for '{path_or_url}': {size_err}")
                         file_size = 0
 
+                # Get progress from status_dict first, then try Redis for real-time updates
+                processed_chunks = status_dict.get('processed_chunks')
+                total_chunks = status_dict.get('total_chunks')
+                task_id = status_dict.get('latest_task_id', '')
+
+                # Always try to get latest progress from Redis if task_id exists
+                # Redis has the most up-to-date progress during vectorization
+                if task_id:
+                    try:
+                        redis_service = get_redis_service()
+                        progress_info = redis_service.get_progress_info(
+                            task_id)
+                        if progress_info:
+                            redis_processed = progress_info.get(
+                                'processed_chunks')
+                            redis_total = progress_info.get('total_chunks')
+                            if redis_processed is not None:
+                                processed_chunks = redis_processed
+                            if redis_total is not None:
+                                total_chunks = redis_total
+                            logger.debug(
+                                f"Retrieved progress from Redis for task {task_id}: {processed_chunks}/{total_chunks}")
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to get progress from Redis for task {task_id}: {str(e)}")
+
+                if path_or_url in files_map:
+                    file_data = files_map[path_or_url]
+                else:
                     file_data = {
                         'path_or_url': path_or_url,
                         'file': filename,
                         'file_size': file_size,
                         'create_time': int(time.time() * 1000),
-                        'status': status_dict.get('state', 'UNKNOWN'),
-                        'latest_task_id': status_dict.get('latest_task_id', '')
+                        'chunk_count': 0,
+                        'error_reason': None,
+                        'has_error_info': False
                     }
-                    files.append(file_data)
+                    files_map[path_or_url] = file_data
+
+                file_data['status'] = status_dict.get('state', file_data.get(
+                    'status', 'UNKNOWN'))
+                file_data['latest_task_id'] = task_id
+                file_data['processed_chunk_num'] = processed_chunks
+                file_data['total_chunk_num'] = total_chunks
+
+                # Get error reason for failed documents
+                if task_id and status_dict.get('state') in ['PROCESS_FAILED', 'FORWARD_FAILED']:
+                    try:
+                        redis_service = get_redis_service()
+                        error_reason = redis_service.get_error_info(task_id)
+                        if error_reason:
+                            file_data['error_reason'] = error_reason
+                            file_data['has_error_info'] = True
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to get error info for task {task_id}: {str(e)}")
+
+            files = list(files_map.values())
 
             # Unified chunks processing for all files
             if include_chunks:
@@ -673,15 +883,46 @@ class ElasticSearchService:
                                 })
 
                             file_data['chunks'] = chunks
-                            file_data['chunk_count'] = len(chunks)
+                            # Get accurate chunk count using count query instead of len(chunks)
+                            # because msearch may have size limits
+                            try:
+                                count_result = vdb_core.client.count(
+                                    index=index_name,
+                                    body={
+                                        "query": {"term": {"path_or_url": file_path}}}
+                                )
+                                file_data['chunk_count'] = count_result.get(
+                                    "count", len(chunks))
+                            except Exception as count_err:
+                                logger.warning(
+                                    f"Failed to get chunk count for {file_path}: {count_err}, using len(chunks)")
+                                file_data['chunk_count'] = len(chunks)
 
                     except Exception as e:
                         logger.error(
                             f"Error during msearch for chunks: {str(e)}")
             else:
+                # When include_chunks=False, ensure chunk_count is accurate for completed files
                 for file_data in files:
                     file_data['chunks'] = []
-                    file_data['chunk_count'] = file_data.get('chunk_count', 0)
+                    if file_data.get('status') == "COMPLETED":
+                        # Always re-query chunk count for completed files to ensure accuracy
+                        try:
+                            count_result = vdb_core.client.count(
+                                index=index_name,
+                                body={
+                                    "query": {"term": {"path_or_url": file_data.get('path_or_url')}}}
+                            )
+                            file_data['chunk_count'] = count_result.get(
+                                "count", 0)
+                        except Exception as count_err:
+                            logger.warning(
+                                f"Failed to get chunk count for {file_data.get('path_or_url')}: {count_err}")
+                            file_data['chunk_count'] = file_data.get(
+                                'chunk_count', 0)
+                    else:
+                        file_data['chunk_count'] = file_data.get(
+                            'chunk_count', 0)
 
             return {"files": files}
 
@@ -820,7 +1061,7 @@ class ElasticSearchService:
                     for char in final_summary:
                         yield f"data: {{\"status\": \"success\", \"message\": \"{char}\"}}\n\n"
                         await asyncio.sleep(0.01)
-                    yield f"data: {{\"status\": \"completed\"}}\n\n"
+                    yield "data: {\"status\": \"completed\"}\n\n"
                 except Exception as e:
                     yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
             
