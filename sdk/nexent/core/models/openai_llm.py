@@ -14,7 +14,7 @@ from ..utils.observer import MessageObserver, ProcessType
 logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
-    def __init__(self, observer: MessageObserver, temperature=0.2, top_p=0.95, 
+    def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -46,7 +46,7 @@ class OpenAIModel(OpenAIServerModel):
 
     @get_monitoring_manager().monitor_llm_call("openai_chat", "chat_completion")
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
-                 grammar: Optional[str] = None, tools_to_call_from: Optional[List[Tool]] = None, **kwargs, ) -> ChatMessage:
+                 response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, **kwargs, ) -> ChatMessage:
         # Get token tracker from decorator (if monitoring is available)
         token_tracker = kwargs.pop('_token_tracker', None)
 
@@ -63,7 +63,7 @@ class OpenAIModel(OpenAIServerModel):
 
         completion_kwargs = self._prepare_completion_kwargs(
             messages=messages, stop_sequences=stop_sequences,
-            grammar=grammar, tools_to_call_from=tools_to_call_from, model=self.model_id,
+            response_format=response_format, tools_to_call_from=tools_to_call_from, model=self.model_id,
             custom_role_conversions=self.custom_role_conversions, convert_images_to_image_urls=True,
             temperature=self.temperature, top_p=self.top_p, **kwargs,
         )

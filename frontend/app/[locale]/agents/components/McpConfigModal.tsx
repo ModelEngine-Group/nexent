@@ -178,17 +178,22 @@ export default function McpConfigModal({
           if (result.success) {
             await loadServerList(); // Reload list
 
-            // After successful deletion, refresh tools and agents asynchronously
-            // This will update MCP tool availability and agent availability status
-            await refreshToolsAndAgents();
-
-            // Show success message after refresh completes to avoid message overlap
+            // Show success message immediately
             message.success(t("mcpService.message.deleteServerSuccess"));
+
+            // This will update MCP tool availability and agent availability status
+            refreshToolsAndAgents().catch((error) => {
+              log.error("Failed to refresh tools and agents after deletion:", error);
+            });
           } else {
             message.error(result.message);
+            // Throw error to prevent modal from closing
+            throw new Error(result.message);
           }
         } catch (error) {
           message.error(t("mcpConfig.message.deleteServerFailed"));
+          // Throw error to prevent modal from closing
+          throw error;
         }
       },
     });

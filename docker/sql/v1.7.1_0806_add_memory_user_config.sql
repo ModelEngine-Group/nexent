@@ -1,5 +1,5 @@
 -- 创建序列
-CREATE SEQUENCE "nexent"."memory_user_config_t_config_id_seq"
+CREATE SEQUENCE IF NOT EXISTS "nexent"."memory_user_config_t_config_id_seq"
 INCREMENT 1
 MINVALUE  1
 MAXVALUE 2147483647
@@ -47,6 +47,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS "update_memory_user_config_update_time_trigger" ON "nexent"."memory_user_config_t";
 CREATE TRIGGER "update_memory_user_config_update_time_trigger"
 BEFORE UPDATE ON "nexent"."memory_user_config_t"
 FOR EACH ROW

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
 import { NavigationLayout } from "@/components/navigation/NavigationLayout";
 import { HomepageContent } from "@/components/homepage/HomepageContent";
 import { AuthDialogs } from "@/components/homepage/AuthDialogs";
@@ -31,10 +30,24 @@ import { FiRefreshCw } from "react-icons/fi";
 import { USER_ROLES } from "@/const/modelConfig";
 import MarketContent from "./market/MarketContent";
 import UsersContent from "./users/UsersContent";
+import McpToolsContent from "./mcp-tools/McpToolsContent";
+import MonitoringContent from "./monitoring/MonitoringContent";
 import { getSavedView, saveView } from "@/lib/viewPersistence";
 
 // View type definition
-type ViewType = "home" | "memory" | "models" | "agents" | "knowledges" | "space" | "setup" | "chat" | "market" | "users";
+type ViewType =
+  | "home"
+  | "memory"
+  | "models"
+  | "agents"
+  | "knowledges"
+  | "space"
+  | "setup"
+  | "chat"
+  | "market"
+  | "users"
+  | "mcpTools"
+  | "monitoring";
 type SetupStep = "models" | "knowledges" | "agents";
 
 export default function Home() {
@@ -101,18 +114,6 @@ export default function Home() {
     // Confirm login dialog
     const handleCloseLoginPrompt = () => {
       setLoginPromptOpen(false);
-    };
-
-    // Handle login button click
-    const handleLoginClick = () => {
-      setLoginPromptOpen(false);
-      openLoginModal();
-    };
-
-    // Handle register button click
-    const handleRegisterClick = () => {
-      setLoginPromptOpen(false);
-      openRegisterModal();
     };
 
     // Handle operations that require admin privileges
@@ -453,6 +454,28 @@ export default function Home() {
           return (
             <div className="w-full h-full">
               <UsersContent
+                connectionStatus={connectionStatus}
+                isCheckingConnection={isCheckingConnection}
+                onCheckConnection={checkModelEngineConnection}
+              />
+            </div>
+          );
+
+        case "mcpTools":
+          return (
+            <div className="w-full h-full p-8">
+              <McpToolsContent
+                connectionStatus={connectionStatus}
+                isCheckingConnection={isCheckingConnection}
+                onCheckConnection={checkModelEngineConnection}
+              />
+            </div>
+          );
+
+        case "monitoring":
+          return (
+            <div className="w-full h-full p-8">
+              <MonitoringContent
                 connectionStatus={connectionStatus}
                 isCheckingConnection={isCheckingConnection}
                 onCheckConnection={checkModelEngineConnection}

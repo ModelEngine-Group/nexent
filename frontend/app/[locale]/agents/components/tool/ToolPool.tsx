@@ -584,36 +584,34 @@ function ToolPool({
                   ghost
                   size="small"
                   className="tool-categories-collapse mt-1"
-                >
-                  {group.subGroups.map((subGroup, index) => (
-                    <Collapse.Panel
-                      key={subGroup.key}
-                      header={
-                        <span
-                          className="text-gray-700 font-medium"
-                          style={{
-                            paddingTop: "8px",
-                            paddingBottom: "8px",
-                            display: "block",
-                            minHeight: "36px",
-                            lineHeight: "20px",
-                          }}
-                        >
-                          {subGroup.label}
-                        </span>
-                      }
-                      className={`tool-category-panel ${
-                        index === 0 ? "mt-1" : "mt-3"
-                      }`}
-                    >
+                  items={group.subGroups.map((subGroup, index) => ({
+                    key: subGroup.key,
+                    label: (
+                      <span
+                        className="text-gray-700 font-medium"
+                        style={{
+                          paddingTop: "8px",
+                          paddingBottom: "8px",
+                          display: "block",
+                          minHeight: "36px",
+                          lineHeight: "20px",
+                        }}
+                      >
+                        {subGroup.label}
+                      </span>
+                    ),
+                    className: `tool-category-panel ${
+                      index === 0 ? "mt-1" : "mt-3"
+                    }`,
+                    children: (
                       <div className="space-y-3 pt-3">
                         {subGroup.tools.map((tool) => (
                           <ToolItem key={tool.id} tool={tool} />
                         ))}
                       </div>
-                    </Collapse.Panel>
-                  ))}
-                </Collapse>
+                    ),
+                  }))}
+                />
               </div>
             </>
           ) : (
