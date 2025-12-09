@@ -860,7 +860,7 @@
   "mcpConfig.modal.updatingTools": "Updating tools list...",
   "mcpConfig.addServer.title": "Add MCP Server",
   "mcpConfig.addServer.namePlaceholder": "Server name",
-  "mcpConfig.addServer.urlPlaceholder": "Server URL (e.g.: http://localhost:3001/sse), currently only SSE protocol supported",
+  "mcpConfig.addServer.urlPlaceholder": "Server URL (e.g.: http://localhost:3001/mcp), currently supports sse and streamable-http protocols",
   "mcpConfig.addServer.button.add": "Add",
   "mcpConfig.addServer.button.updating": "Updating...",
   "mcpConfig.serverList.title": "Configured MCP Servers",

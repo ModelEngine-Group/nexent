@@ -1001,15 +1001,15 @@ class ElasticSearchService:
             StreamingResponse containing the generated summary
         """
         try:
+            if not tenant_id:
+                raise Exception("Tenant ID is required for summary generation.")
+            
             from utils.document_vector_utils import (
                 process_documents_for_clustering,
                 kmeans_cluster_documents,
                 summarize_clusters_map_reduce,
                 merge_cluster_summaries
             )
-            
-            if not tenant_id:
-                raise Exception("Tenant ID is required for summary generation.")
             
             # Use new Map-Reduce approach
             sample_count = min(batch_size // 5, 200)  # Sample reasonable number of documents

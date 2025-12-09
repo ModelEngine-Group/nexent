@@ -741,6 +741,7 @@ export default function AgentConfigModal({
       <div className="flex-1 min-h-0">
         <SimplePromptEditor
           value={localDutyContent}
+          height="100%"
           onChange={(value: string) => {
             setLocalDutyContent(value);
             // Immediate update to parent component
@@ -758,6 +759,7 @@ export default function AgentConfigModal({
       <div className="flex-1 min-h-0">
         <SimplePromptEditor
           value={localConstraintContent}
+          height="100%"
           onChange={(value: string) => {
             setLocalConstraintContent(value);
             // Immediate update to parent component
@@ -775,6 +777,7 @@ export default function AgentConfigModal({
       <div className="flex-1 min-h-0">
         <SimplePromptEditor
           value={localFewShotsContent}
+          height="100%"
           onChange={(value: string) => {
             setLocalFewShotsContent(value);
             // Immediate update to parent component

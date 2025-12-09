@@ -7,7 +7,7 @@ SET search_path TO nexent;
 
 -- Add model_id column to ag_tenant_agent_t table
 ALTER TABLE ag_tenant_agent_t 
-ADD COLUMN model_id INTEGER;
+ADD COLUMN IF NOT EXISTS model_id INTEGER;
 
 -- Add comment for the new model_id column
 COMMENT ON COLUMN ag_tenant_agent_t.model_id IS 'Model ID, foreign key reference to model_record_t.model_id';

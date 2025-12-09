@@ -117,7 +117,7 @@ class TestHelperMethods:
     @pytest.mark.parametrize(
         "dataset_id, file_id, expected",
         [
-            ("ds1", "f1", "127.0.0.1/api/data-management/datasets/ds1/files/f1/download"),
+            ("ds1", "f1", "http://127.0.0.1:8080/api/data-management/datasets/ds1/files/f1/download"),
             ("", "f1", ""),
             ("ds1", "", ""),
         ],
