@@ -156,6 +156,7 @@ export interface SubAgentPoolProps {
   isGeneratingAgent?: boolean;
   editingAgent?: Agent | null;
   isCreatingNewAgent?: boolean;
+  onCopyAgent?: (agent: Agent) => void;
   onExportAgent?: (agent: Agent) => void;
   onDeleteAgent?: (agent: Agent) => void;
 }
