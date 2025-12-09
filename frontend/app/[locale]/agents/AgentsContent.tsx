@@ -74,7 +74,7 @@ export default function AgentsContent({
         transition={pageTransition}
         style={{width: "100%", height: "100%"}}
       >
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="w-full h-full">
           {canAccessProtectedData ? (
             <AgentConfig ref={agentConfigRef} canAccessProtectedData={canAccessProtectedData} />
           ) : null}

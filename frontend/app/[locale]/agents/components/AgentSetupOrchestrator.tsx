@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { TFunction } from "i18next";
 
-import { App, Modal, Button, Tooltip } from "antd";
+import { App, Modal, Button, Tooltip, Row, Col } from "antd";
 import { WarningFilled } from "@ant-design/icons";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -1961,11 +1961,11 @@ export default function AgentSetupOrchestrator({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-full gap-0 justify-between relative ml-2 mr-2">
-        {/* Lower part: Agent pool + Agent capability configuration + System Prompt */}
-        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 max-w-full">
-          {/* Left column: Always show SubAgentPool - Equal flex width */}
-          <div className="w-full lg:w-auto lg:flex-1 h-full overflow-hidden">
+      <div className="h-full relative px-2">
+        {/* Three-column layout using Ant Design Grid */}
+        <Row gutter={[16, 16]} className="h-full">
+          {/* Left column: SubAgentPool */}
+          <Col xs={24} sm={24} md={24} lg={24} xl={8} className="flex flex-col" style={{ minHeight: '400px' }}>
             <SubAgentPool
               onEditAgent={(agent) => handleEditAgent(agent, t)}
               onCreateNewAgent={() => confirmOrRun(handleCreateNewAgent)}
@@ -1985,29 +1985,28 @@ export default function AgentSetupOrchestrator({
                   : null
               }
             />
-          </div>
+          </Col>
 
-          {/* Middle column: Agent capability configuration - Equal flex width */}
-          <div className="w-full lg:w-auto lg:flex-1 h-full flex flex-col overflow-hidden">
+          {/* Middle column: Agent capability configuration */}
+          <Col xs={24} sm={24} md={24} lg={24} xl={8} className="flex flex-col" style={{ minHeight: '400px' }}>
             {/* Header: Configure Agent Capabilities */}
             <div className="flex justify-between items-center mb-2">
               <div className="flex items-center">
                 <div className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500 text-white text-sm font-medium mr-2">
                   2
                 </div>
-                <h2 className="text-lg font-medium">
+                <h2 className="text-lg font-medium m-0">
                   {t("businessLogic.config.title")}
                 </h2>
               </div>
             </div>
 
-            {/* Content: ScrollArea with two sections */}
-            <div className="flex-1 overflow-hidden border-t pt-2">
+            {/* Content: Two sections */}
+            <div className="flex-1 overflow-hidden border-t border-gray-200 pt-2">
               <div className="flex flex-col h-full gap-4">
                 {/* Upper section: Collaborative Agent Display - fixed area */}
                 <CollaborativeAgentDisplay
-                  className="h-[128px] lg:h-[128px]"
-                  style={{ flexShrink: 0 }}
+                  className="h-[128px] flex-shrink-0"
                   availableAgents={subAgentList}
                   selectedAgentIds={enabledAgentIds}
                   parentAgentId={
@@ -2070,10 +2069,10 @@ export default function AgentSetupOrchestrator({
                 </div>
               </div>
             </div>
-          </div>
+          </Col>
 
-          {/* Right column: System Prompt Display - Equal flex width */}
-          <div className="w-full lg:w-auto lg:flex-1 h-full overflow-hidden">
+          {/* Right column: System Prompt Display */}
+          <Col xs={24} sm={24} md={24} lg={24} xl={8} className="flex flex-col" style={{ minHeight: '400px' }}>
             <PromptManager
               onDebug={onDebug ? () => confirmOrRun(() => onDebug()) : () => {}}
               agentId={
@@ -2123,8 +2122,8 @@ export default function AgentSetupOrchestrator({
               editingAgent={editingAgentFromParent || editingAgent}
               onViewCallRelationship={handleViewCallRelationship}
             />
-          </div>
-        </div>
+          </Col>
+        </Row>
 
         {/* Delete confirmation popup */}
         <Modal
