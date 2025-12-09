@@ -1,8 +1,9 @@
 import re
+import time
 from threading import Event
 from typing import List
 
-from smolagents import ActionStep, AgentText, TaskStep
+from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
 from ..models.openai_llm import OpenAIModel
@@ -195,7 +196,9 @@ class NexentAgent:
                 # Create task step for user message
                 self.agent.memory.steps.append(TaskStep(task=msg.content))
             elif msg.role == 'assistant':
-                self.agent.memory.steps.append(ActionStep(action_output=msg.content, model_output=msg.content))
+                self.agent.memory.steps.append(ActionStep(step_number=len(self.agent.memory.steps) + 1,
+                                                          timing=Timing(start_time=time.time()),
+                                                          action_output=msg.content, model_output=msg.content))
 
     def agent_run_with_observer(self, query: str, reset=True):
         if not isinstance(self.agent, CoreAgent):
@@ -214,7 +217,7 @@ class NexentAgent:
                 if hasattr(step_log, "error") and step_log.error is not None:
                     observer.add_message("", ProcessType.ERROR, str(step_log.error))
 
-            final_answer = step_log.final_answer  # Last log is the run's final_answer
+            final_answer = step_log.output  # Last log is the run's final_answer
 
             if isinstance(final_answer, AgentText):
                 final_answer_str = convert_code_format(final_answer.to_string())

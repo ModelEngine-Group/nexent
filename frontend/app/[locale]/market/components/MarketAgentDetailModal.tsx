@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { MarketAgentDetail } from "@/types/market";
 import { getToolSourceLabel, getGenericLabel } from "@/lib/agentLabelMapper";
+import { getCategoryIcon } from "@/const/marketConfig";
 
 interface MarketAgentDetailModalProps {
   visible: boolean;
@@ -97,7 +98,10 @@ export default function MarketAgentDetailModal({
             >
               {agentDetails?.category ? (
                 <Tag color="purple" className="inline-flex items-center gap-1">
-                  <span>{agentDetails.category.icon || "📦"}</span>
+                  <span>
+                    {agentDetails.category.icon ||
+                      getCategoryIcon(agentDetails.category.name)}
+                  </span>
                   <span>
                     {isZh
                       ? agentDetails.category.display_name_zh

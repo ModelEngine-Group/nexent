@@ -60,10 +60,10 @@ class DataMateSearchTool(Tool):
     tool_sign = ToolSign.DATAMATE_KNOWLEDGE_BASE.value
 
     def __init__(
-            self,
-            server_ip: str = Field(description="DataMate server IP or hostname"),
-            server_port: int = Field(description="DataMate server port"),
-            observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
+        self,
+        server_ip: str = Field(description="DataMate server IP or hostname"),
+        server_port: int = Field(description="DataMate server port"),
+        observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
     ):
         """Initialize the DataMateSearchTool.
 
@@ -99,12 +99,12 @@ class DataMateSearchTool(Tool):
         self.running_prompt_en = "Searching the DataMate knowledge base..."
 
     def forward(
-            self,
-            query: str,
-            top_k: int = 10,
-            threshold: float = 0.2,
-            kb_page: int = 0,
-            kb_page_size: int = 20,
+        self,
+        query: str,
+        top_k: int = 10,
+        threshold: float = 0.2,
+        kb_page: int = 0,
+        kb_page_size: int = 20,
     ) -> str:
         """Execute DataMate search.
 
@@ -184,7 +184,7 @@ class DataMateSearchTool(Tool):
                 })
 
                 search_result_message = SearchResultTextMessage(
-                    title=metadata.get("file_name", "") or "Untitled",
+                    title=metadata.get("file_name", ""),
                     text=entity_data.get("text", ""),
                     source_type="datamate",
                     url=download_url,
