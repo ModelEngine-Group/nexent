@@ -619,15 +619,15 @@ def test_create_local_tool_success(nexent_agent_instance):
     assert result == mock_tool_instance
 
 
-def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
-    """Test AnalyzeTextFileTool creation injects observer and metadata."""
+def test_create_local_tool_analyze_document_tool(nexent_agent_instance):
+    """Test AnalyzeDocumentTool creation injects observer and metadata."""
     mock_analyze_tool_class = MagicMock()
     mock_analyze_tool_instance = MagicMock()
     mock_analyze_tool_class.return_value = mock_analyze_tool_instance
 
     tool_config = ToolConfig(
-        class_name="AnalyzeTextFileTool",
-        name="analyze_text_file",
+        class_name="AnalyzeDocumentTool",
+        name="analyze_document",
         description="desc",
         inputs="{}",
         output_type="array",
@@ -640,16 +640,16 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         },
     )
 
-    original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
-    nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_analyze_tool_class
+    original_value = nexent_agent.__dict__.get("AnalyzeDocumentTool")
+    nexent_agent.__dict__["AnalyzeDocumentTool"] = mock_analyze_tool_class
 
     try:
         result = nexent_agent_instance.create_local_tool(tool_config)
     finally:
         if original_value is not None:
-            nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
-        elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["AnalyzeTextFileTool"]
+            nexent_agent.__dict__["AnalyzeDocumentTool"] = original_value
+        elif "AnalyzeDocumentTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["AnalyzeDocumentTool"]
 
     mock_analyze_tool_class.assert_called_once_with(
         observer=nexent_agent_instance.observer,
@@ -822,15 +822,15 @@ def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_
     assert mock_kb_tool_instance.embedding_model is None
     assert result == mock_kb_tool_instance
 
-def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
-    """Test AnalyzeTextFileTool creation injects observer and metadata."""
+def test_create_local_tool_analyze_document_tool(nexent_agent_instance):
+    """Test AnalyzeDocumentTool creation injects observer and metadata."""
     mock_analyze_tool_class = MagicMock()
     mock_analyze_tool_instance = MagicMock()
     mock_analyze_tool_class.return_value = mock_analyze_tool_instance
 
     tool_config = ToolConfig(
-        class_name="AnalyzeTextFileTool",
-        name="analyze_text_file",
+        class_name="AnalyzeDocumentTool",
+        name="analyze_document",
         description="desc",
         inputs="{}",
         output_type="string",
@@ -844,16 +844,16 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         },
     )
 
-    original_value = nexent_agent.__dict__.get("AnalyzeTextFileTool")
-    nexent_agent.__dict__["AnalyzeTextFileTool"] = mock_analyze_tool_class
+    original_value = nexent_agent.__dict__.get("AnalyzeDocumentTool")
+    nexent_agent.__dict__["AnalyzeDocumentTool"] = mock_analyze_tool_class
 
     try:
         result = nexent_agent_instance.create_local_tool(tool_config)
     finally:
         if original_value is not None:
-            nexent_agent.__dict__["AnalyzeTextFileTool"] = original_value
-        elif "AnalyzeTextFileTool" in nexent_agent.__dict__:
-            del nexent_agent.__dict__["AnalyzeTextFileTool"]
+            nexent_agent.__dict__["AnalyzeDocumentTool"] = original_value
+        elif "AnalyzeDocumentTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["AnalyzeDocumentTool"]
 
     mock_analyze_tool_class.assert_called_once_with(
         observer=nexent_agent_instance.observer,

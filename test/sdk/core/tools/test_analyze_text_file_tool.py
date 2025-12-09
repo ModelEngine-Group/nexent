@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import sdk.nexent.core.tools.analyze_text_file_tool as module
-from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool, ProcessType
+import sdk.nexent.core.tools.analyze_document_tool as module
+from sdk.nexent.core.tools.analyze_document_tool import AnalyzeDocumentTool, ProcessType
 
 
 class _NoopLoadSaveObjectManager:
@@ -47,7 +47,7 @@ def observer_en():
 
 @pytest.fixture
 def tool(observer_zh, llm_model):
-    return AnalyzeTextFileTool(
+    return AnalyzeDocumentTool(
         storage_client=MagicMock(),
         observer=observer_zh,
         data_process_service_url="http://data-process",
@@ -55,9 +55,9 @@ def tool(observer_zh, llm_model):
     )
 
 
-class TestAnalyzeTextFileTool:
+class TestAnalyzeDocumentTool:
     def test_forward_impl_switches_language(self, observer_en, llm_model, monkeypatch):
-        tool = AnalyzeTextFileTool(
+        tool = AnalyzeDocumentTool(
             storage_client=MagicMock(),
             observer=observer_en,
             data_process_service_url="http://data-process",
@@ -96,7 +96,7 @@ class TestAnalyzeTextFileTool:
 
         assert result == ["LLM failed"]
 
-    @patch("sdk.nexent.core.tools.analyze_text_file_tool.httpx.Client")
+    @patch("sdk.nexent.core.tools.analyze_document_tool.httpx.Client")
     def test_process_text_file_success(self, mock_client_cls, tool):
         mock_response = MagicMock(status_code=200)
         mock_response.json.return_value = {"text": "converted"}
@@ -112,7 +112,7 @@ class TestAnalyzeTextFileTool:
         assert result == "converted"
         mock_http_client.post.assert_called_once()
 
-    @patch("sdk.nexent.core.tools.analyze_text_file_tool.httpx.Client")
+    @patch("sdk.nexent.core.tools.analyze_document_tool.httpx.Client")
     def test_process_text_file_http_error_json_detail(self, mock_client_cls, tool):
         mock_response = MagicMock(status_code=400)
         mock_response.headers = {"content-type": "application/json"}
@@ -127,7 +127,7 @@ class TestAnalyzeTextFileTool:
         with pytest.raises(Exception, match="bad request"):
             tool.process_text_file("doc.txt", b"bytes")
 
-    @patch("sdk.nexent.core.tools.analyze_text_file_tool.httpx.Client")
+    @patch("sdk.nexent.core.tools.analyze_document_tool.httpx.Client")
     def test_process_text_file_http_error_plain_text(self, mock_client_cls, tool):
         mock_response = MagicMock(status_code=500)
         mock_response.headers = {}

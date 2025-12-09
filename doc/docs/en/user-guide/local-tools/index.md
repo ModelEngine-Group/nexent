@@ -32,7 +32,7 @@ Nexent preloads a set of reusable local tools grouped by capability: email, file
 
 ### 🖼️ Multimodal Tools
 
-- **analyze_text_file**: Based on user queries and the S3 URL, HTTP URL, and HTTPS URL of a text file, parse the file and use a large language model to understand it, answering user questions. An available large language model needs to be configured on the model management page.
+- **analyze_document**: Based on user queries and the S3 URL, HTTP URL, and HTTPS URL of a text file, parse the file and use a large language model to understand it, answering user questions. An available large language model needs to be configured on the model management page.
 - **analyze_image**: Based on user queries and the S3 URL, HTTP URL, and HTTPS URL of an image, use a visual language model to analyze and understand the image, answering user questions. An available visual language model needs to be configured on the model management page.
 
 ### 🖥️ Terminal Tool

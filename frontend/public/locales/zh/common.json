@@ -412,7 +412,7 @@
   "toolPool.category.other": "其他",
   "toolPool.noTools": "暂无可用工具",
   "toolPool.error.requiredFields": "以下必填字段未填写: {{fields}}",
-  "toolPool.tooltip.functionGuide": "1. 本地知识库检索功能，请启用knowledge_base_search工具；\n2. 文本文件解析功能，请启用analyze_text_file工具；\n3. 图片解析功能，请启用analyze_image工具。",
+  "toolPool.tooltip.functionGuide": "1. 本地知识库检索功能，请启用knowledge_base_search工具；\n2. 文本文件解析功能，请启用analyze_document工具；\n3. 图片解析功能，请启用analyze_image工具。",
 
 
   "tool.message.unavailable": "该工具当前不可用，无法选择",

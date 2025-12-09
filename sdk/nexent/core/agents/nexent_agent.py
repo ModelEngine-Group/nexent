@@ -85,7 +85,7 @@ class NexentAgent:
                     "vdb_core", None) if tool_config.metadata else None
                 tools_obj.embedding_model = tool_config.metadata.get(
                     "embedding_model", None) if tool_config.metadata else None
-            elif class_name == "AnalyzeTextFileTool":
+            elif class_name == "AnalyzeDocumentTool":
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),

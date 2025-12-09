@@ -411,7 +411,7 @@
   "toolPool.category.other": "other",
   "toolPool.noTools": "No tools available",
   "toolPool.error.requiredFields": "The following required fields are not filled: {{fields}}",
-  "toolPool.tooltip.functionGuide": "1. For local knowledge base search functionality, please enable the knowledge_base_search tool;\n2. For text file parsing functionality, please enable the analyze_text_file tool;\n3. For image parsing functionality, please enable the analyze_image tool.",
+  "toolPool.tooltip.functionGuide": "1. For local knowledge base search functionality, please enable the knowledge_base_search tool;\n2. For text file parsing functionality, please enable the analyze_document tool;\n3. For image parsing functionality, please enable the analyze_image tool.",
 
 
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",

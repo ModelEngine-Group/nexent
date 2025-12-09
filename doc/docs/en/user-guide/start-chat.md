@@ -70,7 +70,7 @@ You can upload files during a chat so the agent can reason over their content:
 
 > ⚠️ **Important:**
 > 1. Multimodal file conversations require the agent to have the corresponding parsing tools enabled during agent development. 
->    2. For document or text files select the `analyze_text_file` tool.
+>    2. For document or text files select the `analyze_document` tool.
 >    3. For image files select the `analyze_image` tool.
 > 2. Each uploaded file should ideally be under 10 MB. Split large documents into multiple uploads.
 

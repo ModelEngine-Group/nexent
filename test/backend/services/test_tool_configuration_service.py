@@ -1896,25 +1896,25 @@ class TestValidateLocalToolAnalyzeImage:
 
 
 class TestValidateLocalToolAnalyzeTextFile:
-    """Test cases for _validate_local_tool function with analyze_text_file tool"""
+    """Test cases for _validate_local_tool function with analyze_document tool"""
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_llm_model')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://data-process-service")
-    def test_validate_local_tool_analyze_text_file_success(self, mock_minio_client, mock_get_llm_model,
+    def test_validate_local_tool_analyze_document_success(self, mock_minio_client, mock_get_llm_model,
                                                            mock_signature, mock_get_class):
-        """Test successful analyze_text_file tool validation with proper dependencies"""
+        """Test successful analyze_document tool validation with proper dependencies"""
         # Mock tool class
         mock_tool_class = Mock()
         mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "analyze text file result"
+        mock_tool_instance.forward.return_value = "analyze document result"
         mock_tool_class.return_value = mock_tool_instance
 
         mock_get_class.return_value = mock_tool_class
 
-        # Mock signature for analyze_text_file tool
+        # Mock signature for analyze_document tool
         mock_sig = Mock()
         mock_sig.parameters = {
             'self': Mock(),
@@ -1931,17 +1931,17 @@ class TestValidateLocalToolAnalyzeTextFile:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         result = _validate_local_tool(
-            "analyze_text_file",
+            "analyze_document",
             {"input": "test input"},
             {"param": "config"},
             "tenant1",
             "user1"
         )
 
-        assert result == "analyze text file result"
-        mock_get_class.assert_called_once_with("analyze_text_file")
+        assert result == "analyze document result"
+        mock_get_class.assert_called_once_with("analyze_document")
 
-        # Verify analyze_text_file specific parameters were passed
+        # Verify analyze_document specific parameters were passed
         expected_params = {
             "param": "config",
             "llm_model": mock_llm_model,
@@ -1955,17 +1955,17 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_get_llm_model.assert_called_once_with(tenant_id="tenant1")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    def test_validate_local_tool_analyze_text_file_missing_tenant_id(self, mock_get_class):
-        """Test analyze_text_file tool validation when tenant_id is missing"""
+    def test_validate_local_tool_analyze_document_missing_tenant_id(self, mock_get_class):
+        """Test analyze_document tool validation when tenant_id is missing"""
         mock_tool_class = Mock()
         mock_get_class.return_value = mock_tool_class
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for analyze_text_file validation"):
+                           match="Tenant ID and User ID are required for analyze_document validation"):
             _validate_local_tool(
-                "analyze_text_file",
+                "analyze_document",
                 {"input": "test input"},
                 {"param": "config"},
                 None,  # Missing tenant_id
@@ -1973,17 +1973,17 @@ class TestValidateLocalToolAnalyzeTextFile:
             )
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    def test_validate_local_tool_analyze_text_file_missing_user_id(self, mock_get_class):
-        """Test analyze_text_file tool validation when user_id is missing"""
+    def test_validate_local_tool_analyze_document_missing_user_id(self, mock_get_class):
+        """Test analyze_document tool validation when user_id is missing"""
         mock_tool_class = Mock()
         mock_get_class.return_value = mock_tool_class
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for analyze_text_file validation"):
+                           match="Tenant ID and User ID are required for analyze_document validation"):
             _validate_local_tool(
-                "analyze_text_file",
+                "analyze_document",
                 {"input": "test input"},
                 {"param": "config"},
                 "tenant1",
@@ -1991,17 +1991,17 @@ class TestValidateLocalToolAnalyzeTextFile:
             )
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    def test_validate_local_tool_analyze_text_file_missing_both_ids(self, mock_get_class):
-        """Test analyze_text_file tool validation when both tenant_id and user_id are missing"""
+    def test_validate_local_tool_analyze_document_missing_both_ids(self, mock_get_class):
+        """Test analyze_document tool validation when both tenant_id and user_id are missing"""
         mock_tool_class = Mock()
         mock_get_class.return_value = mock_tool_class
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for analyze_text_file validation"):
+                           match="Tenant ID and User ID are required for analyze_document validation"):
             _validate_local_tool(
-                "analyze_text_file",
+                "analyze_document",
                 {"input": "test input"},
                 {"param": "config"},
                 None,  # Missing tenant_id
