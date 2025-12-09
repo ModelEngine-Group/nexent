@@ -535,6 +535,8 @@
   "document.error.code.vector_service_busy.suggestion": "请更换模型服务提供商，或稍后重试",
   "document.error.code.es_bulk_failed.message": "向量录入数据库错误",
   "document.error.code.es_bulk_failed.suggestion": "请确保Elasticsearch路径拥有完整写入权限，且存储空间与内存充足",
+  "document.error.code.es_dim_mismatch.message": "向量化模型维度与Elasticsearch维度不匹配",
+  "document.error.code.es_dim_mismatch.suggestion": "建议删除所有向量化模型后再添加模型重试",
   "document.error.code.embedding_chunks_exceed_limit.message": "当前切片数量超过向量化模型并行度",
   "document.error.code.embedding_chunks_exceed_limit.suggestion": "请增加切片大小以减少切片数量后再试",
   "document.error.code.unsupported_file_format.message": "检测到当前文档中存在不支持的换行符",
@@ -1099,7 +1101,7 @@
   "sidebar.memoryManagement": "记忆管理",
   "sidebar.userManagement": "用户管理",
   "sidebar.mcpToolsManagement": "MCP 工具",
-   "sidebar.monitoringManagement": "监控与运维",
+  "sidebar.monitoringManagement": "监控与运维",
 
   "market.comingSoon.title": "智能体市场即将推出",
   "market.comingSoon.description": "从我们的市场中发现并安装预构建的AI智能体。通过使用社区创建的解决方案节省时间。",

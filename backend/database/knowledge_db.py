@@ -197,6 +197,7 @@ def get_knowledge_info_by_knowledge_ids(knowledge_ids: List[str]) -> List[Dict[s
                 knowledge_info.append({
                     "knowledge_id": item.knowledge_id,
                     "index_name": item.index_name,
+                    "knowledge_name": item.knowledge_name,
                     "knowledge_sources": item.knowledge_sources,
                     "embedding_model_name": item.embedding_model_name
                 })

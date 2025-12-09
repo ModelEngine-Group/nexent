@@ -37,7 +37,8 @@ def knowledge_base_search_tool(mock_observer, mock_vdb_core, mock_embedding_mode
         index_names=["test_index1", "test_index2"],
         observer=mock_observer,
         embedding_model=mock_embedding_model,
-        vdb_core=mock_vdb_core
+        vdb_core=mock_vdb_core,
+        name_resolver={}
     )
     return tool
 
@@ -50,7 +51,8 @@ def knowledge_base_search_tool_no_observer(mock_vdb_core, mock_embedding_model):
         index_names=["test_index"],
         observer=None,
         embedding_model=mock_embedding_model,
-        vdb_core=mock_vdb_core
+        vdb_core=mock_vdb_core,
+        name_resolver={}
     )
     return tool
 
@@ -78,6 +80,49 @@ def create_mock_search_result(count=3):
 class TestKnowledgeBaseSearchTool:
     """Test KnowledgeBaseSearchTool functionality"""
     
+    def test_update_name_resolver_supports_empty_mapping(self, knowledge_base_search_tool):
+        """Ensure update_name_resolver replaces mapping and handles falsy input"""
+        knowledge_base_search_tool.update_name_resolver({"kb": "index_kb"})
+        assert knowledge_base_search_tool.name_resolver == {"kb": "index_kb"}
+
+        knowledge_base_search_tool.update_name_resolver(None)
+        assert knowledge_base_search_tool.name_resolver == {}
+
+    def test_resolve_names_without_resolver_logs_warning(self, knowledge_base_search_tool, mocker):
+        """When no resolver is configured, names are returned unchanged and warning is logged"""
+        warning_mock = mocker.patch("sdk.nexent.core.tools.knowledge_base_search_tool.logger.warning")
+
+        names = knowledge_base_search_tool._resolve_names(["kb1", "kb2"])
+
+        assert names == ["kb1", "kb2"]
+        warning_mock.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "incoming,expected",
+        [
+            (None, []),
+            ("single_index", ["single_index"]),
+            (["a", "b"], ["a", "b"]),
+        ],
+    )
+    def test_normalize_index_names_variants(self, knowledge_base_search_tool_no_observer, incoming, expected):
+        """_normalize_index_names should normalize None, string, and list inputs"""
+        assert knowledge_base_search_tool_no_observer._normalize_index_names(incoming) == expected
+
+    def test_forward_with_observer_adds_messages(self, knowledge_base_search_tool):
+        """forward should send TOOL and CARD messages when observer is present"""
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        knowledge_base_search_tool.forward("hello world")
+
+        knowledge_base_search_tool.observer.add_message.assert_any_call(
+            "", ProcessType.TOOL, "Searching the knowledge base..."
+        )
+        knowledge_base_search_tool.observer.add_message.assert_any_call(
+            "", ProcessType.CARD, json.dumps([{"icon": "search", "text": "hello world"}], ensure_ascii=False)
+        )
+
     def test_init_with_custom_values(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """Test initialization with custom values"""
         tool = KnowledgeBaseSearchTool(
@@ -85,7 +130,8 @@ class TestKnowledgeBaseSearchTool:
             index_names=["index1", "index2", "index3"],
             observer=mock_observer,
             embedding_model=mock_embedding_model,
-            vdb_core=mock_vdb_core
+            vdb_core=mock_vdb_core,
+            name_resolver={}
         )
 
         assert tool.top_k == 10
@@ -101,7 +147,8 @@ class TestKnowledgeBaseSearchTool:
             index_names=None,
             observer=None,
             embedding_model=mock_embedding_model,
-            vdb_core=mock_vdb_core
+            vdb_core=mock_vdb_core,
+            name_resolver={}
         )
 
         assert tool.index_names == []

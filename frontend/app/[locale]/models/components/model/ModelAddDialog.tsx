@@ -414,22 +414,35 @@ export const ModelAddDialog = ({
         ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
         : form.type;
     try {
+      const isEmbeddingType =
+        modelType === MODEL_TYPES.EMBEDDING ||
+        modelType === MODEL_TYPES.MULTI_EMBEDDING;
       const result = await modelService.addBatchCustomModel({
         api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
         provider: form.provider,
         type: modelType,
-        models: enabledModels.map((model: any) => ({
-          ...model,
-          max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
-          // Add chunk size range for embedding models
-          ...(isEmbeddingModel
-            ? {
-                expected_chunk_size: form.chunkSizeRange[0],
-                maximum_chunk_size: form.chunkSizeRange[1],
-                chunk_batch: parseInt(form.chunkingBatchSize) || 10,
-              }
-            : {}),
-        })),
+        models: enabledModels.map((model: any) => {
+          // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
+          if (isEmbeddingType) {
+            const { max_tokens, ...modelWithoutMaxTokens } = model;
+            return {
+              ...modelWithoutMaxTokens,
+              // Add chunk size range for embedding models
+              ...(isEmbeddingModel
+                ? {
+                    expected_chunk_size: form.chunkSizeRange[0],
+                    maximum_chunk_size: form.chunkSizeRange[1],
+                    chunk_batch: parseInt(form.chunkingBatchSize) || 10,
+                  }
+                : {}),
+            };
+          } else {
+            return {
+              ...model,
+              max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
+            };
+          }
+        }),
       });
       if (result === 200) {
         onSuccess();

@@ -22,7 +22,12 @@ class RedisService:
         if self._client is None:
             if not REDIS_URL:
                 raise ValueError("REDIS_URL environment variable is not set")
-            self._client = redis.from_url(REDIS_URL, socket_timeout=5, socket_connect_timeout=5)
+            self._client = redis.from_url(
+                REDIS_URL, 
+                socket_timeout=5, 
+                socket_connect_timeout=5,
+                decode_responses=True
+            )
         return self._client
 
     @property
@@ -673,8 +678,6 @@ class RedisService:
                 # Verify the save by reading it back
                 verify = self.client.get(reason_key)
                 if verify:
-                    if isinstance(verify, bytes):
-                        verify = verify.decode('utf-8')
                     logger.debug(f"Verified error info saved for task {task_id}: {verify[:100]}...")
                 else:
                     logger.warning(f"Failed to verify error info save for task {task_id}")
@@ -760,11 +763,8 @@ class RedisService:
         try:
             reason_key = f"error:reason:{task_id}"
             reason = self.client.get(reason_key)
-            if reason:
-                if isinstance(reason, bytes):
-                    return reason.decode('utf-8')
-                return reason
-            return None
+            # With decode_responses=True, reason is already a string
+            return reason if reason else None
         except Exception as e:
             logger.error(
                 f"Failed to get error info for task {task_id}: {str(e)}")

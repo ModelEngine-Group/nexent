@@ -3,7 +3,7 @@ import sys
 import os
 import time
 import unittest
-from unittest.mock import MagicMock, ANY
+from unittest.mock import MagicMock, ANY, AsyncMock
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
 import numpy as np
@@ -728,7 +728,7 @@ class TestElasticSearchService(unittest.TestCase):
         This test verifies that:
         1. When an error occurs during indexing, an appropriate exception is raised
         2. The exception has the correct status code (500)
-        3. The exception message contains "Error during indexing"
+        3. The exception message contains the original error message
         """
         # Setup
         self.mock_vdb_core.check_index_exists.return_value = True
@@ -757,7 +757,7 @@ class TestElasticSearchService(unittest.TestCase):
                     embedding_model=mock_embedding_model
                 )
 
-        self.assertIn("Error during indexing", str(context.exception))
+        self.assertIn("Indexing error", str(context.exception))
         _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
         self.assertEqual(kwargs.get("embedding_batch_size"), 8)
         self.assertTrue(callable(kwargs.get("progress_callback")))
@@ -2646,7 +2646,489 @@ class TestElasticSearchService(unittest.TestCase):
             # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
+ 
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    def test_update_progress_success(self, mock_get_redis):
+        """Ensure _update_progress updates Redis progress when not cancelled."""
+        from backend.services.vectordatabase_service import _update_progress
 
+        mock_redis = MagicMock()
+        mock_redis.is_task_cancelled.return_value = False
+        mock_redis.save_progress_info.return_value = True
+        mock_get_redis.return_value = mock_redis
+
+        _update_progress("task-1", 5, 10)
+
+        mock_redis.is_task_cancelled.assert_called_once_with("task-1")
+        mock_redis.save_progress_info.assert_called_once_with("task-1", 5, 10)
+
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    def test_update_progress_save_failure(self, mock_get_redis):
+        """_update_progress logs a warning when saving progress fails."""
+        from backend.services.vectordatabase_service import _update_progress
+
+        mock_redis = MagicMock()
+        mock_redis.is_task_cancelled.return_value = False
+        mock_redis.save_progress_info.return_value = False
+        mock_get_redis.return_value = mock_redis
+
+        _update_progress("task-2", 1, 2)
+
+        mock_redis.is_task_cancelled.assert_called_once_with("task-2")
+        mock_redis.save_progress_info.assert_called_once_with("task-2", 1, 2)
+
+
+class TestRethrowOrPlain(unittest.TestCase):
+    def setUp(self):
+        self.es_service = ElasticSearchService()
+        self.mock_vdb_core = MagicMock()
+        self.mock_vdb_core.embedding_model = MagicMock()
+        self.mock_vdb_core.embedding_dim = 768
+
+        self.get_embedding_model_patcher = patch(
+            'backend.services.vectordatabase_service.get_embedding_model')
+        self.mock_get_embedding = self.get_embedding_model_patcher.start()
+        self.mock_embedding = MagicMock()
+        self.mock_embedding.embedding_dim = 768
+        self.mock_embedding.model = "test-model"
+        self.mock_get_embedding.return_value = self.mock_embedding
+
+    def tearDown(self):
+        self.get_embedding_model_patcher.stop()
+
+    def test_rethrow_or_plain_rethrows_json_error_code(self):
+        """_rethrow_or_plain should re-raise JSON payload when error_code present."""
+        from backend.services.vectordatabase_service import _rethrow_or_plain
+
+        with self.assertRaises(Exception) as exc:
+            _rethrow_or_plain(Exception('{"error_code":"E123","detail":"boom"}'))
+        self.assertIn('"error_code": "E123"', str(exc.exception))
+
+    def test_get_vector_db_core_unsupported_type(self):
+        """get_vector_db_core raises on unsupported db type."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+
+        with self.assertRaises(ValueError) as exc:
+            get_vector_db_core(db_type="unsupported")
+
+        self.assertIn("Unsupported vector database type", str(exc.exception))
+
+    def test_rethrow_or_plain_parses_error_code(self):
+        """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
+        from backend.services.vectordatabase_service import _rethrow_or_plain
+
+        with self.assertRaises(Exception) as exc:
+            _rethrow_or_plain(Exception('{"error_code":123,"detail":"boom"}'))
+
+        self.assertIn("error_code", str(exc.exception))
+
+    @patch('services.redis_service.get_redis_service')
+    def test_full_delete_knowledge_base_no_files_redis_warning(self, mock_get_redis):
+        """full_delete_knowledge_base handles empty file list and surfaces Redis warnings."""
+        mock_vdb_core = MagicMock()
+        mock_redis = MagicMock()
+        mock_redis.delete_knowledgebase_records.return_value = {
+            "total_deleted": 0,
+            "errors": []
+        }
+        mock_get_redis.return_value = mock_redis
+
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, return_value={"files": []}) as mock_list_files, \
+                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                      new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
+
+            async def run_test():
+                return await ElasticSearchService.full_delete_knowledge_base(
+                    index_name="kb-1",
+                    vdb_core=mock_vdb_core,
+                    user_id="user-1",
+                )
+
+            result = asyncio.run(run_test())
+
+        self.assertEqual(result["minio_cleanup"]["total_files_found"], 0)
+        self.assertEqual(result["redis_cleanup"].get("errors"), [])
+        self.assertIn("redis_warnings", result)
+        self.assertIn("redis_warnings", result)
+        mock_list_files.assert_awaited_once()
+        mock_delete_index.assert_awaited_once()
+
+    @patch('services.redis_service.get_redis_service')
+    def test_full_delete_knowledge_base_minio_and_redis_error(self, mock_get_redis):
+        """full_delete_knowledge_base logs minio summary and handles redis cleanup errors."""
+        mock_vdb_core = MagicMock()
+        mock_redis = MagicMock()
+        # Redis cleanup will raise to hit error branch (lines 289-292)
+        mock_redis.delete_knowledgebase_records.side_effect = Exception("redis boom")
+        mock_get_redis.return_value = mock_redis
+
+        files_payload = {
+            "files": [
+                {"path_or_url": "obj-success", "source_type": "minio"},
+                {"path_or_url": "obj-fail", "source_type": "minio"},
+            ]
+        }
+
+        # delete_file returns success for first, failure for second
+        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                   new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
+                patch('backend.services.vectordatabase_service.delete_file') as mock_delete_file, \
+                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                      new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
+            mock_delete_file.side_effect = [
+                {"success": True},
+                {"success": False, "error": "minio failed"},
+            ]
+
+            async def run_test():
+                return await ElasticSearchService.full_delete_knowledge_base(
+                    index_name="kb-2",
+                    vdb_core=mock_vdb_core,
+                    user_id="user-2",
+                )
+
+            result = asyncio.run(run_test())
+
+        # MinIO summary should reflect one success and one failure (line 270 hit)
+        self.assertEqual(result["minio_cleanup"]["deleted_count"], 1)
+        self.assertEqual(result["minio_cleanup"]["failed_count"], 1)
+        # Redis cleanup error should be surfaced
+        self.assertIn("error", result["redis_cleanup"])
+        mock_list_files.assert_awaited_once()
+        mock_delete_index.assert_awaited_once_with("kb-2", mock_vdb_core, "user-2")
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_create_index_failure(self, mock_create_record):
+        """create_knowledge_base raises when index creation fails."""
+        mock_create_record.return_value = {
+            "knowledge_id": 1,
+            "index_name": "1-uuid",
+            "knowledge_name": "kb"
+        }
+        self.mock_vdb_core.create_index.return_value = False
+
+        with self.assertRaises(Exception) as exc:
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb",
+                embedding_dim=256,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-1",
+                tenant_id="tenant-1",
+            )
+
+        self.assertIn("Failed to create index", str(exc.exception))
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_raises_on_exception(self, mock_create_record):
+        """create_knowledge_base wraps unexpected errors."""
+        mock_create_record.return_value = {
+            "knowledge_id": 2,
+            "index_name": "2-uuid",
+            "knowledge_name": "kb2"
+        }
+        self.mock_vdb_core.create_index.side_effect = Exception("boom")
+
+        with self.assertRaises(Exception) as exc:
+            ElasticSearchService.create_knowledge_base(
+                knowledge_name="kb2",
+                embedding_dim=128,
+                vdb_core=self.mock_vdb_core,
+                user_id="user-2",
+                tenant_id="tenant-2",
+            )
+
+        self.assertIn("Error creating knowledge base", str(exc.exception))
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_index_documents_default_batch_without_tenant(self, mock_get_record):
+        """index_documents defaults embedding batch size to 10 when tenant is missing."""
+        mock_get_record.return_value = None
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 1
+
+        data = [{
+            "path_or_url": "p1",
+            "content": "c1",
+            "metadata": {"title": "t1"},
+        }]
+        embedding = MagicMock()
+        embedding.model = "model-x"
+
+        result = ElasticSearchService.index_documents(
+            embedding_model=embedding,
+            index_name="idx",
+            data=data,
+            vdb_core=self.mock_vdb_core,
+        )
+
+        self.assertTrue(result["success"])
+        _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
+        self.assertEqual(kwargs["embedding_batch_size"], 10)
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    def test_index_documents_updates_final_progress(self, mock_get_redis, mock_get_record, mock_tenant_cfg):
+        """index_documents sends final progress update to Redis when task_id is provided."""
+        mock_get_record.return_value = {"tenant_id": "tenant-1"}
+        mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 4}
+        mock_redis = MagicMock()
+        mock_get_redis.return_value = mock_redis
+
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 2
+
+        data = [
+            {"path_or_url": "p1", "content": "c1", "metadata": {}},
+            {"path_or_url": "p2", "content": "c2", "metadata": {}},
+        ]
+
+        result = ElasticSearchService.index_documents(
+            embedding_model=self.mock_embedding,
+            index_name="idx",
+            data=data,
+            vdb_core=self.mock_vdb_core,
+            task_id="task-xyz",
+        )
+
+        self.assertTrue(result["success"])
+        mock_redis.save_progress_info.assert_called()
+        last_call = mock_redis.save_progress_info.call_args_list[-1]
+        self.assertEqual(last_call[0], ("task-xyz", 2, 2))
+
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    def test_index_documents_progress_init_and_final_errors(self, mock_tenant_cfg, mock_get_record, mock_get_redis):
+        """index_documents should continue when progress save fails during init and final updates."""
+        mock_get_record.return_value = {"tenant_id": "tenant-1"}
+        mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 4}
+
+        mock_redis = MagicMock()
+        # First call (init) raises, second call (final) raises
+        mock_redis.save_progress_info.side_effect = [Exception("init fail"), Exception("final fail")]
+        mock_redis.is_task_cancelled.return_value = False
+        mock_get_redis.return_value = mock_redis
+
+        self.mock_vdb_core.check_index_exists.return_value = True
+        self.mock_vdb_core.vectorize_documents.return_value = 1
+
+        data = [{"path_or_url": "p1", "content": "c1", "metadata": {}}]
+
+        result = ElasticSearchService.index_documents(
+            embedding_model=self.mock_embedding,
+            index_name="idx",
+            data=data,
+            vdb_core=self.mock_vdb_core,
+            task_id="task-err",
+        )
+
+        self.assertTrue(result["success"])
+        # two attempts to save progress (init and final)
+        self.assertEqual(mock_redis.save_progress_info.call_count, 2)
+
+    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_redis, mock_get_files_status):
+        """list_files handles invalid timestamps, progress overrides, and error info."""
+        self.mock_vdb_core.get_documents_detail.return_value = [
+            {
+                "path_or_url": "file1",
+                "filename": "file1.txt",
+                "file_size": 10,
+                "create_time": "invalid",
+                "chunk_count": 1
+            }
+        ]
+        self.mock_vdb_core.client.count.return_value = {"count": 7}
+
+        mock_get_files_status.return_value = {
+            "file1": {
+                "state": "PROCESS_FAILED",
+                "latest_task_id": "task-1",
+                "processed_chunks": 1,
+                "total_chunks": 5,
+                "source_type": "minio",
+                "original_filename": "file1.txt"
+            }
+        }
+
+        mock_redis = MagicMock()
+        mock_redis.get_progress_info.return_value = {
+            "processed_chunks": 2,
+            "total_chunks": 5
+        }
+        mock_redis.get_error_info.return_value = "boom error"
+        mock_get_redis.return_value = mock_redis
+
+        async def run_test():
+            return await ElasticSearchService.list_files(
+                index_name="idx",
+                include_chunks=False,
+                vdb_core=self.mock_vdb_core
+            )
+
+        result = asyncio.run(run_test())
+        self.assertEqual(len(result["files"]), 1)
+        file_info = result["files"][0]
+        self.assertEqual(file_info["chunk_count"], 7)
+        self.assertEqual(file_info["file_size"], 10)
+        self.assertEqual(file_info["status"], "PROCESS_FAILED")
+        self.assertEqual(file_info["processed_chunk_num"], 2)
+        self.assertEqual(file_info["total_chunk_num"], 5)
+        self.assertEqual(file_info["error_reason"], "boom error")
+        self.assertIsInstance(file_info["create_time"], int)
+
+    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('backend.services.vectordatabase_service.get_redis_service')
+    def test_list_files_warning_and_progress_error_branches(self, mock_get_redis, mock_get_files_status):
+        """list_files covers chunk count warning, file size error, progress overrides, and redis failures."""
+        # Existing ES file triggers count warning (lines 749-750 and 910-916)
+        self.mock_vdb_core.get_documents_detail.return_value = [
+            {
+                "path_or_url": "file-es",
+                "filename": "file-es.txt",
+                "file_size": 5,
+                "create_time": "2024-01-01T00:00:00",
+                "chunk_count": 1
+            }
+        ]
+        # First count call for ES file, second for completed file at include_chunks=False
+        self.mock_vdb_core.client.count.side_effect = [
+            Exception("count fail initial"),
+            Exception("count fail final"),
+        ]
+
+        # Two tasks from Celery status to exercise progress success and failure
+        mock_get_files_status.return_value = {
+            "file-processing": {
+                "state": "PROCESSING",
+                "latest_task_id": "t1",
+                "source_type": "minio",
+                "original_filename": "fp.txt",
+                "processed_chunks": 1,
+                "total_chunks": 3,
+            },
+            "file-failed": {
+                "state": "PROCESS_FAILED",
+                "latest_task_id": "t2",
+                "source_type": "minio",
+                "original_filename": "ff.txt",
+            },
+        }
+
+        mock_redis = MagicMock()
+        # Progress info: first returns dict, second raises to hit lines 815-816
+        mock_redis.get_progress_info.side_effect = [
+            {"processed_chunks": 2, "total_chunks": 4},
+            Exception("progress boom"),
+        ]
+        # get_error_info raises to hit 847-848
+        mock_redis.get_error_info.side_effect = Exception("error info boom")
+        mock_get_redis.return_value = mock_redis
+
+        with patch('backend.services.vectordatabase_service.get_file_size', side_effect=Exception("size boom")):
+            async def run_test():
+                return await ElasticSearchService.list_files(
+                    index_name="idx",
+                    include_chunks=False,
+                    vdb_core=self.mock_vdb_core
+                )
+
+            result = asyncio.run(run_test())
+
+        # Ensure both ES file and processing files are returned
+        paths = {f["path_or_url"] for f in result["files"]}
+        self.assertIn("file-es", paths)
+        self.assertIn("file-processing", paths)
+        self.assertIn("file-failed", paths)
+        # Processing file gets progress override
+        proc_file = next(f for f in result["files"] if f["path_or_url"] == "file-processing")
+        self.assertEqual(proc_file["processed_chunk_num"], 2)
+        self.assertEqual(proc_file["total_chunk_num"], 4)
+        # Failed file retains default chunk_count fallback
+        failed_file = next(f for f in result["files"] if f["path_or_url"] == "file-failed")
+        self.assertEqual(failed_file.get("chunk_count", 0), 0)
+
+    @patch('backend.services.vectordatabase_service.get_all_files_status', return_value={})
+    def test_list_files_with_chunks_updates_chunk_count(self, mock_get_files_status):
+        """list_files include_chunks path refreshes chunk counts."""
+        self.mock_vdb_core.get_documents_detail.return_value = [
+            {
+                "path_or_url": "file1",
+                "filename": "file1.txt",
+                "file_size": 10,
+                "create_time": "2024-01-01T00:00:00"
+            }
+        ]
+        self.mock_vdb_core.multi_search.return_value = {
+            "responses": [
+                {
+                    "hits": {
+                        "hits": [
+                            {"_source": {
+                                "id": "doc1",
+                                "title": "t",
+                                "content": "c",
+                                "create_time": "2024-01-01T00:00:00"
+                            }}
+                        ]
+                    }
+                }
+            ]
+        }
+        self.mock_vdb_core.client.count.return_value = {"count": 2}
+
+        async def run_test():
+            return await ElasticSearchService.list_files(
+                index_name="idx",
+                include_chunks=True,
+                vdb_core=self.mock_vdb_core
+            )
+
+        result = asyncio.run(run_test())
+        file_info = result["files"][0]
+        self.assertEqual(file_info["chunk_count"], 2)
+        self.assertEqual(len(file_info["chunks"]), 1)
+
+    def test_summary_index_name_streams_generator_error(self):
+        """summary_index_name streams error payloads when generator fails."""
+        class BadIterable:
+            def __iter__(self):
+                raise RuntimeError("stream failure")
+
+        with patch('utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
+                patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
+                patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('utils.document_vector_utils.merge_cluster_summaries', return_value=BadIterable()):
+
+            mock_process_docs.return_value = (
+                {"doc1": {"chunks": [{"content": "x"}]}},
+                {"doc1": MagicMock()}
+            )
+            mock_cluster.return_value = {"doc1": 0}
+            mock_summarize.return_value = {0: "summary"}
+
+            async def run_test():
+                response = await self.es_service.summary_index_name(
+                    index_name="idx",
+                    batch_size=100,
+                    vdb_core=self.mock_vdb_core,
+                    language="en",
+                    model_id=None,
+                    tenant_id="tenant-1",
+                )
+                messages = []
+                async for chunk in response.body_iterator:
+                    messages.append(chunk)
+                    break
+                return messages
+
+            messages = asyncio.run(run_test())
+            self.assertTrue(any("error" in msg for msg in messages))
+
+ 
 if __name__ == '__main__':
     unittest.main()
 

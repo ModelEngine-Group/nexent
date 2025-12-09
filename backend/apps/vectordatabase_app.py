@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
+import re
 
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from nexent.vector_database.base import VectorDatabaseCore
@@ -124,8 +125,11 @@ def create_index_documents(
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
+
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error indexing documents: {error_msg}")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error indexing documents: {error_msg}"
+        )
 
 
 @router.get("/{index_name}/files")
@@ -229,15 +233,18 @@ async def get_document_error_info(
         error_code = None
 
         if raw_error:
-            text = raw_error
-
             # Try to parse JSON (new format with error_code only)
-            if isinstance(text, str) and text.strip().startswith("{"):
+            try:
+                parsed = json.loads(raw_error)
+                if isinstance(parsed, dict) and "error_code" in parsed:
+                    error_code = parsed.get("error_code")
+            except Exception:
+                # Fallback: regex extraction if JSON parsing fails
                 try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, dict):
-                        if "error_code" in parsed:
-                            error_code = parsed.get("error_code")
+                    match = re.search(
+                        r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', raw_error)
+                    if match:
+                        error_code = match.group(1)
                 except Exception:
                     pass
 

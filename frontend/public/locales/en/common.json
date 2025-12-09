@@ -413,7 +413,6 @@
   "toolPool.error.requiredFields": "The following required fields are not filled: {{fields}}",
   "toolPool.tooltip.functionGuide": "1. For local knowledge base search functionality, please enable the knowledge_base_search tool;\n2. For text file parsing functionality, please enable the analyze_text_file tool;\n3. For image parsing functionality, please enable the analyze_image tool.",
 
-
   "tool.message.unavailable": "This tool is currently unavailable and cannot be selected",
   "tool.error.noMainAgentId": "Main agent ID is not set, cannot update tool status",
   "tool.error.configFetchFailed": "Failed to get tool configuration",
@@ -535,6 +534,8 @@
   "document.error.code.vector_service_busy.suggestion": "Please switch the model service provider or try again later.",
   "document.error.code.es_bulk_failed.message": "Failed to write vectors into the database",
   "document.error.code.es_bulk_failed.suggestion": "Please ensure the Elasticsearch data path has sufficient disk space and write permissions.",
+  "document.error.code.es_dim_mismatch.message": "Embedding dimension does not match the Elasticsearch mapping",
+  "document.error.code.es_dim_mismatch.suggestion": "Please delete all embedding models and add the model again to try again.",
   "document.error.code.embedding_chunks_exceed_limit.message": "The current chunk count exceeds the embedding model concurrency limit",
   "document.error.code.embedding_chunks_exceed_limit.suggestion": "Please increase the chunk size to reduce the number of chunks and try again.",
   "document.error.code.unsupported_file_format.message": "Unsupported line breaks detected in the document",
