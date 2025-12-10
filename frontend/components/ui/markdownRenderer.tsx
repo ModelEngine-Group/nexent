@@ -779,21 +779,16 @@ const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> = React.memo
 
 ImageWithErrorHandling.displayName = "ImageWithErrorHandling";
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
-  content,
-  className,
-  searchResults = [],
-  showDiagramToggle = true,
-  onCitationHover,
-  enableMultimodal = true,
-  resolveS3Media = false,
-}) => {
+/**
+ * Render a code block with syntax highlighting, language label, and copy button
+ * This is exported for use in other components that need to render code blocks directly
+ */
+export const CodeBlock: React.FC<{
+  codeContent: string;
+  language?: string;
+}> = ({ codeContent, language = "python" }) => {
   const { t } = useTranslation("common");
-
-  // Convert LaTeX delimiters to markdown math delimiters
-  const processedContent = convertLatexDelimiters(content);
-
-  // Customize code block style with light gray background
+  
   const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {
@@ -829,6 +824,47 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       display: "block",
     },
   };
+
+  const cleanedContent = codeContent.replace(/^\n+|\n+$/g, "");
+
+  return (
+    <div className="code-block-container group">
+      <div className="code-block-header">
+        <span className="code-language-label" data-language={language}>
+          {language}
+        </span>
+        <CopyButton
+          content={cleanedContent}
+          variant="code-block"
+          className="header-copy-button"
+          tooltipText={{
+            copy: t("chatStreamMessage.copyContent"),
+            copied: t("chatStreamMessage.copied"),
+          }}
+        />
+      </div>
+      <div className="code-block-content">
+        <SyntaxHighlighter style={customStyle} language={language} PreTag="div">
+          {cleanedContent}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+};
+
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+  content,
+  className,
+  searchResults = [],
+  showDiagramToggle = true,
+  onCitationHover,
+  enableMultimodal = true,
+  resolveS3Media = false,
+}) => {
+  const { t } = useTranslation("common");
+
+  // Convert LaTeX delimiters to markdown math delimiters
+  const processedContent = convertLatexDelimiters(content);
 
   const renderCodeFallback = (text: string, key?: React.Key) => (
     <code
@@ -1150,37 +1186,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                       return <Diagram code={codeContent} className="my-4" showToggle={showDiagramToggle} />;
                     }
                     if (!inline) {
-                      return (
-                        <div className="code-block-container group">
-                          <div className="code-block-header">
-                            <span
-                              className="code-language-label"
-                              data-language={match[1]}
-                            >
-                              {match[1]}
-                            </span>
-                            <CopyButton
-                              content={codeContent}
-                              variant="code-block"
-                              className="header-copy-button"
-                              tooltipText={{
-                                copy: t("chatStreamMessage.copyContent"),
-                                copied: t("chatStreamMessage.copied"),
-                              }}
-                            />
-                          </div>
-                          <div className="code-block-content">
-                            <SyntaxHighlighter
-                              style={customStyle}
-                              language={match[1]}
-                              PreTag="div"
-                              {...props}
-                            >
-                              {codeContent}
-                            </SyntaxHighlighter>
-                          </div>
-                        </div>
-                      );
+                      return <CodeBlock codeContent={codeContent} language={match[1]} />;
                     }
                   }
                 } catch (error) {

@@ -10,6 +10,7 @@ import { ChatMessageType, TaskMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import { ChatStreamFinalMessage } from "@/app/chat/streaming/chatStreamFinalMessage";
 import { TaskWindow } from "@/app/chat/streaming/taskWindow";
+import { transformMessagesToTaskMessages } from "@/app/chat/streaming/messageTransformer";
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
 import log from "@/lib/logger";
 
@@ -49,62 +50,17 @@ function AgentDebugging({
     }
   };
 
-  // Process the step content of the message
+  // Process the step content of the message using unified transformer
   const processMessageSteps = (message: ChatMessageType): TaskMessageType[] => {
     if (!message.steps || message.steps.length === 0) return [];
 
-    const taskMsgs: TaskMessageType[] = [];
-    message.steps.forEach((step) => {
-      // Process step.contents
-      if (step.contents && step.contents.length > 0) {
-        step.contents.forEach((content) => {
-          taskMsgs.push({
-            id: content.id,
-            role: ROLE_ASSISTANT,
-            content: content.content,
-            timestamp: new Date(),
-            type: content.type,
-            // Preserve subType so TaskWindow can style deep thinking text
-            subType: content.subType as any,
-          } as any);
-        });
-      }
+    // Use unified message transformer with includeCode: true for debug mode
+    const { taskMessages } = transformMessagesToTaskMessages(
+      [message],
+      { includeCode: true }
+    );
 
-      // Process step.thinking
-      if (step.thinking && step.thinking.content) {
-        taskMsgs.push({
-          id: `thinking-${step.id}`,
-          role: ROLE_ASSISTANT,
-          content: step.thinking.content,
-          timestamp: new Date(),
-          type: "model_output_thinking",
-        });
-      }
-
-      // Process step.code
-      if (step.code && step.code.content) {
-        taskMsgs.push({
-          id: `code-${step.id}`,
-          role: ROLE_ASSISTANT,
-          content: step.code.content,
-          timestamp: new Date(),
-          type: "model_output_code",
-        });
-      }
-
-      // Process step.output
-      if (step.output && step.output.content) {
-        taskMsgs.push({
-          id: `output-${step.id}`,
-          role: ROLE_ASSISTANT,
-          content: step.output.content,
-          timestamp: new Date(),
-          type: "tool",
-        });
-      }
-    });
-
-    return taskMsgs;
+    return taskMessages;
   };
 
   return (

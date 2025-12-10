@@ -13,12 +13,134 @@ import {
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "@/components/ui/button";
-import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
+import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType, CardItem, MessageHandler } from "@/types/chat";
 import { useChatTaskMessage } from "@/hooks/useChatTaskMessage";
 import { storageService, extractObjectNameFromUrl } from "@/services/storageService";
 import log from "@/lib/logger";
+
+/**
+ * Extract code content and language from model_output_code content
+ * Handles both <RUN> and <DISPLAY:language> formats
+ * Supports streaming mode where end markers may not be present yet
+ * @param content - Raw code content from stream
+ * @returns Object with codeContent and language
+ */
+const extractCodeInfo = (content: string): { codeContent: string; language: string } => {
+  if (!content || typeof content !== "string") {
+    return { codeContent: "", language: "python" };
+  }
+
+  let processed = content;
+
+  // Remove "代码：" or "Code:" prefix if present (handle both full-width and half-width colon)
+  processed = processed.replace(/^(代码|Code)[：:]\s*/i, "");
+
+  // 1. Detect and process COMPLETE <DISPLAY:language> format
+  // Match: ```<DISPLAY:python> or ``` <DISPLAY:python>
+  const displayMatch = processed.match(/```\s*<DISPLAY:(\w+)>/);
+  if (displayMatch) {
+    const language = displayMatch[1];
+    // Remove the opening marker (handle optional whitespace and newline)
+    processed = processed.replace(/```\s*<DISPLAY:\w+>\s*\n?/, "");
+    // Remove closing marker if present: ```<END_DISPLAY_CODE> or just <END_DISPLAY_CODE>
+    processed = processed.replace(/\n?```<END_DISPLAY_CODE>[\s\S]*$/, "");
+    processed = processed.replace(/<END_DISPLAY_CODE>[\s\S]*$/, "");
+    // Remove trailing "[已展示给用户]" or similar text
+    processed = processed.replace(/\[已展示给用户\][\s\S]*$/, "");
+    // Clean up any remaining incomplete markers (for streaming)
+    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
+    processed = processed.replace(/<END[\s\S]*$/, "");
+    // Remove trailing backticks that might be part of incomplete end marker
+    processed = processed.replace(/\n?```$/, "");
+    return { codeContent: processed.trim(), language };
+  }
+
+  // 2. Detect and process COMPLETE <RUN> format (executable code, default to python)
+  const runMatch = processed.match(/```\s*<RUN>/);
+  if (runMatch) {
+    // Remove the opening marker
+    processed = processed.replace(/```\s*<RUN>\s*\n?/, "");
+    // Remove closing marker if present
+    processed = processed.replace(/\n?```<END_CODE>[\s\S]*$/, "");
+    processed = processed.replace(/<END_CODE>[\s\S]*$/, "");
+    // Clean up any remaining incomplete markers (for streaming)
+    processed = processed.replace(/\n?```<END[\s\S]*$/, "");
+    processed = processed.replace(/<END[\s\S]*$/, "");
+    // Remove trailing backticks
+    processed = processed.replace(/\n?```$/, "");
+    return { codeContent: processed.trim(), language: "python" };
+  }
+
+  // 3. Handle PARTIAL/INCOMPLETE headers (Streaming)
+  // This is critical for preventing the user from seeing raw tags like "```<DISPLAY:py"
+
+  // Case: ```<DISPLAY:py... (Incomplete tag, no closing >)
+  // Or: ```<RUN (Incomplete tag)
+  // Or: ```< (Just started special tag)
+  if (/^```\s*<[A-Z]*(:[a-z0-9]*)?$/.test(processed)) {
+    // We are strictly inside the header tag. Content is empty.
+    // Try to guess language if possible
+    const langMatch = processed.match(/:(\w+)$/);
+    return { codeContent: "", language: langMatch ? langMatch[1] : "python" };
+  }
+
+  // If content contains incomplete markers somewhere else (not at start), try to detect them
+  // This handles cases where backticks might have been stripped or came separately
+  if (processed.includes("<DISPLAY:") || processed.includes("<RUN>")) {
+    const partialDisplayMatch = processed.match(/<DISPLAY:(\w+)>/);
+    if (partialDisplayMatch) {
+      const language = partialDisplayMatch[1];
+      // Remove all variations of the display marker
+      processed = processed.replace(/```\s*<DISPLAY:\w+>\s*\n?/g, "");
+      processed = processed.replace(/<DISPLAY:\w+>\s*\n?/g, "");
+      // Clean up end markers
+      processed = processed.replace(/\n?```<END[\s\S]*$/, "");
+      processed = processed.replace(/<END[\s\S]*$/, "");
+      processed = processed.replace(/\n?```$/, "");
+      return { codeContent: processed.trim(), language };
+    }
+    
+    if (processed.includes("<RUN>")) {
+      // Remove all variations of the RUN marker
+      processed = processed.replace(/```\s*<RUN>\s*\n?/g, "");
+      processed = processed.replace(/<RUN>\s*\n?/g, "");
+      // Clean up end markers
+      processed = processed.replace(/\n?```<END[\s\S]*$/, "");
+      processed = processed.replace(/<END[\s\S]*$/, "");
+      processed = processed.replace(/\n?```$/, "");
+      return { codeContent: processed.trim(), language: "python" };
+    }
+  }
+
+  // 4. Handle standard markdown block start or ambiguous start
+  // Case: Just ``` or ```\n
+  // Hide the backticks until we know what's coming, to avoid flashing raw markdown
+  if (/^```\s*$/.test(processed)) {
+    return { codeContent: "", language: "python" };
+  }
+
+  // 5. Fallback: Treat as standard markdown code block
+  if (processed.startsWith("```")) {
+    // Check for standard language tag: ```python
+    const standardMatch = processed.match(/^```(\w+)\s/);
+    let lang = "python";
+    if (standardMatch) {
+        lang = standardMatch[1];
+        processed = processed.replace(/^```\w+\s*/, "");
+    } else {
+        processed = processed.replace(/^```\s*/, "");
+    }
+    
+    // Clean tails
+    processed = processed.replace(/\n?```$/, "");
+    return { codeContent: processed.trim(), language: lang };
+  }
+
+  // Default: treat as python code content
+  return { codeContent: processed.trim(), language: "python" };
+};
 
 // Icon mapping dictionary - map strings to corresponding icon components
 const iconMap: Record<string, React.ReactNode> = {
@@ -823,6 +945,30 @@ const messageHandlers: MessageHandler[] = [
     ),
   },
 
+  // model_output_code type processor - code output with direct code block rendering
+  {
+    canHandle: (message) => message.type === chatConfig.messageTypes.MODEL_OUTPUT_CODE,
+    render: (message, _t) => {
+      // Extract code content and language from the message
+      const { codeContent, language } = extractCodeInfo(message.content);
+      
+      return (
+        <div
+          style={{
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+            color: "#1f2937",
+            fontWeight: 400,
+          }}
+        >
+          <CodeBlock codeContent={codeContent} language={language} />
+        </div>
+      );
+    },
+  },
+
   // execution type processor - execution result (not displayed)
   {
     canHandle: (message) => message.type === "execution",
@@ -1307,37 +1453,28 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
         }
 
         /* For the code block style in task-message-content */
-        .task-message-content pre {
-          white-space: pre-wrap !important;
-          word-wrap: break-word !important;
-          word-break: break-word !important;
-          overflow-wrap: break-word !important;
-          overflow: auto !important;
+        /* Allow code-block-container to use its default styles */
+        .task-message-content .code-block-container {
           max-width: 100% !important;
-          box-sizing: border-box !important;
-          padding: 6px 10px !important;
-          margin: 2px 0 !important;
+          margin: 8px 0 !important;
         }
 
-        .task-message-content code {
+        .task-message-content .code-block-content pre {
           white-space: pre-wrap !important;
           word-wrap: break-word !important;
           word-break: break-word !important;
           overflow-wrap: break-word !important;
-          max-width: 100% !important;
-          padding: 0 !important;
-        }
-
-        .task-message-content div[class*="language-"] {
-          white-space: pre-wrap !important;
-          word-wrap: break-word !important;
-          word-break: break-word !important;
-          overflow-wrap: break-word !important;
-          overflow: auto !important;
           max-width: 100% !important;
           box-sizing: border-box !important;
-          padding: 6px 10px !important;
-          margin: 2px 0 !important;
+        }
+
+        /* For inline code and fallback code */
+        .task-message-content code:not(.code-block-content code) {
+          white-space: pre-wrap !important;
+          word-wrap: break-word !important;
+          word-break: break-word !important;
+          overflow-wrap: break-word !important;
+          max-width: 100% !important;
         }
 
         /* Ensure the content of the SyntaxHighlighter component wraps correctly */
@@ -1347,15 +1484,24 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
 
         /* Make sure the entire container is not stretched by the content */
         .task-message-content {
-          overflow: hidden !important;
           max-width: 100% !important;
           word-wrap: break-word !important;
           word-break: break-word !important;
         }
 
+        /* Allow code block container to overflow if needed for proper display */
+        .task-message-content .code-block-container {
+          overflow: visible !important;
+        }
+
         .task-message-content * {
           max-width: 100% !important;
           box-sizing: border-box !important;
+        }
+
+        /* Exception for code block container - allow it to use its default overflow */
+        .task-message-content .code-block-container * {
+          max-width: none !important;
         }
 
          /* Override diagram size in task window */
