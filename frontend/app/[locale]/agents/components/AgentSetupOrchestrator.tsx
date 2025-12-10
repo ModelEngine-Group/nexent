@@ -26,6 +26,7 @@ import {
 } from "@/types/agentConfig";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import log from "@/lib/logger";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import SubAgentPool from "./agent/SubAgentPool";
 import CollaborativeAgentDisplay from "./agent/CollaborativeAgentDisplay";
@@ -198,6 +199,7 @@ export default function AgentSetupOrchestrator({
 
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
 
   // Common refresh agent list function, moved to the front to avoid hoisting issues
   const refreshAgentList = async (t: TFunction, clearTools: boolean = true) => {
@@ -1860,6 +1862,7 @@ export default function AgentSetupOrchestrator({
     }
   };
 
+  // Handle copy agent from list
   const handleCopyAgentFromList = async (agent: Agent) => {
     try {
       // Fetch source agent detail before duplicating
@@ -1970,6 +1973,16 @@ export default function AgentSetupOrchestrator({
       log.error("Failed to copy agent:", error);
       message.error(t("agentConfig.agents.copyFailed"));
     }
+  };
+
+  const handleCopyAgentWithConfirm = (agent: Agent) => {
+    confirm({
+      title: t("agentConfig.agents.copyConfirmTitle"),
+      content: t("agentConfig.agents.copyConfirmContent", {
+        name: agent?.display_name || agent?.name || "",
+      }),
+      onConfirm: () => handleCopyAgentFromList(agent),
+    });
   };
 
   // Handle delete agent from list
@@ -2091,7 +2104,7 @@ export default function AgentSetupOrchestrator({
               isGeneratingAgent={isGeneratingAgent}
               editingAgent={editingAgent}
               isCreatingNewAgent={isCreatingNewAgent}
-              onCopyAgent={handleCopyAgentFromList}
+              onCopyAgent={handleCopyAgentWithConfirm}
               onExportAgent={handleExportAgentFromList}
               onDeleteAgent={handleDeleteAgentFromList}
               unsavedAgentId={

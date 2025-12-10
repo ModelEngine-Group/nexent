@@ -912,6 +912,8 @@
   "agentConfig.agents.detailsFetchFailed": "获取Agent详情失败，请稍后重试",
   "agentConfig.agents.callRelationshipFetchFailed": "获取Agent调用关系失败，请稍后重试",
   "agentConfig.agents.defaultDisplayName": "智能体",
+  "agentConfig.agents.copyConfirmTitle": "确认复制",
+  "agentConfig.agents.copyConfirmContent": "确定要复制 {{name}} 吗？",
   "agentConfig.agents.copySuccess": "Agent复制成功",
   "agentConfig.agents.copyUnavailableTools": "已忽略{{count}}个不可用工具：{{names}}",
   "agentConfig.agents.copyFailed": "Agent复制失败",

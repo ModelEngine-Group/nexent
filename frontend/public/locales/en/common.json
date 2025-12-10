@@ -912,6 +912,8 @@
   "agentConfig.agents.detailsFetchFailed": "Failed to fetch agent details, please try again later",
   "agentConfig.agents.callRelationshipFetchFailed": "Failed to fetch agent call relationship, please try again later",
   "agentConfig.agents.defaultDisplayName": "Agent",
+  "agentConfig.agents.copyConfirmTitle": "Confirm Copy",
+  "agentConfig.agents.copyConfirmContent": "Create a duplicate of {{name}}?",
   "agentConfig.agents.copySuccess": "Agent copied successfully",
   "agentConfig.agents.copyUnavailableTools": "Ignored {{count}} unavailable tools: {{names}}",
   "agentConfig.agents.copyFailed": "Failed to copy Agent",
