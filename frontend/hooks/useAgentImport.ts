@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { importAgent } from "@/services/agentConfigService";
+import {
+  checkAgentNameConflictBatch,
+  importAgent,
+  regenerateAgentNameBatch,
+} from "@/services/agentConfigService";
 import log from "@/lib/logger";
 
 export interface ImportAgentData {
@@ -15,6 +19,19 @@ export interface UseAgentImportOptions {
   onSuccess?: () => void;
   onError?: (error: Error) => void;
   forceImport?: boolean;
+  /**
+   * Optional: handle name/display_name conflicts before导入
+   * Caller can resolve by returning新名称或选择继续/终止
+   */
+  onNameConflictResolve?: (payload: {
+    name: string;
+    displayName?: string;
+    conflictAgents: Array<{ id: string; name?: string; display_name?: string }>;
+    regenerateWithLLM: () => Promise<{
+      name?: string;
+      displayName?: string;
+    }>;
+  }) => Promise<{ proceed: boolean; name?: string; displayName?: string }>;
 }
 
 export interface UseAgentImportResult {
@@ -111,6 +128,30 @@ export function useAgentImport(
    * Core import logic - calls backend API
    */
   const importAgentData = async (data: ImportAgentData): Promise<void> => {
+    // Step 1: 前置重名检查（仅检查主 Agent 名称与展示名）
+    const mainAgent = data.agent_info?.[String(data.agent_id)];
+    if (mainAgent?.name) {
+      const conflictHandled = await ensureNameNotDuplicated(
+        mainAgent.name,
+        mainAgent.display_name,
+        mainAgent.description || mainAgent.business_description
+      );
+
+      if (!conflictHandled.proceed) {
+        throw new Error(
+          "Agent name/display name conflicts with existing agent; import cancelled."
+        );
+      }
+
+      // 如果用户选择修改名称，写回导入数据
+      if (conflictHandled.name) {
+        mainAgent.name = conflictHandled.name;
+      }
+      if (conflictHandled.displayName) {
+        mainAgent.display_name = conflictHandled.displayName;
+      }
+    }
+
     const result = await importAgent(data, { forceImport });
     
     if (!result.success) {
@@ -140,6 +181,80 @@ export function useAgentImport(
       
       reader.readAsText(file);
     });
+  };
+
+  /**
+   * 前端侧重名校验逻辑
+   */
+  const ensureNameNotDuplicated = async (
+    name: string,
+    displayName?: string,
+    taskDescription?: string
+  ): Promise<{ proceed: boolean; name?: string; displayName?: string }> => {
+    try {
+      const checkResp = await checkAgentNameConflictBatch({
+        items: [
+          {
+            name,
+            display_name: displayName,
+          },
+        ],
+      });
+      if (!checkResp.success || !Array.isArray(checkResp.data)) {
+        log.warn("Skip name conflict check due to fetch failure");
+        return { proceed: true };
+      }
+
+      const first = checkResp.data[0] || {};
+      const { name_conflict, display_name_conflict, conflict_agents } = first;
+
+      if (!name_conflict && !display_name_conflict) {
+        return { proceed: true };
+      }
+
+      const regenerateWithLLM = async () => {
+        const regenResp = await regenerateAgentNameBatch({
+          items: [
+            {
+              name,
+              display_name: displayName,
+              task_description: taskDescription,
+            },
+          ],
+        });
+        if (!regenResp.success || !Array.isArray(regenResp.data) || !regenResp.data[0]) {
+          throw new Error("Failed to regenerate agent name");
+        }
+        const item = regenResp.data[0];
+        return {
+          name: item.name,
+          displayName: item.display_name ?? displayName,
+        };
+      };
+
+      // 交给调用方决定如何处理冲突（例如弹窗让用户选择是否让大模型改名）
+      if (options.onNameConflictResolve) {
+        return await options.onNameConflictResolve({
+          name,
+          displayName,
+          conflictAgents: (conflict_agents || []).map((c: any) => ({
+            id: String(c.agent_id ?? c.id),
+            name: c.name,
+            display_name: c.display_name,
+          })),
+          regenerateWithLLM,
+        });
+      }
+
+      // 默认行为：直接调用后端重命名以保持导入可用
+      const regenerated = await regenerateWithLLM();
+      return { proceed: true, ...regenerated };
+    } catch (error) {
+      // 若回调抛错，则阻止导入
+      throw error instanceof Error
+        ? error
+        : new Error("Name conflict handling failed");
+    }
   };
 
   return {
