@@ -155,3 +155,9 @@ Notes:
 - 📝 Use `docker images` to verify the images are loaded locally
 - 📊 Use `--progress=plain` to see detailed build and push progress
 - 📈 Use `--build-arg MIRROR=...` to set up a pip mirror to accelerate your build-up progress
+
+## 🚀 Deployment Recommendations
+
+After building is complete, you can use the docker/deploy.sh script for deployment, or directly start the services using docker-compose.
+
+> When starting a test of locally built images, you need to change APP_VERSION="$(get_app_version)" to APP_VERSION="latest" in docker/deploy.sh, because the deployment will default to using the image corresponding to the current version.

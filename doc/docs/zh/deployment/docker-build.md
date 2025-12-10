@@ -141,3 +141,5 @@ docker rm nexent-docs
 ## 🚀 部署建议
 
 构建完成后，可以使用 `docker/deploy.sh` 脚本进行部署，或者直接使用 `docker-compose` 启动服务。
+
+> 启动测试本地构建的镜像时，需要修改下`docker/deploy.sh`中的`APP_VERSION="$(get_app_version)"` -> `APP_VERSION="latest"`，因为部署时默认会使用当前版本对应的镜像。
