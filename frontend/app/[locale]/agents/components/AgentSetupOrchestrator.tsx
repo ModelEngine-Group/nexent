@@ -1930,6 +1930,13 @@ export default function AgentSetupOrchestrator({
         return;
       }
       const newAgentId = Number(createResult.data.agent_id);
+      const copiedAgentFallback: Agent = {
+        ...detail,
+        id: String(newAgentId),
+        name: copyName,
+        display_name: copyDisplayName,
+        sub_agent_id_list: subAgentIds,
+      };
 
       // Copy tool configuration to the new agent
       for (const tool of tools) {
@@ -1969,6 +1976,8 @@ export default function AgentSetupOrchestrator({
           })
         );
       }
+      // Auto select the newly copied agent for editing
+      await handleEditAgent(copiedAgentFallback, t);
     } catch (error) {
       log.error("Failed to copy agent:", error);
       message.error(t("agentConfig.agents.copyFailed"));
