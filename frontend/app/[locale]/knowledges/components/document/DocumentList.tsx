@@ -156,6 +156,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     React.useEffect(() => {
       setShowDetail(false);
       setShowChunk(false);
+      setSummary("");
     }, [knowledgeBaseName]);
 
     // Load available models when showing detail
