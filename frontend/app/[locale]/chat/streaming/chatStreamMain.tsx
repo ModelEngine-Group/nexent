@@ -59,9 +59,11 @@ export function ChatStreamMain({
     damping: 80,
   };
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showTopFade, setShowTopFade] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [chatInputHeight, setChatInputHeight] = useState(130); // Default ChatInput height
   const [processedMessages, setProcessedMessages] = useState<ProcessedMessages>(
     {
       finalMessages: [],
@@ -71,6 +73,28 @@ export function ChatStreamMain({
   );
   const lastUserMessageIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Monitor ChatInput height changes
+  useEffect(() => {
+    const chatInputElement = chatInputRef.current;
+    if (!chatInputElement) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const height = entry.contentRect.height;
+        setChatInputHeight(height);
+      }
+    });
+
+    resizeObserver.observe(chatInputElement);
+
+    // Set initial height
+    setChatInputHeight(chatInputElement.getBoundingClientRect().height);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [processedMessages.finalMessages.length]); // Re-observe when messages change (initial vs regular mode)
 
   // Handle message classification
   useEffect(() => {
@@ -515,6 +539,7 @@ export function ChatStreamMain({
                       animate="animate"
                       variants={chatInputVariants}
                       transition={chatInputTransition}
+                      ref={chatInputRef}
                     >
                       <ChatInput
                         input={input}
@@ -582,12 +607,17 @@ export function ChatStreamMain({
         <div className="absolute top-0 left-0 right-0 h-16 pointer-events-none z-10 bg-gradient-to-b from-background to-transparent"></div>
       )}
 
-      {/* Scroll to bottom button */}
+      {/* Scroll to bottom button - dynamically positioned based on ChatInput height */}
       {showScrollButton && (
         <Button
           variant="outline"
           size="icon"
-          className="absolute bottom-[130px] left-1/2 transform -translate-x-1/2 z-20 rounded-full shadow-md bg-background hover:bg-background/90 border border-border h-8 w-8"
+          className="absolute left-1/2 transform -translate-x-1/2 z-20 rounded-full shadow-md bg-background hover:bg-background/90 border border-border h-8 w-8"
+          style={{
+            // Position the button above the ChatInput with some margin
+            // The ChatInput height changes from 130px (default) to up to 200px+ when textarea expands
+            bottom: `${chatInputHeight-15}px`
+          }}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -607,6 +637,7 @@ export function ChatStreamMain({
             animate="animate"
             variants={chatInputVariants}
             transition={chatInputTransition}
+            ref={chatInputRef}
           >
             <ChatInput
               input={input}
