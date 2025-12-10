@@ -290,6 +290,10 @@ export const ModelAddDialog = ({
     ) {
       setConnectivityStatus({ status: null, message: "" });
     }
+    // Clear model search term when model type changes
+    if (field === "type") {
+      setModelSearchTerm("");
+    }
   };
 
   // Verify if the vector dimension is valid
