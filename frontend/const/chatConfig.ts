@@ -111,6 +111,7 @@ messageTypes: {
 // Content type constants for last content type tracking
 contentTypes: {
   MODEL_OUTPUT: "model_output" as const,
+  MODEL_OUTPUT_CODE: "model_output_code" as const,
   PARSING: "parsing" as const,
   EXECUTION: "execution" as const,
   AGENT_NEW_RUN: "agent_new_run" as const,
