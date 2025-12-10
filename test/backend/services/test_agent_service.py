@@ -3,15 +3,20 @@ import asyncio
 import json
 from contextlib import contextmanager
 from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
+import os
 
 import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
-
-# Import the actual ToolConfig model for testing before any mocking
 from nexent.core.agents.agent_model import ToolConfig
 
-import os
+from backend.consts.model import (
+    AgentNameBatchCheckItem,
+    AgentNameBatchCheckRequest,
+    AgentNameBatchRegenerateItem,
+    AgentNameBatchRegenerateRequest,
+)
+
 
 # Patch environment variables before any imports that might use them
 os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
@@ -5630,6 +5635,260 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 
 
 # =====================================================================
+# Tests for batch agent name conflict and regeneration
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    existing_agents = [
+        {"agent_id": 10, "name": "dup_name", "display_name": "Dup Display"},
+        {"agent_id": 11, "name": "unique", "display_name": "Unique"},
+    ]
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: existing_agents,
+        raising=False,
+    )
+
+    from consts.model import AgentNameBatchCheckItem, AgentNameBatchCheckRequest
+
+    request = AgentNameBatchCheckRequest(
+        items=[
+            AgentNameBatchCheckItem(name="dup_name", display_name="Another"),
+            AgentNameBatchCheckItem(name="", display_name=None),
+        ]
+    )
+
+    result = await agent_service.check_agent_name_conflict_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result[0]["name_conflict"] is True
+    assert result[0]["display_name_conflict"] is False
+    assert result[0]["conflict_agents"] == [
+        {"name": "dup_name", "display_name": "Dup Display"}
+    ]
+    assert result[1]["name_conflict"] is False
+    assert result[1]["display_name_conflict"] is False
+    assert result[1]["conflict_agents"] == []
+
+
+@pytest.mark.asyncio
+async def test_check_agent_name_conflict_batch_impl_display_conflict(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    existing_agents = [
+        {"agent_id": 3, "name": "alpha", "display_name": "Shown"},
+    ]
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: existing_agents,
+        raising=False,
+    )
+
+    request = AgentNameBatchCheckRequest(
+        items=[AgentNameBatchCheckItem(name="beta", display_name="Shown")]
+    )
+
+    result = await agent_service.check_agent_name_conflict_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result[0]["name_conflict"] is False
+    assert result[0]["display_name_conflict"] is True
+    assert result[0]["conflict_agents"] == [
+        {"name": "alpha", "display_name": "Shown"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_check_agent_name_conflict_batch_impl_skips_same_agent(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    existing_agents = [
+        {"agent_id": 7, "name": "self", "display_name": "Self Display"},
+    ]
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: existing_agents,
+        raising=False,
+    )
+
+    request = AgentNameBatchCheckRequest(
+        items=[
+            AgentNameBatchCheckItem(
+                agent_id=7, name="self", display_name="Self Display"
+            )
+        ]
+    )
+
+    result = await agent_service.check_agent_name_conflict_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result[0]["name_conflict"] is False
+    assert result[0]["display_name_conflict"] is False
+    assert result[0]["conflict_agents"] == []
+
+
+@pytest.mark.asyncio
+async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: [{"agent_id": 2, "name": "dup_name", "display_name": "Dup"}],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.tenant_config_manager.get_model_config",
+        lambda key, tenant_id: {"model_id": "model-1", "display_name": "LLM"},
+        raising=False,
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service._regenerate_agent_name_with_llm",
+        lambda **kwargs: "regenerated_name",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._regenerate_agent_display_name_with_llm",
+        lambda **kwargs: "Regenerated Display",
+        raising=False,
+    )
+
+    
+
+    request = AgentNameBatchRegenerateRequest(
+        items=[
+            AgentNameBatchRegenerateItem(
+                agent_id=1,
+                name="dup_name",
+                display_name="Dup",
+                task_description="desc",
+            )
+        ]
+    )
+
+    result = await agent_service.regenerate_agent_name_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result == [{"name": "regenerated_name", "display_name": "Regenerated Display"}]
+
+
+@pytest.mark.asyncio
+async def test_regenerate_agent_name_batch_impl_no_model(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: [],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.tenant_config_manager.get_model_config",
+        lambda key, tenant_id: None,
+        raising=False,
+    )
+
+    from consts.model import AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
+
+    request = AgentNameBatchRegenerateRequest(
+        items=[AgentNameBatchRegenerateItem(agent_id=1, name="dup", display_name="Dup")]
+    )
+
+    with pytest.raises(ValueError):
+        await agent_service.regenerate_agent_name_batch_impl(
+            request, authorization="Bearer token"
+        )
+
+
+@pytest.mark.asyncio
+async def test_regenerate_agent_name_batch_impl_llm_failure_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.agent_service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    # existing agent ensures duplicate detection
+    monkeypatch.setattr(
+        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: [{"agent_id": 2, "name": "dup", "display_name": "Dup"}],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service.tenant_config_manager.get_model_config",
+        lambda key, tenant_id: {"model_id": "model-1", "display_name": "LLM"},
+        raising=False,
+    )
+
+    async def run_in_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", run_in_thread, raising=False)
+    monkeypatch.setattr(
+        "backend.services.agent_service._regenerate_agent_name_with_llm",
+        lambda **kwargs: (_ for _ in ()).throw(Exception("llm-fail")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._regenerate_agent_display_name_with_llm",
+        lambda **kwargs: (_ for _ in ()).throw(Exception("llm-fail")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._generate_unique_agent_name_with_suffix",
+        lambda base_value, **kwargs: f"{base_value}_fallback",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.services.agent_service._generate_unique_display_name_with_suffix",
+        lambda base_value, **kwargs: f"{base_value}_fallback",
+        raising=False,
+    )
+
+    request = AgentNameBatchRegenerateRequest(
+        items=[
+            AgentNameBatchRegenerateItem(
+                agent_id=1,
+                name="dup",
+                display_name="Dup",
+                task_description="desc",
+            )
+        ]
+    )
+
+    result = await agent_service.regenerate_agent_name_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result == [{"name": "dup_fallback", "display_name": "Dup_fallback"}]
+
+
+# =====================================================================
 # Tests for _resolve_model_with_fallback helper function
 # =====================================================================
 
@@ -6233,94 +6492,19 @@ async def test_get_agent_info_impl_with_unavailable_agent(
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._generate_unique_agent_name_with_suffix')
-@patch('backend.services.agent_service._regenerate_agent_name_with_llm')
-@patch('backend.services.agent_service._check_agent_name_duplicate')
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
 @patch('backend.services.agent_service._resolve_model_with_fallback')
-async def test_import_agent_by_agent_id_duplicate_name_with_llm_success(
+async def test_import_agent_by_agent_id_allows_duplicate_name_without_regen(
     mock_resolve_model,
-    mock_query_all_agents,
-    mock_check_name_dup,
-    mock_regen_name,
-    mock_generate_unique_name,
     mock_query_all_tools,
     mock_create_agent,
     mock_create_tool
 ):
-    """Test import_agent_by_agent_id when agent_name is duplicate and LLM regeneration succeeds (line 1043-1060)."""
-    # Setup
-    mock_query_all_tools.return_value = []
-    mock_resolve_model.side_effect = [1, 2]  # model_id=1, business_logic_model_id=2
-    mock_query_all_agents.return_value = [{"name": "duplicate_name", "display_name": "Display"}]
-    mock_check_name_dup.return_value = True  # Name is duplicate
-    mock_regen_name.return_value = "regenerated_name"
-    mock_create_agent.return_value = {"agent_id": 456}
-
-    agent_info = ExportAndImportAgentInfo(
-        agent_id=123,
-        name="duplicate_name",
-        display_name="Test Display",
-        description="Test",
-        business_description="Test business",
-        max_steps=5,
-        provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
-        enabled=True,
-        tools=[],
-        managed_agents=[],
-        model_id=1,
-        model_name="Model1",
-        business_logic_model_id=2,
-        business_logic_model_name="Model2"
-    )
-
-    # Execute
-    result = await import_agent_by_agent_id(
-        import_agent_info=agent_info,
-        tenant_id="test_tenant",
-        user_id="test_user",
-        skip_duplicate_regeneration=False
-    )
-
-    # Assert
-    assert result == 456
-    mock_check_name_dup.assert_called_once()
-    mock_regen_name.assert_called_once()
-    mock_create_agent.assert_called_once()
-    # Verify regenerated name was used
-    assert mock_create_agent.call_args[1]["agent_info"]["name"] == "regenerated_name"
-
-
-@pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._generate_unique_agent_name_with_suffix')
-@patch('backend.services.agent_service._regenerate_agent_name_with_llm')
-@patch('backend.services.agent_service._check_agent_name_duplicate')
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
-@patch('backend.services.agent_service._resolve_model_with_fallback')
-async def test_import_agent_by_agent_id_duplicate_name_llm_failure_fallback(
-    mock_resolve_model,
-    mock_query_all_agents,
-    mock_check_name_dup,
-    mock_regen_name,
-    mock_generate_unique_name,
-    mock_query_all_tools,
-    mock_create_agent,
-    mock_create_tool
-):
-    """Test import_agent_by_agent_id when agent_name is duplicate, LLM regeneration fails, uses fallback (line 1061-1067)."""
-    # Setup
+    """
+    New behavior: import_agent_by_agent_id no longer performs duplicate-name regeneration.
+    It should create the agent with the provided name/display_name even if duplicates exist.
+    """
     mock_query_all_tools.return_value = []
     mock_resolve_model.side_effect = [1, 2]
-    mock_query_all_agents.return_value = [{"name": "duplicate_name", "display_name": "Display"}]
-    mock_check_name_dup.return_value = True
-    mock_regen_name.side_effect = Exception("LLM failed")
-    mock_generate_unique_name.return_value = "fallback_name_1"
     mock_create_agent.return_value = {"agent_id": 456}
 
     agent_info = ExportAndImportAgentInfo(
@@ -6343,7 +6527,6 @@ async def test_import_agent_by_agent_id_duplicate_name_llm_failure_fallback(
         business_logic_model_name="Model2"
     )
 
-    # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=agent_info,
         tenant_id="test_tenant",
@@ -6351,41 +6534,78 @@ async def test_import_agent_by_agent_id_duplicate_name_llm_failure_fallback(
         skip_duplicate_regeneration=False
     )
 
-    # Assert
     assert result == 456
-    mock_regen_name.assert_called_once()
-    mock_generate_unique_name.assert_called_once()
     mock_create_agent.assert_called_once()
-    # Verify fallback name was used
-    assert mock_create_agent.call_args[1]["agent_info"]["name"] == "fallback_name_1"
+    assert mock_create_agent.call_args[1]["agent_info"]["name"] == "duplicate_name"
+    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "Test Display"
 
 
 @pytest.mark.asyncio
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._generate_unique_agent_name_with_suffix')
-@patch('backend.services.agent_service._regenerate_agent_name_with_llm')
-@patch('backend.services.agent_service._check_agent_name_duplicate')
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
 @patch('backend.services.agent_service._resolve_model_with_fallback')
-async def test_import_agent_by_agent_id_duplicate_name_no_model_fallback(
+async def test_import_agent_by_agent_id_duplicate_name_no_regen_fallback(
     mock_resolve_model,
-    mock_query_all_agents,
-    mock_check_name_dup,
-    mock_regen_name,
-    mock_generate_unique_name,
     mock_query_all_tools,
     mock_create_agent,
     mock_create_tool
 ):
-    """Test import_agent_by_agent_id when agent_name is duplicate but no model available, uses fallback (line 1068-1074)."""
-    # Setup
+    """
+    New behavior: even when duplicate name, import proceeds without regeneration or fallback.
+    """
     mock_query_all_tools.return_value = []
-    mock_resolve_model.side_effect = [None, None]  # No models available
-    mock_query_all_agents.return_value = [{"name": "duplicate_name", "display_name": "Display"}]
-    mock_check_name_dup.return_value = True
-    mock_generate_unique_name.return_value = "fallback_name_2"
+    mock_resolve_model.side_effect = [1, 2]
+    mock_create_agent.return_value = {"agent_id": 456}
+
+    agent_info = ExportAndImportAgentInfo(
+        agent_id=123,
+        name="duplicate_name",
+        display_name="Test Display",
+        description="Test",
+        business_description="Test business",
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="",
+        constraint_prompt="",
+        few_shots_prompt="",
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+        model_id=1,
+        model_name="Model1",
+        business_logic_model_id=2,
+        business_logic_model_name="Model2"
+    )
+
+    result = await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        skip_duplicate_regeneration=False
+    )
+
+    assert result == 456
+    mock_create_agent.assert_called_once()
+    assert mock_create_agent.call_args[1]["agent_info"]["name"] == "duplicate_name"
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.create_agent')
+@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service._resolve_model_with_fallback')
+async def test_import_agent_by_agent_id_duplicate_name_no_model_still_allows(
+    mock_resolve_model,
+    mock_query_all_tools,
+    mock_create_agent,
+    mock_create_tool
+):
+    """
+    New behavior: even without model, duplicate name passes through unchanged.
+    """
+    mock_query_all_tools.return_value = []
+    mock_resolve_model.side_effect = [None, None]
     mock_create_agent.return_value = {"agent_id": 456}
 
     agent_info = ExportAndImportAgentInfo(
@@ -6408,7 +6628,6 @@ async def test_import_agent_by_agent_id_duplicate_name_no_model_fallback(
         business_logic_model_name=None
     )
 
-    # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=agent_info,
         tenant_id="test_tenant",
@@ -6416,45 +6635,25 @@ async def test_import_agent_by_agent_id_duplicate_name_no_model_fallback(
         skip_duplicate_regeneration=False
     )
 
-    # Assert
     assert result == 456
-    mock_check_name_dup.assert_called_once()
-    mock_regen_name.assert_not_called()  # Should not call LLM when no model
-    mock_generate_unique_name.assert_called_once()
     mock_create_agent.assert_called_once()
-    # Verify fallback name was used
-    assert mock_create_agent.call_args[1]["agent_info"]["name"] == "fallback_name_2"
+    assert mock_create_agent.call_args[1]["agent_info"]["name"] == "duplicate_name"
 
 
 @pytest.mark.asyncio
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._generate_unique_display_name_with_suffix')
-@patch('backend.services.agent_service._regenerate_agent_display_name_with_llm')
-@patch('backend.services.agent_service._check_agent_display_name_duplicate')
-@patch('backend.services.agent_service._check_agent_name_duplicate')
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
 @patch('backend.services.agent_service._resolve_model_with_fallback')
-async def test_import_agent_by_agent_id_duplicate_display_name_with_llm_success(
+async def test_import_agent_by_agent_id_duplicate_display_name_allowed(
     mock_resolve_model,
-    mock_query_all_agents,
-    mock_check_name_dup,
-    mock_check_display_dup,
-    mock_regen_display,
-    mock_generate_unique_display,
     mock_query_all_tools,
     mock_create_agent,
     mock_create_tool
 ):
-    """Test import_agent_by_agent_id when agent_display_name is duplicate and LLM regeneration succeeds (line 1077-1092)."""
-    # Setup
+    """New behavior: duplicate display_name passes through without regeneration."""
     mock_query_all_tools.return_value = []
     mock_resolve_model.side_effect = [1, 2]
-    mock_query_all_agents.return_value = [{"name": "name1", "display_name": "duplicate_display"}]
-    mock_check_name_dup.return_value = False  # Name is not duplicate
-    mock_check_display_dup.return_value = True  # Display name is duplicate
-    mock_regen_display.return_value = "regenerated_display"
     mock_create_agent.return_value = {"agent_id": 456}
 
     agent_info = ExportAndImportAgentInfo(
@@ -6477,7 +6676,6 @@ async def test_import_agent_by_agent_id_duplicate_display_name_with_llm_success(
         business_logic_model_name="Model2"
     )
 
-    # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=agent_info,
         tenant_id="test_tenant",
@@ -6485,45 +6683,27 @@ async def test_import_agent_by_agent_id_duplicate_display_name_with_llm_success(
         skip_duplicate_regeneration=False
     )
 
-    # Assert
     assert result == 456
-    mock_check_display_dup.assert_called_once()
-    mock_regen_display.assert_called_once()
     mock_create_agent.assert_called_once()
-    # Verify regenerated display name was used
-    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "regenerated_display"
+    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "duplicate_display"
 
 
 @pytest.mark.asyncio
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._generate_unique_display_name_with_suffix')
-@patch('backend.services.agent_service._regenerate_agent_display_name_with_llm')
-@patch('backend.services.agent_service._check_agent_display_name_duplicate')
-@patch('backend.services.agent_service._check_agent_name_duplicate')
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
 @patch('backend.services.agent_service._resolve_model_with_fallback')
-async def test_import_agent_by_agent_id_duplicate_display_name_llm_failure_fallback(
+async def test_import_agent_by_agent_id_duplicate_display_name_no_llm_fallback(
     mock_resolve_model,
-    mock_query_all_agents,
-    mock_check_name_dup,
-    mock_check_display_dup,
-    mock_regen_display,
-    mock_generate_unique_display,
     mock_query_all_tools,
     mock_create_agent,
     mock_create_tool
 ):
-    """Test import_agent_by_agent_id when agent_display_name is duplicate, LLM regeneration fails, uses fallback (line 1093-1099)."""
-    # Setup
+    """
+    New behavior: duplicate display_name passes through without LLM; fallback not invoked.
+    """
     mock_query_all_tools.return_value = []
     mock_resolve_model.side_effect = [1, 2]
-    mock_query_all_agents.return_value = [{"name": "name1", "display_name": "duplicate_display"}]
-    mock_check_name_dup.return_value = False
-    mock_check_display_dup.return_value = True
-    mock_regen_display.side_effect = Exception("LLM failed")
-    mock_generate_unique_display.return_value = "fallback_display_1"
     mock_create_agent.return_value = {"agent_id": 456}
 
     agent_info = ExportAndImportAgentInfo(
@@ -6546,7 +6726,6 @@ async def test_import_agent_by_agent_id_duplicate_display_name_llm_failure_fallb
         business_logic_model_name="Model2"
     )
 
-    # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=agent_info,
         tenant_id="test_tenant",
@@ -6554,44 +6733,27 @@ async def test_import_agent_by_agent_id_duplicate_display_name_llm_failure_fallb
         skip_duplicate_regeneration=False
     )
 
-    # Assert
     assert result == 456
-    mock_regen_display.assert_called_once()
-    mock_generate_unique_display.assert_called_once()
     mock_create_agent.assert_called_once()
-    # Verify fallback display name was used
-    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "fallback_display_1"
+    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "duplicate_display"
 
 
 @pytest.mark.asyncio
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
 @patch('backend.services.agent_service.create_agent')
 @patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._generate_unique_display_name_with_suffix')
-@patch('backend.services.agent_service._regenerate_agent_display_name_with_llm')
-@patch('backend.services.agent_service._check_agent_display_name_duplicate')
-@patch('backend.services.agent_service._check_agent_name_duplicate')
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
 @patch('backend.services.agent_service._resolve_model_with_fallback')
-async def test_import_agent_by_agent_id_duplicate_display_name_no_model_fallback(
+async def test_import_agent_by_agent_id_duplicate_display_name_no_model_still_allowed(
     mock_resolve_model,
-    mock_query_all_agents,
-    mock_check_name_dup,
-    mock_check_display_dup,
-    mock_regen_display,
-    mock_generate_unique_display,
     mock_query_all_tools,
     mock_create_agent,
     mock_create_tool
 ):
-    """Test import_agent_by_agent_id when agent_display_name is duplicate but no model available, uses fallback (line 1100-1106)."""
-    # Setup
+    """
+    New behavior: even without model, duplicate display_name passes through unchanged.
+    """
     mock_query_all_tools.return_value = []
-    mock_resolve_model.side_effect = [None, None]  # No models available
-    mock_query_all_agents.return_value = [{"name": "name1", "display_name": "duplicate_display"}]
-    mock_check_name_dup.return_value = False
-    mock_check_display_dup.return_value = True
-    mock_generate_unique_display.return_value = "fallback_display_2"
+    mock_resolve_model.side_effect = [None, None]
     mock_create_agent.return_value = {"agent_id": 456}
 
     agent_info = ExportAndImportAgentInfo(
@@ -6614,7 +6776,6 @@ async def test_import_agent_by_agent_id_duplicate_display_name_no_model_fallback
         business_logic_model_name=None
     )
 
-    # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=agent_info,
         tenant_id="test_tenant",
@@ -6622,11 +6783,6 @@ async def test_import_agent_by_agent_id_duplicate_display_name_no_model_fallback
         skip_duplicate_regeneration=False
     )
 
-    # Assert
     assert result == 456
-    mock_check_display_dup.assert_called_once()
-    mock_regen_display.assert_not_called()  # Should not call LLM when no model
-    mock_generate_unique_display.assert_called_once()
     mock_create_agent.assert_called_once()
-    # Verify fallback display name was used
-    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "fallback_display_2"
+    assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "duplicate_display"
