@@ -33,7 +33,7 @@ Nexent预置了一组可以直接复用的本地工具。它们按照能力分�
 
 ### 🖼️ 多模态工具（Multimodal）
 
-- **analyze_text_file**：基于用户提问和文本文件的s3 url、http url、https url，解析文件并使用大语言模型理解文件，回答用户问题。需要在模型管理页面配置可用的大语言模型。
+- **analyze_document**：基于用户提问和文本文件的s3 url、http url、https url，解析文件并使用大语言模型理解文件，回答用户问题。需要在模型管理页面配置可用的大语言模型。
 - **analyze_image**：基于用户提问和图片的s3 url、http url、https url，使用视觉语言模型分析理解图像，回答用户问题。需要在模型管理页面配置可用的视觉语言模型。
 
 ### 🖥️ Terminal工具

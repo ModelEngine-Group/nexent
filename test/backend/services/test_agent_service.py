@@ -1823,7 +1823,7 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
             usage=None
         ),
         ToolConfig(
-            class_name="AnalyzeTextFileTool",
+            class_name="AnalyzeDocumentTool",
             name="Text Analyzer",
             source="source3",
             params={"param4": "value4"},
@@ -1882,8 +1882,8 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     assert knowledge_tool.metadata == {}
 
     analyze_text_tool = next(
-        tool for tool in result.tools if tool.class_name == "AnalyzeTextFileTool")
-    assert analyze_text_tool.metadata == {}
+        tool for tool in result.tools if tool.class_name == "AnalyzeDocumentTool")
+    assert analyze_text_tool.metadata == {'text': 'data'}
 
     analyze_image_tool = next(
         tool for tool in result.tools if tool.class_name == "AnalyzeImageTool")

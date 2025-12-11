@@ -403,10 +403,10 @@ class TestCreateToolConfigList:
             }
 
     @pytest.mark.asyncio
-    async def test_create_tool_config_list_with_analyze_text_file_tool(self):
-        """Ensure AnalyzeTextFileTool receives text-specific metadata."""
+    async def test_create_tool_config_list_with_analyze_document_tool(self):
+        """Ensure AnalyzeDocumentTool receives text-specific metadata."""
         mock_tool_instance = MagicMock()
-        mock_tool_instance.class_name = "AnalyzeTextFileTool"
+        mock_tool_instance.class_name = "AnalyzeDocumentTool"
         mock_tool_config.return_value = mock_tool_instance
 
         with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
@@ -416,8 +416,8 @@ class TestCreateToolConfigList:
 
             mock_search_tools.return_value = [
                 {
-                    "class_name": "AnalyzeTextFileTool",
-                    "name": "analyze_text_file",
+                    "class_name": "AnalyzeDocumentTool",
+                    "name": "analyze_document",
                     "description": "Analyze text file tool",
                     "inputs": "string",
                     "output_type": "array",

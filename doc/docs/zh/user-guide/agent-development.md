@@ -55,7 +55,7 @@
 
 > 💡 **小贴士**：
 > 1. 请选择 `knowledge_base_search` 工具，启用知识库的检索功能。
-> 2. 请选择 `analyze_text_file` 工具，启用文档类、文本类文件的解析功能。
+> 2. 请选择 `analyze_document` 工具，启用文档类、文本类文件的解析功能。
 > 3. 请选择 `analyze_image` 工具，启用图片类文件的解析功能。
 > 
 > 📚 想了解系统已经内置的所有本地工具能力？请参阅 [本地工具概览](./local-tools/index.md)。

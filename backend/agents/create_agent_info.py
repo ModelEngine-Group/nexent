@@ -242,7 +242,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
             }
-        elif tool_config.class_name == "AnalyzeTextFileTool":
+        elif tool_config.class_name == "AnalyzeDocumentTool":
             tool_config.metadata = {
                 "llm_model": get_llm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
