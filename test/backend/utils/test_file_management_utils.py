@@ -300,6 +300,123 @@ async def test_get_all_files_status_connect_error_and_non200(fmu, monkeypatch):
     assert out2 == {}
 
 
+@pytest.mark.asyncio
+async def test_get_all_files_status_no_tasks_returns_empty(fmu, monkeypatch):
+    fake_client = _FakeAsyncClient(_Resp(200, []))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+
+    out = await fmu.get_all_files_status("idx-empty")
+    assert out == {}
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_forward_updates_and_redis_progress(fmu, monkeypatch):
+    tasks_list = [
+        {
+            "id": "10",
+            "task_name": "process",
+            "index_name": "idx",
+            "path_or_url": "/p2",
+            "original_filename": "f2",
+            "source_type": "local",
+            "status": "SUCCESS",
+            "created_at": 1,
+        },
+        {
+            "id": "20",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p2",
+            "original_filename": "f2",
+            "source_type": "local",
+            "status": "STARTED",
+            "created_at": 5,  # later than process to trigger forward branch
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "FORWARDING"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    # Stub redis_service with progress info
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(
+        get_progress_info=lambda task_id: {"processed_chunks": 7, "total_chunks": 9}
+    )
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+    assert out["/p2"]["state"] == "FORWARDING"
+    assert out["/p2"]["latest_task_id"] == "20"
+    assert out["/p2"]["processed_chunks"] == 7
+    assert out["/p2"]["total_chunks"] == 9
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_redis_progress_exception(fmu, monkeypatch):
+    tasks_list = [
+        {
+            "id": "30",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p3",
+            "original_filename": "f3",
+            "source_type": "local",
+            "status": "STARTED",
+            "created_at": 2,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "FORWARDING"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    # Redis service raising exception to hit exception path
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    def _boom():
+        raise RuntimeError("redis down")
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(get_progress_info=lambda task_id: _boom())
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+    assert out["/p3"]["state"] == "FORWARDING"
+    assert out["/p3"]["processed_chunks"] is None
+    assert out["/p3"]["total_chunks"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_outer_exception_returns_empty(fmu, monkeypatch):
+    tasks_list = [
+        {
+            "id": "40",
+            "task_name": "process",
+            "index_name": "idx",
+            "path_or_url": "/p4",
+            "original_filename": "f4",
+            "source_type": "local",
+            "status": "SUCCESS",
+            "created_at": 1,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+
+    def _boom(*a, **k):
+        raise RuntimeError("convert failed")
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _boom)
+
+    out = await fmu.get_all_files_status("idx")
+    assert out == {}
+
+
 # -------------------- _convert_to_custom_state --------------------
 
 
@@ -378,4 +495,212 @@ def test_get_file_size_invalid_source_type(fmu):
     # Function catches NotImplementedError and returns 0
     assert fmu.get_file_size("http", "http://x") == 0
 
+
+# -------------------- Additional coverage for get_all_files_status --------------------
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_forward_created_at_not_greater(fmu, monkeypatch):
+    """Test forward task with created_at not greater than latest_forward_created_at (line 195)"""
+    tasks_list = [
+        {
+            "id": "20",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p5",
+            "original_filename": "f5",
+            "source_type": "local",
+            "status": "STARTED",
+            "created_at": 5,
+        },
+        {
+            "id": "21",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p5",
+            "original_filename": "f5",
+            "source_type": "local",
+            "status": "SUCCESS",
+            "created_at": 3,  # Less than previous forward task, should not update
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "FORWARDING"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    out = await fmu.get_all_files_status("idx")
+    # Should use the first forward task (id=20) as latest since it has higher created_at
+    assert out["/p5"]["latest_task_id"] == "20"
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_empty_task_id(fmu, monkeypatch):
+    """Test when task_id is empty string (line 221 - not entering if branch)"""
+    tasks_list = [
+        {
+            "id": "",  # Empty task_id
+            "task_name": "process",
+            "index_name": "idx",
+            "path_or_url": "/p6",
+            "original_filename": "f6",
+            "source_type": "local",
+            "status": "SUCCESS",
+            "created_at": 1,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "COMPLETED"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    # Stub redis_service to ensure it's not called
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    redis_called = {"called": False}
+    def _track_call(task_id):
+        redis_called["called"] = True
+        return {}
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(
+        get_progress_info=_track_call
+    )
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+    assert out["/p6"]["latest_task_id"] == ""
+    # Redis should not be called when task_id is empty
+    assert redis_called["called"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_redis_progress_info_none(fmu, monkeypatch):
+    """Test when progress_info is None (line 226, 237 - entering else branch)"""
+    tasks_list = [
+        {
+            "id": "50",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p7",
+            "original_filename": "f7",
+            "source_type": "local",
+            "status": "STARTED",
+            "created_at": 1,
+            "processed_chunks": 5,
+            "total_chunks": 10,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "FORWARDING"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    # Redis service returning None (line 226, 237)
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(
+        get_progress_info=lambda task_id: None  # Returns None to trigger else branch
+    )
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+    assert out["/p7"]["state"] == "FORWARDING"
+    assert out["/p7"]["latest_task_id"] == "50"
+    # Should use task state values when progress_info is None
+    assert out["/p7"]["processed_chunks"] == 5
+    assert out["/p7"]["total_chunks"] == 10
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_redis_processed_chunks_none(fmu, monkeypatch):
+    """Test when redis_processed is None (line 230 - not entering if branch)"""
+    tasks_list = [
+        {
+            "id": "60",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p8",
+            "original_filename": "f8",
+            "source_type": "local",
+            "status": "STARTED",
+            "created_at": 1,
+            "processed_chunks": 3,
+            "total_chunks": 8,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "FORWARDING"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    # Redis service returning progress_info with processed_chunks as None (line 230)
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(
+        get_progress_info=lambda task_id: {
+            "processed_chunks": None,  # None to skip line 230 if branch
+            "total_chunks": 15
+        }
+    )
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+    assert out["/p8"]["state"] == "FORWARDING"
+    # processed_chunks should remain from task state (3) since redis_processed is None
+    assert out["/p8"]["processed_chunks"] == 3
+    # total_chunks should be updated from Redis (15)
+    assert out["/p8"]["total_chunks"] == 15
+
+
+@pytest.mark.asyncio
+async def test_get_all_files_status_redis_total_chunks_none(fmu, monkeypatch):
+    """Test when redis_total is None (line 232 - not entering if branch)"""
+    tasks_list = [
+        {
+            "id": "70",
+            "task_name": "forward",
+            "index_name": "idx",
+            "path_or_url": "/p9",
+            "original_filename": "f9",
+            "source_type": "local",
+            "status": "STARTED",
+            "created_at": 1,
+            "processed_chunks": 4,
+            "total_chunks": 12,
+        },
+    ]
+    fake_client = _FakeAsyncClient(_Resp(200, tasks_list))
+    monkeypatch.setattr(fmu, "httpx", types.SimpleNamespace(AsyncClient=lambda: fake_client))
+    async def _fake_convert(*a, **k):
+        return "FORWARDING"
+    monkeypatch.setattr(fmu, "_convert_to_custom_state", _fake_convert)
+
+    # Redis service returning progress_info with total_chunks as None (line 232)
+    services_pkg = types.ModuleType("services")
+    services_pkg.__path__ = []
+    sys.modules["services"] = services_pkg
+    redis_mod = types.ModuleType("services.redis_service")
+    redis_mod.get_redis_service = lambda: types.SimpleNamespace(
+        get_progress_info=lambda task_id: {
+            "processed_chunks": 6,
+            "total_chunks": None  # None to skip line 232 if branch
+        }
+    )
+    sys.modules["services.redis_service"] = redis_mod
+
+    out = await fmu.get_all_files_status("idx")
+    assert out["/p9"]["state"] == "FORWARDING"
+    # processed_chunks should be updated from Redis (6)
+    assert out["/p9"]["processed_chunks"] == 6
+    # total_chunks should remain from task state (12) since redis_total is None
+    assert out["/p9"]["total_chunks"] == 12
 

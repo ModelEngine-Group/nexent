@@ -238,35 +238,49 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     try {
       const userConfig = await userConfigService.loadKnowledgeList();
       if (userConfig && userConfig.selectedKbNames.length > 0) {
-        // Find matching knowledge base IDs based on names
+        // Find matching knowledge base IDs based on index names
         const selectedIds = state.knowledgeBases
-          .filter(kb => userConfig.selectedKbNames.includes(kb.name))
-          .map(kb => kb.id);
+          .filter((kb) => userConfig.selectedKbNames.includes(kb.id))
+          .map((kb) => kb.id);
 
-        dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE, payload: selectedIds });
+        dispatch({
+          type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
+          payload: selectedIds,
+        });
       }
     } catch (error) {
-      log.error(t('knowledgeBase.error.loadSelected'), error);
-      dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: t('knowledgeBase.error.loadSelectedRetry') });
+      log.error(t("knowledgeBase.error.loadSelected"), error);
+      dispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
+        payload: t("knowledgeBase.error.loadSelectedRetry"),
+      });
     }
   }, [state.knowledgeBases]);
 
   // Save user selected knowledge bases to backend
   const saveUserSelectedKnowledgeBases = useCallback(async () => {
     try {
-      // Get selected knowledge base names
+      // Get selected knowledge base index names (globally unique identifiers)
       const selectedKbNames = state.knowledgeBases
-        .filter(kb => state.selectedIds.includes(kb.id))
-        .map(kb => kb.name);
+        .filter((kb) => state.selectedIds.includes(kb.id))
+        .map((kb) => kb.id);
 
-      const success = await userConfigService.updateKnowledgeList(selectedKbNames);
+      const success = await userConfigService.updateKnowledgeList(
+        selectedKbNames
+      );
       if (!success) {
-        dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: t('knowledgeBase.error.saveSelected') });
+        dispatch({
+          type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
+          payload: t("knowledgeBase.error.saveSelected"),
+        });
       }
       return success;
     } catch (error) {
-      log.error(t('knowledgeBase.error.saveSelected'), error);
-      dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: t('knowledgeBase.error.saveSelectedRetry') });
+      log.error(t("knowledgeBase.error.saveSelected"), error);
+      dispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
+        payload: t("knowledgeBase.error.saveSelectedRetry"),
+      });
       return false;
     }
   }, [state.knowledgeBases, state.selectedIds, t]);

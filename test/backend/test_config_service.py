@@ -431,5 +431,45 @@ class TestMainServiceModuleIntegration:
         assert version_logged, "Custom APP version should be logged"
 
 
+class TestTenantConfigService:
+    """Unit tests for tenant_config_service helpers"""
+
+    @patch('backend.services.tenant_config_service.get_selected_knowledge_list')
+    def test_build_knowledge_name_mapping_prefers_knowledge_name(self, mock_get_selected):
+        """Ensure knowledge_name is used as key when present."""
+        mock_get_selected.return_value = [
+            {"knowledge_name": "User Docs", "index_name": "index_user_docs"},
+            {"knowledge_name": "API Docs", "index_name": "index_api_docs"},
+        ]
+
+        from backend.services.tenant_config_service import build_knowledge_name_mapping
+
+        mapping = build_knowledge_name_mapping(tenant_id="t1", user_id="u1")
+
+        assert mapping == {
+            "User Docs": "index_user_docs",
+            "API Docs": "index_api_docs",
+        }
+        mock_get_selected.assert_called_once_with(tenant_id="t1", user_id="u1")
+
+    @patch('backend.services.tenant_config_service.get_selected_knowledge_list')
+    def test_build_knowledge_name_mapping_fallbacks_to_index_name(self, mock_get_selected):
+        """Fallback to index_name when knowledge_name is missing."""
+        mock_get_selected.return_value = [
+            {"index_name": "index_fallback_only"},
+            {"knowledge_name": None, "index_name": "index_none_name"},
+        ]
+
+        from backend.services.tenant_config_service import build_knowledge_name_mapping
+
+        mapping = build_knowledge_name_mapping(tenant_id="t2", user_id="u2")
+
+        assert mapping == {
+            "index_fallback_only": "index_fallback_only",
+            "index_none_name": "index_none_name",
+        }
+        mock_get_selected.assert_called_once_with(tenant_id="t2", user_id="u2")
+
+
 if __name__ == '__main__':
     pytest.main()
