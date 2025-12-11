@@ -258,7 +258,7 @@ export default function ToolConfigModal({
 
   // Handle tool testing - open test panel
   const handleTestTool = () => {
-    if (!tool) return;
+    if (!tool || !checkRequiredFields()) return;
     setTestPanelVisible(true);
   };
 
