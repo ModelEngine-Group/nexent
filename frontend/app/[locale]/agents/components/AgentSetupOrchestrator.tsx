@@ -2099,9 +2099,22 @@ export default function AgentSetupOrchestrator({
     <TooltipProvider>
       <div className="h-full relative px-2">
         {/* Three-column layout using Ant Design Grid */}
-        <Row gutter={[16, 16]} className="h-full">
+        <Row
+          gutter={[16, 16]}
+          className="h-full"
+          align="stretch"
+          style={{ minHeight: 0 }}
+        >
           {/* Left column: SubAgentPool */}
-          <Col xs={24} sm={24} md={24} lg={24} xl={8} className="flex flex-col" style={{ minHeight: '400px' }}>
+          <Col
+            xs={24}
+            sm={24}
+            md={24}
+            lg={24}
+            xl={8}
+            className="flex flex-col h-full"
+            style={{ height: "100%", minHeight: 0 }}
+          >
             <SubAgentPool
               onEditAgent={(agent) => handleEditAgent(agent, t)}
               onCreateNewAgent={() => confirmOrRun(handleCreateNewAgent)}
@@ -2125,7 +2138,15 @@ export default function AgentSetupOrchestrator({
           </Col>
 
           {/* Middle column: Agent capability configuration */}
-          <Col xs={24} sm={24} md={24} lg={24} xl={8} className="flex flex-col" style={{ minHeight: '400px' }}>
+          <Col
+            xs={24}
+            sm={24}
+            md={24}
+            lg={24}
+            xl={8}
+            className="flex flex-col h-full"
+            style={{ height: "100%", minHeight: 0 }}
+          >
             {/* Header: Configure Agent Capabilities */}
             <div className="flex justify-between items-center mb-2">
               <div className="flex items-center">
@@ -2209,7 +2230,15 @@ export default function AgentSetupOrchestrator({
           </Col>
 
           {/* Right column: System Prompt Display */}
-          <Col xs={24} sm={24} md={24} lg={24} xl={8} className="flex flex-col" style={{ minHeight: '400px' }}>
+          <Col
+            xs={24}
+            sm={24}
+            md={24}
+            lg={24}
+            xl={8}
+            className="flex flex-col h-full"
+            style={{ height: "100%", minHeight: "400px" }}
+          >
             <PromptManager
               onDebug={onDebug ? () => confirmOrRun(() => onDebug()) : () => {}}
               agentId={

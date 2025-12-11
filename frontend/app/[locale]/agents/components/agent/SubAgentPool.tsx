@@ -141,8 +141,8 @@ export default function SubAgentPool({
           }
         }
       `}</style>
-      <div className="flex flex-col h-full min-h-[300px] lg:min-h-0 overflow-hidden">
-        <div className="flex justify-between items-center mb-2">
+      <div className="flex flex-col h-full min-h-[300px] lg:min-h-0 max-h-full overflow-hidden">
+        <div className="flex justify-between items-center mb-2 flex-shrink-0">
           <div className="flex items-center">
             <div className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500 text-white text-sm font-medium mr-2">
               1
@@ -159,7 +159,10 @@ export default function SubAgentPool({
             )}
           </div>
         </div>
-        <ScrollArea className="flex-1 min-h-0 border-t pt-2 pb-2">
+        <ScrollArea
+          className="flex-1 min-h-0 max-h-full h-full border-t pt-2 pb-2"
+          style={{ height: "100%" }}
+        >
           <div className="flex flex-col pr-2">
             {/* Function operation block */}
             <div className="mb-4">
