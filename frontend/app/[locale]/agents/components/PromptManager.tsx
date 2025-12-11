@@ -227,7 +227,6 @@ export interface PromptManagerProps {
   onGenerateAgent?: (model: ModelOption) => void;
   onSaveAgent?: () => void;
   onDebug?: () => void;
-  onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   onDeleteSuccess?: () => void;
   getButtonTitle?: () => string;
@@ -273,7 +272,6 @@ export default function PromptManager({
   onGenerateAgent,
   onSaveAgent,
   onDebug,
-  onExportAgent,
   onDeleteAgent,
   onDeleteSuccess,
   getButtonTitle,
@@ -688,7 +686,6 @@ export default function PromptManager({
             onExpandCard={handleExpandCard}
             isGeneratingAgent={isGeneratingAgent}
             onDebug={onDebug}
-            onExportAgent={onExportAgent}
             onDeleteAgent={onDeleteAgent}
             onDeleteSuccess={onDeleteSuccess}
             onSaveAgent={onSaveAgent}

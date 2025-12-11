@@ -45,7 +45,6 @@ export interface AgentConfigModalProps {
   isGeneratingAgent?: boolean;
   // Add new props for action buttons
   onDebug?: () => void;
-  onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   onDeleteSuccess?: () => void; // New prop for handling delete success
   onSaveAgent?: () => void;
@@ -80,7 +79,6 @@ export default function AgentConfigModal({
   isGeneratingAgent = false,
   // Add new props for action buttons
   onDebug,
-  onExportAgent,
   onDeleteAgent,
   onDeleteSuccess,
   onSaveAgent,
@@ -471,11 +469,6 @@ export default function AgentConfigModal({
     // The actual success/failure will be handled by the parent component
     onDeleteSuccess?.();
   }, [onDeleteAgent, onDeleteSuccess]);
-
-  // Handle delete button click
-  const handleDeleteClick = useCallback(() => {
-    setIsDeleteModalVisible(true);
-  }, []);
 
   // Optimized click handlers using useCallback
   const handleSegmentClick = useCallback((segment: string) => {

@@ -1574,7 +1574,6 @@ export default function AgentSetupOrchestrator({
   const runAgentImport = useCallback(
     async (
       agentPayload: any,
-      translationFn: TFunction,
       options?: { forceImport?: boolean }
     ) => {
       setIsImporting(true);
@@ -1708,7 +1707,7 @@ export default function AgentSetupOrchestrator({
             agentInfo,
           });
         } else {
-          await runAgentImport(agentInfo, t);
+          await runAgentImport(agentInfo);
         }
       } catch (error) {
         log.error(t("agentConfig.agents.importFailed"), error);
@@ -1731,7 +1730,7 @@ export default function AgentSetupOrchestrator({
       return;
     }
     setImportingAction("regenerate");
-    const success = await runAgentImport(pendingImportData.agentInfo, t);
+    const success = await runAgentImport(pendingImportData.agentInfo);
     if (success) {
       setPendingImportData(null);
     }
@@ -1743,7 +1742,7 @@ export default function AgentSetupOrchestrator({
       return;
     }
     setImportingAction("force");
-    const success = await runAgentImport(pendingImportData.agentInfo, t, {
+    const success = await runAgentImport(pendingImportData.agentInfo, {
       forceImport: true,
     });
     if (success) {
@@ -2116,7 +2115,6 @@ export default function AgentSetupOrchestrator({
               isCreatingNewAgent={isCreatingNewAgent}
               canSaveAgent={localCanSaveAgent}
               getButtonTitle={getLocalButtonTitle}
-              onExportAgent={onExportAgent || (() => {})}
               onDeleteAgent={onDeleteAgent || (() => {})}
               onDeleteSuccess={handleExitEdit}
               editingAgent={editingAgentFromParent || editingAgent}
