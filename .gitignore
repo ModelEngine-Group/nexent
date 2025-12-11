@@ -20,6 +20,7 @@ docker/openssh-server
 docker/volumes/db/data
 docker/.env
 docker/.run
+docker/deploy.options
 
 frontend_standalone/
 .pnpm-store/

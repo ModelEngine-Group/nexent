@@ -26,6 +26,7 @@ import {
 } from "@/types/agentConfig";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import log from "@/lib/logger";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAuth } from "@/hooks/useAuth";
 
 import SubAgentPool from "./agent/SubAgentPool";
@@ -154,7 +155,9 @@ export default function AgentSetupOrchestrator({
         detailReasons.length > 0 ? detailReasons : fallbackReasons;
 
       const normalizedAvailability =
-        typeof detail?.is_available === "boolean"
+        normalizedReasons.length > 0
+          ? false
+          : typeof detail?.is_available === "boolean"
           ? detail.is_available
           : typeof fallback?.is_available === "boolean"
           ? fallback.is_available
@@ -200,6 +203,7 @@ export default function AgentSetupOrchestrator({
 
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
 
   // Common refresh agent list function, moved to the front to avoid hoisting issues
   const refreshAgentList = async (t: TFunction, clearTools: boolean = true) => {
@@ -1871,6 +1875,138 @@ export default function AgentSetupOrchestrator({
     }
   };
 
+  // Handle copy agent from list
+  const handleCopyAgentFromList = async (agent: Agent) => {
+    try {
+      // Fetch source agent detail before duplicating
+      const detailResult = await searchAgentInfo(Number(agent.id));
+      if (!detailResult.success || !detailResult.data) {
+        message.error(detailResult.message);
+        return;
+      }
+      const detail = detailResult.data;
+
+      // Prepare copy names
+      const copyName = `${detail.name || "agent"}_copy`;
+      const copyDisplayName = `${
+        detail.display_name || t("agentConfig.agents.defaultDisplayName")
+      }${t("agent.copySuffix")}`;
+
+      // Gather tool and sub-agent identifiers from the source agent
+      const tools = Array.isArray(detail.tools) ? detail.tools : [];
+      const unavailableTools = tools.filter(
+        (tool: any) => tool && tool.is_available === false
+      );
+      const unavailableToolNames = unavailableTools
+        .map(
+          (tool: any) =>
+            tool?.display_name || tool?.name || tool?.tool_name || ""
+        )
+        .filter((name: string) => Boolean(name));
+
+      const enabledToolIds = tools
+        .filter((tool: any) => tool && tool.is_available !== false)
+        .map((tool: any) => Number(tool.id))
+        .filter((id: number) => Number.isFinite(id));
+      const subAgentIds = (Array.isArray(detail.sub_agent_id_list)
+        ? detail.sub_agent_id_list
+        : []
+      )
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
+      // Create a new agent using the source agent fields
+      const createResult = await updateAgent(
+        undefined,
+        copyName,
+        detail.description,
+        detail.model,
+        detail.max_step,
+        detail.provide_run_summary,
+        detail.enabled,
+        detail.business_description,
+        detail.duty_prompt,
+        detail.constraint_prompt,
+        detail.few_shots_prompt,
+        copyDisplayName,
+        detail.model_id ?? undefined,
+        detail.business_logic_model_name ?? undefined,
+        detail.business_logic_model_id ?? undefined,
+        enabledToolIds,
+        subAgentIds
+      );
+      if (!createResult.success || !createResult.data?.agent_id) {
+        message.error(
+          createResult.message ||
+            t("agentConfig.agents.copyFailed")
+        );
+        return;
+      }
+      const newAgentId = Number(createResult.data.agent_id);
+      const copiedAgentFallback: Agent = {
+        ...detail,
+        id: String(newAgentId),
+        name: copyName,
+        display_name: copyDisplayName,
+        sub_agent_id_list: subAgentIds,
+      };
+
+      // Copy tool configuration to the new agent
+      for (const tool of tools) {
+        if (!tool || tool.is_available === false) {
+          continue;
+        }
+        const params =
+          tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
+            acc[param.name] = param.value;
+            return acc;
+          }, {}) || {};
+        try {
+          await updateToolConfig(Number(tool.id), newAgentId, params, true);
+        } catch (error) {
+          log.error("Failed to copy tool configuration while duplicating agent:", error);
+          message.error(
+            t("agentConfig.agents.copyFailed")
+          );
+          return;
+        }
+      }
+
+      // Refresh UI state and notify user about copy result
+      await refreshAgentList(t, false);
+      message.success(t("agentConfig.agents.copySuccess"));
+      if (unavailableTools.length > 0) {
+        const names =
+          unavailableToolNames.join(", ") ||
+          unavailableTools
+            .map((tool: any) => Number(tool?.id))
+            .filter((id: number) => !Number.isNaN(id))
+            .join(", ");
+        message.warning(
+          t("agentConfig.agents.copyUnavailableTools", {
+            count: unavailableTools.length,
+            names,
+          })
+        );
+      }
+      // Auto select the newly copied agent for editing
+      await handleEditAgent(copiedAgentFallback, t);
+    } catch (error) {
+      log.error("Failed to copy agent:", error);
+      message.error(t("agentConfig.agents.copyFailed"));
+    }
+  };
+
+  const handleCopyAgentWithConfirm = (agent: Agent) => {
+    confirm({
+      title: t("agentConfig.agents.copyConfirmTitle"),
+      content: t("agentConfig.agents.copyConfirmContent", {
+        name: agent?.display_name || agent?.name || "",
+      }),
+      onConfirm: () => handleCopyAgentFromList(agent),
+    });
+  };
+
   // Handle delete agent from list
   const handleDeleteAgentFromList = (agent: Agent) => {
     setAgentToDelete(agent);
@@ -1990,6 +2126,7 @@ export default function AgentSetupOrchestrator({
               isGeneratingAgent={isGeneratingAgent}
               editingAgent={editingAgent}
               isCreatingNewAgent={isCreatingNewAgent}
+              onCopyAgent={handleCopyAgentWithConfirm}
               onExportAgent={handleExportAgentFromList}
               onDeleteAgent={handleDeleteAgentFromList}
               unsavedAgentId={

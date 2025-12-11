@@ -149,56 +149,54 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({
     if (memory.addingMemoryKey !== groupKey) return null;
 
     return (
-      <List.Item className="border-b border-gray-100">
-        <div className="flex items-center w-full gap-3 mb-4">
-          <Input.TextArea
-            value={memory.newMemoryContent}
-            onChange={(e) => memory.setNewMemoryContent(e.target.value)}
-            placeholder={t("memoryManageModal.inputPlaceholder")}
-            maxLength={500}
-            showCount
-            onPressEnter={memory.confirmAddingMemory}
-            disabled={memory.isAddingMemory}
-            className="flex-1"
-            autoSize={{ minRows: 2, maxRows: 5 }}
-          />
-          <Button
-            type="primary"
-            variant="outlined"
-            size="small"
-            shape="circle"
-            color="red"
-            className={memory.isAddingMemory ? "" : "hover:!bg-red-50"}
-            icon={<X className={"size-4"} />}
-            onClick={memory.cancelAddingMemory}
-            disabled={memory.isAddingMemory}
-            style={{
-              border: "none",
-              backgroundColor: "transparent",
-              boxShadow: "none",
-            }}
-          />
-          <Button
-            type="primary"
-            variant="outlined"
-            size="small"
-            shape="circle"
-            color="green"
-            className={
-              !memory.newMemoryContent.trim() ? "" : "hover:!bg-green-50"
-            }
-            icon={<Check className={"size-4"} />}
-            onClick={memory.confirmAddingMemory}
-            loading={memory.isAddingMemory}
-            disabled={!memory.newMemoryContent.trim()}
-            style={{
-              border: "none",
-              backgroundColor: "transparent",
-              boxShadow: "none",
-            }}
-          />
-        </div>
-      </List.Item>
+      <div className="flex items-center w-full gap-3 mb-4">
+        <Input.TextArea
+          value={memory.newMemoryContent}
+          onChange={(e) => memory.setNewMemoryContent(e.target.value)}
+          placeholder={t("memoryManageModal.inputPlaceholder")}
+          maxLength={500}
+          showCount
+          onPressEnter={memory.confirmAddingMemory}
+          disabled={memory.isAddingMemory}
+          className="flex-1"
+          autoSize={{ minRows: 2, maxRows: 5 }}
+        />
+        <Button
+          type="primary"
+          variant="outlined"
+          size="small"
+          shape="circle"
+          color="red"
+          className={memory.isAddingMemory ? "" : "hover:!bg-red-50"}
+          icon={<X className={"size-4"} />}
+          onClick={memory.cancelAddingMemory}
+          disabled={memory.isAddingMemory}
+          style={{
+            border: "none",
+            backgroundColor: "transparent",
+            boxShadow: "none",
+          }}
+        />
+        <Button
+          type="primary"
+          variant="outlined"
+          size="small"
+          shape="circle"
+          color="green"
+          className={
+            !memory.newMemoryContent.trim() ? "" : "hover:!bg-green-50"
+          }
+          icon={<Check className={"size-4"} />}
+          onClick={memory.confirmAddingMemory}
+          loading={memory.isAddingMemory}
+          disabled={!memory.newMemoryContent.trim()}
+          style={{
+            border: "none",
+            backgroundColor: "transparent",
+            boxShadow: "none",
+          }}
+        />
+      </div>
     );
   };
 
@@ -263,7 +261,9 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({
                     shape="round"
                     color="green"
                     title={t("memoryManageModal.addMemory")}
-                    onClick={() => memory.startAddingMemory(g.key)}
+                    onClick={() => {
+                      memory.startAddingMemory(g.key);
+                    }}
                     icon={<MessageSquarePlus className="size-4" />}
                     className="hover:!bg-green-50"
                     style={{
@@ -303,41 +303,46 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({
                   </p>
                 </div>
               ) : (
-                <List
-                  className="memory-modal-list"
-                  dataSource={g.items}
-                  style={{
-                    maxHeight: "35vh",
-                    overflowY: "auto",
-                    scrollbarGutter: "stable",
-                  }}
-                  size="small"
-                  locale={{ emptyText: renderEmptyState(g.key) }}
-                  renderItem={(item) => (
-                    <List.Item
-                      actions={[
-                        <Button
-                          key="delete"
-                          type="text"
-                          size="small"
-                          title={t("memoryManageModal.deleteMemory")}
-                          danger
-                          style={{ background: "transparent" }}
-                          icon={<Eraser className="size-4" />}
-                          onClick={() =>
-                            memory.handleDeleteMemory(item.id, g.key)
-                          }
-                        />,
-                      ]}
-                    >
-                      <div className="flex flex-col text-sm pl-2">
-                        {item.memory}
-                      </div>
-                    </List.Item>
+                <div>
+                  {memory.addingMemoryKey === g.key && (
+                    <div className="border border-gray-200 rounded-md p-3 mb-3 bg-blue-50">
+                      {renderAddMemoryInput(g.key)}
+                    </div>
                   )}
-                >
-                  {renderAddMemoryInput(g.key)}
-                </List>
+                  <List
+                    className="memory-modal-list"
+                    dataSource={g.items}
+                    style={{
+                      maxHeight: memory.addingMemoryKey === g.key ? "calc(35vh - 80px)" : "35vh",
+                      overflowY: "auto",
+                      scrollbarGutter: "stable",
+                    }}
+                    size="small"
+                    locale={{ emptyText: renderEmptyState(g.key) }}
+                    renderItem={(item) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="delete"
+                            type="text"
+                            size="small"
+                            title={t("memoryManageModal.deleteMemory")}
+                            danger
+                            style={{ background: "transparent" }}
+                            icon={<Eraser className="size-4" />}
+                            onClick={() =>
+                              memory.handleDeleteMemory(item.id, g.key)
+                            }
+                          />,
+                        ]}
+                      >
+                        <div className="flex flex-col text-sm pl-2">
+                          {item.memory}
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                </div>
               )}
             </div>
           ))}
@@ -435,42 +440,47 @@ const MemoryManageModal: React.FC<MemoryManageModalProps> = ({
               ),
               collapsible: disabled ? "disabled" : undefined,
               children: (
-                <List
-                  className="memory-modal-list"
-                  dataSource={g.items}
-                  style={{
-                    maxHeight: "35vh",
-                    overflowY: "auto",
-                    scrollbarGutter: "stable",
-                  }}
-                  size="small"
-                  locale={{ emptyText: renderEmptyState(g.key) }}
-                  renderItem={(item) => (
-                    <List.Item
-                      actions={[
-                        <Button
-                          key="delete"
-                          type="text"
-                          size="small"
-                          title={t("memoryManageModal.deleteMemory")}
-                          danger
-                          style={{ background: "transparent" }}
-                          icon={<Eraser className="size-4" />}
-                          disabled={disabled}
-                          onClick={() =>
-                            memory.handleDeleteMemory(item.id, g.key)
-                          }
-                        />,
-                      ]}
-                    >
-                      <div className="flex flex-col text-sm pl-2">
-                        {item.memory}
-                      </div>
-                    </List.Item>
+                <div>
+                  {memory.addingMemoryKey === g.key && (
+                    <div className="border border-gray-200 rounded-md p-3 mb-3 bg-blue-50">
+                      {renderAddMemoryInput(g.key)}
+                    </div>
                   )}
-                >
-                  {renderAddMemoryInput(g.key)}
-                </List>
+                  <List
+                    className="memory-modal-list"
+                    dataSource={g.items}
+                    style={{
+                      maxHeight: memory.addingMemoryKey === g.key ? "calc(35vh - 80px)" : "35vh",
+                      overflowY: "auto",
+                      scrollbarGutter: "stable",
+                    }}
+                    size="small"
+                    locale={{ emptyText: renderEmptyState(g.key) }}
+                    renderItem={(item) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="delete"
+                            type="text"
+                            size="small"
+                            title={t("memoryManageModal.deleteMemory")}
+                            danger
+                            style={{ background: "transparent" }}
+                            icon={<Eraser className="size-4" />}
+                            disabled={disabled}
+                            onClick={() =>
+                              memory.handleDeleteMemory(item.id, g.key)
+                            }
+                          />,
+                        ]}
+                      >
+                        <div className="flex flex-col text-sm pl-2">
+                          {item.memory}
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                </div>
               ),
               showArrow: true,
               className: "memory-modal-panel",
