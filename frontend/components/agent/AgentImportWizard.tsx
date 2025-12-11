@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Modal, Steps, Button, Select, Input, Form, Tag, Space, Spin, App, Collapse, Radio } from "antd";
 import { DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -136,6 +136,17 @@ export default function AgentImportWizard({
   }>>({});
   const [checkingName, setCheckingName] = useState(false);
   const [regeneratingAll, setRegeneratingAll] = useState(false);
+  // Track which agents have been successfully renamed (no conflicts)
+  const [successfullyRenamedAgents, setSuccessfullyRenamedAgents] = useState<Set<string>>(new Set());
+  // Debounce timer for manual name changes - use ref to avoid stale closures
+  const nameCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Store latest agentNameConflicts in ref to avoid stale closures in timer callbacks
+  const agentNameConflictsRef = useRef<Record<string, {
+    hasConflict: boolean;
+    conflictAgents: Array<{ name?: string; display_name?: string }>;
+    renamedName: string;
+    renamedDisplayName: string;
+  }>>({});
 
   // Helper: Refresh tools and agents after MCP changes
   const refreshToolsAndAgents = async () => {
@@ -169,6 +180,15 @@ export default function AgentImportWizard({
       checkNameConflict();
     }
   }, [visible, initialData]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (nameCheckTimerRef.current) {
+        clearTimeout(nameCheckTimerRef.current);
+      }
+    };
+  }, []);
 
   // Parse agent data for config fields and MCP servers
   useEffect(() => {
@@ -223,6 +243,7 @@ export default function AgentImportWizard({
       if (!result.success || !Array.isArray(result.data)) {
         log.warn("Skip name conflict check due to fetch failure");
         setAgentNameConflicts({});
+        agentNameConflictsRef.current = {};
         setCheckingName(false);
         return;
       }
@@ -243,8 +264,9 @@ export default function AgentImportWizard({
           return acc;
         }, []);
 
+        const hasConflict = hasNameConflict || hasDisplayNameConflict;
         conflicts[agentKey] = {
-          hasConflict: hasNameConflict || hasDisplayNameConflict,
+          hasConflict,
           conflictAgents,
           renamedName: item.name,
           renamedDisplayName: item.display_name || "",
@@ -252,10 +274,93 @@ export default function AgentImportWizard({
       });
 
       setAgentNameConflicts(conflicts);
+      
+      // Update successfully renamed agents based on initial check
+      // Only add to successfullyRenamedAgents if there was a conflict that was resolved
+      // For initial check, we don't add anything since no renaming has happened yet
+      setSuccessfullyRenamedAgents((prev) => {
+        const next = new Set(prev);
+        // Don't modify on initial check - only track agents that were successfully renamed
+        return next;
+      });
     } catch (error) {
       log.error("Failed to check name conflicts:", error);
     } finally {
       setCheckingName(false);
+    }
+  };
+
+  // Check name conflict for a specific agent after renaming
+  const checkSingleAgentConflict = async (agentKey: string, name: string, displayName?: string) => {
+    if (!initialData?.agent_info) return;
+
+    try {
+      const result = await checkAgentNameConflictBatch({
+        items: [
+          {
+            name,
+            display_name: displayName,
+          },
+        ],
+      });
+
+      if (!result.success || !Array.isArray(result.data) || !result.data[0]) {
+        return;
+      }
+
+      const checkResult = result.data[0];
+      const hasNameConflict = checkResult?.name_conflict || false;
+      const hasDisplayNameConflict = checkResult?.display_name_conflict || false;
+      const hasConflict = hasNameConflict || hasDisplayNameConflict;
+      const conflictAgentsRaw = Array.isArray(checkResult?.conflict_agents) ? checkResult.conflict_agents : [];
+      
+      // Deduplicate by name/display_name
+      const seen = new Set<string>();
+      const conflictAgents = conflictAgentsRaw.reduce((acc: Array<{ name?: string; display_name?: string }>, curr: any) => {
+        const key = `${curr?.name || ""}||${curr?.display_name || ""}`;
+        if (seen.has(key)) return acc;
+        seen.add(key);
+        acc.push({ name: curr?.name, display_name: curr?.display_name });
+        return acc;
+      }, []);
+
+      setAgentNameConflicts((prev) => {
+        const next = { ...prev };
+        if (!next[agentKey]) {
+          const agentInfo = initialData.agent_info[agentKey] as any;
+          next[agentKey] = {
+            hasConflict: false,
+            conflictAgents: [],
+            renamedName: agentInfo?.name || "",
+            renamedDisplayName: agentInfo?.display_name || "",
+          };
+        }
+        next[agentKey] = {
+          ...next[agentKey],
+          hasConflict,
+          conflictAgents,
+          renamedName: name,
+          renamedDisplayName: displayName || "",
+        };
+        agentNameConflictsRef.current = next;
+        return next;
+      });
+
+      // Update success status
+      setSuccessfullyRenamedAgents((prev) => {
+        const next = new Set(prev);
+        if (hasConflict) {
+          next.delete(agentKey);
+        } else {
+          next.add(agentKey);
+        }
+        return next;
+      });
+
+      return hasConflict;
+    } catch (error) {
+      log.error("Failed to check single agent conflict:", error);
+      return true; // Assume conflict on error to be safe
     }
   };
 
@@ -292,6 +397,7 @@ export default function AgentImportWizard({
 
       const regenerated = result.data as Array<{ name?: string; display_name?: string }>;
 
+      // Update conflicts state with regenerated names
       setAgentNameConflicts((prev) => {
         const next = { ...prev };
         agentsWithConflicts.forEach(([agentKey, conflict], idx) => {
@@ -304,10 +410,26 @@ export default function AgentImportWizard({
               data.display_name || conflict.renamedDisplayName || agentInfo?.display_name || "",
           };
         });
+        agentNameConflictsRef.current = next;
         return next;
       });
 
-      message.success(t("market.install.success.nameRegenerated", "Agent name regenerated successfully"));
+      // Re-check conflicts for all regenerated agents
+      const checkPromises = agentsWithConflicts.map(async ([agentKey, conflict], idx) => {
+        const data = regenerated[idx] || {};
+        const newName = data.name || conflict.renamedName || "";
+        const newDisplayName = data.display_name || conflict.renamedDisplayName || "";
+        return checkSingleAgentConflict(agentKey, newName, newDisplayName);
+      });
+
+      const checkResults = await Promise.all(checkPromises);
+      const allResolved = checkResults.every((hasConflict) => !hasConflict);
+
+      if (allResolved) {
+        message.success(t("market.install.success.nameRegeneratedAndResolved", "Agent names regenerated successfully and all conflicts resolved"));
+      } else {
+        message.success(t("market.install.success.nameRegenerated", "Agent name regenerated successfully"));
+      }
     } catch (error) {
       log.error("Failed to regenerate agent names:", error);
       message.error(t("market.install.error.nameRegenerationFailed", "Failed to regenerate name"));
@@ -691,16 +813,23 @@ export default function AgentImportWizard({
     setMcpServers([]);
     setIsImporting(false);
     setAgentNameConflicts({});
+    agentNameConflictsRef.current = {};
     setCheckingName(false);
     setRegeneratingAll(false);
+    setSuccessfullyRenamedAgents(new Set());
+    if (nameCheckTimerRef.current) {
+      clearTimeout(nameCheckTimerRef.current);
+      nameCheckTimerRef.current = null;
+    }
     onCancel();
   };
 
   // Filter only required steps for navigation
-  // Only show rename step if name conflict check is complete and there is at least one conflict
-  const hasAnyConflict = !checkingName && Object.values(agentNameConflicts).some(conflict => conflict.hasConflict);
+  // Show rename step if name conflict check is complete and there are any agents that had conflicts
+  // (even if all conflicts are now resolved, we still want to show the step so users can see the success state)
+  const hasAnyAgentsWithConflicts = !checkingName && Object.keys(agentNameConflicts).length > 0;
   const steps = [
-    hasAnyConflict && {
+    hasAnyAgentsWithConflicts && {
       key: "rename",
       title: t("market.install.step.rename", "Rename Agent"),
     },
@@ -771,9 +900,17 @@ export default function AgentImportWizard({
     const currentStepKey = steps[currentStep]?.key;
 
     if (currentStepKey === "rename") {
-      // Get all agents with conflicts
-      const agentsWithConflicts = Object.entries(agentNameConflicts)
-        .filter(([_, conflict]) => conflict.hasConflict)
+      // Get all agents that had conflicts (including resolved ones)
+      // Show all agents in agentNameConflicts - they either have conflicts or were successfully renamed
+      const allAgentsWithConflicts = Object.entries(agentNameConflicts)
+        .filter(([agentKey, conflict]) => {
+          // Show agent if:
+          // 1. It currently has a conflict, OR
+          // 2. It was successfully renamed (in successfullyRenamedAgents), OR
+          // 3. It's in agentNameConflicts (meaning it was checked and had a conflict at some point)
+          // We show all agents in agentNameConflicts to keep the UI consistent
+          return true; // Show all agents that were checked
+        })
         .sort(([keyA], [keyB]) => {
           // Main agent first
           const mainAgentId = String(initialData?.agent_id);
@@ -782,34 +919,67 @@ export default function AgentImportWizard({
           return 0;
         });
 
-      if (agentsWithConflicts.length === 0) {
+      // Get agents that still have conflicts
+      const agentsWithConflicts = allAgentsWithConflicts.filter(
+        ([agentKey, conflict]) => conflict.hasConflict
+      );
+
+      // If no agents had conflicts at all, don't show rename step
+      if (allAgentsWithConflicts.length === 0) {
         return null;
       }
 
+      // Check if all conflicts are resolved
+      const allConflictsResolved = agentsWithConflicts.length === 0 && allAgentsWithConflicts.length > 0;
+      const hasResolvedAgents = allAgentsWithConflicts.some(
+        ([agentKey]) => successfullyRenamedAgents.has(agentKey)
+      );
+
       return (
         <div className="space-y-6">
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-2">
-            <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
-              {t("market.install.rename.warning", "The agent name or display name conflicts with existing agents. Please rename to proceed.")}
-            </p>
-            <p className="text-xs text-yellow-800 dark:text-yellow-200">
-              {t("market.install.rename.oneClickDesc", "You can manually edit the names, or click one-click rename to let the selected model regenerate names for all conflicted agents.")}
-            </p>
-            <p className="text-xs text-yellow-800 dark:text-yellow-200">
-              {t("market.install.rename.note", "Note: If you proceed without renaming, the agent will be created but marked as unavailable due to name conflicts. You can rename it later in the agent list.")}
-            </p>
-            <Button
-              type="primary"
-              onClick={handleRegenerateAll}
-              loading={regeneratingAll}
-              disabled={regeneratingAll}
-            >
-              {t("market.install.rename.oneClick", "One-click Rename")}
-            </Button>
-          </div>
+          {allConflictsResolved ? (
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-lg" />
+                <p className="text-sm font-semibold text-green-800 dark:text-green-200">
+                  {t("market.install.rename.success", "All agent name conflicts have been resolved. You can proceed to the next step.")}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-2">
+              {hasResolvedAgents && (
+                <div className="mb-2 pb-2 border-b border-yellow-300 dark:border-yellow-700">
+                  <div className="flex items-center gap-2">
+                    <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-sm" />
+                    <p className="text-xs text-green-700 dark:text-green-300">
+                      {t("market.install.rename.partialSuccess", "Some agents have been successfully renamed.")}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+                {t("market.install.rename.warning", "The agent name or display name conflicts with existing agents. Please rename to proceed.")}
+              </p>
+              <p className="text-xs text-yellow-800 dark:text-yellow-200">
+                {t("market.install.rename.oneClickDesc", "You can manually edit the names, or click one-click rename to let the selected model regenerate names for all conflicted agents.")}
+              </p>
+              <p className="text-xs text-yellow-800 dark:text-yellow-200">
+                {t("market.install.rename.note", "Note: If you proceed without renaming, the agent will be created but marked as unavailable due to name conflicts. You can rename it later in the agent list.")}
+              </p>
+              <Button
+                type="primary"
+                onClick={handleRegenerateAll}
+                loading={regeneratingAll}
+                disabled={regeneratingAll}
+              >
+                {t("market.install.rename.oneClick", "One-click Rename")}
+              </Button>
+            </div>
+          )}
 
           <div className="space-y-6">
-            {agentsWithConflicts.map(([agentKey, conflict]) => {
+            {allAgentsWithConflicts.map(([agentKey, conflict]) => {
               const agentInfo = initialData?.agent_info?.[agentKey] as any;
               const agentDisplayName = agentInfo?.display_name || agentInfo?.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
               const isMainAgent = agentKey === String(initialData?.agent_id);
@@ -825,7 +995,16 @@ export default function AgentImportWizard({
                     </h4>
                   </div>
 
-                  {conflict.conflictAgents.length > 0 && (
+                  {successfullyRenamedAgents.has(agentKey) ? (
+                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-sm" />
+                        <p className="text-xs text-green-700 dark:text-green-300">
+                          {t("market.install.rename.agentResolved", "This agent's name conflict has been resolved.")}
+                        </p>
+                      </div>
+                    </div>
+                  ) : conflict.hasConflict && conflict.conflictAgents.length > 0 && (
                     <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-2 mb-3">
                       <p className="text-xs text-red-700 dark:text-red-300 mb-1">
                         {t("market.install.rename.conflictAgents", "Conflicting agents:")}
@@ -847,13 +1026,37 @@ export default function AgentImportWizard({
                     <Input
                       value={conflict.renamedName}
                       onChange={(e) => {
-                        setAgentNameConflicts(prev => ({
-                          ...prev,
-                          [agentKey]: {
-                            ...prev[agentKey],
-                            renamedName: e.target.value,
-                          },
-                        }));
+                        const newName = e.target.value;
+                        setAgentNameConflicts(prev => {
+                          const updated = {
+                            ...prev,
+                            [agentKey]: {
+                              ...prev[agentKey],
+                              renamedName: newName,
+                            },
+                          };
+
+                          // Clear existing timer
+                          if (nameCheckTimerRef.current) {
+                            clearTimeout(nameCheckTimerRef.current);
+                          }
+
+                          // Set new timer for debounced check (500ms delay)
+                          nameCheckTimerRef.current = setTimeout(() => {
+                            // Read latest value from ref when timer fires
+                            const currentConflict = agentNameConflictsRef.current[agentKey];
+                            if (currentConflict) {
+                              checkSingleAgentConflict(
+                                agentKey,
+                                currentConflict.renamedName,
+                                currentConflict.renamedDisplayName
+                              );
+                            }
+                          }, 500);
+
+                          agentNameConflictsRef.current = updated;
+                          return updated;
+                        });
                       }}
                       placeholder={originalName}
                       size="large"
@@ -868,13 +1071,37 @@ export default function AgentImportWizard({
                     <Input
                       value={conflict.renamedDisplayName}
                       onChange={(e) => {
-                        setAgentNameConflicts(prev => ({
-                          ...prev,
-                          [agentKey]: {
-                            ...prev[agentKey],
-                            renamedDisplayName: e.target.value,
-                          },
-                        }));
+                        const newDisplayName = e.target.value;
+                        setAgentNameConflicts(prev => {
+                          const updated = {
+                            ...prev,
+                            [agentKey]: {
+                              ...prev[agentKey],
+                              renamedDisplayName: newDisplayName,
+                            },
+                          };
+
+                          // Clear existing timer
+                          if (nameCheckTimerRef.current) {
+                            clearTimeout(nameCheckTimerRef.current);
+                          }
+
+                          // Set new timer for debounced check (500ms delay)
+                          nameCheckTimerRef.current = setTimeout(() => {
+                            // Read latest value from ref when timer fires
+                            const currentConflict = agentNameConflictsRef.current[agentKey];
+                            if (currentConflict) {
+                              checkSingleAgentConflict(
+                                agentKey,
+                                currentConflict.renamedName,
+                                currentConflict.renamedDisplayName
+                              );
+                            }
+                          }, 500);
+
+                          agentNameConflictsRef.current = updated;
+                          return updated;
+                        });
                       }}
                       placeholder={originalDisplayName}
                       size="large"

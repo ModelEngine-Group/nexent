@@ -705,7 +705,7 @@ def test_check_agent_name_batch_api_success(mocker, mock_auth_header):
     }
 
     resp = config_client.post(
-        "/agent/check_name/batch", json=payload, headers=mock_auth_header
+        "/agent/check_name", json=payload, headers=mock_auth_header
     )
 
     assert resp.status_code == 200
@@ -721,7 +721,7 @@ def test_check_agent_name_batch_api_bad_request(mocker, mock_auth_header):
     mock_impl.side_effect = ValueError("bad payload")
 
     resp = config_client.post(
-        "/agent/check_name/batch",
+        "/agent/check_name",
         json={"items": [{"agent_id": 1, "name": "AgentA"}]},
         headers=mock_auth_header,
     )
@@ -738,7 +738,7 @@ def test_check_agent_name_batch_api_error(mocker, mock_auth_header):
     mock_impl.side_effect = Exception("unexpected")
 
     resp = config_client.post(
-        "/agent/check_name/batch",
+        "/agent/check_name",
         json={"items": [{"agent_id": 1, "name": "AgentA"}]},
         headers=mock_auth_header,
     )
@@ -766,7 +766,7 @@ def test_regenerate_agent_name_batch_api_success(mocker, mock_auth_header):
     }
 
     resp = config_client.post(
-        "/agent/regenerate_name/batch", json=payload, headers=mock_auth_header
+        "/agent/regenerate_name", json=payload, headers=mock_auth_header
     )
 
     assert resp.status_code == 200
@@ -782,7 +782,7 @@ def test_regenerate_agent_name_batch_api_bad_request(mocker, mock_auth_header):
     mock_impl.side_effect = ValueError("invalid")
 
     resp = config_client.post(
-        "/agent/regenerate_name/batch",
+        "/agent/regenerate_name",
         json={"items": [{"agent_id": 1, "name": "AgentA"}]},
         headers=mock_auth_header,
     )
@@ -799,7 +799,7 @@ def test_regenerate_agent_name_batch_api_error(mocker, mock_auth_header):
     mock_impl.side_effect = Exception("boom")
 
     resp = config_client.post(
-        "/agent/regenerate_name/batch",
+        "/agent/regenerate_name",
         json={"items": [{"agent_id": 1, "name": "AgentA"}]},
         headers=mock_auth_header,
     )

@@ -20,8 +20,8 @@ export interface UseAgentImportOptions {
   onError?: (error: Error) => void;
   forceImport?: boolean;
   /**
-   * Optional: handle name/display_name conflicts before导入
-   * Caller can resolve by returning新名称或选择继续/终止
+   * Optional: handle name/display_name conflicts before import
+   * Caller can resolve by returning new name or choosing to continue/terminate
    */
   onNameConflictResolve?: (payload: {
     name: string;
@@ -128,7 +128,7 @@ export function useAgentImport(
    * Core import logic - calls backend API
    */
   const importAgentData = async (data: ImportAgentData): Promise<void> => {
-    // Step 1: 前置重名检查（仅检查主 Agent 名称与展示名）
+    // Step 1: check name/display name conflicts before import (only check main agent name and display name)
     const mainAgent = data.agent_info?.[String(data.agent_id)];
     if (mainAgent?.name) {
       const conflictHandled = await ensureNameNotDuplicated(
@@ -143,7 +143,7 @@ export function useAgentImport(
         );
       }
 
-      // 如果用户选择修改名称，写回导入数据
+      // if user chooses to modify name, write back to import data
       if (conflictHandled.name) {
         mainAgent.name = conflictHandled.name;
       }
@@ -184,7 +184,7 @@ export function useAgentImport(
   };
 
   /**
-   * 前端侧重名校验逻辑
+   * Frontend side name conflict validation logic
    */
   const ensureNameNotDuplicated = async (
     name: string,
@@ -232,7 +232,7 @@ export function useAgentImport(
         };
       };
 
-      // 交给调用方决定如何处理冲突（例如弹窗让用户选择是否让大模型改名）
+      // let caller decide how to handle conflicts (e.g. show a dialog to let user choose whether to let LLM rename)
       if (options.onNameConflictResolve) {
         return await options.onNameConflictResolve({
           name,
@@ -246,11 +246,11 @@ export function useAgentImport(
         });
       }
 
-      // 默认行为：直接调用后端重命名以保持导入可用
+      // default behavior: directly call backend to rename to keep import available
       const regenerated = await regenerateWithLLM();
       return { proceed: true, ...regenerated };
     } catch (error) {
-      // 若回调抛错，则阻止导入
+      // if callback throws an error, prevent import
       throw error instanceof Error
         ? error
         : new Error("Name conflict handling failed");

@@ -148,7 +148,7 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent import error.")
 
 
-@agent_config_router.post("/check_name/batch")
+@agent_config_router.post("/check_name")
 async def check_agent_name_batch_api(request: AgentNameBatchCheckRequest, authorization: Optional[str] = Header(None)):
     """
     Batch check whether agent name/display_name conflicts exist in the tenant.
@@ -163,7 +163,7 @@ async def check_agent_name_batch_api(request: AgentNameBatchCheckRequest, author
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent name batch check error.")
 
 
-@agent_config_router.post("/regenerate_name/batch")
+@agent_config_router.post("/regenerate_name")
 async def regenerate_agent_name_batch_api(request: AgentNameBatchRegenerateRequest, authorization: Optional[str] = Header(None)):
     """
     Batch regenerate agent name/display_name using LLM or suffix fallback.
