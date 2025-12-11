@@ -781,6 +781,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "display_name": request.display_name,
                 "description": request.description,
                 "business_description": request.business_description,
+                "author": request.author,
                 "model_id": request.model_id,
                 "model_name": request.model_name,
                 "business_logic_model_id": request.business_logic_model_id,
@@ -1019,6 +1020,7 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
                                           display_name=agent_info["display_name"],
                                           description=agent_info["description"],
                                           business_description=agent_info["business_description"],
+                                          author=agent_info.get("author"),
                                           max_steps=agent_info["max_steps"],
                                           provide_run_summary=agent_info["provide_run_summary"],
                                           duty_prompt=agent_info.get(
@@ -1156,6 +1158,7 @@ async def import_agent_by_agent_id(
                                          "display_name": agent_display_name,
                                          "description": import_agent_info.description,
                                          "business_description": import_agent_info.business_description,
+                                         "author": import_agent_info.author,
                                          "model_id": model_id,
                                          "model_name": import_agent_info.model_name,
                                          "business_logic_model_id": business_logic_model_id,
@@ -1243,6 +1246,7 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
                 "name": agent["name"] if agent["name"] else agent["display_name"],
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
+                "author": agent.get("author"),
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons
             })

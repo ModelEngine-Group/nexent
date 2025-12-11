@@ -27,6 +27,7 @@ import {
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import log from "@/lib/logger";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAuth } from "@/hooks/useAuth";
 
 import SubAgentPool from "./agent/SubAgentPool";
 import CollaborativeAgentDisplay from "./agent/CollaborativeAgentDisplay";
@@ -80,6 +81,8 @@ export default function AgentSetupOrchestrator({
   setAgentDescription,
   agentDisplayName,
   setAgentDisplayName,
+  agentAuthor,
+  setAgentAuthor,
   isGeneratingAgent = false,
   // SystemPromptDisplay related props
   onDebug,
@@ -94,6 +97,7 @@ export default function AgentSetupOrchestrator({
   registerSaveHandler,
   registerReloadHandler,
 }: AgentSetupOrchestratorProps) {
+  const { user, isSpeedMode } = useAuth();
   const [enabledToolIds, setEnabledToolIds] = useState<number[]>([]);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -371,6 +375,7 @@ export default function AgentSetupOrchestrator({
       setAgentName?.(agentDetail.name || "");
       setAgentDescription?.(agentDetail.description || "");
       setAgentDisplayName?.(agentDetail.display_name || "");
+      setAgentAuthor?.(agentDetail.author || "");
 
       // Load Agent data to interface
       setMainAgentModel(agentDetail.model);
@@ -911,6 +916,8 @@ export default function AgentSetupOrchestrator({
     setAgentName?.("");
     setAgentDescription?.("");
     setAgentDisplayName?.("");
+    setAgentAuthor?.("");
+    setAgentAuthor?.("");
 
     // Clear tool and agent selections
     setSelectedTools([]);
@@ -1104,6 +1111,9 @@ export default function AgentSetupOrchestrator({
           )
         ).sort((a, b) => a - b);
 
+        // Determine author value: use provided author, or default to user email in Full mode
+        const finalAuthor = agentAuthor || (!isSpeedMode && user?.email ? user.email : undefined);
+
         if (isEditingAgent && editingAgent) {
           // Editing existing agent
           result = await updateAgent(
@@ -1123,7 +1133,8 @@ export default function AgentSetupOrchestrator({
             businessLogicModel ?? undefined,
             businessLogicModelId ?? undefined,
             deduplicatedToolIds,
-            deduplicatedAgentIds
+            deduplicatedAgentIds,
+            finalAuthor
           );
         } else {
           // Creating new agent on save
@@ -1144,7 +1155,8 @@ export default function AgentSetupOrchestrator({
             businessLogicModel ?? undefined,
             businessLogicModelId ?? undefined,
             deduplicatedToolIds,
-            deduplicatedAgentIds
+            deduplicatedAgentIds,
+            finalAuthor
           );
         }
 
@@ -1187,6 +1199,7 @@ export default function AgentSetupOrchestrator({
                 setAgentName?.(agentDetail.name || "");
                 setAgentDescription?.(agentDetail.description || "");
                 setAgentDisplayName?.(agentDetail.display_name || "");
+                setAgentAuthor?.(agentDetail.author || "");
                 onEditingStateChange?.(true, agentDetail);
                 setMainAgentModel(agentDetail.model);
                 setMainAgentModelId(agentDetail.model_id ?? null);
@@ -1374,6 +1387,7 @@ export default function AgentSetupOrchestrator({
       setAgentName?.(agentDetail.name || "");
       setAgentDescription?.(agentDetail.description || "");
       setAgentDisplayName?.(agentDetail.display_name || "");
+      setAgentAuthor?.(agentDetail.author || "");
 
       // Notify external editing state change (use complete data)
       onEditingStateChange?.(true, agentDetail);
@@ -1578,7 +1592,6 @@ export default function AgentSetupOrchestrator({
   const runAgentImport = useCallback(
     async (
       agentPayload: any,
-      translationFn: TFunction,
       options?: { forceImport?: boolean }
     ) => {
       setIsImporting(true);
@@ -1712,7 +1725,7 @@ export default function AgentSetupOrchestrator({
             agentInfo,
           });
         } else {
-          await runAgentImport(agentInfo, t);
+          await runAgentImport(agentInfo);
         }
       } catch (error) {
         log.error(t("agentConfig.agents.importFailed"), error);
@@ -1735,7 +1748,7 @@ export default function AgentSetupOrchestrator({
       return;
     }
     setImportingAction("regenerate");
-    const success = await runAgentImport(pendingImportData.agentInfo, t);
+    const success = await runAgentImport(pendingImportData.agentInfo);
     if (success) {
       setPendingImportData(null);
     }
@@ -1747,7 +1760,7 @@ export default function AgentSetupOrchestrator({
       return;
     }
     setImportingAction("force");
-    const success = await runAgentImport(pendingImportData.agentInfo, t, {
+    const success = await runAgentImport(pendingImportData.agentInfo, {
       forceImport: true,
     });
     if (success) {
@@ -1890,7 +1903,7 @@ export default function AgentSetupOrchestrator({
             tool?.display_name || tool?.name || tool?.tool_name || ""
         )
         .filter((name: string) => Boolean(name));
-      
+
       const enabledToolIds = tools
         .filter((tool: any) => tool && tool.is_available !== false)
         .map((tool: any) => Number(tool.id))
@@ -2264,6 +2277,8 @@ export default function AgentSetupOrchestrator({
               onAgentDescriptionChange={setAgentDescription}
               agentDisplayName={agentDisplayName}
               onAgentDisplayNameChange={setAgentDisplayName}
+              agentAuthor={agentAuthor}
+              onAgentAuthorChange={setAgentAuthor}
               isEditingMode={isEditingAgent || isCreatingNewAgent}
               mainAgentModel={mainAgentModel ?? undefined}
               mainAgentModelId={mainAgentModelId}
@@ -2282,7 +2297,6 @@ export default function AgentSetupOrchestrator({
               isCreatingNewAgent={isCreatingNewAgent}
               canSaveAgent={localCanSaveAgent}
               getButtonTitle={getLocalButtonTitle}
-              onExportAgent={onExportAgent || (() => {})}
               onDeleteAgent={onDeleteAgent || (() => {})}
               onDeleteSuccess={handleExitEdit}
               editingAgent={editingAgentFromParent || editingAgent}
