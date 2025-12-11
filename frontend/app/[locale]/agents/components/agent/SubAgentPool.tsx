@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button, Row, Col } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { FileOutput, Network, FileInput, Trash2, Plus, X } from "lucide-react";
+import { Copy, FileOutput, Network, FileInput, Trash2, Plus, X } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import {
@@ -37,6 +37,7 @@ export default function SubAgentPool({
   isGeneratingAgent = false,
   editingAgent = null,
   isCreatingNewAgent = false,
+  onCopyAgent,
   onExportAgent,
   onDeleteAgent,
   unsavedAgentId = null,
@@ -250,7 +251,7 @@ export default function SubAgentPool({
                             isImporting ? "bg-gray-100" : "bg-green-100"
                           }`}
                         >
-                          <FileOutput
+                          <FileInput
                             className={`w-4 h-4 ${
                               isImporting ? "text-gray-400" : "text-green-600"
                             }`}
@@ -357,6 +358,27 @@ export default function SubAgentPool({
 
                         {/* Operation button area */}
                         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                          {/* Copy agent button */}
+                          {onCopyAgent && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<Copy className="w-4 h-4" />}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onCopyAgent(agent);
+                                  }}
+                                  className="agent-action-button agent-action-button-blue"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {t("agent.contextMenu.copy")}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
                           {/* View call relationship button */}
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -383,7 +405,7 @@ export default function SubAgentPool({
                                 <Button
                                   type="text"
                                   size="small"
-                                  icon={<FileInput className="w-4 h-4" />}
+                                  icon={<FileOutput className="w-4 h-4" />}
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
