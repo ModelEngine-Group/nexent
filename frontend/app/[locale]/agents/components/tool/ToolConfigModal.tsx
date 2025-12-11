@@ -9,6 +9,7 @@ import {
   InputNumber,
   Tag,
   App,
+  Tooltip
 } from "antd";
 
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
@@ -277,7 +278,7 @@ export default function ToolConfigModal({
               value={stringValue}
               onChange={(e) => handleParamChange(index, e.target.value)}
               placeholder={t("toolConfig.input.string.placeholder", {
-                name: param.name,
+                name: param.description,
               })}
               autoSize={{ minRows: 1, maxRows: 8 }}
               style={{ resize: "vertical" }}
@@ -289,7 +290,7 @@ export default function ToolConfigModal({
             value={stringValue}
             onChange={(e) => handleParamChange(index, e.target.value)}
             placeholder={t("toolConfig.input.string.placeholder", {
-              name: param.name,
+              name: param.description,
             })}
           />
         );
@@ -298,6 +299,9 @@ export default function ToolConfigModal({
           <InputNumber
             value={param.value as number}
             onChange={(value) => handleParamChange(index, value)}
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
             className="w-full"
           />
         );
@@ -445,9 +449,9 @@ export default function ToolConfigModal({
                 >
                   <div className="flex items-start gap-4">
                     <div className="flex-[0.3] pt-1">
-                      {param.description ? (
+                      {param.name ? (
                         <div className="text-sm text-gray-600">
-                          {param.description}
+                          {param.name}
                           {param.required && (
                             <span className="text-red-500 ml-1">*</span>
                           )}
@@ -462,7 +466,13 @@ export default function ToolConfigModal({
                       )}
                     </div>
                     <div className="flex-[0.7]">
-                      {renderParamInput(param, index)}
+                      <Tooltip
+                        title={param.description}
+                        placement="topLeft"
+                        styles={{ root: { maxWidth: 400 } }}
+                      >
+                        {renderParamInput(param, index)}
+                      </Tooltip>
                     </div>
                   </div>
                 </div>
