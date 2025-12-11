@@ -703,7 +703,7 @@ function ToolPool({
           {t("toolPool.error.unavailableSelected")}
         </div>
       )}
-      <div className="flex-1 min-h-0 border-t pt-2 pb-2 overflow-hidden">
+      <div className="flex-1 min-h-0 border-t pt-2 pb-2">
         {loadingTools ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-gray-500">{t("toolPool.loadingTools")}</span>

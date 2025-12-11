@@ -546,6 +546,7 @@ export default forwardRef<AgentConfigHandle, AgentConfigProps>(function AgentCon
           style={{
             height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
             ...STANDARD_CARD.CONTENT_SCROLL,
+            overflow: "hidden"
           }}
         >
           <div style={{ padding: STANDARD_CARD.PADDING, height: "100%" }}>
