@@ -689,3 +689,120 @@ def test_get_agent_call_relationship_api_exception(mocker, mock_auth_header):
 
     assert resp.status_code == 500
     assert "Failed to get agent call relationship" in resp.json()["detail"]
+
+
+def test_check_agent_name_batch_api_success(mocker, mock_auth_header):
+    mock_impl = mocker.patch(
+        "apps.agent_app.check_agent_name_conflict_batch_impl",
+        new_callable=mocker.AsyncMock,
+    )
+    mock_impl.return_value = [{"name_conflict": True}]
+
+    payload = {
+        "items": [
+            {"agent_id": 1, "name": "AgentA", "display_name": "Agent A"},
+        ]
+    }
+
+    resp = config_client.post(
+        "/agent/check_name", json=payload, headers=mock_auth_header
+    )
+
+    assert resp.status_code == 200
+    mock_impl.assert_called_once()
+    assert resp.json() == [{"name_conflict": True}]
+
+
+def test_check_agent_name_batch_api_bad_request(mocker, mock_auth_header):
+    mock_impl = mocker.patch(
+        "apps.agent_app.check_agent_name_conflict_batch_impl",
+        new_callable=mocker.AsyncMock,
+    )
+    mock_impl.side_effect = ValueError("bad payload")
+
+    resp = config_client.post(
+        "/agent/check_name",
+        json={"items": [{"agent_id": 1, "name": "AgentA"}]},
+        headers=mock_auth_header,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "bad payload"
+
+
+def test_check_agent_name_batch_api_error(mocker, mock_auth_header):
+    mock_impl = mocker.patch(
+        "apps.agent_app.check_agent_name_conflict_batch_impl",
+        new_callable=mocker.AsyncMock,
+    )
+    mock_impl.side_effect = Exception("unexpected")
+
+    resp = config_client.post(
+        "/agent/check_name",
+        json={"items": [{"agent_id": 1, "name": "AgentA"}]},
+        headers=mock_auth_header,
+    )
+
+    assert resp.status_code == 500
+    assert "Agent name batch check error" in resp.json()["detail"]
+
+
+def test_regenerate_agent_name_batch_api_success(mocker, mock_auth_header):
+    mock_impl = mocker.patch(
+        "apps.agent_app.regenerate_agent_name_batch_impl",
+        new_callable=mocker.AsyncMock,
+    )
+    mock_impl.return_value = [{"name": "NewName", "display_name": "New Display"}]
+
+    payload = {
+        "items": [
+            {
+                "agent_id": 1,
+                "name": "AgentA",
+                "display_name": "Agent A",
+                "task_description": "desc",
+            }
+        ]
+    }
+
+    resp = config_client.post(
+        "/agent/regenerate_name", json=payload, headers=mock_auth_header
+    )
+
+    assert resp.status_code == 200
+    mock_impl.assert_called_once()
+    assert resp.json() == [{"name": "NewName", "display_name": "New Display"}]
+
+
+def test_regenerate_agent_name_batch_api_bad_request(mocker, mock_auth_header):
+    mock_impl = mocker.patch(
+        "apps.agent_app.regenerate_agent_name_batch_impl",
+        new_callable=mocker.AsyncMock,
+    )
+    mock_impl.side_effect = ValueError("invalid")
+
+    resp = config_client.post(
+        "/agent/regenerate_name",
+        json={"items": [{"agent_id": 1, "name": "AgentA"}]},
+        headers=mock_auth_header,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid"
+
+
+def test_regenerate_agent_name_batch_api_error(mocker, mock_auth_header):
+    mock_impl = mocker.patch(
+        "apps.agent_app.regenerate_agent_name_batch_impl",
+        new_callable=mocker.AsyncMock,
+    )
+    mock_impl.side_effect = Exception("boom")
+
+    resp = config_client.post(
+        "/agent/regenerate_name",
+        json={"items": [{"agent_id": 1, "name": "AgentA"}]},
+        headers=mock_auth_header,
+    )
+
+    assert resp.status_code == 500
+    assert "Agent name batch regenerate error" in resp.json()["detail"]

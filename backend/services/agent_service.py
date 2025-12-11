@@ -20,6 +20,8 @@ from consts.exceptions import MemoryPreparationException
 from consts.model import (
     AgentInfoRequest,
     AgentRequest,
+    AgentNameBatchCheckRequest,
+    AgentNameBatchRegenerateRequest,
     ExportAndImportAgentInfo,
     ExportAndImportDataFormat,
     MCPInfo,
@@ -408,6 +410,150 @@ def _regenerate_agent_display_name_with_llm(
         )
     )
 
+
+
+async def check_agent_name_conflict_batch_impl(
+    request: AgentNameBatchCheckRequest,
+    authorization: str
+) -> list[dict]:
+    """
+    Batch check name/display_name duplication for multiple agents.
+    """
+    _, tenant_id, _ = get_current_user_info(authorization)
+    agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
+
+    results: list[dict] = []
+    for item in request.items:
+        if not item.name:
+            results.append({
+                "name_conflict": False,
+                "display_name_conflict": False,
+                "conflict_agents": []
+            })
+            continue
+
+        conflicts: list[dict] = []
+        name_conflict = False
+        display_name_conflict = False
+        for agent in agents_cache:
+            if item.agent_id and agent.get("agent_id") == item.agent_id:
+                continue
+            matches_name = item.name and agent.get("name") == item.name
+            matches_display = item.display_name and agent.get(
+                "display_name") == item.display_name
+            if matches_name:
+                name_conflict = True
+            if matches_display:
+                display_name_conflict = True
+            if matches_name or matches_display:
+                conflicts.append({
+                    "name": agent.get("name"),
+                    "display_name": agent.get("display_name"),
+                })
+
+        results.append({
+            "name_conflict": name_conflict,
+            "display_name_conflict": display_name_conflict,
+            "conflict_agents": conflicts
+        })
+    return results
+
+
+async def regenerate_agent_name_batch_impl(
+    request: AgentNameBatchRegenerateRequest,
+    authorization: str
+) -> list[dict]:
+    """
+    Batch regenerate agent name/display_name with LLM (or suffix fallback).
+    """
+    _, tenant_id, _ = get_current_user_info(authorization)
+    agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
+
+    existing_names = [agent.get("name") for agent in agents_cache if agent.get("name")]
+    existing_display_names = [agent.get("display_name") for agent in agents_cache if agent.get("display_name")]
+
+    # Always use tenant quick-config LLM model
+    quick_config_model = tenant_config_manager.get_model_config(
+        key=MODEL_CONFIG_MAPPING["llm"],
+        tenant_id=tenant_id
+    )
+    resolved_model_id = quick_config_model.get("model_id") if quick_config_model else None
+    if not resolved_model_id:
+        raise ValueError("No available model for regeneration. Please configure an LLM model first.")
+
+    results: list[dict] = []
+    # Use local mutable caches to avoid regenerated duplicates in the same batch
+    name_set = set(existing_names)
+    display_name_set = set(existing_display_names)
+
+    for item in request.items:
+        agent_name = item.name or ""
+        agent_display_name = item.display_name or ""
+        task_description = item.task_description or ""
+        exclude_agent_id = item.agent_id
+
+        # Regenerate name if duplicate and non-empty
+        if agent_name and _check_agent_name_duplicate(
+            agent_name, tenant_id, agents_cache=agents_cache, exclude_agent_id=exclude_agent_id
+        ):
+            try:
+                agent_name = await asyncio.to_thread(
+                    _regenerate_agent_name_with_llm,
+                    original_name=agent_name,
+                    existing_names=list(name_set),
+                    task_description=task_description,
+                    model_id=resolved_model_id,
+                    tenant_id=tenant_id,
+                    language=LANGUAGE["ZH"],
+                    agents_cache=agents_cache,
+                    exclude_agent_id=exclude_agent_id
+                )
+            except Exception as e:
+                logger.error(f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
+                agent_name = _generate_unique_agent_name_with_suffix(
+                    agent_name,
+                    tenant_id=tenant_id,
+                    agents_cache=agents_cache,
+                    exclude_agent_id=exclude_agent_id
+                )
+
+        # Regenerate display_name if duplicate and non-empty
+        if agent_display_name and _check_agent_display_name_duplicate(
+            agent_display_name, tenant_id, agents_cache=agents_cache, exclude_agent_id=exclude_agent_id
+        ):
+            try:
+                agent_display_name = await asyncio.to_thread(
+                    _regenerate_agent_display_name_with_llm,
+                    original_display_name=agent_display_name,
+                    existing_display_names=list(display_name_set),
+                    task_description=task_description,
+                    model_id=resolved_model_id,
+                    tenant_id=tenant_id,
+                    language=LANGUAGE["ZH"],
+                    agents_cache=agents_cache,
+                    exclude_agent_id=exclude_agent_id
+                )
+            except Exception as e:
+                logger.error(f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
+                agent_display_name = _generate_unique_display_name_with_suffix(
+                    agent_display_name,
+                    tenant_id=tenant_id,
+                    agents_cache=agents_cache,
+                    exclude_agent_id=exclude_agent_id
+                )
+
+        # Track regenerated names to avoid duplicates within batch
+        if agent_name:
+            name_set.add(agent_name)
+        if agent_display_name:
+            display_name_set.add(agent_display_name)
+
+        results.append({
+            "name": agent_name,
+            "display_name": agent_display_name
+        })
+
+    return results
 
 
 async def _stream_agent_chunks(
@@ -1002,83 +1148,8 @@ async def import_agent_by_agent_id(
         tenant_id=tenant_id
     )
 
-    # Check for duplicate names and regenerate if needed (unless forced import)
     agent_name = import_agent_info.name
     agent_display_name = import_agent_info.display_name
-
-    # Get all existing agent names and display names for duplicate checking
-    all_agents = query_all_agent_info_by_tenant_id(tenant_id)
-    existing_names = [agent.get("name") for agent in all_agents if agent.get("name")]
-    existing_display_names = [agent.get("display_name") for agent in all_agents if agent.get("display_name")]
-
-    if not skip_duplicate_regeneration:
-        # Check and regenerate name if duplicate
-        if _check_agent_name_duplicate(agent_name, tenant_id, agents_cache=all_agents):
-            logger.info(f"Agent name '{agent_name}' already exists, regenerating with LLM")
-            # Get model for regeneration (use business_logic_model_id if available, otherwise use model_id)
-            regeneration_model_id = business_logic_model_id or model_id
-            if regeneration_model_id:
-                try:
-                    # Offload blocking LLM regeneration to a thread to avoid blocking the event loop
-                    agent_name = await asyncio.to_thread(
-                        _regenerate_agent_name_with_llm,
-                        original_name=agent_name,
-                        existing_names=existing_names,
-                        task_description=import_agent_info.business_description or import_agent_info.description or "",
-                        model_id=regeneration_model_id,
-                        tenant_id=tenant_id,
-                        language=LANGUAGE["ZH"],  # Default to Chinese, can be enhanced later
-                        agents_cache=all_agents,
-                    )
-                    logger.info(f"Regenerated agent name: '{agent_name}'")
-                except Exception as e:
-                    logger.error(f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
-                    agent_name = _generate_unique_agent_name_with_suffix(
-                        agent_name,
-                        tenant_id=tenant_id,
-                        agents_cache=all_agents
-                    )
-            else:
-                logger.warning("No model available for regeneration, using fallback")
-                agent_name = _generate_unique_agent_name_with_suffix(
-                    agent_name,
-                    tenant_id=tenant_id,
-                    agents_cache=all_agents
-                )
-
-        # Check and regenerate display_name if duplicate
-        if _check_agent_display_name_duplicate(agent_display_name, tenant_id, agents_cache=all_agents):
-            logger.info(f"Agent display_name '{agent_display_name}' already exists, regenerating with LLM")
-            # Get model for regeneration (use business_logic_model_id if available, otherwise use model_id)
-            regeneration_model_id = business_logic_model_id or model_id
-            if regeneration_model_id:
-                try:
-                    # Offload blocking LLM regeneration to a thread to avoid blocking the event loop
-                    agent_display_name = await asyncio.to_thread(
-                        _regenerate_agent_display_name_with_llm,
-                        original_display_name=agent_display_name,
-                        existing_display_names=existing_display_names,
-                        task_description=import_agent_info.business_description or import_agent_info.description or "",
-                        model_id=regeneration_model_id,
-                        tenant_id=tenant_id,
-                        language=LANGUAGE["ZH"],  # Default to Chinese, can be enhanced later
-                        agents_cache=all_agents,
-                    )
-                    logger.info(f"Regenerated agent display_name: '{agent_display_name}'")
-                except Exception as e:
-                    logger.error(f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
-                    agent_display_name = _generate_unique_display_name_with_suffix(
-                        agent_display_name,
-                        tenant_id=tenant_id,
-                        agents_cache=all_agents
-                    )
-            else:
-                logger.warning("No model available for regeneration, using fallback")
-                agent_display_name = _generate_unique_display_name_with_suffix(
-                    agent_display_name,
-                    tenant_id=tenant_id,
-                    agents_cache=all_agents
-                )
 
     # create a new agent
     new_agent = create_agent(agent_info={"name": agent_name,

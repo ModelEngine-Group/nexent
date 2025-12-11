@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { importAgent } from "@/services/agentConfigService";
+import {
+  checkAgentNameConflictBatch,
+  importAgent,
+  regenerateAgentNameBatch,
+} from "@/services/agentConfigService";
 import log from "@/lib/logger";
 
 export interface ImportAgentData {
@@ -15,6 +19,19 @@ export interface UseAgentImportOptions {
   onSuccess?: () => void;
   onError?: (error: Error) => void;
   forceImport?: boolean;
+  /**
+   * Optional: handle name/display_name conflicts before import
+   * Caller can resolve by returning new name or choosing to continue/terminate
+   */
+  onNameConflictResolve?: (payload: {
+    name: string;
+    displayName?: string;
+    conflictAgents: Array<{ id: string; name?: string; display_name?: string }>;
+    regenerateWithLLM: () => Promise<{
+      name?: string;
+      displayName?: string;
+    }>;
+  }) => Promise<{ proceed: boolean; name?: string; displayName?: string }>;
 }
 
 export interface UseAgentImportResult {
@@ -111,6 +128,30 @@ export function useAgentImport(
    * Core import logic - calls backend API
    */
   const importAgentData = async (data: ImportAgentData): Promise<void> => {
+    // Step 1: check name/display name conflicts before import (only check main agent name and display name)
+    const mainAgent = data.agent_info?.[String(data.agent_id)];
+    if (mainAgent?.name) {
+      const conflictHandled = await ensureNameNotDuplicated(
+        mainAgent.name,
+        mainAgent.display_name,
+        mainAgent.description || mainAgent.business_description
+      );
+
+      if (!conflictHandled.proceed) {
+        throw new Error(
+          "Agent name/display name conflicts with existing agent; import cancelled."
+        );
+      }
+
+      // if user chooses to modify name, write back to import data
+      if (conflictHandled.name) {
+        mainAgent.name = conflictHandled.name;
+      }
+      if (conflictHandled.displayName) {
+        mainAgent.display_name = conflictHandled.displayName;
+      }
+    }
+
     const result = await importAgent(data, { forceImport });
     
     if (!result.success) {
@@ -140,6 +181,80 @@ export function useAgentImport(
       
       reader.readAsText(file);
     });
+  };
+
+  /**
+   * Frontend side name conflict validation logic
+   */
+  const ensureNameNotDuplicated = async (
+    name: string,
+    displayName?: string,
+    taskDescription?: string
+  ): Promise<{ proceed: boolean; name?: string; displayName?: string }> => {
+    try {
+      const checkResp = await checkAgentNameConflictBatch({
+        items: [
+          {
+            name,
+            display_name: displayName,
+          },
+        ],
+      });
+      if (!checkResp.success || !Array.isArray(checkResp.data)) {
+        log.warn("Skip name conflict check due to fetch failure");
+        return { proceed: true };
+      }
+
+      const first = checkResp.data[0] || {};
+      const { name_conflict, display_name_conflict, conflict_agents } = first;
+
+      if (!name_conflict && !display_name_conflict) {
+        return { proceed: true };
+      }
+
+      const regenerateWithLLM = async () => {
+        const regenResp = await regenerateAgentNameBatch({
+          items: [
+            {
+              name,
+              display_name: displayName,
+              task_description: taskDescription,
+            },
+          ],
+        });
+        if (!regenResp.success || !Array.isArray(regenResp.data) || !regenResp.data[0]) {
+          throw new Error("Failed to regenerate agent name");
+        }
+        const item = regenResp.data[0];
+        return {
+          name: item.name,
+          displayName: item.display_name ?? displayName,
+        };
+      };
+
+      // let caller decide how to handle conflicts (e.g. show a dialog to let user choose whether to let LLM rename)
+      if (options.onNameConflictResolve) {
+        return await options.onNameConflictResolve({
+          name,
+          displayName,
+          conflictAgents: (conflict_agents || []).map((c: any) => ({
+            id: String(c.agent_id ?? c.id),
+            name: c.name,
+            display_name: c.display_name,
+          })),
+          regenerateWithLLM,
+        });
+      }
+
+      // default behavior: directly call backend to rename to keep import available
+      const regenerated = await regenerateWithLLM();
+      return { proceed: true, ...regenerated };
+    } catch (error) {
+      // if callback throws an error, prevent import
+      throw error instanceof Error
+        ? error
+        : new Error("Name conflict handling failed");
+    }
   };
 
   return {

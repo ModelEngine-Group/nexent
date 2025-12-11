@@ -345,6 +345,27 @@ class AgentImportRequest(BaseModel):
     force_import: bool = False
 
 
+class AgentNameBatchRegenerateItem(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    task_description: Optional[str] = ""
+    agent_id: Optional[int] = None
+
+
+class AgentNameBatchRegenerateRequest(BaseModel):
+    items: List[AgentNameBatchRegenerateItem]
+
+
+class AgentNameBatchCheckItem(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    agent_id: Optional[int] = None
+
+
+class AgentNameBatchCheckRequest(BaseModel):
+    items: List[AgentNameBatchCheckItem]
+
+
 class ConvertStateRequest(BaseModel):
     """Request schema for /tasks/convert_state endpoint"""
     process_state: str = ""
