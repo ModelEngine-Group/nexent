@@ -246,6 +246,7 @@ class AgentInfoRequest(BaseModel):
     display_name: Optional[str] = None
     description: Optional[str] = None
     business_description: Optional[str] = None
+    author: Optional[str] = None
     model_name: Optional[str] = None
     model_id: Optional[int] = None
     max_steps: Optional[int] = None
@@ -311,6 +312,7 @@ class ExportAndImportAgentInfo(BaseModel):
     display_name: Optional[str] = None
     description: str
     business_description: str
+    author: Optional[str] = None
     max_steps: int
     provide_run_summary: bool
     duty_prompt: Optional[str] = None

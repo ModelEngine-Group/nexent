@@ -116,6 +116,7 @@ export const fetchAgentList = async () => {
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
+      author: agent.author,
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
     }));
@@ -326,7 +327,8 @@ export const updateAgent = async (
   businessLogicModelName?: string,
   businessLogicModelId?: number,
   enabledToolIds?: number[],
-  relatedAgentIds?: number[]
+  relatedAgentIds?: number[],
+  author?: string
 ) => {
   try {
     const response = await fetch(API_ENDPOINTS.agent.update, {
@@ -350,6 +352,7 @@ export const updateAgent = async (
         business_logic_model_id: businessLogicModelId,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: relatedAgentIds,
+        author: author,
       }),
     });
 
@@ -510,6 +513,7 @@ export const searchAgentInfo = async (agentId: number) => {
       name: data.name,
       display_name: data.display_name,
       description: data.description,
+      author: data.author,
       model: data.model_name,
       model_id: data.model_id,
       max_step: data.max_steps,
@@ -587,6 +591,7 @@ export const fetchAllAgents = async () => {
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
+      author: agent.author,
       is_available: agent.is_available,
     }));
 

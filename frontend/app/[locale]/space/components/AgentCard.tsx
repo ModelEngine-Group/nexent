@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { App, Modal } from "antd";
+import { App } from "antd";
 import {
   Trash2,
   Download,
@@ -32,6 +32,7 @@ interface Agent {
   name: string;
   display_name: string;
   description: string;
+  author?: string;
   is_available: boolean;
   enabled?: boolean;
 }
@@ -44,7 +45,6 @@ interface AgentCardProps {
 }
 
 export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCardProps) {
-  const router = useRouter();
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
   const { user, isSpeedMode } = useAuth();
@@ -199,6 +199,13 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
           <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2 line-clamp-2">
             {agent.display_name || agent.name}
           </h3>
+          {agent.author ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+              {t("market.by", { defaultValue: "By {{author}}", author: agent.author })}
+            </p>
+          ) : (
+            <div className="h-4 mb-2" aria-hidden />
+          )}
           <div className="flex-1 overflow-hidden">
             <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-4">
               {agent.description || t("space.noDescription", "No description")}

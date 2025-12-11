@@ -17,6 +17,7 @@ import {
   checkAgentDisplayName,
 } from "@/services/agentConfigService";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { useAuth } from "@/hooks/useAuth";
 
 import { SimplePromptEditor } from "../PromptManager";
 
@@ -34,6 +35,8 @@ export interface AgentConfigModalProps {
   onAgentDescriptionChange?: (description: string) => void;
   agentDisplayName?: string;
   onAgentDisplayNameChange?: (displayName: string) => void;
+  agentAuthor?: string;
+  onAgentAuthorChange?: (author: string) => void;
   isEditingMode?: boolean;
   mainAgentModel?: string;
   mainAgentModelId?: number | null;
@@ -69,6 +72,8 @@ export default function AgentConfigModal({
   onAgentDescriptionChange,
   agentDisplayName = "",
   onAgentDisplayNameChange,
+  agentAuthor = "",
+  onAgentAuthorChange,
   isEditingMode = false,
   mainAgentModel = "",
   mainAgentModelId = null,
@@ -88,6 +93,7 @@ export default function AgentConfigModal({
   getButtonTitle,
 }: AgentConfigModalProps) {
   const { t } = useTranslation("common");
+  const { user, isSpeedMode } = useAuth();
 
   // Add local state to track content of three sections
   const [localDutyContent, setLocalDutyContent] = useState(dutyContent || "");
@@ -183,6 +189,13 @@ export default function AgentConfigModal({
 
     loadLLMModels();
   }, []);
+
+  // Set default author for new agents in Full mode
+  useEffect(() => {
+    if (isCreatingNewAgent && !isSpeedMode && !agentAuthor && user?.email) {
+      onAgentAuthorChange?.(user.email);
+    }
+  }, [isCreatingNewAgent, isSpeedMode, agentAuthor, user?.email, onAgentAuthorChange]);
 
   // Default to globally configured model when creating a new agent
   // IMPORTANT: Only read from localStorage when creating a NEW agent, not when editing existing agent
@@ -641,6 +654,27 @@ export default function AgentConfigModal({
               })}
             </p>
           )}
+      </div>
+
+      {/* Agent Author */}
+      <div className="mb-2">
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {t("agent.author")}:
+        </label>
+        <Input
+          value={agentAuthor}
+          onChange={(e) => {
+            onAgentAuthorChange?.(e.target.value);
+          }}
+          placeholder={t("agent.authorPlaceholder")}
+          size="large"
+          disabled={!isEditingMode}
+        />
+        {isCreatingNewAgent && !isSpeedMode && !agentAuthor && user?.email && (
+          <p className="mt-1 text-xs text-gray-500">
+            {t("agent.author.hint", { defaultValue: "Default: {{email}}", email: user.email })}
+          </p>
+        )}
       </div>
 
       {/* Model Selection */}

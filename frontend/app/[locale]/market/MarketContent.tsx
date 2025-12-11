@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { ShoppingBag, Search, RefreshCw, AlertCircle } from "lucide-react";
+import { ShoppingBag, Search, RefreshCw } from "lucide-react";
 import { Tabs, Input, Spin, Empty, Pagination, App } from "antd";
 import log from "@/lib/logger";
 

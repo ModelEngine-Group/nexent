@@ -222,6 +222,8 @@ export interface PromptManagerProps {
   onAgentNameChange?: (name: string) => void;
   onAgentDescriptionChange?: (description: string) => void;
   onAgentDisplayNameChange?: (displayName: string) => void;
+  agentAuthor?: string;
+  onAgentAuthorChange?: (author: string) => void;
   onModelChange?: (value: string, modelId?: number) => void;
   onMaxStepChange?: (value: number | null) => void;
   onGenerateAgent?: (model: ModelOption) => void;
@@ -250,6 +252,8 @@ export default function PromptManager({
   agentName = "",
   agentDescription = "",
   agentDisplayName = "",
+  agentAuthor = "",
+  onAgentAuthorChange,
   mainAgentModel = "",
   mainAgentModelId = null,
   mainAgentMaxStep = 5,
@@ -676,6 +680,8 @@ export default function PromptManager({
             onAgentDescriptionChange={onAgentDescriptionChange}
             agentDisplayName={agentDisplayName}
             onAgentDisplayNameChange={onAgentDisplayNameChange}
+            agentAuthor={agentAuthor}
+            onAgentAuthorChange={onAgentAuthorChange}
             isEditingMode={isEditingMode}
             mainAgentModel={mainAgentModel}
             mainAgentModelId={mainAgentModelId}

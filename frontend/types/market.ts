@@ -28,6 +28,7 @@ export interface MarketAgentListItem {
   name: string;
   display_name: string;
   description: string;
+  author?: string;
   category: MarketCategory;
   tags: MarketTag[];
   download_count: number;
