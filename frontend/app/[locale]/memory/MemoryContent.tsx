@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { App, Button, Card, Input, List, Menu, Switch, Tabs } from "antd";
 import { motion } from "framer-motion";
 import "./memory.css";
@@ -188,9 +188,16 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
   };
 
   // Render single list (for tenant shared and user personal) - no card, with header buttons
-  const renderSingleList = (group: { title: string; key: string; items: any[] }) => {
+  const renderSingleList = useCallback((group: { title: string; key: string; items: any[] }) => {
     return (
-      <div className="memory-single-list">
+      <div className="memory-single-list" key={`${group.key}-${group.items.length}-${memory.addingMemoryKey}`}>
+        {/* Add memory input - appears before the list */}
+        {memory.addingMemoryKey === group.key && (
+          <div className="border border-gray-200 rounded-md p-3 mb-3 bg-blue-50">
+            {renderAddMemoryInput(group.key)}
+          </div>
+        )}
+        
         <List
           header={
             <div className="flex items-center justify-between">
@@ -200,7 +207,9 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
                   type="text"
                   size="small"
                   icon={<MessageSquarePlus className="size-4" />}
-                  onClick={() => memory.startAddingMemory(group.key)}
+                  onClick={() => {
+                    memory.startAddingMemory(group.key);
+                  }}
                   className="hover:bg-green-50 hover:text-green-600"
                   title={t("memoryManageModal.addMemory")}
                 />
@@ -228,7 +237,7 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
               </div>
             ),
           }}
-          style={{ height: "calc(100vh - 280px)", overflowY: "auto" }}
+          style={{ height: memory.addingMemoryKey === group.key ? "calc(100vh - 380px)" : "calc(100vh - 280px)", overflowY: "auto" }}
           renderItem={(item) => (
             <List.Item
               className="hover:bg-gray-50 transition-colors"
@@ -247,19 +256,10 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
               <div className="flex flex-col text-sm">{item.memory}</div>
             </List.Item>
           )}
-        >
-          {memory.addingMemoryKey === group.key && (
-            <List.Item 
-              className="bg-blue-50 border-t-2 border-blue-300 flex items-center" 
-              style={{ minHeight: "100px", padding: "20px" }}
-            >
-              {renderAddMemoryInput(group.key)}
-            </List.Item>
-          )}
-        </List>
+        />
       </div>
     );
-  };
+  }, [memory.addingMemoryKey, memory.startAddingMemory, memory.handleDeleteMemory, handleClearConfirm, renderAddMemoryInput, t]);
 
   const renderMemoryWithMenu = (
     groups: { title: string; key: string; items: any[] }[],
@@ -463,6 +463,13 @@ function MemoryMenuList({
       />
 
       <div className="flex-1">
+        {/* Add memory input - appears before the list */}
+        {memory.addingMemoryKey === currentGroup.key && (
+          <div className="border border-gray-200 rounded-md p-3 mb-3 bg-blue-50">
+            {renderAddMemoryInput(currentGroup.key)}
+          </div>
+        )}
+        
         <List
           header={
             <div className="flex items-center justify-between">
@@ -472,7 +479,9 @@ function MemoryMenuList({
                   type="text"
                   size="small"
                   icon={<MessageSquarePlus className="size-4" />}
-                  onClick={() => memory.startAddingMemory(currentGroup.key)}
+                  onClick={() => {
+                    memory.startAddingMemory(currentGroup.key);
+                  }}
                   disabled={disabled}
                   className="hover:bg-green-50 hover:text-green-600"
                   title={t("memoryManageModal.addMemory")}
@@ -504,7 +513,7 @@ function MemoryMenuList({
               </div>
             ),
           }}
-          style={{ height: "100%", overflowY: "auto" }}
+          style={{ height: memory.addingMemoryKey === currentGroup.key ? "calc(100% - 100px)" : "100%", overflowY: "auto" }}
           renderItem={(item) => (
             <List.Item
               className="hover:bg-gray-50 transition-colors"
@@ -524,16 +533,7 @@ function MemoryMenuList({
               <div className="flex flex-col text-sm">{item.memory}</div>
             </List.Item>
           )}
-        >
-          {memory.addingMemoryKey === currentGroup.key && (
-            <List.Item
-              className="bg-blue-50 border-t-2 border-blue-300 flex items-center"
-              style={{ minHeight: "100px", padding: "20px" }}
-            >
-              {renderAddMemoryInput(currentGroup.key)}
-            </List.Item>
-          )}
-        </List>
+        />
       </div>
     </div>
   );
