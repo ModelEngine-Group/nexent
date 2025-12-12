@@ -202,4 +202,4 @@ python backend/mcp_service.py     # MCP服务
 - 资源池管理
 - 自动扩展能力
 
-详细的后端开发指南，请参阅 [开发指南](../getting-started/development-guide)。
+详细的后端开发指南，请参阅 [开发者指南](../developer-guide/overview)。

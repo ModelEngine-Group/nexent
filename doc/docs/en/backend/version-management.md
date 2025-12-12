@@ -2,7 +2,7 @@
 
 The Nexent project adopts a unified version management strategy to ensure consistency between frontend and backend version information. This document describes how to manage and update project version information.
 
-## Version Number Format
+## 📋 Version Number Format
 
 Nexent uses Semantic Versioning:
 
@@ -12,21 +12,21 @@ Nexent uses Semantic Versioning:
 - **PATCH**: Backwards-compatible bug fixes
 - **BUILD**: Optional minor version number for more granular bugfix versions
 
-### Version Number Examples
+### 🏷️ Version Number Examples
 
 - `v1.2.0` - Feature update release
 - `v1.2.0.1` - Bugfix release with minor version number
 
-## Frontend Version Management
+## 🖥️ Frontend Version Management
 
-### Version Information Location
+### 📍 Version Information Location
 
 Frontend version information is fetched from the backend via API.
 
 - **Endpoint**: `GET /api/tenant_config/deployment_version`
 - **Service**: `frontend/services/versionService.ts`
 
-### Version Update Process
+### 🔄 Version Update Process
 
 1. **Update backend version in code**
 
@@ -47,16 +47,16 @@ APP_VERSION="v1.1.0"
    # Check the application version displayed at the bottom of the page
    ```
 
-### Version Display
+### 📺 Version Display
 
 Frontend version information is displayed at the following location:
 
 - **Location**: Bottom navigation bar, located at the bottom left corner of the page.
 - **Version Format**: `v1.1.0`
 
-## Backend Version Management
+## ⚙️ Backend Version Management
 
-### Version Information Location
+### 📍 Version Information Location
 
 Backend version information is defined in code in `backend/consts/const.py`:
 
@@ -65,11 +65,11 @@ Backend version information is defined in code in `backend/consts/const.py`:
 APP_VERSION = "v1.0.0"
 ```
 
-### Version Configuration
+### 🔧 Version Configuration
 
 Version is configured directly in `backend/consts/const.py`.
 
-### Version Display
+### 📺 Version Display
 
 Backend startup will print version information in the logs:
 
@@ -78,7 +78,7 @@ Backend startup will print version information in the logs:
 logger.info(f"APP version is: {APP_VERSION}")
 ```
 
-### Version Update Process
+### 🔄 Version Update Process
 
 1. **Update Version in Code**
 
@@ -97,3 +97,4 @@ APP_VERSION="v1.1.0"
    # Check the version information in the startup logs
    # Output example: APP version is: v1.1.0
    ```
+

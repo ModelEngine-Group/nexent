@@ -40,100 +40,16 @@ nexent/
 - **监控**: 内置健康检查
 - **日志**: 结构化日志
 
-## 🚀 开发环境搭建
+## 🧱 环境准备
 
-### 环境要求
-- Python 3.10+
-- Node.js 18+
-- Docker & Docker Compose
-- uv (Python 包管理器)
-- pnpm (Node.js 包管理器)
+环境相关步骤已迁移至独立的 [环境准备](./environment-setup) 指南，涵盖：
 
-### 基础设施部署
-在开始后端开发之前，需要先部署基础设施服务。这些服务包括数据库、缓存、文件存储等核心组件。
+- 通用依赖与前置条件
+- 全栈 Nexent 搭建（基础设施、后端、前端、运行服务）
+- 仅使用 SDK 的安装路径
 
-```bash
-# 在项目根目录的docker目录下执行
-cd docker
-./deploy.sh --mode infrastructure
-```
+请先完成该指南，再回到此页继续模块开发。
 
-::: info 重要说明
-基础设施模式会启动 PostgreSQL、Redis、Elasticsearch 和 MinIO 服务。部署脚本会自动生成开发环境所需的密钥和环境变量，并保存到根目录的 `.env` 文件中。生成的密钥包括 MinIO 访问密钥和 Elasticsearch API 密钥。所有服务 URL 会配置为 localhost 地址，方便本地开发。
-:::
-
-### 后端设置
-```bash
-# 在项目根目录的backend目录下执行
-cd backend
-uv sync --all-extras
-uv pip install ../sdk
-```
-
-::: tip 说明
-`--all-extras` 会安装所有可选依赖，包括数据处理、测试等模块。然后安装本地 SDK 包。
-:::
-
-#### 使用国内镜像源（可选）
-如果网络访问较慢，可以使用国内镜像源加速安装：
-
-```bash
-# 使用清华大学镜像源
-uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install ../sdk --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 使用阿里云镜像源
-uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --default-index https://mirrors.aliyun.com/pypi/simple/
-
-# 使用多个镜像源（推荐）
-uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-```
-
-::: info 镜像源说明
-- **清华大学镜像源**: `https://pypi.tuna.tsinghua.edu.cn/simple`
-- **阿里云镜像源**: `https://mirrors.aliyun.com/pypi/simple/`
-- **中科大镜像源**: `https://pypi.mirrors.ustc.edu.cn/simple/`
-- **豆瓣镜像源**: `https://pypi.douban.com/simple/`
-
-推荐使用多个镜像源配置，以提高下载成功率。
-:::
-
-### 前端设置
-```bash
-# 在项目根目录的frontend目录下执行
-cd frontend
-pnpm install
-pnpm run dev
-```
-
-### 服务启动
-在启动服务之前，需要先激活虚拟环境：
-
-```bash
-# 在项目根目录的backend目录下执行
-cd backend
-source .venv/bin/activate  # 激活虚拟环境
-```
-
-::: warning 重要提示
-Windows操作系统需执行`source .venv/Scripts/activate`命令激活虚拟环境。
-:::
-
-Nexent 包含三个核心后端服务，需要分别启动：
-
-```bash
-# 在项目根目录下执行，请按以下顺序执行：
-source .env && python backend/mcp_service.py            # MCP 服务
-source .env && python backend/data_process_service.py   # 数据处理服务
-source .env && python backend/config_service.py         # 编辑态服务
-source .env && python backend/runtime_service.py        # 运行态服务
-```
-
-::: warning 重要提示
-所有服务必须在项目根目录下启动。每个 Python 命令前都需要先执行 `source .env` 来加载环境变量。确保基础设施服务（数据库、Redis、Elasticsearch、MinIO）已经启动并正常运行。
-:::
 
 ## 🔧 开发模块指南
 
@@ -208,8 +124,8 @@ source .env && python backend/runtime_service.py        # 运行态服务
 ## 💡 获取帮助
 
 ### 文档资源
-- [安装部署](./installation.md) - 环境搭建和部署
-- [常见问题](./faq) - 常见问题解答
+- [安装部署](../quick-start/installation) - 环境搭建和部署
+- [常见问题](../quick-start/faq) - 常见问题解答
 - [用户指南](../user-guide/home-page) - Nexent使用指南
 
 ### 社区支持

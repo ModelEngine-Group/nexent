@@ -128,4 +128,4 @@ npm start
 - Voice processing integration
 - Analytics and monitoring
 
-For detailed development guidelines and component documentation, see the [Development Guide](../getting-started/development-guide).
+For detailed development guidelines and component documentation, see the [Developer Guide](../developer-guide/overview).
