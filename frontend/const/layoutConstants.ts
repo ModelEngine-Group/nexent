@@ -18,6 +18,15 @@ export const HEADER_CONFIG = {
   HORIZONTAL_PADDING: "24px", // px-6
 } as const;
 
+// Sidebar configuration
+export const SIDER_CONFIG = {
+  // Sidebar width when expanded
+  EXPANDED_WIDTH: 280,
+  
+  // Sidebar width when collapsed
+  COLLAPSED_WIDTH: 64,
+} as const;
+
 // Footer configuration
 export const FOOTER_CONFIG = {
   // Actual displayed height (including padding)
