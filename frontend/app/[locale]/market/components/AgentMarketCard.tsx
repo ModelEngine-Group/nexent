@@ -6,6 +6,7 @@ import { Download, Tag, Wrench } from "lucide-react";
 import { MarketAgentListItem } from "@/types/market";
 import { useTranslation } from "react-i18next";
 import { getGenericLabel } from "@/lib/agentLabelMapper";
+import { getCategoryIcon } from "@/const/marketConfig";
 
 interface AgentMarketCardProps {
   agent: MarketAgentListItem;
@@ -34,6 +35,11 @@ export function AgentMarketCard({
     onViewDetails(agent);
   };
 
+  // Get category icon: prefer API icon, then fallback to default mapping by name
+  const categoryIcon = agent.category
+    ? agent.category.icon || getCategoryIcon(agent.category.name)
+    : "📦";
+
   return (
     <motion.div
       whileHover={{ y: -4 }}
@@ -45,7 +51,7 @@ export function AgentMarketCard({
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="text-2xl">
-              {agent.category?.icon || "📦"}
+              {categoryIcon}
             </span>
             <span className="text-xs font-medium text-purple-600 dark:text-purple-400">
               {agent.category
@@ -64,6 +70,13 @@ export function AgentMarketCard({
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 line-clamp-1 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
           {agent.display_name}
         </h3>
+        {agent.author ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {t("market.by", { defaultValue: "By {{author}}", author: agent.author })}
+          </p>
+        ) : (
+          <div className="h-5" aria-hidden />
+        )}
       </div>
 
       {/* Card body */}

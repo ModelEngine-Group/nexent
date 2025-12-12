@@ -15,6 +15,7 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { visit } from "unist-util-visit";
 
 import { SearchResult } from "@/types/chat";
+import { resolveS3UrlToDataUrl } from "@/services/storageService";
 import {
   Tooltip,
   TooltipContent,
@@ -31,7 +32,266 @@ interface MarkdownRendererProps {
   showDiagramToggle?: boolean;
   onCitationHover?: () => void;
   enableMultimodal?: boolean;
+  /**
+   * When true, resolve s3:// media URLs in markdown into data URLs (base64)
+   * so that images can still be displayed after page refresh or when
+   * the original S3 URL is not directly accessible by the browser.
+   */
+  resolveS3Media?: boolean;
 }
+
+// Simple in-memory cache to avoid refetching the same S3 object multiple times
+const s3MediaCache = new Map<string, string>();
+const mediaObjectUrlCache = new Map<string, string>();
+const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
+const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
+
+const isBrowserEnvironment = typeof window !== "undefined";
+
+const getSessionCachedValue = (key: string): string | null => {
+  if (!isBrowserEnvironment) {
+    return null;
+  }
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const getCachedMediaSrc = (src: string): string | null => {
+  const cached = s3MediaCache.get(src);
+  if (cached) {
+    return cached;
+  }
+  const sessionValue = getSessionCachedValue(src);
+  if (sessionValue) {
+    s3MediaCache.set(src, sessionValue);
+    return sessionValue;
+  }
+  return null;
+};
+
+const setCachedMediaSrc = (src: string, value: string) => {
+  s3MediaCache.set(src, value);
+  if (!isBrowserEnvironment) {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(`${S3_MEDIA_SESSION_PREFIX}${src}`, value);
+  } catch {
+    // Ignore storage quota errors silently.
+  }
+};
+
+const setCachedObjectUrl = (src: string, objectUrl: string | null) => {
+  if (!objectUrl) {
+    return;
+  }
+  const existing = mediaObjectUrlCache.get(src);
+  if (existing && existing !== objectUrl) {
+    URL.revokeObjectURL(existing);
+  }
+  mediaObjectUrlCache.set(src, objectUrl);
+};
+
+const resolveMediaToObjectUrl = async (
+  src: string,
+  { resolveS3 }: { resolveS3: boolean }
+): Promise<string | null> => {
+  try {
+    if (src.startsWith("blob:")) {
+      return src;
+    }
+
+    if (src.startsWith("s3://")) {
+      if (!resolveS3) {
+        return null;
+      }
+      const dataUrl = await resolveS3UrlToDataUrl(src);
+      if (!dataUrl) {
+        return null;
+      }
+      const response = await fetch(dataUrl);
+      if (!response.ok) {
+        return null;
+      }
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    }
+
+    if (
+      src.startsWith("http://") ||
+      src.startsWith("https://") ||
+      src.startsWith("/api/") ||
+      src.startsWith("/nexent/") ||
+      src.startsWith("/attachments/") ||
+      src.startsWith("/")
+    ) {
+      const response = await fetch(src);
+      if (!response.ok) {
+        return null;
+      }
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    }
+
+    if (src.startsWith("data:")) {
+      const response = await fetch(src);
+      if (!response.ok) {
+        return null;
+      }
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const usePrefetchedMediaSource = (
+  src?: string,
+  options?: { enable?: boolean; resolveS3?: boolean }
+) => {
+  const shouldPrefetch =
+    Boolean(
+      options?.enable &&
+        src &&
+        typeof src === "string" &&
+        !src.startsWith("blob:") &&
+        (src.startsWith("s3://") ||
+          src.startsWith("http://") ||
+          src.startsWith("https://") ||
+          src.startsWith("/"))
+    ) || false;
+
+  const [resolvedSrc, setResolvedSrc] = React.useState<string | null>(() => {
+    if (!src || typeof src !== "string") {
+      return null;
+    }
+    if (!shouldPrefetch) {
+      return src;
+    }
+    return mediaObjectUrlCache.get(src) ?? null;
+  });
+
+  React.useEffect(() => {
+    if (!src || typeof src !== "string") {
+      setResolvedSrc(null);
+      return;
+    }
+
+    if (!shouldPrefetch) {
+      setResolvedSrc(src);
+      return;
+    }
+
+    const cached = mediaObjectUrlCache.get(src);
+    if (cached) {
+      setResolvedSrc(cached);
+      return;
+    }
+
+    let cancelled = false;
+
+    const promise =
+      mediaObjectUrlPromiseCache.get(src) ??
+      resolveMediaToObjectUrl(src, {
+        resolveS3: options?.resolveS3 ?? true,
+      });
+
+    mediaObjectUrlPromiseCache.set(src, promise);
+
+    promise
+      .then((objectUrl) => {
+        if (cancelled) {
+          return;
+        }
+        if (!objectUrl) {
+          setResolvedSrc(null);
+          return;
+        }
+        setCachedObjectUrl(src, objectUrl);
+        setResolvedSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResolvedSrc(null);
+        }
+      })
+      .finally(() => {
+        mediaObjectUrlPromiseCache.delete(src);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [options?.resolveS3, shouldPrefetch, src]);
+
+  return resolvedSrc;
+};
+
+const useResolvedS3Media = (src?: string, shouldResolve?: boolean) => {
+  const cachedInitial =
+    typeof src === "string" && src.startsWith("s3://")
+      ? getCachedMediaSrc(src)
+      : null;
+  const initialValue =
+    typeof src === "string"
+      ? !shouldResolve || !src.startsWith("s3://")
+        ? src
+        : cachedInitial
+      : null;
+  const [resolvedSrc, setResolvedSrc] = React.useState<string | null>(
+    initialValue
+  );
+
+  React.useEffect(() => {
+    if (!src || typeof src !== "string") {
+      setResolvedSrc(null);
+      return;
+    }
+
+    if (!shouldResolve || !src.startsWith("s3://")) {
+      setResolvedSrc(src);
+      return;
+    }
+
+    const cached = getCachedMediaSrc(src);
+    if (cached) {
+      setResolvedSrc(cached);
+      return;
+    }
+
+    let cancelled = false;
+
+    resolveS3UrlToDataUrl(src)
+      .then((dataUrl) => {
+        if (cancelled) {
+          return;
+        }
+        if (dataUrl) {
+          setCachedMediaSrc(src, dataUrl);
+          setResolvedSrc(dataUrl);
+        } else {
+          setResolvedSrc(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResolvedSrc(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [src, shouldResolve]);
+
+  return resolvedSrc;
+};
 
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".ogg", ".mov", ".m4v"];
 
@@ -519,20 +779,16 @@ const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> = React.memo
 
 ImageWithErrorHandling.displayName = "ImageWithErrorHandling";
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
-  content,
-  className,
-  searchResults = [],
-  showDiagramToggle = true,
-  onCitationHover,
-  enableMultimodal = true,
-}) => {
+/**
+ * Render a code block with syntax highlighting, language label, and copy button
+ * This is exported for use in other components that need to render code blocks directly
+ */
+export const CodeBlock: React.FC<{
+  codeContent: string;
+  language?: string;
+}> = ({ codeContent, language = "python" }) => {
   const { t } = useTranslation("common");
-
-  // Convert LaTeX delimiters to markdown math delimiters
-  const processedContent = convertLatexDelimiters(content);
-
-  // Customize code block style with light gray background
+  
   const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {
@@ -568,6 +824,47 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       display: "block",
     },
   };
+
+  const cleanedContent = codeContent.replace(/^\n+|\n+$/g, "");
+
+  return (
+    <div className="code-block-container group">
+      <div className="code-block-header">
+        <span className="code-language-label" data-language={language}>
+          {language}
+        </span>
+        <CopyButton
+          content={cleanedContent}
+          variant="code-block"
+          className="header-copy-button"
+          tooltipText={{
+            copy: t("chatStreamMessage.copyContent"),
+            copied: t("chatStreamMessage.copied"),
+          }}
+        />
+      </div>
+      <div className="code-block-content">
+        <SyntaxHighlighter style={customStyle} language={language} PreTag="div">
+          {cleanedContent}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+};
+
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+  content,
+  className,
+  searchResults = [],
+  showDiagramToggle = true,
+  onCitationHover,
+  enableMultimodal = true,
+  resolveS3Media = false,
+}) => {
+  const { t } = useTranslation("common");
+
+  // Convert LaTeX delimiters to markdown math delimiters
+  const processedContent = convertLatexDelimiters(content);
 
   const renderCodeFallback = (text: string, key?: React.Key) => (
     <code
@@ -614,6 +911,30 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     }
 
     return <VideoWithErrorHandling key={src} src={src} alt={alt} props={props} />;
+  };
+
+  const ImageResolver: React.FC<{ src?: string; alt?: string | null }> = ({
+    src,
+    alt,
+  }) => {
+    const resolvedSrc = useResolvedS3Media(
+      typeof src === "string" ? src : undefined,
+      resolveS3Media
+    );
+
+    if (!enableMultimodal) {
+      return renderMediaFallback(src, alt);
+    }
+
+    if (!resolvedSrc) {
+      return renderMediaFallback(src, alt);
+    }
+
+    if (isVideoUrl(resolvedSrc)) {
+      return renderVideoElement({ src: resolvedSrc, alt });
+    }
+
+    return <ImageWithErrorHandling key={resolvedSrc} src={resolvedSrc} alt={alt} />;
   };
 
   // Modified processText function logic
@@ -865,37 +1186,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                       return <Diagram code={codeContent} className="my-4" showToggle={showDiagramToggle} />;
                     }
                     if (!inline) {
-                      return (
-                        <div className="code-block-container group">
-                          <div className="code-block-header">
-                            <span
-                              className="code-language-label"
-                              data-language={match[1]}
-                            >
-                              {match[1]}
-                            </span>
-                            <CopyButton
-                              content={codeContent}
-                              variant="code-block"
-                              className="header-copy-button"
-                              tooltipText={{
-                                copy: t("chatStreamMessage.copyContent"),
-                                copied: t("chatStreamMessage.copied"),
-                              }}
-                            />
-                          </div>
-                          <div className="code-block-content">
-                            <SyntaxHighlighter
-                              style={customStyle}
-                              language={match[1]}
-                              PreTag="div"
-                              {...props}
-                            >
-                              {codeContent}
-                            </SyntaxHighlighter>
-                          </div>
-                        </div>
-                      );
+                      return <CodeBlock codeContent={codeContent} language={match[1]} />;
                     }
                   }
                 } catch (error) {
@@ -908,21 +1199,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 );
               },
               // Image
-              img: ({ src, alt }: any) => {
-                if (!enableMultimodal) {
-                  return renderMediaFallback(src, alt);
-                }
-
-                if (isVideoUrl(src)) {
-                  return renderVideoElement({ src, alt });
-                }
-
-                if (!src || typeof src !== "string") {
-                  return null;
-                }
-
-                return <ImageWithErrorHandling key={src} src={src} alt={alt} />;
-              },
+              img: ({ src, alt }: any) => (
+                <ImageResolver src={src} alt={alt} />
+              ),
               // Video
               video: ({ children, ...props }: any) => {
                 const directSrc = props?.src;

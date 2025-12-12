@@ -202,4 +202,4 @@ python backend/mcp_service.py            # MCP service
 - Resource pool management
 - Auto-scaling capabilities
 
-For detailed backend development guidelines, see the [Development Guide](../getting-started/development-guide).
+For detailed backend development guidelines, see the [Developer Guide](../developer-guide/overview).

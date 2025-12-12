@@ -59,6 +59,7 @@ class ModelRequest(BaseModel):
     connect_status: Optional[str] = ''
     expected_chunk_size: Optional[int] = None
     maximum_chunk_size: Optional[int] = None
+    chunk_batch: Optional[int] = None
 
 
 class ProviderModelRequest(BaseModel):
@@ -246,6 +247,7 @@ class AgentInfoRequest(BaseModel):
     display_name: Optional[str] = None
     description: Optional[str] = None
     business_description: Optional[str] = None
+    author: Optional[str] = None
     model_name: Optional[str] = None
     model_id: Optional[int] = None
     max_steps: Optional[int] = None
@@ -311,6 +313,7 @@ class ExportAndImportAgentInfo(BaseModel):
     display_name: Optional[str] = None
     description: str
     business_description: str
+    author: Optional[str] = None
     max_steps: int
     provide_run_summary: bool
     duty_prompt: Optional[str] = None
@@ -342,6 +345,27 @@ class ExportAndImportDataFormat(BaseModel):
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
+
+
+class AgentNameBatchRegenerateItem(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    task_description: Optional[str] = ""
+    agent_id: Optional[int] = None
+
+
+class AgentNameBatchRegenerateRequest(BaseModel):
+    items: List[AgentNameBatchRegenerateItem]
+
+
+class AgentNameBatchCheckItem(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    agent_id: Optional[int] = None
+
+
+class AgentNameBatchCheckRequest(BaseModel):
+    items: List[AgentNameBatchCheckItem]
 
 
 class ConvertStateRequest(BaseModel):

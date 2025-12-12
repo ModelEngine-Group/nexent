@@ -107,23 +107,18 @@ function ToolPool({
     // Group by source and usage
     availableTools.forEach((tool) => {
       let groupKey: string;
-      let groupLabel: string;
 
       if (tool.source === TOOL_SOURCE_TYPES.MCP) {
         // MCP tools grouped by usage
         const usage = tool.usage || TOOL_SOURCE_TYPES.OTHER;
         groupKey = `mcp-${usage}`;
-        groupLabel = usage;
       } else if (tool.source === TOOL_SOURCE_TYPES.LOCAL) {
         groupKey = TOOL_SOURCE_TYPES.LOCAL;
-        groupLabel = t("toolPool.group.local");
       } else if (tool.source === TOOL_SOURCE_TYPES.LANGCHAIN) {
         groupKey = TOOL_SOURCE_TYPES.LANGCHAIN;
-        groupLabel = t("toolPool.group.langchain");
       } else {
         // Other types
         groupKey = tool.source || TOOL_SOURCE_TYPES.OTHER;
-        groupLabel = tool.source || t("toolPool.group.other");
       }
 
       if (!groupMap.has(groupKey)) {
@@ -703,7 +698,7 @@ function ToolPool({
           {t("toolPool.error.unavailableSelected")}
         </div>
       )}
-      <div className="flex-1 min-h-0 border-t pt-2 pb-2 overflow-hidden">
+      <div className="flex-1 min-h-0 border-t pt-2 pb-2">
         {loadingTools ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-gray-500">{t("toolPool.loadingTools")}</span>

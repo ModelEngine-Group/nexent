@@ -162,6 +162,8 @@ class ModelRecord(TableBase):
         Integer, doc="Maximum chunk size for embedding models, used during document chunking")
     ssl_verify = Column(
         Boolean, default=True, doc="Whether to verify SSL certificates when connecting to this model API. Default is true. Set to false for local services without SSL support.")
+    chunk_batch = Column(
+        Integer, doc="Batch size for concurrent embedding requests during document chunking")
 
 
 class ToolInfo(TableBase):
@@ -199,6 +201,7 @@ class AgentInfo(TableBase):
     name = Column(String(100), doc="Agent name")
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
+    author = Column(String(100), doc="Agent author")
     model_name = Column(String(100), doc="[DEPRECATED] Name of the model used, use model_id instead")
     model_id = Column(Integer, doc="Model ID, foreign key reference to model_record_t.model_id")
     max_steps = Column(Integer, doc="Maximum number of steps")
@@ -242,7 +245,8 @@ class KnowledgeRecord(TableBase):
 
     knowledge_id = Column(Integer, Sequence("knowledge_record_t_knowledge_id_seq", schema="nexent"),
                           primary_key=True, nullable=False, doc="Knowledge base ID, unique primary key")
-    index_name = Column(String(100), doc="Knowledge base name")
+    index_name = Column(String(100), doc="Internal Elasticsearch index name")
+    knowledge_name = Column(String(100), doc="User-facing knowledge base name")
     knowledge_describe = Column(String(3000), doc="Knowledge base description")
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
     embedding_model_name = Column(String(200), doc="Embedding model name, used to record the embedding model used by the knowledge base")

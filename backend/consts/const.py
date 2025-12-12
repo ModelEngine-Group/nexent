@@ -38,6 +38,7 @@ CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+ROOT_DIR = os.getenv("ROOT_DIR")
 
 
 # Supabase Configuration
@@ -278,8 +279,10 @@ LLM_SLOW_REQUEST_THRESHOLD_SECONDS = float(
 LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
     os.getenv("LLM_SLOW_TOKEN_RATE_THRESHOLD", "10.0"))  # tokens per second
 
-# APP Version
-APP_VERSION = "v1.7.7.1"
 
 DEFAULT_ZH_TITLE = "新对话"
 DEFAULT_EN_TITLE = "New Conversation"
+
+
+# APP Version
+APP_VERSION = "v1.7.8"

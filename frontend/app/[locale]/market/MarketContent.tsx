@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { ShoppingBag, Search, RefreshCw, AlertCircle } from "lucide-react";
+import { ShoppingBag, Search, RefreshCw } from "lucide-react";
 import { Tabs, Input, Spin, Empty, Pagination, App } from "antd";
 import log from "@/lib/logger";
 
@@ -18,7 +18,8 @@ import {
 import marketService, { MarketApiError } from "@/services/marketService";
 import { AgentMarketCard } from "./components/AgentMarketCard";
 import MarketAgentDetailModal from "./components/MarketAgentDetailModal";
-import AgentInstallModal from "./components/AgentInstallModal";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import { ImportAgentData } from "@/hooks/useAgentImport";
 import MarketErrorState from "./components/MarketErrorState";
 
 interface MarketContentProps {
@@ -261,12 +262,7 @@ export default function MarketContent({
     },
     ...categories.map((cat) => ({
       key: cat.name,
-      label: (
-        <span className="flex items-center gap-2">
-          <span>{cat.icon}</span>
-          <span>{isZh ? cat.display_name_zh : cat.display_name}</span>
-        </span>
-      ),
+      label: isZh ? cat.display_name_zh : cat.display_name,
     })),
   ];
 
@@ -451,11 +447,22 @@ export default function MarketContent({
           />
 
           {/* Agent Install Modal */}
-          <AgentInstallModal
+          <AgentImportWizard
             visible={installModalVisible}
-            agentDetails={installAgent}
             onCancel={handleInstallCancel}
-            onInstallComplete={handleInstallComplete}
+            initialData={
+              installAgent?.agent_json
+                ? ({
+                    agent_id: installAgent.agent_id,
+                    agent_info: installAgent.agent_json.agent_info,
+                    mcp_info: installAgent.agent_json.mcp_info,
+                  } as ImportAgentData)
+                : null
+            }
+            onImportComplete={handleInstallComplete}
+            title={undefined} // Use default title
+            agentDisplayName={installAgent?.display_name}
+            agentDescription={installAgent?.description}
           />
         </motion.div>
       ) : null}

@@ -846,40 +846,82 @@ export const ModelConfigSection = forwardRef<
             justifyContent: "flex-start",
             paddingRight: 12,
             marginLeft: "4px",
-            height: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
+            minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
           }}
         >
-          <Space size={10}>
-            <Button type="primary" size="middle" onClick={handleSyncModels}>
-              <SyncOutlined />{" "}
-              {t("modelConfig.button.syncModelEngine")}
-            </Button>
-            <Button
-              type="primary"
-              size="middle"
-              icon={<PlusOutlined />}
-              onClick={() => setIsAddModalOpen(true)}
-            >
-              {t("modelConfig.button.addCustomModel")}
-            </Button>
-            <Button
-              type="primary"
-              size="middle"
-              icon={<EditOutlined />}
-              onClick={() => setIsDeleteModalOpen(true)}
-            >
-              {t("modelConfig.button.editCustomModel")}
-            </Button>
-            <Button
-              type="primary"
-              size="middle"
-              icon={<SafetyCertificateOutlined />}
-              onClick={verifyModels}
-              loading={isVerifying}
-            >
-              {t("modelConfig.button.checkConnectivity")}
-            </Button>
-          </Space>
+          <Row gutter={[8, 8]} style={{ width: "100%" }}>
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Button 
+                type="primary" 
+                size="middle" 
+                onClick={handleSyncModels}
+                style={{ width: "100%" }}
+                block
+              >
+                <SyncOutlined />
+                <span style={{ marginLeft: 4 }}>
+                  <span className="hidden xl:inline button-text-full">
+                    {t("modelConfig.button.syncModelEngine")}
+                  </span>
+                  <span className="xl:hidden button-text-short">
+                    {t("modelConfig.button.sync")}
+                  </span>
+                </span>
+              </Button>
+            </Col>
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Button
+                type="primary"
+                size="middle"
+                icon={<PlusOutlined />}
+                onClick={() => setIsAddModalOpen(true)}
+                style={{ width: "100%" }}
+                block
+              >
+                <span className="hidden xl:inline button-text-full">
+                  {t("modelConfig.button.addCustomModel")}
+                </span>
+                <span className="xl:hidden button-text-short">
+                  {t("modelConfig.button.add")}
+                </span>
+              </Button>
+            </Col>
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Button
+                type="primary"
+                size="middle"
+                icon={<EditOutlined />}
+                onClick={() => setIsDeleteModalOpen(true)}
+                style={{ width: "100%" }}
+                block
+              >
+                <span className="hidden xl:inline button-text-full">
+                  {t("modelConfig.button.editCustomModel")}
+                </span>
+                <span className="xl:hidden button-text-short">
+                  {t("modelConfig.button.edit")}
+                </span>
+              </Button>
+            </Col>
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Button
+                type="primary"
+                size="middle"
+                icon={<SafetyCertificateOutlined />}
+                onClick={verifyModels}
+                loading={isVerifying}
+                style={{ width: "100%" }}
+                block
+              >
+                <span className="hidden xl:inline button-text-full">
+                  {t("modelConfig.button.checkConnectivity")}
+                </span>
+                <span className="xl:hidden button-text-short">
+                  {t("modelConfig.button.check")}
+                </span>
+              </Button>
+            </Col>
+          </Row>
         </div>
 
         <div

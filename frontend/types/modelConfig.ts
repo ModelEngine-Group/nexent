@@ -45,6 +45,7 @@ export interface ModelOption {
   connect_status?: ModelConnectStatus;
   expectedChunkSize?: number;
   maximumChunkSize?: number;
+  chunkingBatchSize?: number;
 }
 
 // Application configuration interface

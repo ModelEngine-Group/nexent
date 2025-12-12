@@ -17,6 +17,11 @@ import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
 import { ModelEditDialog, ProviderConfigEditDialog } from "./ModelEditDialog";
+import {
+  ModelChunkSizeSlider,
+  DEFAULT_EXPECTED_CHUNK_SIZE,
+  DEFAULT_MAXIMUM_CHUNK_SIZE,
+} from "./ModelChunkSizeSilder";
 
 interface ModelDeleteDialogProps {
   isOpen: boolean;
@@ -58,6 +63,18 @@ export const ModelDeleteDialog = ({
     useState<any>(null);
   const [modelMaxTokens, setModelMaxTokens] = useState("4096");
   const [providerModelSearchTerm, setProviderModelSearchTerm] = useState("");
+
+  // Embedding model chunk config modal state
+  const [embeddingConfigModalVisible, setEmbeddingConfigModalVisible] =
+    useState(false);
+  const [selectedEmbeddingModel, setSelectedEmbeddingModel] =
+    useState<ModelOption | null>(null);
+  const [chunkSizeRange, setChunkSizeRange] = useState<[number, number]>([
+    DEFAULT_EXPECTED_CHUNK_SIZE,
+    DEFAULT_MAXIMUM_CHUNK_SIZE,
+  ]);
+  const [chunkingBatchSize, setChunkingBatchSize] = useState("10");
+  const [savingEmbeddingConfig, setSavingEmbeddingConfig] = useState(false);
 
   // Get model color scheme
   const getModelColorScheme = (
@@ -219,11 +236,7 @@ export const ModelDeleteDialog = ({
     switch (source) {
       case MODEL_SOURCES.SILICON:
         return (
-          <img
-            src="/siliconflow.png"
-            alt="SiliconFlow"
-            className="w-5 h-5"
-          />
+          <img src="/siliconflow.png" alt="SiliconFlow" className="w-5 h-5" />
         );
       case MODEL_SOURCES.MODELENGINE:
         return (
@@ -455,7 +468,6 @@ export const ModelDeleteDialog = ({
     });
   }, [providerModels, providerModelSearchTerm]);
 
-
   // Handle provider config save
   const handleProviderConfigSave = async ({
     apiKey,
@@ -491,9 +503,7 @@ export const ModelDeleteDialog = ({
             maxTokens: maxTokens || m.maxTokens,
           }));
 
-        await modelService.updateBatchModel(
-          currentModelPayloads
-        );
+        await modelService.updateBatchModel(currentModelPayloads);
 
         // Show success message since no exception was thrown
         message.success(t("model.dialog.success.updateSuccess"));
@@ -538,6 +548,104 @@ export const ModelDeleteDialog = ({
     setSelectedModelForSettings(null);
   };
 
+  // Handle embedding model click to open config modal
+  const handleEmbeddingModelClick = (model: ModelOption | any) => {
+    const isEmbeddingModel =
+      model.type === MODEL_TYPES.EMBEDDING ||
+      model.type === MODEL_TYPES.MULTI_EMBEDDING ||
+      model.model_type === MODEL_TYPES.EMBEDDING ||
+      model.model_type === MODEL_TYPES.MULTI_EMBEDDING;
+    if (isEmbeddingModel) {
+      // If it's a providerModel (not yet added to system), find the corresponding model in models list
+      if (model.id && !model.name) {
+        // This is a providerModel, find the corresponding model in models list
+        const existingModel = models.find(
+          (m) =>
+            m.name === model.id &&
+            m.type === (model.model_type || deletingModelType) &&
+            m.source === selectedSource
+        );
+        if (existingModel) {
+          setSelectedEmbeddingModel(existingModel);
+          setChunkSizeRange([
+            existingModel.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
+            existingModel.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
+          ]);
+          setChunkingBatchSize(
+            (existingModel.chunkingBatchSize || 10).toString()
+          );
+        } else {
+          // Model not yet added, use default values
+          setSelectedEmbeddingModel({
+            ...model,
+            name: model.id,
+            displayName: model.id,
+            type: model.model_type || deletingModelType,
+            source: selectedSource,
+            expectedChunkSize: DEFAULT_EXPECTED_CHUNK_SIZE,
+            maximumChunkSize: DEFAULT_MAXIMUM_CHUNK_SIZE,
+            chunkingBatchSize: 10,
+          } as ModelOption);
+          setChunkSizeRange([
+            DEFAULT_EXPECTED_CHUNK_SIZE,
+            DEFAULT_MAXIMUM_CHUNK_SIZE,
+          ]);
+          setChunkingBatchSize("10");
+        }
+      } else {
+        // This is a ModelOption from models list
+        setSelectedEmbeddingModel(model);
+        setChunkSizeRange([
+          model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
+          model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
+        ]);
+        setChunkingBatchSize((model.chunkingBatchSize || 10).toString());
+      }
+      setEmbeddingConfigModalVisible(true);
+    }
+  };
+
+  // Handle embedding config save
+  const handleEmbeddingConfigSave = async () => {
+    if (!selectedEmbeddingModel) return;
+
+    setSavingEmbeddingConfig(true);
+    try {
+      // Get the display name - use the one from existing model if available
+      const displayName =
+        selectedEmbeddingModel.displayName || selectedEmbeddingModel.name;
+      const apiKey =
+        selectedEmbeddingModel.apiKey || getApiKeyByType(deletingModelType);
+
+      await modelService.updateSingleModel({
+        currentDisplayName: displayName,
+        url: selectedEmbeddingModel.apiUrl || "",
+        apiKey: apiKey || "sk-no-api-key",
+        source: selectedEmbeddingModel.source || selectedSource,
+        expectedChunkSize: chunkSizeRange[0],
+        maximumChunkSize: chunkSizeRange[1],
+        chunkingBatchSize: parseInt(chunkingBatchSize) || 10,
+      });
+
+      message.success(t("model.dialog.editSuccess"));
+      setEmbeddingConfigModalVisible(false);
+      setSelectedEmbeddingModel(null);
+      // Refresh model list to reflect changes
+      await onSuccess();
+    } catch (error: any) {
+      log.error("Failed to save embedding model config:", error);
+      if (error.code === 404) {
+        message.error(t("model.dialog.error.modelNotFound"));
+      } else if (error.code === 500) {
+        message.error(t("model.dialog.error.serverError"));
+      } else {
+        message.error(t("model.dialog.error.editFailed"));
+      }
+    } finally {
+      setSavingEmbeddingConfig(false);
+    }
+  };
+
   return (
     // Refactor: Styles are embedded within the component
     <Modal
@@ -572,7 +680,11 @@ export const ModelDeleteDialog = ({
 
                       if (allEnabledModels) {
                         const apiKey = getApiKeyByType(deletingModelType);
-                        // Pass all currently enabled models with their max_tokens values
+                        const isEmbeddingType =
+                          deletingModelType === MODEL_TYPES.EMBEDDING ||
+                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                        // Pass all currently enabled models
+                        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
                         await modelService.addBatchCustomModel({
                           api_key:
                             apiKey && apiKey.trim() !== ""
@@ -580,10 +692,18 @@ export const ModelDeleteDialog = ({
                               : "sk-no-api-key",
                           provider: MODEL_SOURCES.SILICON,
                           type: deletingModelType,
-                          models: allEnabledModels.map((model) => ({
-                            ...model,
-                            max_tokens: model.max_tokens || 4096, // Ensure max_tokens is always present
-                          })),
+                          models: allEnabledModels.map((model) => {
+                            if (isEmbeddingType) {
+                              const { max_tokens, ...modelWithoutMaxTokens } =
+                                model;
+                              return modelWithoutMaxTokens;
+                            } else {
+                              return {
+                                ...model,
+                                max_tokens: model.max_tokens || 4096,
+                              };
+                            }
+                          }),
                         });
                       }
 
@@ -882,12 +1002,36 @@ export const ModelDeleteDialog = ({
                 const checked = pendingSelectedProviderIds.has(
                   providerModel.id
                 );
+                const isEmbeddingModel =
+                  deletingModelType === MODEL_TYPES.EMBEDDING ||
+                  deletingModelType === MODEL_TYPES.MULTI_EMBEDDING ||
+                  providerModel.model_type === MODEL_TYPES.EMBEDDING ||
+                  providerModel.model_type === MODEL_TYPES.MULTI_EMBEDDING;
+                // Check if this model is already added to the system
+                const existingModel = models.find(
+                  (m) =>
+                    m.name === providerModel.id &&
+                    m.type ===
+                      (providerModel.model_type || deletingModelType) &&
+                    m.source === selectedSource
+                );
+                const canEditEmbedding = isEmbeddingModel && existingModel;
+
                 return (
                   <div
                     key={providerModel.id}
-                    className="p-2 flex justify-between items-center hover:bg-gray-50 text-sm"
+                    className={`p-2 flex justify-between items-center hover:bg-gray-50 text-sm ${
+                      canEditEmbedding ? "cursor-pointer" : ""
+                    }`}
                   >
-                    <div className="flex items-center min-w-0">
+                    <div
+                      className="flex items-center min-w-0 flex-1"
+                      onClick={
+                        canEditEmbedding
+                          ? () => handleEmbeddingModelClick(providerModel)
+                          : undefined
+                      }
+                    >
                       <span className="truncate" title={providerModel.id}>
                         {providerModel.id}
                       </span>
@@ -898,25 +1042,33 @@ export const ModelDeleteDialog = ({
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
-                      {deletingModelType !== "embedding" && (
-                        <Tooltip
-                          title={t("model.dialog.modelList.tooltip.settings")}
-                        >
-                          <Button
-                            type="text"
-                            icon={<SettingOutlined />}
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation(); // Prevent switch toggle
-                              handleSettingsClick(providerModel);
-                            }}
-                          />
-                        </Tooltip>
-                      )}
+                      {deletingModelType !== "embedding" &&
+                        deletingModelType !== MODEL_TYPES.MULTI_EMBEDDING && (
+                          <Tooltip
+                            title={t("model.dialog.modelList.tooltip.settings")}
+                          >
+                            <Button
+                              type="text"
+                              icon={<SettingOutlined />}
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent switch toggle
+                                handleSettingsClick(providerModel);
+                              }}
+                            />
+                          </Tooltip>
+                        )}
                       <Switch
                         size="small"
                         checked={checked}
-                        onChange={(value) => {
+                        onChange={(value, event) => {
+                          // Ensure toggling switch never triggers the row click handler
+                          if (
+                            event &&
+                            typeof event.stopPropagation === "function"
+                          ) {
+                            event.stopPropagation();
+                          }
                           setPendingSelectedProviderIds((prev) => {
                             const next = new Set(prev);
                             if (value) {
@@ -941,75 +1093,94 @@ export const ModelDeleteDialog = ({
                     model.type === deletingModelType &&
                     model.source === selectedSource
                 )
-                .map((model) => (
-                  <div
-                    key={model.name}
-                    onClick={
-                      selectedSource === MODEL_SOURCES.OPENAI_API_COMPATIBLE
-                        ? () => handleEditModel(model)
-                        : undefined
-                    }
-                    className={`p-2 flex justify-between items-center hover:bg-gray-50 text-sm ${
-                      selectedSource === MODEL_SOURCES.OPENAI_API_COMPATIBLE
-                        ? "cursor-pointer"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate" title={model.name}>
-                        {model.displayName || model.name} ({model.name})
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteModel(model.displayName || model.name);
-                      }}
-                      disabled={
-                        deletingModels.has(model.displayName || model.name) ||
-                        model.type === MODEL_TYPES.STT ||
-                        model.type === MODEL_TYPES.TTS
+                .map((model) => {
+                  const isEmbeddingModel =
+                    model.type === MODEL_TYPES.EMBEDDING ||
+                    model.type === MODEL_TYPES.MULTI_EMBEDDING;
+                  // Only allow clicking for batch-imported embedding models (not custom models)
+                  const isBatchImportedEmbedding =
+                    isEmbeddingModel &&
+                    selectedSource !== MODEL_SOURCES.OPENAI_API_COMPATIBLE;
+                  // Custom models can still be clicked to edit full model config
+                  const isCustomModelClickable =
+                    selectedSource === MODEL_SOURCES.OPENAI_API_COMPATIBLE;
+                  const isClickable =
+                    isBatchImportedEmbedding || isCustomModelClickable;
+
+                  return (
+                    <div
+                      key={model.name}
+                      onClick={
+                        isClickable
+                          ? () =>
+                              isBatchImportedEmbedding
+                                ? handleEmbeddingModelClick(model)
+                                : handleEditModel(model)
+                          : undefined
                       }
-                      className={`p-1 ${
-                        model.type === MODEL_TYPES.STT ||
-                        model.type === MODEL_TYPES.TTS
-                          ? "text-gray-400 cursor-not-allowed"
-                          : "text-red-500 hover:text-red-700"
+                      className={`p-2 flex justify-between items-center hover:bg-gray-50 text-sm ${
+                        isClickable ? "cursor-pointer" : ""
                       }`}
-                      title={
-                        model.type === MODEL_TYPES.STT ||
-                        model.type === MODEL_TYPES.TTS
-                          ? t("model.dialog.delete.unsupportedTypeHint")
-                          : t("model.dialog.delete.deleteHint")
-                      }
                     >
-                      {deletingModels.has(model.displayName || model.name) ? (
-                        <svg
-                          className="animate-spin h-5 w-5"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className="font-medium truncate"
+                          title={model.name}
                         >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path>
-                        </svg>
-                      ) : (
-                        <DeleteOutlined className="h-5 w-5" />
-                      )}
-                    </button>
-                  </div>
-                ))}
+                          {model.displayName || model.name} ({model.name})
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteModel(model.displayName || model.name);
+                        }}
+                        disabled={
+                          deletingModels.has(model.displayName || model.name) ||
+                          model.type === MODEL_TYPES.STT ||
+                          model.type === MODEL_TYPES.TTS
+                        }
+                        className={`p-1 ${
+                          model.type === MODEL_TYPES.STT ||
+                          model.type === MODEL_TYPES.TTS
+                            ? "text-gray-400 cursor-not-allowed"
+                            : "text-red-500 hover:text-red-700"
+                        }`}
+                        title={
+                          model.type === MODEL_TYPES.STT ||
+                          model.type === MODEL_TYPES.TTS
+                            ? t("model.dialog.delete.unsupportedTypeHint")
+                            : t("model.dialog.delete.deleteHint")
+                        }
+                      >
+                        {deletingModels.has(model.displayName || model.name) ? (
+                          <svg
+                            className="animate-spin h-5 w-5"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            ></circle>
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
+                          </svg>
+                        ) : (
+                          <DeleteOutlined className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
 
               {models.filter(
                 (model) =>
@@ -1090,6 +1261,57 @@ export const ModelDeleteDialog = ({
               value={modelMaxTokens}
               onChange={(e) => setModelMaxTokens(e.target.value)}
               placeholder={t("model.dialog.placeholder.maxTokens")}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Embedding Model Config Modal */}
+      <Modal
+        title={t("model.dialog.embeddingConfig.title", {
+          modelName:
+            selectedEmbeddingModel?.displayName ||
+            selectedEmbeddingModel?.name ||
+            "",
+        })}
+        open={embeddingConfigModalVisible}
+        onCancel={() => {
+          setEmbeddingConfigModalVisible(false);
+          setSelectedEmbeddingModel(null);
+        }}
+        onOk={handleEmbeddingConfigSave}
+        cancelText={t("common.button.cancel")}
+        okText={t("common.button.save")}
+        confirmLoading={savingEmbeddingConfig}
+        destroyOnClose
+      >
+        <div className="space-y-4">
+          {/* Chunk Size Range */}
+          <div>
+            <label className="block mb-2 text-sm font-medium text-gray-700">
+              {t("modelConfig.slider.chunkingSize")}
+            </label>
+            <ModelChunkSizeSlider
+              value={chunkSizeRange}
+              onChange={(value) => setChunkSizeRange(value)}
+            />
+          </div>
+
+          {/* Concurrent Request Count */}
+          <div>
+            <label
+              htmlFor="embeddingChunkingBatchSize"
+              className="block mb-1 text-sm font-medium text-gray-700"
+            >
+              {t("modelConfig.input.chunkingBatchSize")}
+            </label>
+            <Input
+              id="embeddingChunkingBatchSize"
+              type="number"
+              min="1"
+              placeholder="10"
+              value={chunkingBatchSize}
+              onChange={(e) => setChunkingBatchSize(e.target.value)}
             />
           </div>
         </div>

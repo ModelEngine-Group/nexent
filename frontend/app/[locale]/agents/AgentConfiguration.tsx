@@ -94,6 +94,7 @@ export default forwardRef<AgentConfigHandle, AgentConfigProps>(function AgentCon
   const [agentName, setAgentName] = useState("");
   const [agentDescription, setAgentDescription] = useState("");
   const [agentDisplayName, setAgentDisplayName] = useState("");
+  const [agentAuthor, setAgentAuthor] = useState("");
 
   // Add state for business logic and action buttons
   const [isGeneratingAgent, setIsGeneratingAgent] = useState(false);
@@ -474,12 +475,14 @@ export default forwardRef<AgentConfigHandle, AgentConfigProps>(function AgentCon
     if (isEditing && agent) {
       setAgentName(agent.name || "");
       setAgentDescription(agent.description || "");
+      setAgentAuthor(agent.author || "");
       setBusinessLogicError(false);
     } else if (!isEditing) {
       // When stopping editing, clear name description box
       setAgentName("");
       setAgentDescription("");
       setAgentDisplayName("");
+      setAgentAuthor("");
       setBusinessLogicError(false);
     }
   };
@@ -506,6 +509,7 @@ export default forwardRef<AgentConfigHandle, AgentConfigProps>(function AgentCon
     setFewShotsContent("");
     setAgentName("");
     setAgentDescription("");
+    setAgentAuthor("");
     setBusinessLogicError(false);
   };
 
@@ -546,6 +550,7 @@ export default forwardRef<AgentConfigHandle, AgentConfigProps>(function AgentCon
           style={{
             height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
             ...STANDARD_CARD.CONTENT_SCROLL,
+            overflow: "hidden"
           }}
         >
           <div style={{ padding: STANDARD_CARD.PADDING, height: "100%" }}>
@@ -595,6 +600,8 @@ export default forwardRef<AgentConfigHandle, AgentConfigProps>(function AgentCon
               setAgentDescription={setAgentDescription}
               agentDisplayName={agentDisplayName}
               setAgentDisplayName={setAgentDisplayName}
+              agentAuthor={agentAuthor}
+              setAgentAuthor={setAgentAuthor}
               isGeneratingAgent={isGeneratingAgent}
               // SystemPromptDisplay related props
               onDebug={() => {

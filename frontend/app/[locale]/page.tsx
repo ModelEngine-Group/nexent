@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { NavigationLayout } from "@/components/navigation/NavigationLayout";
 import { HomepageContent } from "@/components/homepage/HomepageContent";
@@ -18,6 +18,7 @@ import MemoryContent from "./memory/MemoryContent";
 import ModelsContent from "./models/ModelsContent";
 import AgentsContent from "./agents/AgentsContent";
 import KnowledgesContent from "./knowledges/KnowledgesContent";
+import SaveConfirmModal from "./agents/components/SaveConfirmModal";
 import { SpaceContent } from "./space/components/SpaceContent";
 import { fetchAgentList } from "@/services/agentConfigService";
 import { useAgentImport, ImportAgentData } from "@/hooks/useAgentImport";
@@ -103,6 +104,11 @@ export default function Home() {
     // Setup-specific states
     const [currentSetupStep, setCurrentSetupStep] = useState<SetupStep>("models");
     const [isSaving, setIsSaving] = useState(false);
+    
+    // Agent save confirmation states
+    const [showAgentSaveConfirm, setShowAgentSaveConfirm] = useState(false);
+    const [pendingCompleteAction, setPendingCompleteAction] = useState<(() => void) | null>(null);
+    const agentConfigRef = useRef<any>(null);
 
     // Handle operations that require login
     const handleAuthRequired = () => {
@@ -114,18 +120,6 @@ export default function Home() {
     // Confirm login dialog
     const handleCloseLoginPrompt = () => {
       setLoginPromptOpen(false);
-    };
-
-    // Handle login button click
-    const handleLoginClick = () => {
-      setLoginPromptOpen(false);
-      openLoginModal();
-    };
-
-    // Handle register button click
-    const handleRegisterClick = () => {
-      setLoginPromptOpen(false);
-      openRegisterModal();
     };
 
     // Handle operations that require admin privileges
@@ -296,6 +290,20 @@ export default function Home() {
     };
 
     const handleSetupComplete = () => {
+      // Check if we're on the agents step and if there are unsaved changes
+      if (currentSetupStep === "agents" && isAdmin && agentConfigRef.current) {
+        if (agentConfigRef.current.hasUnsavedChanges?.()) {
+          // Show save confirmation modal
+          setShowAgentSaveConfirm(true);
+          setPendingCompleteAction(() => () => {
+            setCurrentView("chat");
+            saveView("chat");
+          });
+          return;
+        }
+      }
+      
+      // No unsaved changes, proceed directly
       setCurrentView("chat");
       saveView("chat");
     };
@@ -530,6 +538,7 @@ export default function Home() {
 
               {currentSetupStep === "agents" && isAdmin && (
                 <AgentsContent
+                  ref={agentConfigRef}
                   isSaving={isSaving}
                   connectionStatus={connectionStatus}
                   isCheckingConnection={isCheckingConnection}
@@ -633,6 +642,37 @@ export default function Home() {
             <RegisterModal />
           </>
         )}
+
+        {/* Agent save confirmation modal for setup completion */}
+        <SaveConfirmModal
+          open={showAgentSaveConfirm}
+          onCancel={async () => {
+            // Reload data from backend to discard changes
+            await agentConfigRef.current?.reloadCurrentAgentData?.();
+            setShowAgentSaveConfirm(false);
+            const action = pendingCompleteAction;
+            setPendingCompleteAction(null);
+            if (action) action();
+          }}
+          onSave={async () => {
+            try {
+              setIsSaving(true);
+              await agentConfigRef.current?.saveAllChanges?.();
+              setShowAgentSaveConfirm(false);
+              const action = pendingCompleteAction;
+              setPendingCompleteAction(null);
+              if (action) action();
+            } catch (e) {
+              // errors are surfaced by underlying save
+            } finally {
+              setIsSaving(false);
+            }
+          }}
+          onClose={() => {
+            setShowAgentSaveConfirm(false);
+            setPendingCompleteAction(null);
+          }}
+        />
       </NavigationLayout>
     );
   }

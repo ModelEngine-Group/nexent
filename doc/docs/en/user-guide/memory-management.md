@@ -137,4 +137,4 @@ With memory configured you can:
 2. Manage all agents in **[Agent Space](./agent-space)**.
 3. Build more agents inside **[Agent Development](./agent-development)**.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

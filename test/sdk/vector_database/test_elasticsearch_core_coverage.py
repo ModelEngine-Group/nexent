@@ -215,8 +215,9 @@ class TestElasticSearchCoreCoverage:
                 }
             ]
         }
-        vdb_core._handle_bulk_errors(response)
-        # Should log error but not raise exception
+        with pytest.raises(Exception) as exc_info:
+            vdb_core._handle_bulk_errors(response)
+        assert "Bulk indexing failed" in str(exc_info.value)
     
     def test_handle_bulk_errors_with_caused_by(self, vdb_core):
         """Test _handle_bulk_errors with caused_by information"""
@@ -237,8 +238,10 @@ class TestElasticSearchCoreCoverage:
                 }
             ]
         }
-        vdb_core._handle_bulk_errors(response)
-        # Should log both main error and caused_by error
+        with pytest.raises(Exception) as exc_info:
+            vdb_core._handle_bulk_errors(response)
+        assert "Invalid argument" in str(exc_info.value)
+        assert "JSON parsing failed" in str(exc_info.value)
     
     def test_delete_documents_success(self, vdb_core):
         """Test delete_documents successful case"""
@@ -407,16 +410,18 @@ class TestElasticSearchCoreCoverage:
         mock_embedding_model = MagicMock()
         mock_embedding_model.get_embeddings.return_value = [[0.1]]
 
-        result = vdb_core._large_batch_insert("idx", [{"content": "body"}], 1, "content", mock_embedding_model)
-        assert result == 0
+        with pytest.raises(Exception) as exc_info:
+            vdb_core._large_batch_insert("idx", [{"content": "body"}], 1, "content", mock_embedding_model)
+        assert "bulk error" in str(exc_info.value)
 
     def test_large_batch_insert_preprocess_exception(self, vdb_core):
         """Ensure outer exception handler returns zero on preprocess failure."""
         vdb_core._preprocess_documents = MagicMock(side_effect=Exception("fail"))
 
         mock_embedding_model = MagicMock()
-        result = vdb_core._large_batch_insert("idx", [{"content": "body"}], 10, "content", mock_embedding_model)
-        assert result == 0
+        with pytest.raises(Exception) as exc_info:
+            vdb_core._large_batch_insert("idx", [{"content": "body"}], 10, "content", mock_embedding_model)
+        assert "fail" in str(exc_info.value)
 
     def test_count_documents_success(self, vdb_core):
         """Ensure count_documents returns ES count."""
@@ -672,8 +677,9 @@ class TestElasticSearchCoreCoverage:
         mock_embedding_model = MagicMock()
         documents = [{"content": "test content", "title": "test"}]
         
-        result = vdb_core._small_batch_insert("test_index", documents, "content", mock_embedding_model)
-        assert result == 0
+        with pytest.raises(Exception) as exc_info:
+            vdb_core._small_batch_insert("test_index", documents, "content", mock_embedding_model)
+        assert "Preprocess error" in str(exc_info.value)
     
     def test_large_batch_insert_success(self, vdb_core):
         """Test _large_batch_insert successful case"""

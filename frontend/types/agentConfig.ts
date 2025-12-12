@@ -12,6 +12,7 @@ export interface Agent {
   name: string;
   display_name?: string;
   description: string;
+  author?: string;
   unavailable_reasons?: string[];
   model: string;
   model_id?: number;
@@ -127,6 +128,8 @@ export interface AgentSetupOrchestratorProps {
   setAgentDescription?: (value: string) => void;
   agentDisplayName?: string;
   setAgentDisplayName?: (value: string) => void;
+  agentAuthor?: string;
+  setAgentAuthor?: (value: string) => void;
   isGeneratingAgent?: boolean;
   onDebug?: () => void;
   getCurrentAgentId?: () => number | undefined;
@@ -156,6 +159,7 @@ export interface SubAgentPoolProps {
   isGeneratingAgent?: boolean;
   editingAgent?: Agent | null;
   isCreatingNewAgent?: boolean;
+  onCopyAgent?: (agent: Agent) => void;
   onExportAgent?: (agent: Agent) => void;
   onDeleteAgent?: (agent: Agent) => void;
 }

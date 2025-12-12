@@ -17,6 +17,7 @@ import {
   checkAgentDisplayName,
 } from "@/services/agentConfigService";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { useAuth } from "@/hooks/useAuth";
 
 import { SimplePromptEditor } from "../PromptManager";
 
@@ -34,6 +35,8 @@ export interface AgentConfigModalProps {
   onAgentDescriptionChange?: (description: string) => void;
   agentDisplayName?: string;
   onAgentDisplayNameChange?: (displayName: string) => void;
+  agentAuthor?: string;
+  onAgentAuthorChange?: (author: string) => void;
   isEditingMode?: boolean;
   mainAgentModel?: string;
   mainAgentModelId?: number | null;
@@ -45,7 +48,6 @@ export interface AgentConfigModalProps {
   isGeneratingAgent?: boolean;
   // Add new props for action buttons
   onDebug?: () => void;
-  onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   onDeleteSuccess?: () => void; // New prop for handling delete success
   onSaveAgent?: () => void;
@@ -70,6 +72,8 @@ export default function AgentConfigModal({
   onAgentDescriptionChange,
   agentDisplayName = "",
   onAgentDisplayNameChange,
+  agentAuthor = "",
+  onAgentAuthorChange,
   isEditingMode = false,
   mainAgentModel = "",
   mainAgentModelId = null,
@@ -80,7 +84,6 @@ export default function AgentConfigModal({
   isGeneratingAgent = false,
   // Add new props for action buttons
   onDebug,
-  onExportAgent,
   onDeleteAgent,
   onDeleteSuccess,
   onSaveAgent,
@@ -90,6 +93,7 @@ export default function AgentConfigModal({
   getButtonTitle,
 }: AgentConfigModalProps) {
   const { t } = useTranslation("common");
+  const { user, isSpeedMode } = useAuth();
 
   // Add local state to track content of three sections
   const [localDutyContent, setLocalDutyContent] = useState(dutyContent || "");
@@ -185,6 +189,13 @@ export default function AgentConfigModal({
 
     loadLLMModels();
   }, []);
+
+  // Set default author for new agents in Full mode
+  useEffect(() => {
+    if (isCreatingNewAgent && !isSpeedMode && !agentAuthor && user?.email) {
+      onAgentAuthorChange?.(user.email);
+    }
+  }, [isCreatingNewAgent, isSpeedMode, agentAuthor, user?.email, onAgentAuthorChange]);
 
   // Default to globally configured model when creating a new agent
   // IMPORTANT: Only read from localStorage when creating a NEW agent, not when editing existing agent
@@ -472,11 +483,6 @@ export default function AgentConfigModal({
     onDeleteSuccess?.();
   }, [onDeleteAgent, onDeleteSuccess]);
 
-  // Handle delete button click
-  const handleDeleteClick = useCallback(() => {
-    setIsDeleteModalVisible(true);
-  }, []);
-
   // Optimized click handlers using useCallback
   const handleSegmentClick = useCallback((segment: string) => {
     setActiveSegment(segment);
@@ -650,6 +656,27 @@ export default function AgentConfigModal({
           )}
       </div>
 
+      {/* Agent Author */}
+      <div className="mb-2">
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {t("agent.author")}:
+        </label>
+        <Input
+          value={agentAuthor}
+          onChange={(e) => {
+            onAgentAuthorChange?.(e.target.value);
+          }}
+          placeholder={t("agent.authorPlaceholder")}
+          size="large"
+          disabled={!isEditingMode}
+        />
+        {isCreatingNewAgent && !isSpeedMode && !agentAuthor && user?.email && (
+          <p className="mt-1 text-xs text-gray-500">
+            {t("agent.author.hint", { defaultValue: "Default: {{email}}", email: user.email })}
+          </p>
+        )}
+      </div>
+
       {/* Model Selection */}
       <div className="mb-2">
         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -741,6 +768,7 @@ export default function AgentConfigModal({
       <div className="flex-1 min-h-0">
         <SimplePromptEditor
           value={localDutyContent}
+          height="100%"
           onChange={(value: string) => {
             setLocalDutyContent(value);
             // Immediate update to parent component
@@ -758,6 +786,7 @@ export default function AgentConfigModal({
       <div className="flex-1 min-h-0">
         <SimplePromptEditor
           value={localConstraintContent}
+          height="100%"
           onChange={(value: string) => {
             setLocalConstraintContent(value);
             // Immediate update to parent component
@@ -775,6 +804,7 @@ export default function AgentConfigModal({
       <div className="flex-1 min-h-0">
         <SimplePromptEditor
           value={localFewShotsContent}
+          height="100%"
           onChange={(value: string) => {
             setLocalFewShotsContent(value);
             // Immediate update to parent component

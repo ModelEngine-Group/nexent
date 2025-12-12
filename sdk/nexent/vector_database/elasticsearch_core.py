@@ -1,10 +1,11 @@
+import json
 import logging
 import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from elasticsearch import Elasticsearch, exceptions
 
@@ -338,6 +339,8 @@ class ElasticSearchCore(VectorDatabaseCore):
         documents: List[Dict[str, Any]],
         batch_size: int = 64,
         content_field: str = "content",
+        embedding_batch_size: int = 10,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """
         Smart batch insertion - automatically selecting strategy based on data size
@@ -348,6 +351,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             documents: List of document dictionaries
             batch_size: Number of documents to process at once
             content_field: Field to use for generating embeddings
+            embedding_batch_size: Number of documents to send to embedding API at once (default: 10)
 
         Returns:
             int: Number of documents successfully indexed
@@ -362,15 +366,34 @@ class ElasticSearchCore(VectorDatabaseCore):
         total_docs = len(documents)
         if total_docs < 64:
             # Small data: direct insertion, using wait_for refresh
-            return self._small_batch_insert(index_name, documents, content_field, embedding_model)
+            return self._small_batch_insert(
+                index_name=index_name,
+                documents=documents,
+                content_field=content_field,
+                embedding_model=embedding_model,
+                progress_callback=progress_callback,
+            )
         else:
             # Large data: using context manager
             estimated_duration = max(60, total_docs // 100)
             with self.bulk_operation_context(index_name, estimated_duration):
-                return self._large_batch_insert(index_name, documents, batch_size, content_field, embedding_model)
+                return self._large_batch_insert(
+                    index_name=index_name,
+                    documents=documents,
+                    batch_size=batch_size,
+                    content_field=content_field,
+                    embedding_model=embedding_model,
+                    embedding_batch_size=embedding_batch_size,
+                    progress_callback=progress_callback,
+                )
 
     def _small_batch_insert(
-        self, index_name: str, documents: List[Dict[str, Any]], content_field: str, embedding_model: BaseEmbedding
+        self,
+        index_name: str,
+        documents: List[Dict[str, Any]],
+        content_field: str,
+        embedding_model: BaseEmbedding,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """Small batch insertion: real-time"""
         try:
@@ -398,13 +421,20 @@ class ElasticSearchCore(VectorDatabaseCore):
             # Handle errors
             self._handle_bulk_errors(response)
 
+            if progress_callback:
+                try:
+                    progress_callback(len(documents), len(documents))
+                except Exception as e:
+                    logger.warning(
+                        f"[VECTORIZE] Progress callback failed in small batch: {str(e)}")
+
             logger.info(
                 f"Small batch insert completed: {len(documents)} chunks indexed.")
             return len(documents)
 
         except Exception as e:
             logger.error(f"Small batch insert failed: {e}")
-            return 0
+            raise
 
     def _large_batch_insert(
         self,
@@ -413,6 +443,8 @@ class ElasticSearchCore(VectorDatabaseCore):
         batch_size: int,
         content_field: str,
         embedding_model: BaseEmbedding,
+        embedding_batch_size: int = 10,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> int:
         """
         Large batch insertion with sub-batching for embedding API.
@@ -422,6 +454,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             processed_docs = self._preprocess_documents(
                 documents, content_field)
             total_indexed = 0
+            total_vectorized = 0
             total_docs = len(processed_docs)
             es_total_batches = (total_docs + batch_size - 1) // batch_size
             start_time = time.time()
@@ -439,7 +472,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 doc_embedding_pairs = []
 
                 # Sub-batch for embedding API
-                embedding_batch_size = 64
+                # Use the provided embedding_batch_size (default 10) to reduce provider pressure
                 for j in range(0, len(es_batch), embedding_batch_size):
                     embedding_sub_batch = es_batch[j: j + embedding_batch_size]
                     # Retry logic for embedding API call (3 retries, 1s delay)
@@ -459,6 +492,16 @@ class ElasticSearchCore(VectorDatabaseCore):
                                 doc_embedding_pairs.append((doc, embedding))
 
                             success = True
+                            total_vectorized += len(embedding_sub_batch)
+                            if progress_callback:
+                                try:
+                                    progress_callback(
+                                        total_vectorized, total_docs)
+                                    logger.debug(
+                                        f"[VECTORIZE] Progress callback (embedding) {total_vectorized}/{total_docs} (ES batch {es_batch_num}/{es_total_batches}, sub-batch start {j})")
+                                except Exception as callback_err:
+                                    logger.warning(
+                                        f"[VECTORIZE] Progress callback failed during embedding: {callback_err}")
                             break  # Success, exit retry loop
 
                         except Exception as e:
@@ -504,10 +547,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                 except Exception as e:
                     logger.error(
                         f"Bulk insert error: {e}, ES batch num: {es_batch_num}")
-                    continue
-
-                # Add 0.1s delay between batches to avoid overloading embedding API
-                time.sleep(0.1)
+                    raise
 
             self._force_refresh_with_retry(index_name)
             total_elapsed = time.time() - start_time
@@ -517,7 +557,7 @@ class ElasticSearchCore(VectorDatabaseCore):
             return total_indexed
         except Exception as e:
             logger.error(f"Large batch insert failed: {e}")
-            return 0
+            raise
 
     def _preprocess_documents(self, documents: List[Dict[str, Any]], content_field: str) -> List[Dict[str, Any]]:
         """Ensure all documents have the required fields and set default values"""
@@ -558,21 +598,44 @@ class ElasticSearchCore(VectorDatabaseCore):
         """Handle bulk operation errors"""
         if response.get("errors"):
             for item in response["items"]:
-                if "error" in item.get("index", {}):
-                    error_info = item["index"]["error"]
-                    error_type = error_info.get("type")
-                    error_reason = error_info.get("reason")
-                    error_cause = error_info.get("caused_by", {})
+                if "error" not in item.get("index", {}):
+                    continue
 
-                    if error_type == "version_conflict_engine_exception":
-                        # ignore version conflict
-                        continue
-                    else:
-                        logger.error(
-                            f"FATAL ERROR {error_type}: {error_reason}")
-                        if error_cause:
-                            logger.error(
-                                f"Caused By: {error_cause.get('type')}: {error_cause.get('reason')}")
+                error_info = item["index"]["error"]
+                error_type = error_info.get("type")
+                error_reason = error_info.get("reason")
+                error_cause = error_info.get("caused_by", {})
+
+                if error_type == "version_conflict_engine_exception":
+                    # ignore version conflict
+                    continue
+
+                logger.error(f"FATAL ERROR {error_type}: {error_reason}")
+                if error_cause:
+                    logger.error(
+                        f"Caused By: {error_cause.get('type')}: {error_cause.get('reason')}"
+                    )
+
+                reason_text = error_reason or "Unknown bulk indexing error"
+                cause_reason = error_cause.get("reason")
+                if cause_reason:
+                    reason_text = f"{reason_text}; caused by: {cause_reason}"
+
+                # Derive a precise error code without chaining through es_bulk_failed
+                if "dense_vector" in reason_text and "different number of dimensions" in reason_text:
+                    error_code = "es_dim_mismatch"
+                else:
+                    error_code = "es_bulk_failed"
+
+                raise Exception(
+                    json.dumps(
+                        {
+                            "message": f"Bulk indexing failed: {reason_text}",
+                            "error_code": error_code,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
 
     def delete_documents(self, index_name: str, path_or_url: str) -> int:
         """

@@ -74,7 +74,7 @@ Nexent allows you to quickly and easily use third-party MCP tools to enrich agen
 </div>
 
 Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
-You can also develop your own MCP services and connect them to Nexent; see [MCP Server Development](../mcp-ecosystem/mcp-server-development.md).
+You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../backend/tools/mcp).
 
 ### ⚙️ Custom Tools
 
@@ -156,4 +156,4 @@ After completing agent development, you can:
 2. Interact with agents in **[Start Chat](./start-chat)**
 3. Configure **[Memory Management](./memory-management)** to enhance the agent's personalization capabilities
 
-If you encounter any issues during agent development, please refer to our **[FAQ](../getting-started/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues during agent development, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

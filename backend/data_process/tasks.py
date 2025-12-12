@@ -10,12 +10,14 @@ import time
 from typing import Any, Dict, Optional
 
 import aiohttp
+import re
 import ray
 from celery import Task, chain, states
 from celery.exceptions import Retry
 
 from consts.const import ELASTICSEARCH_SERVICE
 from utils.file_management_utils import get_file_size
+from services.redis_service import get_redis_service
 from .app import app
 from .ray_actors import DataProcessorRayActor
 from consts.const import (
@@ -23,6 +25,7 @@ from consts.const import (
     FORWARD_REDIS_RETRY_DELAY_S,
     FORWARD_REDIS_RETRY_MAX,
     DISABLE_RAY_DASHBOARD,
+    ROOT_DIR,
 )
 
 
@@ -30,6 +33,74 @@ logger = logging.getLogger("data_process.tasks")
 
 # Thread lock for initializing Ray to prevent race conditions
 ray_init_lock = threading.Lock()
+
+ROOT_DIR_DISPLAY = ROOT_DIR or "{ROOT_DIR}"
+
+
+def extract_error_code(reason: str, parsed_error: Optional[Dict] = None) -> Optional[str]:
+    """
+    Extract error code from error message or parsed error dict.
+    Returns error code if matched, None otherwise.
+    """
+    # 1) parsed_error dict
+    if parsed_error and isinstance(parsed_error, dict):
+        code = parsed_error.get("error_code")
+        if code:
+            return code
+
+    # 2) try parse reason as JSON
+    try:
+        parsed = json.loads(reason)
+        if isinstance(parsed, dict):
+            code = parsed.get("error_code")
+            if code:
+                return code
+            detail = parsed.get("detail")
+            if isinstance(detail, dict) and detail.get("error_code"):
+                return detail.get("error_code")
+    except Exception:
+        pass
+
+    # 3) regex from raw string (supports single/double quotes)
+    try:
+        match = re.search(
+            r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', reason)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+
+    return "unknown_error"
+
+
+def save_error_to_redis(task_id: str, error_reason: str, start_time: float):
+    """
+    Save error information to Redis
+
+    Args:
+        task_id: Celery task ID
+        error_reason: Short error reason summary
+        start_time: Task start timestamp (unused, kept for compatibility)
+    """
+    if not task_id:
+        logger.warning("Cannot save error info: task_id is empty")
+        return
+    if not error_reason:
+        logger.warning(
+            f"Cannot save error info for task {task_id}: error_reason is empty")
+        return
+    try:
+        redis_service = get_redis_service()
+        success = redis_service.save_error_info(task_id, error_reason)
+        if success:
+            logger.info(
+                f"Successfully saved error info for task {task_id}: {error_reason[:100]}...")
+        else:
+            logger.warning(
+                f"Failed to save error info for task {task_id}: save_error_info returned False")
+    except Exception as e:
+        logger.error(
+            f"Failed to save error info to Redis for task {task_id}: {str(e)}", exc_info=True)
 
 
 def init_ray_in_worker():
@@ -58,7 +129,7 @@ def init_ray_in_worker():
         logger.info("Ray initialized successfully for Celery worker.")
     except Exception as e:
         logger.error(f"Failed to initialize Ray for Celery worker: {e}")
-        raise
+        raise RuntimeError("Failed to initialize Ray for Celery worker") from e
 
 
 def run_async(coro):
@@ -282,6 +353,17 @@ def process(
             raise NotImplementedError(
                 f"Source type '{source_type}' not yet supported")
 
+        chunk_count = len(chunks) if chunks else 0
+        if chunk_count == 0:
+            raise Exception(json.dumps({
+                "message": "Ray processing completed but produced 0 chunks",
+                "index_name": index_name,
+                "task_name": "process",
+                "source": source,
+                "original_filename": original_filename,
+                "error_code": "no_valid_chunks"
+            }, ensure_ascii=False))
+
         # Update task state to SUCCESS after Ray processing completes
         # This transitions from STARTED (PROCESSING) to SUCCESS (WAIT_FOR_FORWARDING)
         self.update_state(
@@ -316,31 +398,114 @@ def process(
 
     except Exception as e:
         logger.error(f"Error processing file {source}: {str(e)}")
+        # task_id is already defined at the start of the function
         try:
+            # Try to parse the exception as JSON (it might be our custom JSON error)
+            error_message = str(e)
+            parsed_error = None
+
+            try:
+                parsed_error = json.loads(error_message)
+                if isinstance(parsed_error, dict):
+                    error_message = parsed_error.get("message", error_message)
+                    logger.debug(
+                        f"Parsed JSON error for task {task_id}"
+                    )
+            except (json.JSONDecodeError, TypeError):
+                # Not a JSON string, use as-is
+                logger.debug(
+                    f"Exception is not JSON format for task {task_id}, using raw message"
+                )
+
+            # Build error_info for re-raising
             error_info = {
-                "message": str(e),
+                "message": error_message,
                 "index_name": index_name,
                 "task_name": "process",
                 "source": source,
-                "original_filename": original_filename
+                "original_filename": original_filename,
             }
+
+            # Extract error code from parsed error or error message
+            error_code = extract_error_code(error_message, parsed_error)
+            if error_code:
+                error_info["error_code"] = error_code
+
+            # Store only error code (if available) or raw error message
+            if error_code:
+                reason_to_store = json.dumps({
+                    "error_code": error_code
+                }, ensure_ascii=False)
+            else:
+                # Fallback: store raw error message (truncated if too long)
+                reason_to_store = error_message
+                if len(reason_to_store) > 200:
+                    reason_to_store = reason_to_store[:200] + "..."
+
+            # Save error info to Redis BEFORE re-raising
+            logger.info(
+                f"Attempting to save error info for task {task_id} with reason: {reason_to_store[:100]}..."
+            )
+            save_error_to_redis(task_id, reason_to_store, start_time)
+
             self.update_state(
                 meta={
-                    'source': error_info.get('source', ''),
-                    'index_name': error_info.get('index_name', ''),
-                    'task_name': error_info.get('task_name', ''),
-                    'original_filename': error_info.get('original_filename', ''),
-                    'custom_error': error_info.get('message', str(e)),
-                    'stage': 'text_extraction_failed'
+                    "source": error_info.get("source", ""),
+                    "index_name": error_info.get("index_name", ""),
+                    "task_name": error_info.get("task_name", ""),
+                    "original_filename": error_info.get(
+                        "original_filename", ""
+                    ),
+                    "custom_error": error_info.get("message", str(e)),
+                    "stage": "text_extraction_failed",
                 }
             )
             raise Exception(json.dumps(error_info, ensure_ascii=False))
         except Exception as ex:
             logger.error(f"Error serializing process exception: {str(ex)}")
+            # Try to save error even if serialization fails
+            try:
+                error_message = str(e)
+                parsed_error = None
+
+                try:
+                    parsed_error = json.loads(error_message)
+                    if isinstance(parsed_error, dict):
+                        error_message = parsed_error.get(
+                            "message", error_message
+                        )
+                        logger.debug(
+                            "Fallback serialization: parsed JSON error for task "
+                            f"{task_id}"
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug(
+                        "Fallback serialization: exception is not JSON format "
+                        f"for task {task_id}, using raw message"
+                    )
+                    parsed_error = None
+
+                # Extract error code from parsed error or error message
+                error_code = extract_error_code(error_message, parsed_error)
+
+                # Store only error code (if available) or raw error message
+                if error_code:
+                    reason_to_store = json.dumps({
+                        "error_code": error_code
+                    }, ensure_ascii=False)
+                else:
+                    # Fallback: store raw error message (truncated if too long)
+                    reason_to_store = error_message
+                    if len(reason_to_store) > 200:
+                        reason_to_store = reason_to_store[:200] + "..."
+
+                save_error_to_redis(task_id, reason_to_store, start_time)
+            except Exception:
+                pass
             self.update_state(
                 meta={
-                    'custom_error': str(e),
-                    'stage': 'text_extraction_failed'
+                    "custom_error": str(e),
+                    "stage": "text_extraction_failed",
                 }
             )
             raise
@@ -377,6 +542,38 @@ def forward(
     filename = original_filename
 
     try:
+        # Before doing any heavy work, check whether this task has been
+        # explicitly cancelled (for example, because the user deleted the
+        # document from the knowledge base configuration page).
+        try:
+            redis_service = get_redis_service()
+            if redis_service.is_task_cancelled(task_id):
+                logger.info(
+                    f"[{self.request.id}] FORWARD TASK: Detected cancellation flag for task {task_id}; "
+                    f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
+                )
+                # Treat this as a graceful early exit. We still return a
+                # structured payload so callers can consider the task done.
+                return {
+                    'task_id': task_id,
+                    'source': source,
+                    'index_name': index_name,
+                    'original_filename': original_filename,
+                    'chunks_stored': 0,
+                    'storage_time': 0,
+                    'es_result': {
+                        "success": False,
+                        "message": "Indexing cancelled because document was deleted.",
+                        "total_indexed": 0,
+                        "total_submitted": 0,
+                    },
+                }
+        except Exception as cancel_check_exc:
+            logger.warning(
+                f"[{self.request.id}] FORWARD TASK: Failed to check cancellation flag for task {task_id}: "
+                f"{cancel_check_exc}"
+            )
+
         chunks = processed_data.get('chunks')
         # If chunks are not in payload, try loading from Redis via the redis_key
         if (not chunks) and processed_data.get('redis_key'):
@@ -441,18 +638,8 @@ def forward(
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Received data for source '{original_source}' with {len(chunks) if chunks else 'None'} chunks")
 
-        # Update task state to FORWARDING
-        self.update_state(
-            state=states.STARTED,
-            meta={
-                'source': original_source,
-                'index_name': original_index_name,
-                'original_filename': filename,
-                'task_name': 'forward',
-                'start_time': start_time,
-                'stage': 'vectorizing_and_storing'
-            }
-        )
+        # Calculate total chunks for progress tracking
+        total_chunks = len(chunks) if chunks else 0
 
         if chunks is None:
             raise Exception(json.dumps({
@@ -500,7 +687,8 @@ def forward(
                 "index_name": original_index_name,
                 "task_name": "forward",
                 "source": original_source,
-                "original_filename": original_filename
+                "original_filename": original_filename,
+                "error_code": "no_valid_chunks"
             }, ensure_ascii=False))
 
         async def index_documents():
@@ -518,84 +706,115 @@ def forward(
             headers = {"Content-Type": "application/json"}
             if authorization:
                 headers["Authorization"] = authorization
+            # Add task_id header for progress tracking
+            headers["X-Task-Id"] = task_id
 
-            max_retries = 5
-            retry_delay = 5
-            for retry in range(max_retries):
-                try:
-                    connector = aiohttp.TCPConnector(verify_ssl=False)
-                    # Increased timeout for large documents
-                    timeout = aiohttp.ClientTimeout(total=120)
+            try:
+                connector = aiohttp.TCPConnector(verify_ssl=False)
+                timeout = aiohttp.ClientTimeout(total=600)
 
-                    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                        async with session.post(
-                            full_url,
-                            headers=headers,
-                            json=formatted_chunks,
-                            raise_for_status=True
-                        ) as response:
-                            result = await response.json()
-                            return result
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                    async with session.post(
+                        full_url,
+                        headers=headers,
+                        json=formatted_chunks,
+                        raise_for_status=False
+                    ) as response:
+                        text = await response.text()
+                        status = response.status
+                        # Try parse JSON body for structured error_code/message
+                        parsed_body = None
+                        try:
+                            parsed_body = json.loads(text)
+                        except Exception:
+                            parsed_body = None
 
-                except aiohttp.ClientResponseError as e:
-                    if e.status == 503 and retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"ElasticSearch service unavailable: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
-                except aiohttp.ClientConnectorError as e:
-                    logger.error(
-                        f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
-                    if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        logger.warning(
-                            f"[{self.request.id}] FORWARD TASK: Connection error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"Failed to connect to API: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
-                except asyncio.TimeoutError as e:
-                    if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        logger.warning(
-                            f"[{self.request.id}] FORWARD TASK: Timeout when indexing documents: {str(e)}. Retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"Timeout after {max_retries} attempts: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
-                except Exception as e:
-                    if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)
-                        logger.warning(
-                            f"[{self.request.id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}. Retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise Exception(json.dumps({
-                            "message": f"Unexpected error when indexing documents: {str(e)}",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": original_filename
-                        }, ensure_ascii=False))
+                        if status >= 400:
+                            error_code = None
+                            if isinstance(parsed_body, dict):
+                                error_code = parsed_body.get("error_code")
+                                detail = parsed_body.get("detail")
+                                if isinstance(detail, dict) and detail.get("error_code"):
+                                    error_code = detail.get("error_code")
+                                elif isinstance(detail, str):
+                                    try:
+                                        parsed_detail = json.loads(detail)
+                                        if isinstance(parsed_detail, dict):
+                                            error_code = parsed_detail.get(
+                                                "error_code", error_code)
+                                    except Exception:
+                                        pass
+
+                            if not error_code:
+                                try:
+                                    match = re.search(
+                                        r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', text)
+                                    if match:
+                                        error_code = match.group(1)
+                                except Exception:
+                                    pass
+
+                            if error_code:
+                                # Raise flat payload to avoid nested JSON and preserve error_code
+                                raise Exception(json.dumps({
+                                    "error_code": error_code
+                                }, ensure_ascii=False))
+
+                            raise Exception(
+                                f"ElasticSearch service returned HTTP {status}")
+
+                        result = parsed_body if isinstance(parsed_body, dict) else await response.json()
+                        return result
+
+            except aiohttp.ClientConnectorError as e:
+                logger.error(
+                    f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
+                raise Exception(json.dumps({
+                    "message": f"Failed to connect to API: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
+            except asyncio.TimeoutError as e:
+                logger.warning(
+                    f"[{self.request.id}] FORWARD TASK: Timeout when indexing documents: {str(e)}.")
+                raise Exception(json.dumps({
+                    "message": f"Timeout when indexing documents: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
+            except Exception as e:
+                logger.error(
+                    f"[{self.request.id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}.")
+                raise Exception(json.dumps({
+                    "message": f"Unexpected error when indexing documents: {str(e)}",
+                    "index_name": original_index_name,
+                    "task_name": "forward",
+                    "source": original_source,
+                    "original_filename": original_filename
+                }, ensure_ascii=False))
 
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Starting ES indexing for {len(formatted_chunks)} chunks to index '{original_index_name}'...")
+
+        # Update task state with total chunks before starting vectorization
+        self.update_state(
+            state=states.STARTED,
+            meta={
+                'source': original_source,
+                'index_name': original_index_name,
+                'original_filename': filename,
+                'task_name': 'forward',
+                'start_time': start_time,
+                'stage': 'vectorizing_and_storing',
+                'total_chunks': total_chunks,
+                'processed_chunks': 0  # Will be updated during vectorization via Redis
+            }
+        )
+
         es_result = run_async(index_documents())
         logger.debug(
             f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
@@ -617,7 +836,8 @@ def forward(
                     "index_name": original_index_name,
                     "task_name": "forward",
                     "source": original_source,
-                    "original_filename": original_filename
+                    "original_filename": original_filename,
+                    "error_code": "es_bulk_failed"
                 }, ensure_ascii=False))
         elif isinstance(es_result, dict) and not es_result.get("success"):
             error_message = es_result.get(
@@ -638,6 +858,12 @@ def forward(
                 "original_filename": original_filename
             }, ensure_ascii=False))
         end_time = time.time()
+
+        # Get final indexed count from result
+        final_processed = 0
+        if isinstance(es_result, dict) and es_result.get("success"):
+            final_processed = es_result.get("total_indexed", len(chunks))
+
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Updating task state to SUCCESS after ES indexing completion")
         self.update_state(
@@ -650,7 +876,9 @@ def forward(
                 'original_filename': original_filename,
                 'task_name': 'forward',
                 'es_result': es_result,
-                'stage': 'completed'
+                'stage': 'completed',
+                'total_chunks': total_chunks,
+                'processed_chunks': final_processed
             }
         )
 
@@ -667,22 +895,68 @@ def forward(
         }
     except Exception as e:
         # If it's an Exception, all go here (including our custom JSON message)
+        # Important: if this is a Celery Retry, re-raise immediately without recording error_code
+        if isinstance(e, Retry):
+            raise
+
+        task_id = self.request.id
         try:
             error_info = json.loads(str(e))
+            error_message = error_info.get('message', str(e))
             logger.error(
-                f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_info.get('message', str(e))}")
+                f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_message}")
+
+            # Extract error code from parsed error or error message
+            error_code = extract_error_code(error_message, error_info)
+
+            # Store only error code (if available) or raw error message
+            if error_code:
+                reason_to_store = json.dumps({
+                    "error_code": error_code
+                }, ensure_ascii=False)
+            else:
+                # Fallback: store raw error message (truncated if too long)
+                reason_to_store = error_message
+                if len(reason_to_store) > 200:
+                    reason_to_store = reason_to_store[:200] + "..."
+
+            # Save error info to Redis BEFORE re-raising
+            logger.info(
+                f"Attempting to save error info for task {task_id} with reason: {reason_to_store[:100]}...")
+            save_error_to_redis(task_id, reason_to_store, start_time)
+
             self.update_state(
                 meta={
                     'source': error_info.get('source', ''),
                     'index_name': error_info.get('index_name', ''),
                     'task_name': error_info.get('task_name', ''),
                     'original_filename': error_info.get('original_filename', ''),
-                    'custom_error': error_info.get('message', str(e)),
+                    'custom_error': error_message,
                     'stage': 'forward_task_failed'
                 }
             )
-        except Exception as e:
+        except Exception:
             logger.error(f"Error forwarding chunks: {str(e)}")
+            # Try to save error even if parsing fails
+            try:
+                error_message = str(e)
+                # Extract error code from error message
+                error_code = extract_error_code(error_message, None)
+
+                # Store only error code (if available) or raw error message
+                if error_code:
+                    reason_to_store = json.dumps({
+                        "error_code": error_code
+                    }, ensure_ascii=False)
+                else:
+                    # Fallback: store raw error message (truncated if too long)
+                    reason_to_store = error_message
+                    if len(reason_to_store) > 200:
+                        reason_to_store = reason_to_store[:200] + "..."
+
+                save_error_to_redis(task_id, reason_to_store, start_time)
+            except Exception:
+                pass
             self.update_state(
                 meta={
                     'custom_error': str(e),

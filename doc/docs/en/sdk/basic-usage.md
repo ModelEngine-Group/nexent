@@ -2,35 +2,7 @@
 
 This guide provides a comprehensive introduction to using the Nexent SDK for building intelligent agents.
 
-## 🚀 Installation
-
-### User Installation
-If you want to use Nexent:
-
-```bash
-# Recommended: Install from source
-git clone https://github.com/ModelEngine-Group/nexent.git
-cd nexent/sdk
-uv pip install -e .
-
-# Or install using uv
-uv add nexent
-```
-
-### Development Environment Setup
-If you are a third-party SDK developer:
-
-```bash
-# Install complete development environment (including Nexent)
-cd nexent/sdk
-uv pip install -e ".[dev]"  # Includes all development tools (testing, code quality checks, etc.)
-```
-
-The development environment includes the following additional features:
-- Code quality checking tools (ruff)
-- Testing framework (pytest)
-- Data processing dependencies (unstructured)
-- Other development dependencies
+> Installation options for both full-stack and SDK-only workflows are documented in [Environment Preparation](../developer-guide/environment-setup).
 
 ## ⚡ Quick Start
 
@@ -100,11 +72,7 @@ agent.run("Your question here")
 
 ## 📡 Using agent_run (recommended for streaming)
 
-When you need to consume messages as an "event stream" on server or client, use `agent_run`. It executes the agent in a background thread and continuously yields JSON messages, making it easy to render in UIs and collect logs.
-
-Reference: [Run agent with agent_run](./core/agent-run)
-
-Minimal example:
+When you need server/client event streams, use `agent_run`. It runs the agent in a background thread and yields JSON strings from `MessageObserver`, so UIs can render incremental updates.
 
 ```python
 import json
@@ -144,9 +112,52 @@ async def main():
 
     async for message in agent_run(agent_run_info):
         message_data = json.loads(message)
-        print(message_data)
+        print(message_data)  # each message is a JSON string
 
 asyncio.run(main())
+```
+
+### 🛰️ Stream message format
+
+Each yielded JSON string typically contains:
+
+- `type`: message type (maps to `ProcessType`, e.g., `STEP_COUNT`, `MODEL_OUTPUT_THINKING`, `PARSE`, `EXECUTION_LOGS`, `FINAL_ANSWER`, `ERROR`)
+- `content`: text payload
+- `agent_name` (optional): which agent emitted the message
+
+### 🧠 Chat history (optional)
+
+Pass history to keep context:
+
+```python
+from nexent.core.agents.agent_model import AgentHistory
+
+history = [
+    AgentHistory(role="user", content="Hi"),
+    AgentHistory(role="assistant", content="Hello!"),
+]
+
+agent_run_info = AgentRunInfo(
+    # ...
+    history=history,
+)
+```
+
+### 🌐 MCP tool integration (optional)
+
+Provide MCP endpoints to auto-load remote tools:
+
+```python
+agent_run_info = AgentRunInfo(
+    # ...
+    mcp_host=["http://localhost:3000"],  # or dict with url/transport
+)
+```
+
+### ⏹️ Interrupt gracefully
+
+```python
+stop_event.set()  # agent stops after the current step finishes
 ```
 
 ## 🔧 Configuration Options
@@ -176,7 +187,7 @@ search_tool = ExaSearchTool(
 
 ## 📚 More Resources
 
-- **[Run agent with agent_run](./core/agent-run)**
+- **[Streaming with agent_run](#using-agent_run-recommended-for-streaming)**
 - **[Tool Development Guide](./core/tools)**
 - **[Model Architecture Guide](./core/models)**
 - **[Agents](./core/agents)** 

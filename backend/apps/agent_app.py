@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request
 
-from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest
+from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest
 from services.agent_service import (
     get_agent_info_impl,
     get_creating_sub_agent_info_impl,
@@ -12,6 +12,8 @@ from services.agent_service import (
     delete_agent_impl,
     export_agent_impl,
     import_agent_impl,
+    check_agent_name_conflict_batch_impl,
+    regenerate_agent_name_batch_impl,
     list_all_agent_info_impl,
     run_agent_stream,
     stop_agent_tasks,
@@ -144,6 +146,36 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent import error.")
+
+
+@agent_config_router.post("/check_name")
+async def check_agent_name_batch_api(request: AgentNameBatchCheckRequest, authorization: Optional[str] = Header(None)):
+    """
+    Batch check whether agent name/display_name conflicts exist in the tenant.
+    """
+    try:
+        return await check_agent_name_conflict_batch_impl(request, authorization)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Agent name batch check error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent name batch check error.")
+
+
+@agent_config_router.post("/regenerate_name")
+async def regenerate_agent_name_batch_api(request: AgentNameBatchRegenerateRequest, authorization: Optional[str] = Header(None)):
+    """
+    Batch regenerate agent name/display_name using LLM or suffix fallback.
+    """
+    try:
+        return await regenerate_agent_name_batch_impl(request, authorization)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Agent name batch regenerate error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent name batch regenerate error.")
 
 
 @agent_config_router.get("/list")
