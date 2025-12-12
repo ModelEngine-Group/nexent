@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import sdk.nexent.core.tools.analyze_text_file_tool as module
-from sdk.nexent.core.tools.analyze_text_file_tool import AnalyzeTextFileTool, ProcessType
+import sdk.nexent.core.tools.analyze_document_tool as module
+from sdk.nexent.core.tools.analyze_document_tool import AnalyzeTextFileTool, ProcessType
 
 
 class _NoopLoadSaveObjectManager:

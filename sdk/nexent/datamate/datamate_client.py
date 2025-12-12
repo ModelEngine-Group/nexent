@@ -1,5 +1,5 @@
 """
-DataMate API client for knowledge base operations.
+DataMate API client for datamate knowledge base operations.
 
 This SDK provides a unified interface for interacting with DataMate knowledge base APIs,
 including listing knowledge bases, retrieving files, and retrieving content.
@@ -16,7 +16,7 @@ class DataMateClient:
     Client for interacting with DataMate knowledge base APIs.
     
     This client encapsulates all DataMate API calls and provides a clean interface
-    for knowledge base operations.
+    for datamate knowledge base operations.
     """
     
     def __init__(self, base_url: str, timeout: float = 30.0):
@@ -103,25 +103,25 @@ class DataMateClient:
     ) -> List[Dict[str, Any]]:
         """
         Get file list for a specific DataMate knowledge base.
-        
+
         Args:
             knowledge_base_id: The ID of the knowledge base
             authorization: Optional authorization header
-            
+
         Returns:
             List of file dictionaries with name, status, size, upload_date, etc.
-            
+
         Raises:
             RuntimeError: If the API request fails
         """
         try:
             url = self._build_url(f"/api/knowledge-base/{knowledge_base_id}/files")
             logger.info(f"Fetching files for DataMate knowledge base {knowledge_base_id} from: {url}")
-            
+
             headers = {}
             if authorization:
                 headers["Authorization"] = authorization
-            
+
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.get(url, headers=headers)
 
@@ -136,21 +136,73 @@ class DataMateClient:
 
             response.raise_for_status()
             data = response.json()
-            
+
             # Extract file list from response
             files = []
             if data.get("data"):
                 files = data.get("data").get("content", [])
-            
-            logger.info(f"Successfully fetched {len(files)} files for knowledge base {knowledge_base_id}")
+
+            logger.info(f"Successfully fetched {len(files)} files for datamate knowledge base {knowledge_base_id}")
             return files
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+    
+    def get_knowledge_base_info(
+        self,
+        knowledge_base_id: str,
+        authorization: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get details for a specific DataMate knowledge base.
+        
+        Args:
+            knowledge_base_id: The ID of the knowledge base
+            authorization: Optional authorization header
+            
+        Returns:
+            Dictionary containing knowledge base details.
+            
+        Raises:
+            RuntimeError: If the API request fails
+        """
+        try:
+            url = self._build_url(f"/api/knowledge-base/{knowledge_base_id}")
+            logger.info(f"Fetching details for DataMate knowledge base {knowledge_base_id} from: {url}")
+            
+            headers = {}
+            if authorization:
+                headers["Authorization"] = authorization
+            
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.get(url, headers=headers)
+
+            if response.status_code != 200:
+                error_detail = (
+                    response.json().get("detail", "unknown error")
+                    if response.headers.get("content-type", "").startswith("application/json")
+                    else response.text
+                )
+                raise Exception(f"Failed to get knowledge base details (status {response.status_code}): {error_detail}")
+
+            data = response.json()
+            
+            # Extract knowledge base details from response
+            knowledge_base = data.get("data", {})
+            
+            logger.info(f"Successfully fetched details for datamate knowledge base {knowledge_base_id}")
+            return knowledge_base
             
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error while fetching files for knowledge base {knowledge_base_id}: {str(e)}")
-            raise RuntimeError(f"Failed to fetch files for knowledge base {knowledge_base_id}: {str(e)}")
+            logger.error(f"HTTP error while fetching details for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(f"Failed to fetch details for datamate knowledge base {knowledge_base_id}: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error while fetching files for knowledge base {knowledge_base_id}: {str(e)}")
-            raise RuntimeError(f"Failed to fetch files for knowledge base {knowledge_base_id}: {str(e)}")
+            logger.error(f"Unexpected error while fetching details for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(f"Failed to fetch details for datamate knowledge base {knowledge_base_id}: {str(e)}")
     
     def retrieve_knowledge_base(
         self,
@@ -276,7 +328,7 @@ class DataMateClient:
                         "files": files,
                     })
                 except Exception as e:
-                    logger.error(f"Failed to fetch files for knowledge base {kb_id}: {str(e)}")
+                    logger.error(f"Failed to fetch files for datamate knowledge base {kb_id}: {str(e)}")
                     # Continue with other knowledge bases even if one fails
                     result.append({
                         "knowledge_base": kb,

@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...datamate import DataMateClient
+from ...vector_database import DataMateCore
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
@@ -87,8 +87,8 @@ class DataMateSearchTool(Tool):
         # Build base URL: http://host:port
         self.server_base_url = f"http://{self.server_ip}:{self.server_port}".rstrip("/")
 
-        # Initialize DataMate SDK client
-        self.datamate_client = DataMateClient(base_url=self.server_base_url)
+        # Initialize DataMate vector database core
+        self.datamate_core = DataMateCore(base_url=self.server_base_url)
 
         self.kb_page = 0
         self.kb_page_size = 20
@@ -133,7 +133,7 @@ class DataMateSearchTool(Tool):
 
         try:
             # Step 1: Get knowledge base list using SDK
-            knowledge_bases = self.datamate_client.list_knowledge_bases(
+            knowledge_bases = self.datamate_core.client.list_knowledge_bases(
                 page=self.kb_page,
                 size=self.kb_page_size
             )
@@ -149,17 +149,15 @@ class DataMateSearchTool(Tool):
             if not knowledge_base_ids:
                 return json.dumps("No knowledge base found. No relevant information found.", ensure_ascii=False)
 
-            # Step 2: Retrieve knowledge base content using SDK
+            # Step 2: Retrieve knowledge base content using DataMateCore hybrid search
             kb_search_results = []
             for knowledge_base_id in knowledge_base_ids:
-
-                kb_search = self.datamate_client.retrieve_knowledge_base(
-                    query=query,
-                    knowledge_base_ids=[knowledge_base_id],
+                kb_search = self.datamate_core.hybrid_search(
+                    query_text=query,
+                    index_names=[knowledge_base_id],
                     top_k=top_k,
-                    threshold=threshold
+                    weight_accurate=threshold,
                 )
-
                 if not kb_search:
                     raise Exception("No results found! Try a less restrictive/shorter query.")
                 kb_search_results.extend(kb_search)
@@ -173,7 +171,7 @@ class DataMateSearchTool(Tool):
                 metadata = self._parse_metadata(entity_data.get("metadata"))
                 dataset_id = self._extract_dataset_id(metadata.get("absolute_directory_path", ""))
                 file_id = metadata.get("original_file_id")
-                download_url = self.datamate_client.build_file_download_url(dataset_id, file_id)
+                download_url = self.datamate_core.client.build_file_download_url(dataset_id, file_id)
 
                 score_details = entity_data.get("scoreDetails", {}) or {}
                 score_details.update({

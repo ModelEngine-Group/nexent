@@ -60,6 +60,31 @@ class _VectorDatabaseCore:
 vector_db_base_module.VectorDatabaseCore = _VectorDatabaseCore
 sys.modules['nexent.vector_database.base'] = vector_db_base_module
 sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
+sys.modules['nexent.vector_database.datamate_core'] = MagicMock()
+# Provide a lightweight models module with the IndexStatsSummary class used in the service.
+vector_db_models_module = ModuleType('nexent.vector_database.models')
+
+
+class _IndexStatsSummary:
+    def __init__(self, base_info=None, search_performance=None, error=None):
+        self.base_info = base_info
+        self.search_performance = search_performance
+        self.error = error
+
+    def to_dict(self):
+        payload = {}
+        if self.base_info is not None:
+            payload["base_info"] = self.base_info
+        if self.search_performance is not None:
+            payload["search_performance"] = self.search_performance
+        if self.error is not None:
+            payload["error"] = self.error
+        return payload
+
+
+vector_db_models_module.IndexStatsSummary = _IndexStatsSummary
+sys.modules['nexent.vector_database.models'] = vector_db_models_module
+IndexStatsSummary = _IndexStatsSummary
 # Mock nexent.storage module and its submodules before any imports
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
 storage_factory_module = MagicMock()
@@ -429,8 +454,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Setup
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         self.mock_vdb_core.get_indices_detail.return_value = {
-            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}},
-            "index2": {"base_info": {"doc_count": 20, "embedding_model": "test-model"}}
+            "index1": IndexStatsSummary(base_info={"doc_count": 10, "embedding_model": "test-model"}),
+            "index2": IndexStatsSummary(base_info={"doc_count": 20, "embedding_model": "test-model"}),
         }
         mock_get_knowledge.return_value = [
             {"index_name": "index1", "embedding_model_name": "test-model"},
@@ -514,7 +539,7 @@ class TestElasticSearchService(unittest.TestCase):
             {"index_name": "index1", "embedding_model_name": None}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
-            "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
+            "index1": IndexStatsSummary(base_info={"embedding_model": "text-embedding-ada-002"})
         }
 
         result = ElasticSearchService.list_indices(
@@ -565,14 +590,14 @@ class TestElasticSearchService(unittest.TestCase):
             {"index_name": "index1", "embedding_model_name": "model-A"}
         ]
         detailed_stats = {
-            "index1": {
-                "base_info": {
+            "index1": IndexStatsSummary(
+                base_info={
                     "doc_count": 42,
                     "process_source": "Unstructured",
                     "embedding_model": "text-embedding-3-large"
                 },
-                "search_performance": {"avg_time": 12.3}
-            }
+                extra={"search_performance": {"avg_time": 12.3}},
+            )
         }
         self.mock_vdb_core.get_indices_detail.return_value = detailed_stats
 
@@ -585,7 +610,7 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         self.assertEqual(len(result["indices_info"]), 1)
-        self.assertEqual(result["indices_info"][0]["stats"], detailed_stats["index1"])
+        self.assertEqual(result["indices_info"][0]["stats"], detailed_stats["index1"].to_dict())
 
     def test_vectorize_documents_success(self):
         """

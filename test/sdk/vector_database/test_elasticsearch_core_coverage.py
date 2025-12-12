@@ -18,6 +18,7 @@ sys.path.insert(0, project_root)
 
 # Import the class under test
 from sdk.nexent.vector_database.elasticsearch_core import ElasticSearchCore, BulkOperation
+from sdk.nexent.vector_database.models import IndexStatsSummary
 from elasticsearch import exceptions
 
 
@@ -552,8 +553,9 @@ class TestElasticSearchCoreCoverage:
         
         result = vdb_core.get_indices_detail(["test_index"])
         assert "test_index" in result
-        assert "base_info" in result["test_index"]
-        assert "search_performance" in result["test_index"]
+        assert isinstance(result["test_index"], IndexStatsSummary)
+        assert result["test_index"].base_info.doc_count == 10
+        assert result["test_index"].search_performance.total_search_count == 50
     
     def test_get_indices_detail_exception(self, vdb_core):
         """Test get_indices_detail with exception"""
@@ -561,9 +563,9 @@ class TestElasticSearchCoreCoverage:
         vdb_core.client.indices.stats.side_effect = Exception("Stats error")
         
         result = vdb_core.get_indices_detail(["test_index"])
-        # The function returns error info for failed indices, not empty dict
         assert "test_index" in result
-        assert "error" in result["test_index"]
+        assert isinstance(result["test_index"], IndexStatsSummary)
+        assert result["test_index"].error == "Stats error"
     
     def test_get_indices_detail_with_embedding_dim(self, vdb_core):
         """Test get_indices_detail with embedding dimension"""
@@ -601,9 +603,8 @@ class TestElasticSearchCoreCoverage:
         
         result = vdb_core.get_indices_detail(["test_index"], embedding_dim=512)
         assert "test_index" in result
-        assert "base_info" in result["test_index"]
-        assert "search_performance" in result["test_index"]
-        assert result["test_index"]["base_info"]["embedding_dim"] == 512
+        assert isinstance(result["test_index"], IndexStatsSummary)
+        assert result["test_index"].base_info.embedding_dim == 512
     
     def test_bulk_operation_context_success(self, vdb_core):
         """Test bulk_operation_context successful case"""

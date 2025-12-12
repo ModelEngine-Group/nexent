@@ -1,5 +1,5 @@
 """
-Unit tests for backend/database/client.py
+Unit tests for backend/database/datamate_client.py
 Tests PostgresClient, MinioClient, and utility functions
 """
 

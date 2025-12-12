@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
 
 from ..core.models.embedding_model import BaseEmbedding
+from .models import IndexStatsSummary
 
 
 class VectorDatabaseCore(ABC):
@@ -299,7 +300,7 @@ class VectorDatabaseCore(ABC):
     @abstractmethod
     def get_indices_detail(
         self, index_names: List[str], embedding_dim: Optional[int] = None
-    ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    ) -> Dict[str, IndexStatsSummary]:
         """
         Get formatted statistics for multiple indices.
 
@@ -308,10 +309,6 @@ class VectorDatabaseCore(ABC):
             embedding_dim: Optional embedding dimension (for display purposes)
 
         Returns:
-            Dict mapping each index name to:
-                - base_info: Dict with doc_count, chunk_count, store_size,
-                  process_source, embedding_model, embedding_dim,
-                  creation_date, update_date
-                - search_performance: Dict with total_search_count, hit_count
+            Dict mapping index names to IndexStatsSummary objects.
         """
         pass

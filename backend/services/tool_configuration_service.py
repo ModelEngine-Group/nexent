@@ -626,7 +626,7 @@ def _validate_local_tool(
                 'storage_client': minio_client
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "analyze_text_file":
+        elif tool_name == "analyze_document":
             if not tenant_id or not user_id:
                 raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)

@@ -178,3 +178,4 @@ class TestSyncAllKnowledgeBases:
         assert result["total_count"] == 0
         assert "boom" in result["error"]
 
+

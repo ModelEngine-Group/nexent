@@ -11,6 +11,7 @@ from elasticsearch import Elasticsearch, exceptions
 from ..core.models.embedding_model import BaseEmbedding
 from ..core.nlp.tokenizer import calculate_term_weights
 from .base import VectorDatabaseCore
+from .models import IndexBaseInfo, IndexSearchPerformance, IndexStatsSummary
 from .utils import build_weighted_query, format_size
 
 
@@ -1121,9 +1122,9 @@ class ElasticSearchCore(VectorDatabaseCore):
 
     def get_indices_detail(
         self, index_names: List[str], embedding_dim: Optional[int] = None
-    ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    ) -> Dict[str, IndexStatsSummary]:
         """Get formatted statistics for multiple indices"""
-        all_stats = {}
+        all_stats: Dict[str, IndexStatsSummary] = {}
         for index_name in index_names:
             try:
                 stats = self.client.indices.stats(index=index_name)
@@ -1163,26 +1164,30 @@ class ElasticSearchCore(VectorDatabaseCore):
                 # Update time defaults to creation time if not modified
                 update_time = creation_date
 
-                all_stats[index_name] = {
-                    "base_info": {
-                        "doc_count": unique_sources_count,
-                        "chunk_count": index_stats["docs"]["count"],
-                        "store_size": format_size(index_stats["store"]["size_in_bytes"]),
-                        "process_source": process_source,
-                        "embedding_model": embedding_model,
-                        "embedding_dim": embedding_dim or 1024,
-                        "creation_date": creation_date,
-                        "update_date": update_time,
-                    },
-                    "search_performance": {
-                        "total_search_count": index_stats["search"]["query_total"],
-                        "hit_count": index_stats["request_cache"]["hit_count"],
-                    },
-                }
+                base_info = IndexBaseInfo(
+                    doc_count=unique_sources_count,
+                    chunk_count=index_stats["docs"]["count"],
+                    store_size=format_size(index_stats["store"]["size_in_bytes"]),
+                    process_source=process_source,
+                    embedding_model=embedding_model,
+                    embedding_dim=embedding_dim or 1024,
+                    creation_date=creation_date,
+                    update_date=update_time,
+                )
+
+                performance = IndexSearchPerformance(
+                    total_search_count=index_stats["search"]["query_total"],
+                    hit_count=index_stats["request_cache"]["hit_count"],
+                )
+
+                all_stats[index_name] = IndexStatsSummary(
+                    base_info=base_info,
+                    search_performance=performance,
+                )
             except Exception as e:
                 logger.error(
                     f"Error getting stats for index {index_name}: {str(e)}")
-                all_stats[index_name] = {"error": str(e)}
+                all_stats[index_name] = IndexStatsSummary(error=str(e))
 
         return all_stats
 

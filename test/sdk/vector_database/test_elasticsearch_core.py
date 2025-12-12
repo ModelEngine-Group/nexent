@@ -6,6 +6,7 @@ from elasticsearch import exceptions
 
 # Import the class under test
 from sdk.nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from sdk.nexent.vector_database.models import IndexStatsSummary
 
 
 # ----------------------------------------------------------------------------
@@ -1107,8 +1108,9 @@ def test_get_indices_detail_success(elasticsearch_core_instance):
             ["test_index"], embedding_dim=1024)
 
         assert "test_index" in result
-        assert result["test_index"]["base_info"]["doc_count"] == 10
-        assert result["test_index"]["base_info"]["chunk_count"] == 100
+        assert isinstance(result["test_index"], IndexStatsSummary)
+        assert result["test_index"].base_info.doc_count == 10
+        assert result["test_index"].base_info.chunk_count == 100
         mock_stats.assert_called_once()
         mock_settings.assert_called_once()
         mock_search.assert_called_once()

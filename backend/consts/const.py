@@ -14,6 +14,7 @@ TEST_VOICE_PATH = os.path.join(os.path.dirname(
 # Vector database providers
 class VectorDatabaseType(str, Enum):
     ELASTICSEARCH = "elasticsearch"
+    DATAMATE = "datamate"
 
 
 # ModelEngine Configuration
@@ -27,6 +28,9 @@ ES_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
 ES_PASSWORD = os.getenv("ELASTIC_PASSWORD")
 ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
+
+# DataMate Configuration
+DATAMATE_BASE_URL = os.getenv("DATAMATE_BASE_URL", "http://localhost:30000")
 
 
 # Data Processing Service Configuration
@@ -264,6 +268,9 @@ TASK_STATUS = {
 THINK_START_PATTERN = "<think>"
 THINK_END_PATTERN = "</think>"
 
+
+# DataMate Configuration
+DATAMATE_BASE_URL = os.getenv("DATAMATE_BASE_URL", "http://localhost:30000")
 
 # Telemetry and Monitoring Configuration
 ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
