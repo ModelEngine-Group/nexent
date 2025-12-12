@@ -827,7 +827,12 @@ export default function AgentImportWizard({
   // Filter only required steps for navigation
   // Show rename step if name conflict check is complete and there are any agents that had conflicts
   // (even if all conflicts are now resolved, we still want to show the step so users can see the success state)
-  const hasAnyAgentsWithConflicts = !checkingName && Object.keys(agentNameConflicts).length > 0;
+  const hasAnyAgentsWithConflicts = !checkingName && (
+    // Check if any agent has a current conflict
+    Object.values(agentNameConflicts).some(conflict => conflict.hasConflict) ||
+    // OR if any agent was successfully renamed (meaning it had a conflict that was resolved)
+    successfullyRenamedAgents.size > 0
+  );
   const steps = [
     hasAnyAgentsWithConflicts && {
       key: "rename",
