@@ -70,6 +70,13 @@ export function AgentMarketCard({
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 line-clamp-1 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
           {agent.display_name}
         </h3>
+        {agent.author ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {t("market.by", { defaultValue: "By {{author}}", author: agent.author })}
+          </p>
+        ) : (
+          <div className="h-5" aria-hidden />
+        )}
       </div>
 
       {/* Card body */}

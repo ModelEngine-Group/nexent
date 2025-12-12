@@ -25,7 +25,8 @@ from database.tool_db import (
 from database.user_tenant_db import get_all_tenant_ids
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
-from services.tenant_config_service import get_selected_knowledge_list
+from services.tenant_config_service import get_selected_knowledge_list, build_knowledge_name_mapping
+from database.knowledge_db import get_index_name_by_knowledge_name
 from database.client import minio_client
 from services.image_service import get_vlm_model
 
@@ -419,7 +420,7 @@ async def initialize_tools_on_startup():
                 failed_tenants.append(f"{tenant_id} (error: {str(e)})")
         
         # Log final results
-        logger.info(f"Tool initialization completed!")
+        logger.info("Tool initialization completed!")
         logger.info(f"Total tools available across all tenants: {total_tools}")
         logger.info(f"Successfully processed: {successful_tenants}/{len(tenant_ids)} tenants")
         
@@ -607,11 +608,32 @@ def _validate_local_tool(
                 tenant_id=tenant_id, user_id=user_id)
             index_names = [knowledge_info.get("index_name")
                            for knowledge_info in knowledge_info_list]
+            name_resolver = build_knowledge_name_mapping(
+                tenant_id=tenant_id, user_id=user_id)
+
+            # Fallback: if user provided index_names in inputs, try to resolve them even when no selection stored
+            if (not index_names) and inputs and inputs.get("index_names"):
+                raw_names = inputs.get("index_names")
+                if isinstance(raw_names, str):
+                    raw_names = [raw_names]
+                resolved_indices = []
+                for raw in raw_names:
+                    try:
+                        resolved = get_index_name_by_knowledge_name(
+                            raw, tenant_id=tenant_id)
+                        name_resolver[raw] = resolved
+                        resolved_indices.append(resolved)
+                    except Exception:
+                        # If not found as knowledge_name, assume it's already an index_name
+                        resolved_indices.append(raw)
+                index_names = resolved_indices
+
             embedding_model = get_embedding_model(tenant_id=tenant_id)
             vdb_core = get_vector_db_core()
             params = {
                 **instantiation_params,
                 'index_names': index_names,
+                'name_resolver': name_resolver,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
             }

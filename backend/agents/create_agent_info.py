@@ -15,7 +15,7 @@ from services.vectordatabase_service import (
     get_vector_db_core,
     get_embedding_model,
 )
-from services.tenant_config_service import get_selected_knowledge_list
+from services.tenant_config_service import get_selected_knowledge_list, build_knowledge_name_mapping
 from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_config_service import build_memory_context
 from services.image_service import get_vlm_model
@@ -241,6 +241,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
                 "index_names": index_names,
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
+                "name_resolver": build_knowledge_name_mapping(tenant_id=tenant_id, user_id=user_id),
             }
         elif tool_config.class_name == "AnalyzeDocumentTool":
             tool_config.metadata = {

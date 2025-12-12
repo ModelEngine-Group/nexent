@@ -680,7 +680,11 @@ export const ModelDeleteDialog = ({
 
                       if (allEnabledModels) {
                         const apiKey = getApiKeyByType(deletingModelType);
-                        // Pass all currently enabled models with their max_tokens values
+                        const isEmbeddingType =
+                          deletingModelType === MODEL_TYPES.EMBEDDING ||
+                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                        // Pass all currently enabled models
+                        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
                         await modelService.addBatchCustomModel({
                           api_key:
                             apiKey && apiKey.trim() !== ""
@@ -688,10 +692,18 @@ export const ModelDeleteDialog = ({
                               : "sk-no-api-key",
                           provider: MODEL_SOURCES.SILICON,
                           type: deletingModelType,
-                          models: allEnabledModels.map((model) => ({
-                            ...model,
-                            max_tokens: model.max_tokens || 4096, // Ensure max_tokens is always present
-                          })),
+                          models: allEnabledModels.map((model) => {
+                            if (isEmbeddingType) {
+                              const { max_tokens, ...modelWithoutMaxTokens } =
+                                model;
+                              return modelWithoutMaxTokens;
+                            } else {
+                              return {
+                                ...model,
+                                max_tokens: model.max_tokens || 4096,
+                              };
+                            }
+                          }),
                         });
                       }
 

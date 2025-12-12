@@ -89,6 +89,11 @@ export default function MarketAgentDetailModal({
               {agentDetails?.display_name || "-"}
             </Descriptions.Item>
             <Descriptions.Item
+              label={t("market.detail.author", "Author")}
+            >
+              {agentDetails?.author || "-"}
+            </Descriptions.Item>
+            <Descriptions.Item
               label={t("market.detail.description", "Description")}
             >
               {renderFieldValue(agentDetails?.description)}

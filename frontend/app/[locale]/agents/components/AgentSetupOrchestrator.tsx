@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { TFunction } from "i18next";
 
-import { App, Modal, Button, Tooltip } from "antd";
+import { App, Modal, Button, Tooltip, Row, Col } from "antd";
 import { WarningFilled } from "@ant-design/icons";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -26,6 +26,8 @@ import {
 } from "@/types/agentConfig";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import log from "@/lib/logger";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAuth } from "@/hooks/useAuth";
 
 import SubAgentPool from "./agent/SubAgentPool";
 import CollaborativeAgentDisplay from "./agent/CollaborativeAgentDisplay";
@@ -79,6 +81,8 @@ export default function AgentSetupOrchestrator({
   setAgentDescription,
   agentDisplayName,
   setAgentDisplayName,
+  agentAuthor,
+  setAgentAuthor,
   isGeneratingAgent = false,
   // SystemPromptDisplay related props
   onDebug,
@@ -93,6 +97,7 @@ export default function AgentSetupOrchestrator({
   registerSaveHandler,
   registerReloadHandler,
 }: AgentSetupOrchestratorProps) {
+  const { user, isSpeedMode } = useAuth();
   const [enabledToolIds, setEnabledToolIds] = useState<number[]>([]);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -150,7 +155,9 @@ export default function AgentSetupOrchestrator({
         detailReasons.length > 0 ? detailReasons : fallbackReasons;
 
       const normalizedAvailability =
-        typeof detail?.is_available === "boolean"
+        normalizedReasons.length > 0
+          ? false
+          : typeof detail?.is_available === "boolean"
           ? detail.is_available
           : typeof fallback?.is_available === "boolean"
           ? fallback.is_available
@@ -196,6 +203,7 @@ export default function AgentSetupOrchestrator({
 
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
 
   // Common refresh agent list function, moved to the front to avoid hoisting issues
   const refreshAgentList = async (t: TFunction, clearTools: boolean = true) => {
@@ -367,6 +375,7 @@ export default function AgentSetupOrchestrator({
       setAgentName?.(agentDetail.name || "");
       setAgentDescription?.(agentDetail.description || "");
       setAgentDisplayName?.(agentDetail.display_name || "");
+      setAgentAuthor?.(agentDetail.author || "");
 
       // Load Agent data to interface
       setMainAgentModel(agentDetail.model);
@@ -907,6 +916,8 @@ export default function AgentSetupOrchestrator({
     setAgentName?.("");
     setAgentDescription?.("");
     setAgentDisplayName?.("");
+    setAgentAuthor?.("");
+    setAgentAuthor?.("");
 
     // Clear tool and agent selections
     setSelectedTools([]);
@@ -1100,6 +1111,9 @@ export default function AgentSetupOrchestrator({
           )
         ).sort((a, b) => a - b);
 
+        // Determine author value: use provided author, or default to user email in Full mode
+        const finalAuthor = agentAuthor || (!isSpeedMode && user?.email ? user.email : undefined);
+
         if (isEditingAgent && editingAgent) {
           // Editing existing agent
           result = await updateAgent(
@@ -1119,7 +1133,8 @@ export default function AgentSetupOrchestrator({
             businessLogicModel ?? undefined,
             businessLogicModelId ?? undefined,
             deduplicatedToolIds,
-            deduplicatedAgentIds
+            deduplicatedAgentIds,
+            finalAuthor
           );
         } else {
           // Creating new agent on save
@@ -1140,7 +1155,8 @@ export default function AgentSetupOrchestrator({
             businessLogicModel ?? undefined,
             businessLogicModelId ?? undefined,
             deduplicatedToolIds,
-            deduplicatedAgentIds
+            deduplicatedAgentIds,
+            finalAuthor
           );
         }
 
@@ -1183,6 +1199,7 @@ export default function AgentSetupOrchestrator({
                 setAgentName?.(agentDetail.name || "");
                 setAgentDescription?.(agentDetail.description || "");
                 setAgentDisplayName?.(agentDetail.display_name || "");
+                setAgentAuthor?.(agentDetail.author || "");
                 onEditingStateChange?.(true, agentDetail);
                 setMainAgentModel(agentDetail.model);
                 setMainAgentModelId(agentDetail.model_id ?? null);
@@ -1370,6 +1387,7 @@ export default function AgentSetupOrchestrator({
       setAgentName?.(agentDetail.name || "");
       setAgentDescription?.(agentDetail.description || "");
       setAgentDisplayName?.(agentDetail.display_name || "");
+      setAgentAuthor?.(agentDetail.author || "");
 
       // Notify external editing state change (use complete data)
       onEditingStateChange?.(true, agentDetail);
@@ -1574,7 +1592,6 @@ export default function AgentSetupOrchestrator({
   const runAgentImport = useCallback(
     async (
       agentPayload: any,
-      translationFn: TFunction,
       options?: { forceImport?: boolean }
     ) => {
       setIsImporting(true);
@@ -1708,7 +1725,7 @@ export default function AgentSetupOrchestrator({
             agentInfo,
           });
         } else {
-          await runAgentImport(agentInfo, t);
+          await runAgentImport(agentInfo);
         }
       } catch (error) {
         log.error(t("agentConfig.agents.importFailed"), error);
@@ -1731,7 +1748,7 @@ export default function AgentSetupOrchestrator({
       return;
     }
     setImportingAction("regenerate");
-    const success = await runAgentImport(pendingImportData.agentInfo, t);
+    const success = await runAgentImport(pendingImportData.agentInfo);
     if (success) {
       setPendingImportData(null);
     }
@@ -1743,7 +1760,7 @@ export default function AgentSetupOrchestrator({
       return;
     }
     setImportingAction("force");
-    const success = await runAgentImport(pendingImportData.agentInfo, t, {
+    const success = await runAgentImport(pendingImportData.agentInfo, {
       forceImport: true,
     });
     if (success) {
@@ -1858,6 +1875,138 @@ export default function AgentSetupOrchestrator({
     }
   };
 
+  // Handle copy agent from list
+  const handleCopyAgentFromList = async (agent: Agent) => {
+    try {
+      // Fetch source agent detail before duplicating
+      const detailResult = await searchAgentInfo(Number(agent.id));
+      if (!detailResult.success || !detailResult.data) {
+        message.error(detailResult.message);
+        return;
+      }
+      const detail = detailResult.data;
+
+      // Prepare copy names
+      const copyName = `${detail.name || "agent"}_copy`;
+      const copyDisplayName = `${
+        detail.display_name || t("agentConfig.agents.defaultDisplayName")
+      }${t("agent.copySuffix")}`;
+
+      // Gather tool and sub-agent identifiers from the source agent
+      const tools = Array.isArray(detail.tools) ? detail.tools : [];
+      const unavailableTools = tools.filter(
+        (tool: any) => tool && tool.is_available === false
+      );
+      const unavailableToolNames = unavailableTools
+        .map(
+          (tool: any) =>
+            tool?.display_name || tool?.name || tool?.tool_name || ""
+        )
+        .filter((name: string) => Boolean(name));
+
+      const enabledToolIds = tools
+        .filter((tool: any) => tool && tool.is_available !== false)
+        .map((tool: any) => Number(tool.id))
+        .filter((id: number) => Number.isFinite(id));
+      const subAgentIds = (Array.isArray(detail.sub_agent_id_list)
+        ? detail.sub_agent_id_list
+        : []
+      )
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
+      // Create a new agent using the source agent fields
+      const createResult = await updateAgent(
+        undefined,
+        copyName,
+        detail.description,
+        detail.model,
+        detail.max_step,
+        detail.provide_run_summary,
+        detail.enabled,
+        detail.business_description,
+        detail.duty_prompt,
+        detail.constraint_prompt,
+        detail.few_shots_prompt,
+        copyDisplayName,
+        detail.model_id ?? undefined,
+        detail.business_logic_model_name ?? undefined,
+        detail.business_logic_model_id ?? undefined,
+        enabledToolIds,
+        subAgentIds
+      );
+      if (!createResult.success || !createResult.data?.agent_id) {
+        message.error(
+          createResult.message ||
+            t("agentConfig.agents.copyFailed")
+        );
+        return;
+      }
+      const newAgentId = Number(createResult.data.agent_id);
+      const copiedAgentFallback: Agent = {
+        ...detail,
+        id: String(newAgentId),
+        name: copyName,
+        display_name: copyDisplayName,
+        sub_agent_id_list: subAgentIds,
+      };
+
+      // Copy tool configuration to the new agent
+      for (const tool of tools) {
+        if (!tool || tool.is_available === false) {
+          continue;
+        }
+        const params =
+          tool.initParams?.reduce((acc: Record<string, any>, param: any) => {
+            acc[param.name] = param.value;
+            return acc;
+          }, {}) || {};
+        try {
+          await updateToolConfig(Number(tool.id), newAgentId, params, true);
+        } catch (error) {
+          log.error("Failed to copy tool configuration while duplicating agent:", error);
+          message.error(
+            t("agentConfig.agents.copyFailed")
+          );
+          return;
+        }
+      }
+
+      // Refresh UI state and notify user about copy result
+      await refreshAgentList(t, false);
+      message.success(t("agentConfig.agents.copySuccess"));
+      if (unavailableTools.length > 0) {
+        const names =
+          unavailableToolNames.join(", ") ||
+          unavailableTools
+            .map((tool: any) => Number(tool?.id))
+            .filter((id: number) => !Number.isNaN(id))
+            .join(", ");
+        message.warning(
+          t("agentConfig.agents.copyUnavailableTools", {
+            count: unavailableTools.length,
+            names,
+          })
+        );
+      }
+      // Auto select the newly copied agent for editing
+      await handleEditAgent(copiedAgentFallback, t);
+    } catch (error) {
+      log.error("Failed to copy agent:", error);
+      message.error(t("agentConfig.agents.copyFailed"));
+    }
+  };
+
+  const handleCopyAgentWithConfirm = (agent: Agent) => {
+    confirm({
+      title: t("agentConfig.agents.copyConfirmTitle"),
+      content: t("agentConfig.agents.copyConfirmContent", {
+        name: agent?.display_name || agent?.name || "",
+      }),
+      onConfirm: () => handleCopyAgentFromList(agent),
+    });
+  };
+
   // Handle delete agent from list
   const handleDeleteAgentFromList = (agent: Agent) => {
     setAgentToDelete(agent);
@@ -1961,11 +2110,24 @@ export default function AgentSetupOrchestrator({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-full gap-0 justify-between relative ml-2 mr-2">
-        {/* Lower part: Agent pool + Agent capability configuration + System Prompt */}
-        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 max-w-full">
-          {/* Left column: Always show SubAgentPool - Equal flex width */}
-          <div className="w-full lg:w-auto lg:flex-1 h-full overflow-hidden">
+      <div className="h-full relative px-2">
+        {/* Three-column layout using Ant Design Grid */}
+        <Row
+          gutter={[16, 16]}
+          className="h-full"
+          align="stretch"
+          style={{ minHeight: 0 }}
+        >
+          {/* Left column: SubAgentPool */}
+          <Col
+            xs={24}
+            sm={24}
+            md={24}
+            lg={24}
+            xl={8}
+            className="flex flex-col h-full"
+            style={{ height: "100%", minHeight: 0 }}
+          >
             <SubAgentPool
               onEditAgent={(agent) => handleEditAgent(agent, t)}
               onCreateNewAgent={() => confirmOrRun(handleCreateNewAgent)}
@@ -1977,6 +2139,7 @@ export default function AgentSetupOrchestrator({
               isGeneratingAgent={isGeneratingAgent}
               editingAgent={editingAgent}
               isCreatingNewAgent={isCreatingNewAgent}
+              onCopyAgent={handleCopyAgentWithConfirm}
               onExportAgent={handleExportAgentFromList}
               onDeleteAgent={handleDeleteAgentFromList}
               unsavedAgentId={
@@ -1985,29 +2148,36 @@ export default function AgentSetupOrchestrator({
                   : null
               }
             />
-          </div>
+          </Col>
 
-          {/* Middle column: Agent capability configuration - Equal flex width */}
-          <div className="w-full lg:w-auto lg:flex-1 h-full flex flex-col overflow-hidden">
+          {/* Middle column: Agent capability configuration */}
+          <Col
+            xs={24}
+            sm={24}
+            md={24}
+            lg={24}
+            xl={8}
+            className="flex flex-col h-full"
+            style={{ height: "100%", minHeight: 0 }}
+          >
             {/* Header: Configure Agent Capabilities */}
             <div className="flex justify-between items-center mb-2">
               <div className="flex items-center">
                 <div className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500 text-white text-sm font-medium mr-2">
                   2
                 </div>
-                <h2 className="text-lg font-medium">
+                <h2 className="text-lg font-medium m-0">
                   {t("businessLogic.config.title")}
                 </h2>
               </div>
             </div>
 
-            {/* Content: ScrollArea with two sections */}
-            <div className="flex-1 overflow-hidden border-t pt-2">
+            {/* Content: Two sections */}
+            <div className="flex-1 overflow-hidden border-t border-gray-200 pt-2">
               <div className="flex flex-col h-full gap-4">
                 {/* Upper section: Collaborative Agent Display - fixed area */}
                 <CollaborativeAgentDisplay
-                  className="h-[128px] lg:h-[128px]"
-                  style={{ flexShrink: 0 }}
+                  className="h-[128px] flex-shrink-0"
                   availableAgents={subAgentList}
                   selectedAgentIds={enabledAgentIds}
                   parentAgentId={
@@ -2070,10 +2240,18 @@ export default function AgentSetupOrchestrator({
                 </div>
               </div>
             </div>
-          </div>
+          </Col>
 
-          {/* Right column: System Prompt Display - Equal flex width */}
-          <div className="w-full lg:w-auto lg:flex-1 h-full overflow-hidden">
+          {/* Right column: System Prompt Display */}
+          <Col
+            xs={24}
+            sm={24}
+            md={24}
+            lg={24}
+            xl={8}
+            className="flex flex-col h-full"
+            style={{ height: "100%", minHeight: "400px" }}
+          >
             <PromptManager
               onDebug={onDebug ? () => confirmOrRun(() => onDebug()) : () => {}}
               agentId={
@@ -2099,6 +2277,8 @@ export default function AgentSetupOrchestrator({
               onAgentDescriptionChange={setAgentDescription}
               agentDisplayName={agentDisplayName}
               onAgentDisplayNameChange={setAgentDisplayName}
+              agentAuthor={agentAuthor}
+              onAgentAuthorChange={setAgentAuthor}
               isEditingMode={isEditingAgent || isCreatingNewAgent}
               mainAgentModel={mainAgentModel ?? undefined}
               mainAgentModelId={mainAgentModelId}
@@ -2117,14 +2297,13 @@ export default function AgentSetupOrchestrator({
               isCreatingNewAgent={isCreatingNewAgent}
               canSaveAgent={localCanSaveAgent}
               getButtonTitle={getLocalButtonTitle}
-              onExportAgent={onExportAgent || (() => {})}
               onDeleteAgent={onDeleteAgent || (() => {})}
               onDeleteSuccess={handleExitEdit}
               editingAgent={editingAgentFromParent || editingAgent}
               onViewCallRelationship={handleViewCallRelationship}
             />
-          </div>
-        </div>
+          </Col>
+        </Row>
 
         {/* Delete confirmation popup */}
         <Modal

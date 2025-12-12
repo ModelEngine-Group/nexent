@@ -187,12 +187,19 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
 
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
+    # For embedding/multi_embedding models, max_tokens will be set via connectivity check later,
+    # so use 0 as placeholder if not provided
+    model_type = model["model_type"]
+    is_embedding_type = model_type in ["embedding", "multi_embedding"]
+    max_tokens_value = model.get(
+        "max_tokens", 0) if not is_embedding_type else 0
+
     model_obj = ModelRequest(
         model_factory=provider,
         model_name=model_name,
-        model_type=model["model_type"],
+        model_type=model_type,
         api_key=model_api_key,
-        max_tokens=model["max_tokens"],
+        max_tokens=max_tokens_value,
         display_name=model_display_name,
         expected_chunk_size=expected_chunk_size,
         maximum_chunk_size=maximum_chunk_size,

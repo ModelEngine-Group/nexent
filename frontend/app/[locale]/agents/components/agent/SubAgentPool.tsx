@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "antd";
+import { Button, Row, Col } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { FileOutput, Network, FileInput, Trash2, Plus, X } from "lucide-react";
+import { Copy, FileOutput, Network, FileInput, Trash2, Plus, X } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import {
@@ -37,6 +37,7 @@ export default function SubAgentPool({
   isGeneratingAgent = false,
   editingAgent = null,
   isCreatingNewAgent = false,
+  onCopyAgent,
   onExportAgent,
   onDeleteAgent,
   unsavedAgentId = null,
@@ -140,8 +141,8 @@ export default function SubAgentPool({
           }
         }
       `}</style>
-      <div className="flex flex-col h-full min-h-[300px] lg:min-h-0 overflow-hidden">
-        <div className="flex justify-between items-center mb-2">
+      <div className="flex flex-col h-full min-h-[300px] lg:min-h-0 max-h-full overflow-hidden">
+        <div className="flex justify-between items-center mb-2 flex-shrink-0">
           <div className="flex items-center">
             <div className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500 text-white text-sm font-medium mr-2">
               1
@@ -158,19 +159,23 @@ export default function SubAgentPool({
             )}
           </div>
         </div>
-        <ScrollArea className="flex-1 min-h-0 border-t pt-2 pb-2">
+        <ScrollArea
+          className="flex-1 min-h-0 max-h-full h-full border-t pt-2 pb-2"
+          style={{ height: "100%" }}
+        >
           <div className="flex flex-col pr-2">
             {/* Function operation block */}
             <div className="mb-4">
-              <div className="flex gap-3">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      className={`flex-1 rounded-md p-2 flex items-center cursor-pointer transition-all duration-200 min-h-[70px] ${
-                        isCreatingNewAgent
-                          ? "bg-blue-100 border border-blue-200 shadow-sm" // Highlight in creation mode
-                          : "bg-white hover:bg-blue-50 hover:shadow-sm"
-                      }`}
+              <Row gutter={12}>
+                <Col xs={24} sm={12}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className={`rounded-md p-2 flex items-center cursor-pointer transition-all duration-200 min-h-[70px] ${
+                          isCreatingNewAgent
+                            ? "bg-blue-100 border border-blue-200 shadow-sm" // Highlight in creation mode
+                            : "bg-white hover:bg-blue-50 hover:shadow-sm"
+                        }`}
                       onClick={() => {
                         if (isCreatingNewAgent) {
                           // If currently in creation mode, click to exit creation mode
@@ -217,24 +222,26 @@ export default function SubAgentPool({
                               : t("subAgentPool.description.createAgent")}
                           </div>
                         </div>
+                        </div>
                       </div>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {isCreatingNewAgent
-                      ? t("subAgentPool.tooltip.exitCreateMode")
-                      : t("subAgentPool.tooltip.createNewAgent")}
-                  </TooltipContent>
-                </Tooltip>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isCreatingNewAgent
+                        ? t("subAgentPool.tooltip.exitCreateMode")
+                        : t("subAgentPool.tooltip.createNewAgent")}
+                    </TooltipContent>
+                  </Tooltip>
+                </Col>
 
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      className={`flex-1 rounded-md p-2 flex items-center transition-all duration-200 min-h-[70px] ${
-                        isImporting
-                          ? "bg-gray-100 cursor-not-allowed" // Importing: disabled state
-                          : "bg-white cursor-pointer hover:bg-green-50 hover:shadow-sm" // Normal state: clickable
-                      }`}
+                <Col xs={24} sm={12}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className={`rounded-md p-2 flex items-center transition-all duration-200 min-h-[70px] ${
+                          isImporting
+                            ? "bg-gray-100 cursor-not-allowed" // Importing: disabled state
+                            : "bg-white cursor-pointer hover:bg-green-50 hover:shadow-sm" // Normal state: clickable
+                        }`}
                       onClick={isImporting ? undefined : onImportAgent}
                     >
                       <div
@@ -247,7 +254,7 @@ export default function SubAgentPool({
                             isImporting ? "bg-gray-100" : "bg-green-100"
                           }`}
                         >
-                          <FileOutput
+                          <FileInput
                             className={`w-4 h-4 ${
                               isImporting ? "text-gray-400" : "text-green-600"
                             }`}
@@ -265,16 +272,17 @@ export default function SubAgentPool({
                               : t("subAgentPool.description.importAgent")}
                           </div>
                         </div>
+                        </div>
                       </div>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {isImporting
-                      ? t("subAgentPool.description.importing")
-                      : t("subAgentPool.description.importAgent")}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {isImporting
+                        ? t("subAgentPool.description.importing")
+                        : t("subAgentPool.description.importAgent")}
+                    </TooltipContent>
+                  </Tooltip>
+                </Col>
+              </Row>
             </div>
 
             {/* Agent list block */}
@@ -353,6 +361,27 @@ export default function SubAgentPool({
 
                         {/* Operation button area */}
                         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                          {/* Copy agent button */}
+                          {onCopyAgent && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<Copy className="w-4 h-4" />}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onCopyAgent(agent);
+                                  }}
+                                  className="agent-action-button agent-action-button-blue"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {t("agent.contextMenu.copy")}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
                           {/* View call relationship button */}
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -379,7 +408,7 @@ export default function SubAgentPool({
                                 <Button
                                   type="text"
                                   size="small"
-                                  icon={<FileInput className="w-4 h-4" />}
+                                  icon={<FileOutput className="w-4 h-4" />}
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();

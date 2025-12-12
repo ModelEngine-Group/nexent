@@ -10,6 +10,7 @@ Main features include:
 4. Health check interface
 """
 import asyncio
+import json
 import logging
 import os
 import time
@@ -119,6 +120,23 @@ def get_vector_db_core(
         return DataMateCore(base_url=DATAMATE_BASE_URL)
 
     raise ValueError(f"Unsupported vector database type: {db_type}")
+
+
+def _rethrow_or_plain(exc: Exception) -> None:
+    """
+    If the exception message is a JSON dict with error_code, re-raise that JSON as-is.
+    Otherwise, re-raise the original string (no additional nesting/context).
+    """
+    msg = str(exc)
+    try:
+        parsed = json.loads(msg)
+    except Exception:
+        raise Exception(msg)
+
+    if isinstance(parsed, dict) and parsed.get("error_code"):
+        raise Exception(json.dumps(parsed, ensure_ascii=False))
+
+    raise Exception(msg)
 
 
 def check_knowledge_base_exist_impl(index_name: str, vdb_core: VectorDatabaseCore, user_id: str, tenant_id: str) -> dict:
@@ -695,14 +713,12 @@ class ElasticSearchService:
                     "total_submitted": total_submitted
                 }
             except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Error during indexing: {error_msg}")
-                raise Exception(f"Error during indexing: {error_msg}")
+                logger.error(f"Error during indexing: {str(e)}")
+                _rethrow_or_plain(e)
 
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error indexing documents: {error_msg}")
-            raise Exception(f"Error indexing documents: {error_msg}")
+            logger.error(f"Error indexing documents: {str(e)}")
+            _rethrow_or_plain(e)
 
     @staticmethod
     async def list_files(

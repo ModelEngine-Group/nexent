@@ -272,7 +272,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         // Use saved state instead of current potentially cleared state
         const selectedKbNames = savedKnowledgeBasesRef.current
           .filter((kb) => savedSelectedIdsRef.current.includes(kb.id))
-          .map((kb) => kb.name);
+          .map((kb) => kb.id);
 
         try {
           // Use fetch with keepalive to ensure request can be sent during page unload

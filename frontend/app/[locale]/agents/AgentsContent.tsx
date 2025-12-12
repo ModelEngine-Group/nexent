@@ -1,6 +1,6 @@
 "use client";
 
-import React, {useState, useEffect, useRef} from "react";
+import React, {useState, useEffect, useRef, forwardRef, useImperativeHandle} from "react";
 import {motion} from "framer-motion";
 
 import {useSetupFlow} from "@/hooks/useSetupFlow";
@@ -30,14 +30,14 @@ interface AgentsContentProps {
  * AgentsContent - Main component for agent configuration
  * Can be used in setup flow or as standalone page
  */
-export default function AgentsContent({
+export default forwardRef<AgentConfigHandle, AgentsContentProps>(function AgentsContent({
   isSaving: externalIsSaving,
   connectionStatus: externalConnectionStatus,
   isCheckingConnection: externalIsCheckingConnection,
   onCheckConnection: externalOnCheckConnection,
   onConnectionStatusChange,
   onSavingStateChange,
-}: AgentsContentProps) {
+}: AgentsContentProps, ref) {
   const agentConfigRef = useRef<AgentConfigHandle | null>(null);
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const pendingNavRef = useRef<null | (() => void)>(null);
@@ -59,6 +59,21 @@ export default function AgentsContent({
   const [internalIsSaving, setInternalIsSaving] = useState(false);
   const isSaving = externalIsSaving ?? internalIsSaving;
 
+  // Expose AgentConfigHandle methods to parent
+  useImperativeHandle(ref, () => ({
+    hasUnsavedChanges: () => agentConfigRef.current?.hasUnsavedChanges?.() ?? false,
+    saveAllChanges: async () => {
+      if (agentConfigRef.current?.saveAllChanges) {
+        await agentConfigRef.current.saveAllChanges();
+      }
+    },
+    reloadCurrentAgentData: async () => {
+      if (agentConfigRef.current?.reloadCurrentAgentData) {
+        await agentConfigRef.current.reloadCurrentAgentData();
+      }
+    },
+  }), []);
+
   // Update external saving state
   useEffect(() => {
     onSavingStateChange?.(isSaving);
@@ -74,7 +89,7 @@ export default function AgentsContent({
         transition={pageTransition}
         style={{width: "100%", height: "100%"}}
       >
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="w-full h-full">
           {canAccessProtectedData ? (
             <AgentConfig ref={agentConfigRef} canAccessProtectedData={canAccessProtectedData} />
           ) : null}
@@ -108,5 +123,5 @@ export default function AgentsContent({
       />
     </>
   );
-}
+});
 

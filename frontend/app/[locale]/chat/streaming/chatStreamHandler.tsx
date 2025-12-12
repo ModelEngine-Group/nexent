@@ -67,6 +67,7 @@ export const handleStreamResponse = async (
 
   let lastContentType:
     | typeof chatConfig.contentTypes.MODEL_OUTPUT
+    | typeof chatConfig.contentTypes.MODEL_OUTPUT_CODE
     | typeof chatConfig.contentTypes.PARSING
     | typeof chatConfig.contentTypes.EXECUTION
     | typeof chatConfig.contentTypes.AGENT_NEW_RUN
@@ -77,13 +78,24 @@ export const handleStreamResponse = async (
     | typeof chatConfig.contentTypes.PREPROCESS
     | null = null;
   let lastModelOutputIndex = -1; // Track the index of the last model output in currentStep.contents
+  let lastCodeOutputIndex = -1; // Track the index of the last code output for proper streaming
   let searchResultsContent: any[] = [];
   let allSearchResults: any[] = [];
   let finalAnswer = "";
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let readResult;
+      try {
+        readResult = await reader.read();
+      } catch (readError: any) {
+        // If read is aborted, break the loop gracefully
+        if (readError?.name === "AbortError" || readError?.name === "AbortSignal") {
+          break;
+        }
+        throw readError;
+      }
+      const { done, value } = readResult;
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -130,6 +142,7 @@ export const handleStreamResponse = async (
                   // Reset status tracking variables
                   lastContentType = null;
                   lastModelOutputIndex = -1;
+                  lastCodeOutputIndex = -1;
 
                   break;
 
@@ -298,70 +311,74 @@ export const handleStreamResponse = async (
                   }
 
                   if (isDebug) {
-                    // In debug mode, use streaming output like model_output_thinking
-                    // Ensure contents exists
+                    // In debug mode, use MODEL_OUTPUT_CODE type for streaming output
                     let processedContent = messageContent;
 
-                    // Check if we should append to existing content or create new
-                    const shouldAppend =
-                      lastContentType === chatConfig.contentTypes.MODEL_OUTPUT &&
-                      lastModelOutputIndex >= 0 &&
-                      currentStep.contents[lastModelOutputIndex] &&
-                      currentStep.contents[lastModelOutputIndex].subType ===
-                        "code";
+                    // Check if we should append to existing code content
+                    // Only append if the last content type was MODEL_OUTPUT_CODE and we have a valid index
+                    const shouldAppendCode =
+                      lastContentType === chatConfig.contentTypes.MODEL_OUTPUT_CODE &&
+                      lastCodeOutputIndex >= 0 &&
+                      currentStep.contents[lastCodeOutputIndex] &&
+                      currentStep.contents[lastCodeOutputIndex].type ===
+                        chatConfig.messageTypes.MODEL_OUTPUT_CODE;
 
-                    if (shouldAppend) {
-                      const modelOutput =
-                        currentStep.contents[lastModelOutputIndex];
+                    if (shouldAppendCode) {
+                      const codeOutput =
+                        currentStep.contents[lastCodeOutputIndex];
                       const codePrefix = t("chatStreamHandler.codePrefix");
 
                       // In append mode, also check for prefix in case it wasn't removed before
                       if (
-                        modelOutput.content.includes(codePrefix) &&
+                        codeOutput.content.includes(codePrefix) &&
                         processedContent.trim()
                       ) {
                         // Clean existing content
-                        modelOutput.content = modelOutput.content.replace(
-                          new RegExp(codePrefix + `\\s*`),
+                        codeOutput.content = codeOutput.content.replace(
+                          new RegExp(`^(${codePrefix}|代码|Code)[：:]\\s*`, "i"),
                           ""
                         );
                       }
 
-                      // Directly append without prefix processing (prefix should have been removed when first created)
-                      let newContent = modelOutput.content + processedContent;
-                      // Remove "<end" suffix if present
+                      // Directly append the new content
+                      let newContent = codeOutput.content + processedContent;
+                      // Remove incomplete "<end" suffix if present (streaming artifact)
                       if (newContent.endsWith("<end")) {
                         newContent = newContent.slice(0, -4);
                       }
-                      modelOutput.content = newContent;
+                      codeOutput.content = newContent;
                     } else {
-                      // Otherwise, create new code content
-                      // Remove "代码：" prefix if present at the start of first content
+                      // Create new code content with MODEL_OUTPUT_CODE type
+                      // Remove "代码：" or "Code:" prefix if present at the start
                       const codePrefix = t("chatStreamHandler.codePrefix");
                       if (processedContent.startsWith(codePrefix)) {
                         processedContent = processedContent.substring(
                           codePrefix.length
                         );
                       }
-                      // Remove "<end" suffix if present
+                      // Also handle Chinese and English variants directly
+                      processedContent = processedContent.replace(/^(代码|Code)[：:]\s*/i, "");
+                      
+                      // Remove incomplete "<end" suffix if present
                       if (processedContent.endsWith("<end")) {
                         processedContent = processedContent.slice(0, -4);
                       }
+                      
                       currentStep.contents.push({
                         id: `model-code-${Date.now()}-${Math.random()
                           .toString(36)
                           .substring(2, 7)}`,
-                        type: chatConfig.messageTypes.MODEL_OUTPUT,
-                        subType: "code",
+                        type: chatConfig.messageTypes.MODEL_OUTPUT_CODE,
                         content: processedContent,
                         expanded: true,
                         timestamp: Date.now(),
                       });
-                      lastModelOutputIndex = currentStep.contents.length - 1;
+                      // Track the new code content index
+                      lastCodeOutputIndex = currentStep.contents.length - 1;
                     }
 
-                    // Update the last processed content type
-                    lastContentType = chatConfig.contentTypes.MODEL_OUTPUT;
+                    // Update the last processed content type to MODEL_OUTPUT_CODE
+                    lastContentType = chatConfig.contentTypes.MODEL_OUTPUT_CODE;
                   } else {
                     // In non-debug mode, use the original logic - add a stable loading prompt
                     // Check if there is a code generation prompt
@@ -915,7 +932,11 @@ export const handleStreamResponse = async (
     // Reset the conversation switch status
     setIsSwitchedConversation(false);
   } catch (error) {
-    log.error(t("chatStreamHandler.streamResponseError"), error);
+    // Don't log AbortError as it's expected when user stops the stream
+    const err = error as Error;
+    if (err.name !== "AbortError") {
+      log.error(t("chatStreamHandler.streamResponseError"), error);
+    }
     throw error; // Pass the error back to the original function for processing
   }
 

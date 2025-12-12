@@ -10,6 +10,7 @@ import time
 from typing import Any, Dict, Optional
 
 import aiohttp
+import re
 import ray
 from celery import Task, chain, states
 from celery.exceptions import Retry
@@ -41,11 +42,33 @@ def extract_error_code(reason: str, parsed_error: Optional[Dict] = None) -> Opti
     Extract error code from error message or parsed error dict.
     Returns error code if matched, None otherwise.
     """
-    # First check if error_code is already in parsed_error
+    # 1) parsed_error dict
     if parsed_error and isinstance(parsed_error, dict):
-        error_code = parsed_error.get("error_code")
-        if error_code:
-            return error_code
+        code = parsed_error.get("error_code")
+        if code:
+            return code
+
+    # 2) try parse reason as JSON
+    try:
+        parsed = json.loads(reason)
+        if isinstance(parsed, dict):
+            code = parsed.get("error_code")
+            if code:
+                return code
+            detail = parsed.get("detail")
+            if isinstance(detail, dict) and detail.get("error_code"):
+                return detail.get("error_code")
+    except Exception:
+        pass
+
+    # 3) regex from raw string (supports single/double quotes)
+    try:
+        match = re.search(
+            r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', reason)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
 
     return "unknown_error"
 
@@ -688,9 +711,6 @@ def forward(
 
             try:
                 connector = aiohttp.TCPConnector(verify_ssl=False)
-                # Increased timeout for large documents and slow ES bulk operations
-                # Use generous total timeout to avoid marking long-running but successful
-                # indexing as failed.
                 timeout = aiohttp.ClientTimeout(total=600)
 
                 async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
@@ -698,58 +718,54 @@ def forward(
                         full_url,
                         headers=headers,
                         json=formatted_chunks,
-                        raise_for_status=True
+                        raise_for_status=False
                     ) as response:
-                        result = await response.json()
+                        text = await response.text()
+                        status = response.status
+                        # Try parse JSON body for structured error_code/message
+                        parsed_body = None
+                        try:
+                            parsed_body = json.loads(text)
+                        except Exception:
+                            parsed_body = None
+
+                        if status >= 400:
+                            error_code = None
+                            if isinstance(parsed_body, dict):
+                                error_code = parsed_body.get("error_code")
+                                detail = parsed_body.get("detail")
+                                if isinstance(detail, dict) and detail.get("error_code"):
+                                    error_code = detail.get("error_code")
+                                elif isinstance(detail, str):
+                                    try:
+                                        parsed_detail = json.loads(detail)
+                                        if isinstance(parsed_detail, dict):
+                                            error_code = parsed_detail.get(
+                                                "error_code", error_code)
+                                    except Exception:
+                                        pass
+
+                            if not error_code:
+                                try:
+                                    match = re.search(
+                                        r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', text)
+                                    if match:
+                                        error_code = match.group(1)
+                                except Exception:
+                                    pass
+
+                            if error_code:
+                                # Raise flat payload to avoid nested JSON and preserve error_code
+                                raise Exception(json.dumps({
+                                    "error_code": error_code
+                                }, ensure_ascii=False))
+
+                            raise Exception(
+                                f"ElasticSearch service returned HTTP {status}")
+
+                        result = parsed_body if isinstance(parsed_body, dict) else await response.json()
                         return result
 
-            except aiohttp.ClientResponseError as e:
-                # 400: embedding model reports chunk count exceeds concurrency
-                if e.status == 400:
-                    raise Exception(json.dumps({
-                        "message": f"ElasticSearch service returned 400 Bad Request: {str(e)}",
-                        "index_name": original_index_name,
-                        "task_name": "forward",
-                        "source": original_source,
-                        "original_filename": original_filename,
-                        "error_code": "embedding_chunks_exceed_limit"
-                    }, ensure_ascii=False))
-
-                # Timeout from Elasticsearch refresh / bulk operations: stop retrying and treat as es_bulk_failed
-                timeout_markers = [
-                    "Connection timeout caused by",
-                    "Read timed out",
-                    "ReadTimeoutError"
-                ]
-                if any(marker in str(e) for marker in timeout_markers):
-                    raise Exception(json.dumps({
-                        "message": f"ElasticSearch operation timed out: {str(e)}",
-                        "index_name": original_index_name,
-                        "task_name": "forward",
-                        "source": original_source,
-                        "original_filename": original_filename,
-                        "error_code": "es_bulk_failed"
-                    }, ensure_ascii=False))
-
-                # 503: vector service busy: bubble up immediately, let caller decide
-                if e.status == 503:
-                    raise Exception(json.dumps({
-                        "message": f"ElasticSearch service unavailable: {str(e)}",
-                        "index_name": original_index_name,
-                        "task_name": "forward",
-                        "source": original_source,
-                        "original_filename": original_filename,
-                        "error_code": "vector_service_busy"
-                    }, ensure_ascii=False))
-
-                # Other client response errors: bubble up
-                raise Exception(json.dumps({
-                    "message": f"ElasticSearch service unavailable: {str(e)}",
-                    "index_name": original_index_name,
-                    "task_name": "forward",
-                    "source": original_source,
-                    "original_filename": original_filename
-                }, ensure_ascii=False))
             except aiohttp.ClientConnectorError as e:
                 logger.error(
                     f"[{self.request.id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
@@ -879,6 +895,10 @@ def forward(
         }
     except Exception as e:
         # If it's an Exception, all go here (including our custom JSON message)
+        # Important: if this is a Celery Retry, re-raise immediately without recording error_code
+        if isinstance(e, Retry):
+            raise
+
         task_id = self.request.id
         try:
             error_info = json.loads(str(e))
