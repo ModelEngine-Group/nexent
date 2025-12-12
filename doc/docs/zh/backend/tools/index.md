@@ -26,6 +26,6 @@
 
 ## 需要帮助？
 
-- 查看我们的 [常见问题](../../getting-started/faq) 了解常见工具集成问题
+- 查看我们的 [常见问题](../../quick-start/faq) 了解常见工具集成问题
 - 加入我们的 [Discord 社区](https://discord.gg/tb5H3S3wyv) 获取实时支持
 - 查看 [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues) 了解已知问题

@@ -48,4 +48,4 @@ Alternatively, you can click the "Quick Setup" button on the homepage or in the 
 
 ## 💡 Get Help
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

@@ -95,4 +95,4 @@ For complete port mapping details, see our [Dev Container Guide](../deployment/d
 
 Want to build from source or add new features? Check the [Docker Build Guide](../deployment/docker-build) for step-by-step instructions.
 
-For detailed setup instructions and customization options, see our [Development Guide](./development-guide).
+For detailed setup instructions and customization options, see our [Developer Guide](../developer-guide/overview).

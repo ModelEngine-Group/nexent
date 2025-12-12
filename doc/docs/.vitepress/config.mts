@@ -1,4 +1,4 @@
-﻿// https://vitepress.dev/reference/site-config
+// https://vitepress.dev/reference/site-config
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
@@ -33,7 +33,7 @@ export default defineConfig({
         ],
         sidebar: [
           {
-            text: "Getting Started",
+            text: "Overview",
             items: [
               { text: "Overview", link: "/en/getting-started/overview" },
               { text: "Key Features", link: "/en/getting-started/features" },
@@ -41,15 +41,33 @@ export default defineConfig({
                 text: "Software Architecture",
                 link: "/en/getting-started/software-architecture",
               },
+            ],
+          },
+          {
+            text: "Quick Start",
+            items: [
               {
                 text: "Installation & Deployment",
-                link: "/en/getting-started/installation",
+                link: "/en/quick-start/installation",
               },
               {
-                text: "Development Guide",
-                link: "/en/getting-started/development-guide",
+                text: "Upgrade Guide",
+                link: "/en/quick-start/upgrade-guide",
               },
-              { text: "FAQ", link: "/en/getting-started/faq" },
+              { text: "FAQ", link: "/en/quick-start/faq" },
+            ],
+          },
+          {
+            text: "Developer Guide",
+            items: [
+              {
+                text: "Overview",
+                link: "/en/developer-guide/overview",
+              },
+              {
+                text: "Environment Preparation",
+                link: "/en/developer-guide/environment-setup",
+              },
             ],
           },
           {
@@ -83,14 +101,12 @@ export default defineConfig({
               {
                 text: "Local Tools",
                 items: [
-                  {
-                    text: "Local Tools Overview",
-                    link: "/en/user-guide/local-tools/",
-                  },
-                  {
-                    text: "Terminal Tool",
-                    link: "/en/user-guide/local-tools/terminal-tool",
-                  },
+                  { text: "Overview", link: "/en/user-guide/local-tools/" },
+                  { text: "File Tools", link: "/en/user-guide/local-tools/file-tools" },
+                  { text: "Email Tools", link: "/en/user-guide/local-tools/email-tools" },
+                  { text: "Search Tools", link: "/en/user-guide/local-tools/search-tools" },
+                  { text: "Multimodal Tools", link: "/en/user-guide/local-tools/multimodal-tools" },
+                  { text: "Terminal Tool", link: "/en/user-guide/local-tools/terminal-tool" },
                 ],
               },
             ],
@@ -98,17 +114,13 @@ export default defineConfig({
           {
             text: "SDK Documentation",
             items: [
-              { text: "SDK Overview", link: "/en/sdk/overview" },
+              { text: "Overview", link: "/en/sdk/overview" },
               { text: "Basic Usage", link: "/en/sdk/basic-usage" },
               { text: "Features Explained", link: "/en/sdk/features" },
               {
                 text: "Core Modules",
                 items: [
                   { text: "Agents", link: "/en/sdk/core/agents" },
-                  {
-                    text: "Run agent with agent_run",
-                    link: "/en/sdk/core/agent-run",
-                  },
                   { text: "Tools", link: "/en/sdk/core/tools" },
                   { text: "Models", link: "/en/sdk/core/models" },
                 ],
@@ -121,17 +133,21 @@ export default defineConfig({
           {
             text: "Frontend Development",
             items: [
-              { text: "Frontend Overview", link: "/en/frontend/overview" },
+              { text: "Overview", link: "/en/frontend/overview" },
             ],
           },
           {
             text: "Backend Development",
             items: [
-              { text: "Backend Overview", link: "/en/backend/overview" },
+              { text: "Overview", link: "/en/backend/overview" },
               { text: "API Reference", link: "/en/backend/api-reference" },
               {
                 text: "Tools Integration",
                 items: [
+                  {
+                    text: "Nexent Tools",
+                    link: "/en/backend/tools/nexent-native",
+                  },
                   {
                     text: "LangChain Tools",
                     link: "/en/backend/tools/langchain",
@@ -142,6 +158,10 @@ export default defineConfig({
               {
                 text: "Prompt Development",
                 link: "/en/backend/prompt-development",
+              },
+              {
+                text: "Version Management",
+                link: "/en/backend/version-management",
               },
             ],
           },
@@ -156,33 +176,20 @@ export default defineConfig({
             items: [
               { text: "Docker Build", link: "/en/deployment/docker-build" },
               { text: "Dev Container", link: "/en/deployment/devcontainer" },
-              { text: "Upgrade Guide", link: "/en/deployment/upgrade-guide" },
             ],
           },
           {
             text: "MCP Ecosystem",
             items: [
               { text: "Overview", link: "/en/mcp-ecosystem/overview" },
-              {
-                text: "MCP Server Development",
-                link: "/en/mcp-ecosystem/mcp-server-development",
-              },
+              { text: "MCP Recommendations", link: "/en/mcp-ecosystem/mcp-recommendations" },
               { text: "Use Cases", link: "/en/mcp-ecosystem/use-cases" },
-            ],
-          },
-          {
-            text: "Version Management",
-            items: [
-              {
-                text: "Version Management Guide",
-                link: "/en/version/version-management",
-              },
             ],
           },
           {
             text: "Testing",
             items: [
-              { text: "Testing Overview", link: "/en/testing/overview" },
+              { text: "Overview", link: "/en/testing/overview" },
               { text: "Backend Testing", link: "/en/testing/backend" },
             ],
           },
@@ -197,7 +204,6 @@ export default defineConfig({
               { text: "Code of Conduct", link: "/en/code-of-conduct" },
               { text: "Security Policy", link: "/en/security" },
               { text: "Core Contributors", link: "/en/contributors" },
-              { text: "Known Issues", link: "/en/known-issues" },
               { text: "License", link: "/en/license" },
             ],
           },
@@ -222,7 +228,7 @@ export default defineConfig({
         ],
         sidebar: [
           {
-            text: "快速开始",
+            text: "概览",
             items: [
               { text: "项目概览", link: "/zh/getting-started/overview" },
               { text: "核心特性", link: "/zh/getting-started/features" },
@@ -230,12 +236,30 @@ export default defineConfig({
                 text: "软件架构",
                 link: "/zh/getting-started/software-architecture",
               },
-              { text: "安装部署", link: "/zh/getting-started/installation" },
+            ],
+          },
+          {
+            text: "快速开始",
+            items: [
+              { text: "安装部署", link: "/zh/quick-start/installation" },
               {
-                text: "开发指南",
-                link: "/zh/getting-started/development-guide",
+                text: "升级指导",
+                link: "/zh/quick-start/upgrade-guide",
               },
-              { text: "常见问题", link: "/zh/getting-started/faq" },
+              { text: "常见问题", link: "/zh/quick-start/faq" },
+            ],
+          },
+          {
+            text: "开发者指南",
+            items: [
+              {
+                text: "概览",
+                link: "/zh/developer-guide/overview",
+              },
+              {
+                text: "环境准备",
+                link: "/zh/developer-guide/environment-setup",
+              },
             ],
           },
           {
@@ -260,11 +284,12 @@ export default defineConfig({
               {
                 text: "本地工具",
                 items: [
-                  { text: "本地工具概览", link: "/zh/user-guide/local-tools/" },
-                  {
-                    text: "Terminal工具",
-                    link: "/zh/user-guide/local-tools/terminal-tool",
-                  },
+                  { text: "概览", link: "/zh/user-guide/local-tools/" },
+                  { text: "文件工具", link: "/zh/user-guide/local-tools/file-tools" },
+                  { text: "邮件工具", link: "/zh/user-guide/local-tools/email-tools" },
+                  { text: "搜索工具", link: "/zh/user-guide/local-tools/search-tools" },
+                  { text: "多模态工具", link: "/zh/user-guide/local-tools/multimodal-tools" },
+                  { text: "终端工具", link: "/zh/user-guide/local-tools/terminal-tool" },
                 ],
               },
             ],
@@ -272,17 +297,13 @@ export default defineConfig({
           {
             text: "SDK 文档",
             items: [
-              { text: "SDK 概览", link: "/zh/sdk/overview" },
+              { text: "概览", link: "/zh/sdk/overview" },
               { text: "基本使用", link: "/zh/sdk/basic-usage" },
               { text: "特性详解", link: "/zh/sdk/features" },
               {
                 text: "核心模块",
                 items: [
                   { text: "智能体模块", link: "/zh/sdk/core/agents" },
-                  {
-                    text: "使用 agent_run 运行智能体",
-                    link: "/zh/sdk/core/agent-run",
-                  },
                   { text: "工具模块", link: "/zh/sdk/core/tools" },
                   { text: "模型模块", link: "/zh/sdk/core/models" },
                 ],
@@ -294,16 +315,20 @@ export default defineConfig({
           },
           {
             text: "前端开发",
-            items: [{ text: "前端概览", link: "/zh/frontend/overview" }],
+            items: [{ text: "概览", link: "/zh/frontend/overview" }],
           },
           {
             text: "后端开发",
             items: [
-              { text: "后端概览", link: "/zh/backend/overview" },
+              { text: "概览", link: "/zh/backend/overview" },
               { text: "API 文档", link: "/zh/backend/api-reference" },
               {
                 text: "工具集成",
                 items: [
+                  {
+                    text: "Nexent 工具",
+                    link: "/zh/backend/tools/nexent-native",
+                  },
                   {
                     text: "LangChain 工具",
                     link: "/zh/backend/tools/langchain",
@@ -312,41 +337,32 @@ export default defineConfig({
                 ],
               },
               { text: "提示词开发", link: "/zh/backend/prompt-development" },
+              { text: "版本管理", link: "/zh/backend/version-management" },
             ],
           },
           {
             text: "文档开发",
-            items: [{ text: "文档开发指南", link: "/zh/docs-development" }],
+            items: [{ text: "开发指南", link: "/zh/docs-development" }],
           },
           {
             text: "容器构建与容器化开发",
             items: [
-              { text: "Docker 构建", link: "/zh/deployment/docker-build" },
-              { text: "开发容器", link: "/zh/deployment/devcontainer" },
-              { text: "升级指导", link: "/zh/deployment/upgrade-guide" },
+              { text: "镜像构建", link: "/zh/deployment/docker-build" },
+              { text: "容器开发", link: "/zh/deployment/devcontainer" },
             ],
           },
           {
             text: "MCP 生态系统",
             items: [
               { text: "概览", link: "/zh/mcp-ecosystem/overview" },
-              {
-                text: "MCP 服务开发",
-                link: "/zh/mcp-ecosystem/mcp-server-development",
-              },
+              { text: "MCP 推荐", link: "/zh/mcp-ecosystem/mcp-recommendations" },
               { text: "用例场景", link: "/zh/mcp-ecosystem/use-cases" },
-            ],
-          },
-          {
-            text: "版本信息管理",
-            items: [
-              { text: "版本管理指南", link: "/zh/version/version-management" },
             ],
           },
           {
             text: "测试",
             items: [
-              { text: "测试概览", link: "/zh/testing/overview" },
+              { text: "概览", link: "/zh/testing/overview" },
               { text: "后端测试", link: "/zh/testing/backend" },
             ],
           },
@@ -358,7 +374,6 @@ export default defineConfig({
               { text: "行为准则", link: "/zh/code-of-conduct" },
               { text: "安全政策", link: "/zh/security" },
               { text: "核心贡献者", link: "/zh/contributors" },
-              { text: "已知问题", link: "/zh/known-issues" },
               { text: "许可证", link: "/zh/license" },
             ],
           },

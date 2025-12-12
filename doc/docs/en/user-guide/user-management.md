@@ -34,4 +34,4 @@ While waiting for User Management you can:
 2. Configure models in **[Model Management](./model-management)**.
 3. Chat with agents via **[Start Chat](./start-chat)**.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
