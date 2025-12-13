@@ -129,6 +129,7 @@ DISABLE_RAY_DASHBOARD = os.getenv(
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
+DOCKER_HOST = os.getenv("DOCKER_HOST")
 
 
 # Celery Configuration

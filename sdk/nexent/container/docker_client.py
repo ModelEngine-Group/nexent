@@ -1,0 +1,576 @@
+"""
+Docker container client implementation
+"""
+
+import asyncio
+import json
+import logging
+import os
+import socket
+from pathlib import Path
+from typing import Dict, List, Optional, Any
+
+import docker
+from docker.errors import APIError, DockerException, NotFound
+from fastmcp import Client
+
+from .container_client_base import ContainerClient, ContainerConfig
+from .docker_config import DockerContainerConfig
+
+logger = logging.getLogger("nexent.container.docker")
+
+
+class ContainerError(Exception):
+    """Raised when container operation fails"""
+
+    pass
+
+
+class ContainerConnectionError(Exception):
+    """Raised when container connection fails"""
+
+    pass
+
+
+class DockerContainerClient(ContainerClient):
+    """Docker container client implementation"""
+
+    def __init__(self, config: DockerContainerConfig):
+        """
+        Initialize Docker client
+
+        Args:
+            config: Docker container configuration
+
+        Raises:
+            ContainerError: If Docker connection fails
+        """
+        config.validate()
+        base_url = config.base_url
+
+        try:
+            self.client = docker.DockerClient(base_url=base_url)
+            # Test connection
+            self.client.ping()
+            logger.info(f"Docker client initialized successfully with base_url={base_url}")
+        except DockerException as e:
+            logger.error(f"Failed to connect to Docker socket: {e}")
+            raise ContainerError(f"Cannot connect to Docker: {e}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Docker client: {e}")
+            raise ContainerError(f"Cannot connect to Docker: {e}")
+
+    @staticmethod
+    def _is_running_in_docker() -> bool:
+        """
+        Check if the current process is running inside a Docker container
+
+        Returns:
+            True if running in Docker container, False otherwise
+        """
+        # Check for /.dockerenv file (most reliable indicator)
+        if Path("/.dockerenv").exists():
+            return True
+
+        # Check /proc/self/cgroup for Docker (Linux only)
+        try:
+            cgroup_path = Path("/proc/self/cgroup")
+            if cgroup_path.exists():
+                content = cgroup_path.read_text()
+                if "docker" in content or "containerd" in content:
+                    return True
+        except Exception:
+            pass
+
+        # Check environment variable (some setups set this)
+        if os.getenv("container") == "docker":
+            return True
+
+        return False
+
+    @staticmethod
+    def _get_service_host() -> str:
+        """
+        Get the appropriate host for service URLs based on running environment
+
+        Returns:
+            'host.docker.internal' if running in Docker container,
+            'localhost' if running in local development environment
+        """
+        if DockerContainerClient._is_running_in_docker():
+            return "host.docker.internal"
+        return "localhost"
+
+    def find_free_port(self, start_port: int = 5020, max_attempts: int = 100) -> int:
+        """
+        Find an available port on host
+
+        Args:
+            start_port: Starting port number to check
+            max_attempts: Maximum number of ports to check
+
+        Returns:
+            Available port number
+
+        Raises:
+            ContainerError: If no available port found
+        """
+        for i in range(max_attempts):
+            port = start_port + i
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                result = s.connect_ex(("localhost", port))
+                if result != 0:
+                    logger.debug(f"Found free port: {port}")
+                    return port
+        raise ContainerError(
+            f"No available port found in range {start_port}-{start_port + max_attempts}"
+        )
+
+    def _generate_container_name(self, service_name: str, user_id: str) -> str:
+        """Generate unique container name"""
+        # Sanitize service name for container name (only alphanumeric and hyphens)
+        safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
+        return f"mcp-{safe_name}-{user_id[:8]}"
+
+    async def start_container(
+        self,
+        service_name: str,
+        command: str,
+        args: List[str],
+        tenant_id: str,
+        user_id: str,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Start container and return access URL
+
+        Args:
+            service_name: Name of the service
+            command: Command to run (e.g., 'npx')
+            args: Command arguments (e.g., ['-y', '12306-mcp'])
+            tenant_id: Tenant ID for isolation
+            user_id: User ID for isolation
+            env_vars: Optional environment variables
+
+        Returns:
+            Dictionary with container_id, service_url, host_port, and status
+
+        Raises:
+            ContainerError: If container startup fails
+        """
+        container_name = self._generate_container_name(service_name, user_id)
+
+        # Check if container already exists
+        try:
+            existing = self.client.containers.get(container_name)
+            if existing.status == "running":
+                # Get port from existing container
+                ports = existing.attrs.get("NetworkSettings", {}).get("Ports", {})
+                host_port = None
+                for container_port, host_mappings in ports.items():
+                    if host_mappings and len(host_mappings) > 0:
+                        host_port = host_mappings[0].get("HostPort")
+                        if host_port:
+                            break
+
+                if host_port:
+                    host = self._get_service_host()
+                    service_url = f"http://{host}:{host_port}/mcp"
+                    logger.info(f"Using existing container {container_name} on port {host_port}")
+                    return {
+                        "container_id": existing.id,
+                        "service_url": service_url,
+                        "host_port": host_port,
+                        "status": "existing",
+                        "container_name": container_name,
+                    }
+            # Remove existing stopped container
+            logger.info(f"Removing existing stopped container {container_name}")
+            existing.remove(force=True)
+        except NotFound:
+            pass
+        except Exception as e:
+            logger.warning(f"Error checking existing container: {e}")
+
+        # Find free port
+        try:
+            host_port = self.find_free_port()
+        except ContainerError as e:
+            logger.error(f"Failed to find free port: {e}")
+            raise
+
+        # Prepare environment variables
+        container_env = {
+            "PORT": str(host_port),
+            "TRANSPORT": "streamable-http",
+            "NODE_ENV": "production",
+        }
+        if env_vars:
+            container_env.update(env_vars)
+
+        # Build command for container
+        # For npx/node-based services, we need to wrap them to expose a streamable HTTP endpoint
+        image_name = "node:22-alpine"
+
+        # For npx/node commands, use wrapper script to convert stdio to streamable HTTP
+        if command in ["npx", "node", "npm"]:
+            args_json = json.dumps(args)
+            wrapper_script_template = r'''
+const { spawn } = require("child_process");
+const http = require("http");
+const PORT = process.env.PORT || __HOST_PORT__;
+const mcp = spawn("__COMMAND__", __ARGS_JSON__, { stdio: ["pipe", "pipe", "pipe"] });
+let reqId = 0;
+const pending = new Map();
+
+function sendError(res, message, status = 500) {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*"
+  });
+  res.end(JSON.stringify({ type: "error", error: message }));
+}
+
+mcp.stdout.on("data", (data) => {
+  const lines = data.toString().split("\\n").filter((l) => l.trim());
+  for (const line of lines) {
+    try {
+      const msg = JSON.parse(line);
+      if (msg.id !== undefined && pending.has(msg.id)) {
+        const res = pending.get(msg.id);
+        pending.delete(msg.id);
+        res.write(JSON.stringify(msg) + "\\n");
+        res.end();
+      }
+    } catch (e) {
+      console.error("MCP:", line);
+    }
+  }
+});
+
+mcp.stderr.on("data", (d) => console.error("MCP err:", d.toString()));
+
+const server = http.createServer((req, res) => {
+  const pathOk = req.url === "/mcp" || req.url === "/";
+  if (!pathOk) {
+    res.writeHead(404);
+    res.end("Not Found");
+    return;
+  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.writeHead(405);
+    res.end("Method Not Allowed");
+    return;
+  }
+
+  let body = "";
+  req.on("data", (c) => (body += c.toString()));
+  req.on("end", () => {
+    try {
+      const payload = JSON.parse(body || "{}");
+      const id = payload.id ?? reqId++;
+      const mcpReq = { jsonrpc: "2.0", id, method: payload.method, params: payload.params || {} };
+
+      res.writeHead(200, {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Transfer-Encoding": "chunked"
+      });
+
+      pending.set(id, res);
+      mcp.stdin.write(JSON.stringify(mcpReq) + "\\n");
+
+      setTimeout(() => {
+        if (pending.has(id)) {
+          pending.delete(id);
+          res.write(JSON.stringify({ type: "error", error: "timeout" }) + "\\n");
+          res.end();
+        }
+      }, 30000);
+    } catch (err) {
+      sendError(res, err.message);
+    }
+  });
+});
+
+server.listen(PORT, () => console.log(`MCP streamable-http wrapper on ${PORT}`));
+
+const shutdown = () => {
+  mcp.kill();
+  server.close(() => process.exit(0));
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+            '''
+            wrapper_script_content = (
+                wrapper_script_template.replace("__HOST_PORT__", str(host_port))
+                .replace("__COMMAND__", command.replace('"', '\\"'))
+                .replace("__ARGS_JSON__", args_json)
+            )
+
+            # Escape the script for shell
+            escaped_script = wrapper_script_content.replace("'", "'\"'\"'")
+            full_command = ["sh", "-c", f"node -e '{escaped_script}'"]
+        else:
+            # For other commands, use alpine image
+            image_name = "alpine:latest"
+            # For python, python3, bash, sh, use as-is (assuming they already support HTTP/SSE)
+            if command in ["python", "python3", "bash", "sh"]:
+                full_command = [command] + args
+            else:
+                # For generic commands, wrap in sh -c
+                full_command = ["sh", "-c", f"{command} {' '.join(args)}"]
+
+        container_config = {
+            "image": image_name,
+            "name": container_name,
+            "command": full_command,
+            "ports": {f"{host_port}/tcp": host_port},
+            "environment": container_env,
+            "network_mode": "bridge",  # Use bridge network to access from other containers
+            "restart_policy": {"Name": "unless-stopped"},
+            "detach": True,
+            "remove": False,
+            "stdin_open": True,  # Keep stdin open for stdio-based services
+            "tty": False,
+        }
+
+        try:
+            logger.info(f"Starting container {container_name} with command: {full_command}")
+            container = self.client.containers.run(**container_config)
+
+            # Wait a bit for container to start
+            await asyncio.sleep(2)
+
+            # Wait for service to be ready
+            host = self._get_service_host()
+            service_url = f"http://{host}:{host_port}/mcp"
+            try:
+                await self._wait_for_service_ready(service_url, max_retries=30)
+            except ContainerConnectionError:
+                # If health check fails, log but don't fail immediately
+                logger.warning(
+                    f"Service health check failed for {service_url}, but container is running"
+                )
+                # Check if container is still running
+                try:
+                    container.reload()
+                    if container.status != "running":
+                        raise ContainerError(f"Container {container_name} stopped unexpectedly")
+                except NotFound:
+                    raise ContainerError(f"Container {container_name} not found after start")
+
+            logger.info(f"Container {container_name} started successfully on port {host_port}")
+            return {
+                "container_id": container.id,
+                "service_url": service_url,
+                "host_port": str(host_port),
+                "status": "started",
+                "container_name": container_name,
+            }
+        except APIError as e:
+            logger.error(f"Docker API error starting container: {e}")
+            raise ContainerError(f"Container startup failed: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start container: {e}")
+            raise ContainerError(f"Container startup failed: {e}")
+
+    async def _wait_for_service_ready(
+        self, url: str, max_retries: int = 30, retry_delay: int = 2
+    ):
+        """
+        Wait for service to be ready by checking connection
+
+        Args:
+            url: Service URL
+            max_retries: Maximum number of retry attempts
+            retry_delay: Delay between retries in seconds
+
+        Raises:
+            ContainerConnectionError: If service is not ready after max retries
+        """
+        for i in range(max_retries):
+            try:
+                client = Client(url)
+                async with client:
+                    if client.is_connected():
+                        logger.info(f"Service ready at {url}")
+                        return
+                    # If not connected, treat as failure
+                    if i < max_retries - 1:
+                        logger.debug(f"Service not ready yet (attempt {i+1}/{max_retries}): not connected")
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.error(f"Service not ready after {max_retries} attempts: not connected")
+                        raise ContainerConnectionError(
+                            f"Service not ready after {max_retries * retry_delay} seconds: not connected"
+                        )
+            except BaseException as e:
+                if i < max_retries - 1:
+                    logger.debug(f"Service not ready yet (attempt {i+1}/{max_retries}): {e}")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(
+                        f"Service not ready after {max_retries} attempts: {e}", exc_info=True
+                    )
+                    raise ContainerConnectionError(
+                        f"Service not ready after {max_retries * retry_delay} seconds: {e}"
+                    )
+
+    async def stop_container(self, container_id: str) -> bool:
+        """
+        Stop and remove container
+
+        Args:
+            container_id: Container ID or name
+
+        Returns:
+            True if container was stopped successfully
+
+        Raises:
+            ContainerError: If container stop fails
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            logger.info(f"Stopping container {container.name} ({container.id})")
+            container.stop(timeout=10)
+            container.remove()
+            logger.info(f"Container {container.name} stopped and removed")
+            return True
+        except NotFound:
+            logger.warning(f"Container {container_id} not found")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to stop container {container_id}: {e}")
+            raise ContainerError(f"Failed to stop container: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error stopping container {container_id}: {e}")
+            raise ContainerError(f"Failed to stop container: {e}")
+
+    def list_containers(
+        self, tenant_id: Optional[str] = None, service_name: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        List all containers, optionally filtered by tenant or service
+
+        Args:
+            tenant_id: Optional tenant ID to filter containers
+            service_name: Optional service name to filter containers
+
+        Returns:
+            List of container information dictionaries
+        """
+        try:
+            containers = self.client.containers.list(all=True, filters={"name": "mcp-"})
+            result = []
+            for container in containers:
+                # Filter by tenant_id if provided
+                if tenant_id and tenant_id[:8] not in container.name:
+                    continue
+
+                # Filter by service_name if provided
+                if service_name:
+                    safe_name = "".join(
+                        c if c.isalnum() or c == "-" else "-" for c in service_name
+                    )
+                    if safe_name not in container.name:
+                        continue
+
+                ports = container.attrs.get("NetworkSettings", {}).get("Ports", {})
+                host_port = None
+                for port_mappings in ports.values():
+                    if port_mappings and len(port_mappings) > 0:
+                        host_port = port_mappings[0].get("HostPort")
+                        if host_port:
+                            break
+
+                host = self._get_service_host()
+                result.append(
+                    {
+                        "container_id": container.id,
+                        "name": container.name,
+                        "status": container.status,
+                        "service_url": (
+                            f"http://{host}:{host_port}/mcp" if host_port else None
+                        ),
+                        "host_port": host_port,
+                    }
+                )
+            return result
+        except Exception as e:
+            logger.error(f"Failed to list containers: {e}")
+            return []
+
+    def get_container_logs(self, container_id: str, tail: int = 100) -> str:
+        """
+        Get container logs
+
+        Args:
+            container_id: Container ID or name
+            tail: Number of log lines to retrieve
+
+        Returns:
+            Container logs as string
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            logs = container.logs(tail=tail, stdout=True, stderr=True)
+            return logs.decode("utf-8", errors="replace")
+        except NotFound:
+            logger.warning(f"Container {container_id} not found")
+            return ""
+        except Exception as e:
+            logger.error(f"Failed to get container logs: {e}")
+            return f"Error retrieving logs: {e}"
+
+    def get_container_status(self, container_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get container status information
+
+        Args:
+            container_id: Container ID or name
+
+        Returns:
+            Dictionary with container status information, or None if not found
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            ports = container.attrs.get("NetworkSettings", {}).get("Ports", {})
+            host_port = None
+            for port_mappings in ports.values():
+                if port_mappings and len(port_mappings) > 0:
+                    host_port = port_mappings[0].get("HostPort")
+                    if host_port:
+                        break
+
+            host = self._get_service_host()
+            return {
+                "container_id": container.id,
+                "name": container.name,
+                "status": container.status,
+                "service_url": (
+                    f"http://{host}:{host_port}/mcp" if host_port else None
+                ),
+                "host_port": host_port,
+                "created": container.attrs.get("Created"),
+                "image": container.attrs.get("Config", {}).get("Image"),
+            }
+        except NotFound:
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get container status: {e}")
+            return None
+
