@@ -522,6 +522,47 @@ def test_vectorize_documents_small_batch(elasticsearch_core_instance):
         mock_embedding_model.get_embeddings.assert_called_once()
         mock_bulk.assert_called_once()
 
+def test_small_batch_progress_callback_exception(elasticsearch_core_instance, caplog):
+    """Progress callback errors should be logged without failing the insert."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.get_embeddings.return_value = [[0.1] * 3]
+    mock_embedding_model.embedding_model_name = "m"
+
+    documents = [{"content": "a"}]
+
+    def bad_progress(_, __):
+        raise RuntimeError("boom")
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch("time.strftime", lambda *a, **k: "2025-01-15T10:30:00"), \
+         patch("time.time", lambda: 1642234567):
+        mock_bulk.return_value = {"errors": False, "items": []}
+        result = elasticsearch_core_instance._small_batch_insert(
+            "idx", documents, "content", mock_embedding_model, progress_callback=bad_progress
+        )
+
+    assert result == 1
+    assert any("Progress callback failed in small batch" in m for m in caplog.messages)
+
+def test_small_batch_error_path_logs_and_raises(elasticsearch_core_instance, caplog):
+    """Small batch should log errors and re-raise when bulk fails."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.get_embeddings.return_value = [[0.1] * 3]
+    mock_embedding_model.embedding_model_name = "m"
+
+    documents = [{"content": "x"}]
+
+    with patch.object(elasticsearch_core_instance, "client") as mock_client, \
+         patch("time.strftime", lambda *a, **k: "2025-01-15T10:30:00"), \
+         patch("time.time", lambda: 1642234567):
+        mock_client.bulk.side_effect = RuntimeError("bulk boom")
+        with pytest.raises(RuntimeError):
+            elasticsearch_core_instance._small_batch_insert(
+                "idx", documents, "content", mock_embedding_model
+            )
+
+    assert any("Small batch insert failed: bulk boom" in m for m in caplog.messages)
+
 
 def test_vectorize_documents_large_batch(elasticsearch_core_instance):
     """Test indexing a large batch of documents (>= 64)."""
@@ -557,6 +598,76 @@ def test_vectorize_documents_large_batch(elasticsearch_core_instance):
         assert mock_embedding_model.get_embeddings.call_count >= 2
         mock_bulk.assert_called()
         mock_refresh.assert_called_once_with("test_index")
+
+def test_large_batch_progress_callback_invoked(elasticsearch_core_instance):
+    """Progress callback should be triggered during embedding phase."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.embedding_model_name = "test-model"
+    mock_embedding_model.get_embeddings.return_value = [[0.1], [0.2]]
+
+    docs = [{"content": "a"}, {"content": "b"}]
+    progress_calls = []
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch.object(elasticsearch_core_instance, "_force_refresh_with_retry"):
+        mock_bulk.return_value = {"errors": False, "items": []}
+        elasticsearch_core_instance._large_batch_insert(
+            "idx", docs, batch_size=5, content_field="content",
+            embedding_model=mock_embedding_model, embedding_batch_size=2,
+            progress_callback=lambda done, total: progress_calls.append((done, total))
+        )
+
+    assert progress_calls == [(2, 2)]
+
+def test_large_batch_progress_callback_exception_logged(elasticsearch_core_instance, caplog):
+    """Embedding progress callback errors should be logged and not stop indexing."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.embedding_model_name = "test-model"
+    mock_embedding_model.get_embeddings.return_value = [[0.1]]
+
+    docs = [{"content": "a"}]
+
+    def bad_progress(_, __):
+        raise RuntimeError("cb fail")
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch.object(elasticsearch_core_instance, "_force_refresh_with_retry"):
+        mock_bulk.return_value = {"errors": False, "items": []}
+        elasticsearch_core_instance._large_batch_insert(
+            "idx", docs, batch_size=1, content_field="content",
+            embedding_model=mock_embedding_model, embedding_batch_size=1,
+            progress_callback=bad_progress
+        )
+
+    assert any("Progress callback failed during embedding" in m for m in caplog.messages)
+
+def test_large_batch_retry_logs_warning(elasticsearch_core_instance, caplog):
+    """Embedding retries should emit warnings before succeeding."""
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.embedding_model_name = "test-model"
+    call_counter = {"n": 0}
+
+    def get_embeddings(_):
+        call_counter["n"] += 1
+        if call_counter["n"] < 3:
+            raise RuntimeError("embed fail")
+        return [[0.1]]
+
+    mock_embedding_model.get_embeddings.side_effect = get_embeddings
+
+    docs = [{"content": "a"}]
+
+    with patch.object(elasticsearch_core_instance.client, "bulk") as mock_bulk, \
+         patch.object(elasticsearch_core_instance, "_force_refresh_with_retry"), \
+         patch("time.sleep", lambda *a, **k: None):
+        mock_bulk.return_value = {"errors": False, "items": []}
+        elasticsearch_core_instance._large_batch_insert(
+            "idx", docs, batch_size=1, content_field="content",
+            embedding_model=mock_embedding_model, embedding_batch_size=1,
+        )
+
+    assert call_counter["n"] == 3
+    assert any("Embedding API error (attempt 1/3)" in m for m in caplog.messages)
 
 
 def test_delete_documents_success(elasticsearch_core_instance):
@@ -1134,8 +1245,12 @@ def test_handle_bulk_errors_with_errors(elasticsearch_core_instance):
         ]
     }
 
-    # Should not raise exception, just log errors
-    elasticsearch_core_instance._handle_bulk_errors(response)
+    with pytest.raises(Exception) as exc_info:
+        elasticsearch_core_instance._handle_bulk_errors(response)
+
+    err_payload = str(exc_info.value)
+    assert "Bulk indexing failed: Failed to parse mapping" in err_payload
+    assert "es_bulk_failed" in err_payload
 
 
 def test_handle_bulk_errors_version_conflict(elasticsearch_core_instance):
@@ -1157,6 +1272,40 @@ def test_handle_bulk_errors_version_conflict(elasticsearch_core_instance):
     # Should not raise exception or log error for version conflicts
     elasticsearch_core_instance._handle_bulk_errors(response)
 
+
+def test_handle_bulk_errors_skips_items_without_error(elasticsearch_core_instance):
+    """Items without error key should be ignored."""
+    response = {
+        "errors": True,
+        "items": [{"index": {}}],
+    }
+    # Should not raise
+    elasticsearch_core_instance._handle_bulk_errors(response)
+
+
+def test_handle_bulk_errors_dim_mismatch_sets_specific_code(elasticsearch_core_instance):
+    """Dense vector dimension mismatch should produce es_dim_mismatch code."""
+    response = {
+        "errors": True,
+        "items": [
+            {
+                "index": {
+                    "error": {
+                        "type": "illegal_argument_exception",
+                        "reason": "field [embedding] has different number of dimensions than vector",
+                        "caused_by": {"reason": "dense_vector different number of dimensions"},
+                    }
+                }
+            }
+        ],
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        elasticsearch_core_instance._handle_bulk_errors(response)
+
+    payload = str(exc_info.value)
+    assert "es_dim_mismatch" in payload
+    assert "Bulk indexing failed" in payload
 
 def test_bulk_operation_context(elasticsearch_core_instance):
     """Test bulk operation context manager."""

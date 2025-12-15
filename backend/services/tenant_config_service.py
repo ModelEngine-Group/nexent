@@ -66,3 +66,19 @@ def delete_selected_knowledge_by_index_name(tenant_id: str, user_id: str, index_
                 return False
 
     return True
+
+
+def build_knowledge_name_mapping(tenant_id: str, user_id: str):
+    """
+    Build mapping from user-facing knowledge_name to internal index_name for the selected knowledge bases.
+    Falls back to using index_name as key when knowledge_name is missing for backward compatibility.
+    """
+    knowledge_info_list = get_selected_knowledge_list(
+        tenant_id=tenant_id, user_id=user_id)
+    mapping = {}
+    for info in knowledge_info_list:
+        key = info.get("knowledge_name") or info.get("index_name")
+        value = info.get("index_name")
+        if key and value:
+            mapping[key] = value
+    return mapping

@@ -71,15 +71,20 @@ class KnowledgeBaseService {
           // Convert Elasticsearch indices to knowledge base format
           knowledgeBases = data.indices_info.map((indexInfo: any) => {
             const stats = indexInfo.stats?.base_info || {};
+            // Backend now returns:
+            // - name: internal index_name
+            // - display_name: user-facing knowledge_name (fallback to index_name)
+            const kbId = indexInfo.name;
+            const kbName = indexInfo.display_name || indexInfo.name;
 
             return {
-              id: indexInfo.name,
-              name: indexInfo.name,
+              id: kbId,
+              name: kbName,
               description: "Elasticsearch index",
               documentCount: stats.doc_count || 0,
               chunkCount: stats.chunk_count || 0,
-              createdAt:
-                stats.creation_date || new Date().toISOString().split("T")[0],
+              createdAt: stats.creation_date || null,
+              updatedAt: stats.update_date || stats.creation_date || null,
               embeddingModel: stats.embedding_model || "unknown",
               avatar: "",
               chunkNum: 0,
@@ -276,6 +281,16 @@ class KnowledgeBaseService {
         token_num: 0,
         status: file.status || "UNKNOWN",
         latest_task_id: file.latest_task_id || "",
+        error_reason: file.error_reason,
+        // Optional ingestion progress metrics (only present for in-progress files)
+        processed_chunk_num:
+          typeof file.processed_chunk_num === "number"
+            ? file.processed_chunk_num
+            : null,
+        total_chunk_num:
+          typeof file.total_chunk_num === "number"
+            ? file.total_chunk_num
+            : null,
       }));
     } catch (error) {
       log.error("Failed to get all files:", error);
@@ -804,6 +819,41 @@ class KnowledgeBaseService {
         throw error;
       }
       throw new Error("Failed to execute hybrid search");
+    }
+  }
+
+  // Get error information for a document
+  async getDocumentErrorInfo(
+    kbId: string,
+    docId: string
+  ): Promise<{
+    errorCode: string | null;
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.knowledgeBase.getErrorInfo(kbId, docId),
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to get error info");
+      }
+
+      const errorCode = (data.error_code && String(data.error_code)) || null;
+
+      return {
+        errorCode,
+      };
+    } catch (error) {
+      log.error("Failed to get document error info:", error);
+      throw error;
     }
   }
 }

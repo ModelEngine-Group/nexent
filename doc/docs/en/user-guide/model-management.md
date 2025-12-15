@@ -217,4 +217,4 @@ After closing the Model Management flow, continue with:
 1. **[Knowledge Base](./knowledge-base)** – Create and manage knowledge bases.
 2. **[Agent Development](./agent-development)** – Build and configure agents.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

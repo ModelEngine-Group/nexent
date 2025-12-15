@@ -116,6 +116,7 @@ export const fetchAgentList = async () => {
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
+      author: agent.author,
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
     }));
@@ -326,7 +327,8 @@ export const updateAgent = async (
   businessLogicModelName?: string,
   businessLogicModelId?: number,
   enabledToolIds?: number[],
-  relatedAgentIds?: number[]
+  relatedAgentIds?: number[],
+  author?: string
 ) => {
   try {
     const response = await fetch(API_ENDPOINTS.agent.update, {
@@ -350,6 +352,7 @@ export const updateAgent = async (
         business_logic_model_id: businessLogicModelId,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: relatedAgentIds,
+        author: author,
       }),
     });
 
@@ -486,6 +489,76 @@ export const importAgent = async (
 };
 
 /**
+ * check agent name/display_name duplication
+ * @param payload name/displayName to check
+ */
+export const checkAgentNameConflictBatch = async (payload: {
+  items: Array<{ name: string; display_name?: string; agent_id?: number }>;
+}) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.checkNameBatch, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to check agent name conflict batch:", error);
+    return {
+      success: false,
+      data: null,
+      message: "agentConfig.agents.checkNameFailed",
+    };
+  }
+};
+
+export const regenerateAgentNameBatch = async (payload: {
+  items: Array<{
+    name: string;
+    display_name?: string;
+    task_description?: string;
+    language?: string;
+    agent_id?: number;
+  }>;
+}) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.regenerateNameBatch, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to regenerate agent name batch:", error);
+    return {
+      success: false,
+      data: null,
+      message: "agentConfig.agents.regenerateNameFailed",
+    };
+  }
+};
+
+/**
  * search agent info by agent id
  * @param agentId agent id
  * @returns agent detail info
@@ -510,6 +583,7 @@ export const searchAgentInfo = async (agentId: number) => {
       name: data.name,
       display_name: data.display_name,
       description: data.description,
+      author: data.author,
       model: data.model_name,
       model_id: data.model_id,
       max_step: data.max_steps,
@@ -587,6 +661,7 @@ export const fetchAllAgents = async () => {
       name: agent.name,
       display_name: agent.display_name || agent.name,
       description: agent.description,
+      author: agent.author,
       is_available: agent.is_available,
     }));
 

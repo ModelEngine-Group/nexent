@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import List
+from typing import Dict, List, Optional, Union
 
 from pydantic import Field
 from smolagents.tools import Tool
@@ -36,7 +36,7 @@ class KnowledgeBaseSearchTool(Tool):
         },
         "index_names": {
             "type": "array",
-            "description": "The list of knowledge base index names to search. If not provided, will search all available knowledge bases.",
+            "description": "The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.",
             "nullable": True,
         },
     }
@@ -50,6 +50,9 @@ class KnowledgeBaseSearchTool(Tool):
         self,
         top_k: int = Field(description="Maximum number of search results", default=5),
         index_names: List[str] = Field(description="The list of index names to search", default=None, exclude=True),
+        name_resolver: Optional[Dict[str, str]] = Field(
+            description="Mapping from knowledge_name to index_name", default=None, exclude=True
+        ),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
         embedding_model: BaseEmbedding = Field(description="The embedding model to use", default=None, exclude=True),
         vdb_core: VectorDatabaseCore = Field(description="Vector database client", default=None, exclude=True),
@@ -68,13 +71,36 @@ class KnowledgeBaseSearchTool(Tool):
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
+        self.name_resolver: Dict[str, str] = name_resolver or {}
         self.embedding_model = embedding_model
 
         self.record_ops = 1  # To record serial number
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
 
-    def forward(self, query: str, search_mode: str = "hybrid", index_names: List[str] = None) -> str:
+    def update_name_resolver(self, new_mapping: Dict[str, str]) -> None:
+        """Update the mapping from knowledge_name to index_name at runtime."""
+        self.name_resolver = new_mapping or {}
+
+    def _resolve_names(self, names: List[str]) -> List[str]:
+        """Resolve user-facing knowledge names to internal index names."""
+        if not names:
+            return []
+        if not self.name_resolver:
+            logger.warning(
+                "No name resolver provided, returning original names")
+            return names
+        return [self.name_resolver.get(name, name) for name in names]
+
+    def _normalize_index_names(self, index_names: Optional[Union[str, List[str]]]) -> List[str]:
+        """Normalize index_names to list; accept single string and keep None as empty list."""
+        if index_names is None:
+            return []
+        if isinstance(index_names, str):
+            return [index_names]
+        return list(index_names)
+
+    def forward(self, query: str, search_mode: str = "hybrid", index_names: Union[str, List[str], None] = None) -> str:
         # Send tool run message
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
@@ -83,7 +109,9 @@ class KnowledgeBaseSearchTool(Tool):
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
         # Use provided index_names if available, otherwise use default
-        search_index_names = index_names if index_names is not None else self.index_names
+        search_index_names = self._normalize_index_names(
+            index_names if index_names is not None else self.index_names)
+        search_index_names = self._resolve_names(search_index_names)
 
         # Log the index_names being used for this search
         logger.info(

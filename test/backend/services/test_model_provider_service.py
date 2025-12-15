@@ -304,7 +304,9 @@ async def test_prepare_model_dict_embedding():
         assert kwargs["model_name"] == "text-embedding-ada-002"
         assert kwargs["model_type"] == "embedding"
         assert kwargs["api_key"] == "test-key"
-        assert kwargs["max_tokens"] == 1024
+        # For embedding models, max_tokens is set to 0 as placeholder, 
+        # will be updated by embedding_dimension_check later
+        assert kwargs["max_tokens"] == 0
         assert kwargs["display_name"] == "openai/text-embedding-ada-002"
         assert kwargs["expected_chunk_size"] == sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE
         assert kwargs["maximum_chunk_size"] == sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE

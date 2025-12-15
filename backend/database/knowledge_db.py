@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 
+import uuid
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -7,7 +8,16 @@ from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
 
 
-def create_knowledge_record(query: Dict[str, Any]) -> int:
+def _generate_index_name(knowledge_id: int) -> str:
+    """
+    Generate a new internal index_name based on knowledge_id and a UUID suffix.
+    The suffix contains only digits and lowercase letters.
+    """
+    suffix = uuid.uuid4().hex
+    return f"{knowledge_id}-{suffix}"
+
+
+def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create a knowledge base record
 
@@ -21,27 +31,49 @@ def create_knowledge_record(query: Dict[str, Any]) -> int:
             - embedding_model_name: embedding model name for the knowledge base
 
     Returns:
-        int: Newly created knowledge base ID
+        Dict[str, Any]: Dictionary with at least 'knowledge_id' and 'index_name'
     """
     try:
         with get_db_session() as session:
+            # Determine user-facing knowledge base name
+            knowledge_name = query.get(
+                "knowledge_name") or query.get("index_name")
+
             # Prepare data dictionary
-            data = {
-                "index_name": query["index_name"],
+            data: Dict[str, Any] = {
                 "knowledge_describe": query.get("knowledge_describe", ""),
                 "created_by": query.get("user_id"),
                 "updated_by": query.get("user_id"),
                 "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
                 "tenant_id": query.get("tenant_id"),
-                "embedding_model_name": query.get("embedding_model_name")
+                "embedding_model_name": query.get("embedding_model_name"),
+                "knowledge_name": knowledge_name,
             }
+
+            # For backward compatibility: if caller explicitly provides index_name,
+            # respect it and do not regenerate; otherwise generate after flush.
+            explicit_index_name = query.get("index_name")
+            if explicit_index_name:
+                data["index_name"] = explicit_index_name
 
             # Create new record
             new_record = KnowledgeRecord(**data)
             session.add(new_record)
             session.flush()
+
+            # Generate internal index_name for new records when not explicitly provided
+            if not explicit_index_name:
+                generated_index_name = _generate_index_name(
+                    new_record.knowledge_id)
+                new_record.index_name = generated_index_name
+                session.flush()
+
             session.commit()
-            return new_record.knowledge_id
+            return {
+                "knowledge_id": new_record.knowledge_id,
+                "index_name": new_record.index_name,
+                "knowledge_name": new_record.knowledge_name,
+            }
     except SQLAlchemyError as e:
         session.rollback()
         raise e
@@ -165,6 +197,7 @@ def get_knowledge_info_by_knowledge_ids(knowledge_ids: List[str]) -> List[Dict[s
                 knowledge_info.append({
                     "knowledge_id": item.knowledge_id,
                     "index_name": item.index_name,
+                    "knowledge_name": item.knowledge_name,
                     "knowledge_sources": item.knowledge_sources,
                     "embedding_model_name": item.embedding_model_name
                 })
@@ -207,5 +240,36 @@ def update_model_name_by_index_name(index_name: str, embedding_model_name: str, 
             ).update({"embedding_model_name": embedding_model_name, "updated_by": user_id})
             session.commit()
             return True
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_index_name_by_knowledge_name(knowledge_name: str, tenant_id: str) -> str:
+    """
+    Get the internal index_name from user-facing knowledge_name.
+
+    Args:
+        knowledge_name: User-facing knowledge base name
+        tenant_id: Tenant ID to filter by
+
+    Returns:
+        str: The internal index_name if found
+
+    Raises:
+        ValueError: If knowledge base with the given name is not found for the tenant
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.knowledge_name == knowledge_name,
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+
+            if result:
+                return result.index_name
+            raise ValueError(
+                f"Knowledge base '{knowledge_name}' not found for the current tenant"
+            )
     except SQLAlchemyError as e:
         raise e

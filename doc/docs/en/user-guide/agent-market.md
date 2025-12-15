@@ -34,4 +34,4 @@ While Agent Market is being built, you can:
 2. Create new agents in **[Agent Development](./agent-development)**.
 3. Test agents in **[Start Chat](./start-chat)**.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

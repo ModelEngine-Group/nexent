@@ -37,6 +37,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/stop/${conversationId}`,
     export: `${API_BASE_URL}/agent/export`,
     import: `${API_BASE_URL}/agent/import`,
+    checkNameBatch: `${API_BASE_URL}/agent/check_name`,
+    regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
   },
@@ -142,6 +144,11 @@ export const API_ENDPOINTS = {
     // File upload service
     upload: `${API_BASE_URL}/file/upload`,
     process: `${API_BASE_URL}/file/process`,
+    // Error info service
+    getErrorInfo: (indexName: string, pathOrUrl: string) =>
+      `${API_BASE_URL}/indices/${indexName}/documents/${encodeURIComponent(
+        pathOrUrl
+      )}/error-info`,
   },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
