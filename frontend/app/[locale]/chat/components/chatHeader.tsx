@@ -14,8 +14,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { USER_ROLES } from "@/const/modelConfig";
 import { saveView } from "@/lib/viewPersistence";
 
-import MemoryManageModal from "../internal/memory/memoryManageModal";
-
 interface ChatHeaderProps {
   title: string;
   onRename?: (newTitle: string) => void;
@@ -25,8 +23,7 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
-  const [memoryModalVisible, setMemoryModalVisible] = useState(false);
-  const [embeddingConfigured, setEmbeddingConfigured] = useState<boolean>(true);
+
   const [showConfigPrompt, setShowConfigPrompt] = useState(false);
   const [showAutoOffPrompt, setShowAutoOffPrompt] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,9 +59,8 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
       const modelConfig = configStore.getModelConfig();
       const configured = Boolean(
         modelConfig?.embedding?.modelName ||
-          modelConfig?.multiEmbedding?.modelName
+        modelConfig?.multiEmbedding?.modelName
       );
-      setEmbeddingConfigured(configured);
 
       if (!configured) {
         // If memory switch is on, turn it off automatically and notify the user
@@ -85,7 +81,6 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
           });
       }
     } catch (e) {
-      setEmbeddingConfigured(false);
       log.error("Failed to read model config for embedding check", e);
     }
   }, []);
@@ -227,10 +222,6 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
           </div>
         </div>
       </Modal>
-      <MemoryManageModal
-        visible={memoryModalVisible}
-        onClose={() => setMemoryModalVisible(false)}
-      />
     </>
   );
 }
