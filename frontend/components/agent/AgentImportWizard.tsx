@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Modal, Steps, Button, Select, Input, Form, Tag, Space, Spin, App, Collapse, Radio } from "antd";
-import { DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, PlusOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
 import { getMcpServerList, addMcpServer, updateToolList } from "@/services/mcpService";
 import { McpServer, AgentRefreshEvent } from "@/types/agentConfig";
 import { ImportAgentData } from "@/hooks/useAgentImport";
-import { importAgent, checkAgentNameConflictBatch, regenerateAgentNameBatch } from "@/services/agentConfigService";
+import { importAgent, checkAgentNameConflictBatch, regenerateAgentNameBatch, fetchTools } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 
 export interface AgentImportWizardProps {
@@ -125,6 +125,9 @@ export default function AgentImportWizard({
   const [loadingMcpServers, setLoadingMcpServers] = useState(false);
   const [installingMcp, setInstallingMcp] = useState<Record<string, boolean>>({});
   const [isImporting, setIsImporting] = useState(false);
+  const [availableTools, setAvailableTools] = useState<Array<{ name?: string; origin_name?: string; usage?: string; source?: string }>>([]);
+  const [missingTools, setMissingTools] = useState<Array<{ name: string; source?: string; usage?: string; agents: string[] }>>([]);
+  const [loadingTools, setLoadingTools] = useState(false);
 
   // Name conflict checking and renaming
   // Structure: agentKey -> { hasConflict, conflictAgents, renamedName, renamedDisplayName }
@@ -171,6 +174,7 @@ export default function AgentImportWizard({
   useEffect(() => {
     if (visible) {
       loadLLMModels();
+      loadAvailableTools();
     }
   }, [visible]);
 
@@ -196,8 +200,16 @@ export default function AgentImportWizard({
       parseConfigFields();
       parseMcpServers();
       initializeModelSelection();
+      computeMissingTools();
     }
   }, [visible, initialData]);
+
+  // Recompute missing tools when available tool list changes
+  useEffect(() => {
+    if (visible) {
+      computeMissingTools();
+    }
+  }, [visible, availableTools]);
 
   // Initialize model selection for individual mode
   const initializeModelSelection = () => {
@@ -265,12 +277,12 @@ export default function AgentImportWizard({
         }, []);
 
         const hasConflict = hasNameConflict || hasDisplayNameConflict;
-        conflicts[agentKey] = {
-          hasConflict,
-          conflictAgents,
-          renamedName: item.name,
-          renamedDisplayName: item.display_name || "",
-        };
+          conflicts[agentKey] = {
+            hasConflict,
+            conflictAgents,
+            renamedName: item.name,
+            renamedDisplayName: item.display_name || "",
+          };
       });
 
       setAgentNameConflicts(conflicts);
@@ -457,6 +469,24 @@ export default function AgentImportWizard({
     }
   };
 
+  const loadAvailableTools = async () => {
+    setLoadingTools(true);
+    try {
+      const result = await fetchTools();
+      if (result.success) {
+        setAvailableTools(result.data || []);
+      } else {
+        log.warn("Skip tool availability check due to fetch failure");
+        setAvailableTools([]);
+      }
+    } catch (error) {
+      log.error("Failed to load available tools:", error);
+      setAvailableTools([]);
+    } finally {
+      setLoadingTools(false);
+    }
+  };
+
   const parseConfigFields = () => {
     if (!initialData?.agent_info) {
       setConfigFields([]);
@@ -547,6 +577,58 @@ export default function AgentImportWizard({
       initialValues[field.valueKey] = "";
     });
     setConfigValues(initialValues);
+  };
+
+  // Detect missing tools in imported agents compared to available tools
+  const computeMissingTools = () => {
+    if (!initialData?.agent_info) {
+      setMissingTools([]);
+      return;
+    }
+
+    const availableNameSet = new Set<string>();
+    availableTools.forEach((tool) => {
+      if (tool.name) {
+        availableNameSet.add(tool.name.toLowerCase());
+      }
+      if (tool.origin_name) {
+        availableNameSet.add(tool.origin_name.toLowerCase());
+      }
+    });
+
+    const missingMap: Record<string, { name: string; source?: string; usage?: string; agents: Set<string> }> = {};
+
+    Object.entries(initialData.agent_info).forEach(([agentKey, agentInfo]) => {
+      const agentDisplayName = (agentInfo as any)?.display_name || (agentInfo as any)?.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
+      if (Array.isArray((agentInfo as any)?.tools)) {
+        (agentInfo as any).tools.forEach((tool: any) => {
+          const rawName = tool?.name || tool?.origin_name || tool?.class_name;
+          const name = typeof rawName === "string" ? rawName.trim() : "";
+          if (!name) return;
+          const key = name.toLowerCase();
+          if (availableNameSet.has(key)) return;
+
+          if (!missingMap[key]) {
+            missingMap[key] = {
+              name,
+              source: tool?.source,
+              usage: tool?.usage,
+              agents: new Set<string>(),
+            };
+          }
+          missingMap[key].agents.add(agentDisplayName);
+        });
+      }
+    });
+
+    const missingList = Object.values(missingMap).map((item) => ({
+      name: item.name,
+      source: item.source,
+      usage: item.usage,
+      agents: Array.from(item.agents),
+    }));
+
+    setMissingTools(missingList);
   };
 
   const parseMcpServers = async () => {
@@ -833,7 +915,13 @@ export default function AgentImportWizard({
     // OR if any agent was successfully renamed (meaning it had a conflict that was resolved)
     successfullyRenamedAgents.size > 0
   );
+  const hasMissingTools = !loadingTools && missingTools.length > 0;
+  // Tools check should be the first step when there are missing tools
   const steps = [
+    hasMissingTools && {
+      key: "tools",
+      title: t("market.install.step.missingTools", "Missing Tools"),
+    },
     hasAnyAgentsWithConflicts && {
       key: "rename",
       title: t("market.install.step.rename", "Rename Agent"),
@@ -862,6 +950,8 @@ export default function AgentImportWizard({
     const currentStepKey = steps[currentStep]?.key;
     
     if (currentStepKey === "rename") {
+      return true;
+    } else if (currentStepKey === "tools") {
       return true;
     } else if (currentStepKey === "model") {
       if (modelSelectionMode === "unified") {
@@ -926,16 +1016,17 @@ export default function AgentImportWizard({
 
       // Get agents that still have conflicts
       const agentsWithConflicts = allAgentsWithConflicts.filter(
-        ([agentKey, conflict]) => conflict.hasConflict
+        ([, conflict]) => conflict.hasConflict
       );
 
-      // If no agents had conflicts at all, don't show rename step
+      // If no agents had conflicts at all, do not show rename step content
       if (allAgentsWithConflicts.length === 0) {
         return null;
       }
 
       // Check if all conflicts are resolved
-      const allConflictsResolved = agentsWithConflicts.length === 0 && allAgentsWithConflicts.length > 0;
+      const allConflictsResolved =
+        agentsWithConflicts.length === 0 && allAgentsWithConflicts.length > 0;
       const hasResolvedAgents = allAgentsWithConflicts.some(
         ([agentKey]) => successfullyRenamedAgents.has(agentKey)
       );
@@ -947,7 +1038,10 @@ export default function AgentImportWizard({
               <div className="flex items-center gap-2">
                 <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-lg" />
                 <p className="text-sm font-semibold text-green-800 dark:text-green-200">
-                  {t("market.install.rename.success", "All agent name conflicts have been resolved. You can proceed to the next step.")}
+                  {t(
+                    "market.install.rename.success",
+                    "All agent name conflicts have been resolved. You can proceed to the next step."
+                  )}
                 </p>
               </div>
             </div>
@@ -958,19 +1052,31 @@ export default function AgentImportWizard({
                   <div className="flex items-center gap-2">
                     <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-sm" />
                     <p className="text-xs text-green-700 dark:text-green-300">
-                      {t("market.install.rename.partialSuccess", "Some agents have been successfully renamed.")}
+                      {t(
+                        "market.install.rename.partialSuccess",
+                        "Some agents have been successfully renamed."
+                      )}
                     </p>
                   </div>
                 </div>
               )}
               <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
-                {t("market.install.rename.warning", "The agent name or display name conflicts with existing agents. Please rename to proceed.")}
+                {t(
+                  "market.install.rename.warning",
+                  "The agent name or display name conflicts with existing agents. Please rename to proceed."
+                )}
               </p>
               <p className="text-xs text-yellow-800 dark:text-yellow-200">
-                {t("market.install.rename.oneClickDesc", "You can manually edit the names, or click one-click rename to let the selected model regenerate names for all conflicted agents.")}
+                {t(
+                  "market.install.rename.oneClickDesc",
+                  "You can manually edit the names, or click one-click rename to let the selected model regenerate names for all conflicted agents."
+                )}
               </p>
               <p className="text-xs text-yellow-800 dark:text-yellow-200">
-                {t("market.install.rename.note", "Note: If you proceed without renaming, the agent will be created but marked as unavailable due to name conflicts. You can rename it later in the agent list.")}
+                {t(
+                  "market.install.rename.note",
+                  "Note: If you proceed without renaming, the agent will be created but marked as unavailable due to name conflicts. You can rename it later in the agent list."
+                )}
               </p>
               <Button
                 type="primary"
@@ -986,16 +1092,26 @@ export default function AgentImportWizard({
           <div className="space-y-6">
             {allAgentsWithConflicts.map(([agentKey, conflict]) => {
               const agentInfo = initialData?.agent_info?.[agentKey] as any;
-              const agentDisplayName = agentInfo?.display_name || agentInfo?.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
+              const agentDisplayName =
+                agentInfo?.display_name ||
+                agentInfo?.name ||
+                `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
               const isMainAgent = agentKey === String(initialData?.agent_id);
               const originalName = agentInfo?.name || "";
               const originalDisplayName = agentInfo?.display_name || "";
 
               return (
-                <div key={agentKey} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
+                <div
+                  key={agentKey}
+                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4"
+                >
                   <div className="flex items-center gap-2 mb-2">
                     <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                      {isMainAgent && <span className="text-purple-600 dark:text-purple-400 mr-2">{t("market.install.agent.main", "Main")}</span>}
+                      {isMainAgent && (
+                        <span className="text-purple-600 dark:text-purple-400 mr-2">
+                          {t("market.install.agent.main", "Main")}
+                        </span>
+                      )}
                       {agentDisplayName}
                     </h4>
                   </div>
@@ -1005,23 +1121,36 @@ export default function AgentImportWizard({
                       <div className="flex items-center gap-2">
                         <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-sm" />
                         <p className="text-xs text-green-700 dark:text-green-300">
-                          {t("market.install.rename.agentResolved", "This agent's name conflict has been resolved.")}
+                          {t(
+                            "market.install.rename.agentResolved",
+                            "This agent's name conflict has been resolved."
+                          )}
                         </p>
                       </div>
                     </div>
-                  ) : conflict.hasConflict && conflict.conflictAgents.length > 0 && (
-                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-2 mb-3">
-                      <p className="text-xs text-red-700 dark:text-red-300 mb-1">
-                        {t("market.install.rename.conflictAgents", "Conflicting agents:")}
-                      </p>
-                      <ul className="list-disc list-inside text-xs text-red-700 dark:text-red-300">
-                      {conflict.conflictAgents.map((agent, idx) => (
-                        <li key={idx}>
-                          {[agent.name, agent.display_name].filter(Boolean).join(" / ")}
-                        </li>
-                      ))}
-                      </ul>
-                    </div>
+                  ) : (
+                    conflict.hasConflict &&
+                    conflict.conflictAgents.length > 0 && (
+                      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-2 mb-3">
+                        <p className="text-xs text-red-700 dark:text-red-300 mb-1">
+                          {t(
+                            "market.install.rename.conflictAgents",
+                            "Conflicting agents:"
+                          )}
+                        </p>
+                        <ul className="list-disc list-inside text-xs text-red-700 dark:text-red-300">
+                          {conflict.conflictAgents.map(
+                            (agent: { name?: string; display_name?: string }, idx: number) => (
+                              <li key={idx}>
+                                {[agent.name, agent.display_name]
+                                  .filter(Boolean)
+                                  .join(" / ")}
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                    )
                   )}
 
                   <div>
@@ -1032,7 +1161,7 @@ export default function AgentImportWizard({
                       value={conflict.renamedName}
                       onChange={(e) => {
                         const newName = e.target.value;
-                        setAgentNameConflicts(prev => {
+                        setAgentNameConflicts((prev) => {
                           const updated = {
                             ...prev,
                             [agentKey]: {
@@ -1049,7 +1178,8 @@ export default function AgentImportWizard({
                           // Set new timer for debounced check (500ms delay)
                           nameCheckTimerRef.current = setTimeout(() => {
                             // Read latest value from ref when timer fires
-                            const currentConflict = agentNameConflictsRef.current[agentKey];
+                            const currentConflict =
+                              agentNameConflictsRef.current[agentKey];
                             if (currentConflict) {
                               checkSingleAgentConflict(
                                 agentKey,
@@ -1077,7 +1207,7 @@ export default function AgentImportWizard({
                       value={conflict.renamedDisplayName}
                       onChange={(e) => {
                         const newDisplayName = e.target.value;
-                        setAgentNameConflicts(prev => {
+                        setAgentNameConflicts((prev) => {
                           const updated = {
                             ...prev,
                             [agentKey]: {
@@ -1094,7 +1224,8 @@ export default function AgentImportWizard({
                           // Set new timer for debounced check (500ms delay)
                           nameCheckTimerRef.current = setTimeout(() => {
                             // Read latest value from ref when timer fires
-                            const currentConflict = agentNameConflictsRef.current[agentKey];
+                            const currentConflict =
+                              agentNameConflictsRef.current[agentKey];
                             if (currentConflict) {
                               checkSingleAgentConflict(
                                 agentKey,
@@ -1116,8 +1247,77 @@ export default function AgentImportWizard({
                 </div>
               );
             })}
-
           </div>
+        </div>
+      );
+    } else if (currentStepKey === "tools") {
+      return (
+        <div className="space-y-4">
+          {/* Top-level warning, keep same yellow style as rename step */}
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-2">
+            <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+              {t(
+                "market.install.tools.missingDescTitle",
+                "The imported agent uses tools that do not exist in this system"
+              )}
+            </p>
+            <p className="text-xs text-yellow-800 dark:text-yellow-200">
+              {t(
+                "market.install.tools.missingDescBody",
+                "Please review the missing tools below and install or configure them first. If you continue without fixing them, the agent may not work correctly or some capabilities may be unavailable."
+              )}
+            </p>
+          </div>
+
+          {loadingTools ? (
+            <div className="flex items-center justify-center py-8">
+              <Spin />
+              <span className="ml-3 text-gray-600 dark:text-gray-300">
+                {t("market.install.tools.loading", "Loading tools...")}
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {missingTools.map((tool, idx) => (
+                <div
+                  key={`${tool.name}-${idx}`}
+                  className="border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg p-4"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <ToolOutlined className="text-red-500" />
+                      <span className="font-medium text-gray-900 dark:text-gray-100">
+                        {tool.name}
+                      </span>
+                    </div>
+                    {tool.source && (
+                      <Tag color="gold" className="text-xs">
+                        {t("market.install.tools.source", "Source")}:{" "}
+                        {tool.source}
+                      </Tag>
+                    )}
+                  </div>
+                  {tool.usage && (
+                    <p className="text-xs text-gray-700 dark:text-gray-300 mb-2">
+                      {t("market.install.tools.usage", "Usage")}: {tool.usage}
+                    </p>
+                  )}
+                  {tool.agents && tool.agents.length > 0 && (
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      {t("market.install.tools.usedBy", "Used by")}:{" "}
+                      {tool.agents.join(", ")}
+                    </p>
+                  )}
+                  <p className="text-xs text-amber-700 dark:text-amber-200 mt-2">
+                    {t(
+                      "market.install.tools.missingHint",
+                      "If you continue without installing or configuring this tool, the agent may lose part of its capabilities or fail when calling this tool."
+                    )}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     } else if (currentStepKey === "model") {
