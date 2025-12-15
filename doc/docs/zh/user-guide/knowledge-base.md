@@ -76,4 +76,4 @@ Nexent支持多种文件格式，包括：
 1. **[智能体开发](./agent-development)** - 创建和配置智能体
 2. **[开始问答](./start-chat)** - 与智能体进行交互
 
-如果您在知识库配置过程中遇到任何问题，请参考我们的 **[常见问题](../getting-started/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在知识库配置过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

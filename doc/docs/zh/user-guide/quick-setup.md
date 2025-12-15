@@ -50,4 +50,4 @@
 2. 在 **[开始问答](./start-chat)** 中与智能体进行交互
 3. 配置 **[记忆管理](./memory-management)** 以提升智能体的记忆能力
 
-如果您在配置过程中遇到任何问题，请参考我们的 **[常见问题](../getting-started/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在配置过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

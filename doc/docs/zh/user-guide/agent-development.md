@@ -74,7 +74,7 @@ Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力�
 </div>
 
 有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
-您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 服务开发](../mcp-ecosystem/mcp-server-development.md)。
+您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../backend/tools/mcp)。
 
 ### ⚙️ 自定义工具
 
@@ -156,4 +156,4 @@ Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力�
 2. 在 **[开始问答](./start-chat)** 中与智能体进行交互
 3. 在 **[记忆管理](./memory-management)** 配置记忆以提升智能体的个性化能力
 
-如果您在智能体开发过程中遇到任何问题，请参考我们的 **[常见问题](../getting-started/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
+如果您在智能体开发过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

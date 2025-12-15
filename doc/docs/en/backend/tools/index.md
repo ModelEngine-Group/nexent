@@ -26,6 +26,6 @@ For SDK-level tool development, see:
 
 ## Need Help?
 
-- Check our [FAQ](../../getting-started/faq) for common tool integration issues
+- Check our [FAQ](../../quick-start/faq) for common tool integration issues
 - Join our [Discord community](https://discord.gg/tb5H3S3wyv) for real-time support
 - Review [GitHub Issues](https://github.com/ModelEngine-Group/nexent/issues) for known issues

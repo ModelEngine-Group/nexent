@@ -95,4 +95,4 @@ Nexent 采用微服务架构，包含以下核心服务：
 
 想要从源码构建或添加新功能？查看 [Docker 构建指南](../deployment/docker-build) 获取详细说明。
 
-有关详细的安装说明和自定义选项，请查看我们的 [开发指南](./development-guide)。
+有关详细的安装说明和自定义选项，请查看我们的 [开发者指南](../developer-guide/overview)。

@@ -40,100 +40,15 @@ nexent/
 - **Monitoring**: Built-in health checks
 - **Logging**: Structured logging
 
-## 🚀 Development Environment Setup
+## 🧱 Environment Preparation
 
-### Environment Requirements
-- Python 3.10+
-- Node.js 18+
-- Docker & Docker Compose
-- uv (Python package manager)
-- pnpm (Node.js package manager)
+All setup steps now live in the dedicated [Environment Preparation](./environment-setup) guide. It covers:
 
-### Infrastructure Deployment
-Before starting backend development, you need to deploy infrastructure services. These services include databases, caching, file storage, and other core components.
+- Shared prerequisites for every contributor
+- Full-stack Nexent setup (infrastructure, backend, frontend, runtime services)
+- SDK-only installation workflows for developers who only need the Python package
 
-```bash
-# Execute in the docker directory of the project root directory
-cd docker
-./deploy.sh --mode infrastructure
-```
-
-::: info Important Notes
-Infrastructure mode will start PostgreSQL, Redis, Elasticsearch, and MinIO services. The deployment script will automatically generate keys and environment variables needed for development and save them to the `.env` file in the root directory. Generated keys include MinIO access keys and Elasticsearch API keys. All service URLs will be configured as localhost addresses for convenient local development.
-:::
-
-### Backend Setup
-```bash
-# Execute in the backend directory of the project root directory
-cd backend
-uv sync --all-extras
-uv pip install ../sdk
-```
-
-::: tip Notes
-`--all-extras` will install all optional dependencies, including data processing, testing, and other modules. Then install the local SDK package.
-:::
-
-#### Using Domestic Mirror Sources (Optional)
-If network access is slow, you can use domestic mirror sources to accelerate installation:
-
-```bash
-# Using Tsinghua University mirror source
-uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install ../sdk --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-
-# Using Alibaba Cloud mirror source
-uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --default-index https://mirrors.aliyun.com/pypi/simple/
-
-# Using multiple mirror sources (recommended)
-uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-```
-
-::: info Mirror Source Information
-- **Tsinghua University Mirror**: `https://pypi.tuna.tsinghua.edu.cn/simple`
-- **Alibaba Cloud Mirror**: `https://mirrors.aliyun.com/pypi/simple/`
-- **USTC Mirror**: `https://pypi.mirrors.ustc.edu.cn/simple/`
-- **Douban Mirror**: `https://pypi.douban.com/simple/`
-
-It's recommended to use multiple mirror source configurations to improve download success rates.
-:::
-
-### Frontend Setup
-```bash
-# Execute in the frontend directory of the project root directory
-cd frontend
-pnpm install
-pnpm dev
-```
-
-### Service Startup
-Before starting services, you need to activate the virtual environment:
-
-```bash
-# Execute in the backend directory of the project root directory
-cd backend
-source .venv/bin/activate  # Activate virtual environment
-```
-
-::: warning Important Notes
-On Windows, you need to execute the `source .venv/Scripts/activate` command to activate the virtual environment.
-:::
-
-Nexent includes three core backend services that need to be started separately:
-
-```bash
-# Execute in the project root directory, please follow this order:
-source .env && python backend/mcp_service.py            # MCP service
-source .env && python backend/data_process_service.py   # Data processing service
-source .env && python backend/config_service.py         # Config service
-source .env && python backend/runtime_service.py        # Runtime service
-```
-
-::: warning Important Notes
-All services must be started from the project root directory. Each Python command should be preceded by `source .env` to load environment variables. Ensure infrastructure services (database, Redis, Elasticsearch, MinIO) are started and running properly.
-:::
+Review that guide first, then return here for module-specific details.
 
 ## 🔧 Development Module Guide
 
@@ -208,8 +123,8 @@ For detailed build instructions, see [Docker Build Guide](../deployment/docker-b
 ## 💡 Getting Help
 
 ### Documentation Resources
-- [Installation Guide](./installation.md) - Environment setup and deployment
-- [FAQ](./faq) - Frequently asked questions
+- [Installation Guide](../quick-start/installation) - Environment setup and deployment
+- [FAQ](../quick-start/faq) - Frequently asked questions
 - [User Guide](../user-guide/home-page) - Nexent user guide
 
 ### Community Support

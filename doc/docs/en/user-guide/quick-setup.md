@@ -50,4 +50,4 @@ After finishing Quick Setup:
 2. Use **[Start Chat](./start-chat)** to talk to your agents.
 3. Configure **[Memory Management](./memory-management)** to give agents persistent memory.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

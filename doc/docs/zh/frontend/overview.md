@@ -128,4 +128,4 @@ npm start
 - 语音处理集成
 - 分析和监控
 
-详细的开发指南和组件文档，请参阅 [开发指南](../getting-started/development-guide)。
+详细的开发指南和组件文档，请参阅 [开发者指南](../developer-guide/overview)。

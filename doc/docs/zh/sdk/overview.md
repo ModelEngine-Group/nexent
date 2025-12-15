@@ -4,7 +4,7 @@ Nexent 是一个强大的企业级 Agent SDK，革命性地简化了智能体开
 
 ## 🚀 安装与使用
 
-有关详细的安装说明和使用指南，请参阅 **[基本使用指南](./basic-usage)**。如果你需要基于服务端/前端的事件流展示，请参阅 **[使用 agent_run 运行智能体](./core/agent-run)**。
+有关详细的安装说明和使用指南，请参阅 **[基本使用指南](./basic-usage#使用-agent_run推荐的流式运行方式)**，其中包含 `CoreAgent.run` 和流式的 `agent_run`。
 
 ## ⭐ 主要特性
 
@@ -32,7 +32,7 @@ Nexent 是一个强大的企业级 Agent SDK，革命性地简化了智能体开
 
 Nexent 提供了完整的智能体解决方案，支持多模型、MCP 集成、动态工具加载和分布式执行。
 
-- 快速流式运行：**[使用 agent_run 运行智能体](./core/agent-run)**
+- 快速流式运行：**[流式运行 agent_run](./basic-usage#使用-agent_run推荐的流式运行方式)**
 - 详细的 Agent 开发和使用说明：**[智能体模块](./core/agents)**
 
 ## 🛠️ 工具集合

@@ -140,7 +140,7 @@ git checkout -b your-branch-name
 ```
 
 ### Step 4 Make Your Changes
-🧙‍♂️ Code like a wizard! Follow our [Development Guide](./getting-started/development-guide) for setup instructions and coding standards. Ensure your changes are well-tested and documented.
+🧙‍♂️ Code like a wizard! Follow our [Developer Guide](./developer-guide/overview) for setup instructions and coding standards. Ensure your changes are well-tested and documented.
 
 ### Step 5 Commit Your Changes
 📝 Commit with a clear and concise message following our commit message guidelines：

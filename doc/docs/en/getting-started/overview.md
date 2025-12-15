@@ -70,9 +70,9 @@ For detailed architectural design and technical implementation, see our **[Softw
 
 Ready to get started? Here are your next steps:
 
-1. **📋 [Installation & Deployment](./installation)** - System requirements and deployment guide
-2. **🔧 [Development Guide](./development-guide)** - Build from source and customize
-3. **❓ [FAQ](./faq)** - Common questions and troubleshooting
+1. **📋 [Installation & Deployment](../quick-start/installation)** - System requirements and deployment guide
+2. **🔧 [Developer Guide](../developer-guide/overview)** - Build from source and customize
+3. **❓ [FAQ](../quick-start/faq)** - Common questions and troubleshooting
 
 ## 💬 Community & contact
 

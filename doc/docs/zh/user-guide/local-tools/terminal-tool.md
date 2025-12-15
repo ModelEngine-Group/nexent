@@ -1,10 +1,10 @@
-# Terminal工具使用手册
+# 终端工具使用手册
 
-Terminal工具是Nexent平台提供的一个强大的本地工具，允许智能体通过SSH连接远程服务器执行shell命令。该工具支持会话管理以在命令之间保持shell状态，使用密码认证进行安全连接，并返回命令输出结果。本手册将详细介绍如何配置和使用Terminal工具。
+终端工具是Nexent平台提供的一个强大的本地工具，允许智能体通过SSH连接远程服务器执行shell命令。该工具支持会话管理以在命令之间保持shell状态，使用密码认证进行安全连接，并返回命令输出结果。本手册将详细介绍如何配置和使用终端工具。
 
 ## 🖥️ SSH服务器搭建
 
-Terminal工具支持两种SSH服务器配置方式：
+终端工具支持两种SSH服务器配置方式：
 
 1. **Nexent Terminal容器**：使用Nexent提供的预配置SSH容器（推荐）
 2. **第三方SSH服务器**：在现有服务器上搭建SSH服务
@@ -40,7 +40,7 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/
 
 #### 2. Deploy脚本配置
 
-在运行部署脚本时，选择启用Terminal工具容器：
+在运行部署脚本时，选择启用终端工具容器：
 
 ```bash
 # 运行部署脚本
@@ -49,7 +49,7 @@ bash deploy.sh
 
 # 在脚本执行过程中选择：
 # 1. 部署模式：选择开发/生产/基础设施模式
-# 2. Terminal工具：选择 "Y" 启用Terminal工具容器
+# 2. 终端工具：选择 "Y" 启用终端工具容器
 # 3. 配置SSH凭据：输入用户名和密码
 # 4. 配置挂载目录：指定主机目录映射
 ```
@@ -177,7 +177,7 @@ sudo systemctl restart ssh
 
 ## 🚀 工具功能
 
-Terminal工具提供以下核心功能：
+终端工具提供以下核心功能：
 
 ### 基本功能
 
@@ -202,14 +202,14 @@ Terminal工具提供以下核心功能：
 - **timestamp**：执行时间戳
 - **error**：错误信息（如果执行失败）
 
-## ⚙️ Terminal工具配置
+## ⚙️ 终端工具配置
 
-### 在Nexent中配置Terminal工具
+### 在Nexent中配置终端工具
 
 1. 登录Nexent平台
 2. 进入 **[智能体开发](../agent-development)** 页面
 3. 选择要配置的智能体
-4. 在"选择Agent的工具"页签中找到"Terminal工具"
+4. 在"选择Agent的工具"页签中找到"终端工具"
 
 <div style="display: flex; justify-content: center;">
   <img src="./../assets/local-tools/terminal-tool.png" style="width: 80%; height: auto;" alt="智能体工具配置页面" />
@@ -217,7 +217,7 @@ Terminal工具提供以下核心功能：
 
 #### 配置SSH连接参数
 
-点击Terminal工具的配置按钮，填写以下参数：
+点击终端工具的配置按钮，填写以下参数：
 
 **基本配置**：
 - **ssh_host**：SSH服务器的IP地址或域名（Nexent容器默认为nexent-openssh-server）
@@ -227,7 +227,7 @@ Terminal工具提供以下核心功能：
 - **init_path**：初始工作目录（默认为~）
 
 <div style="display: flex; justify-content: center;">
-  <img src="./../assets/local-tools/terminal-tool-setting.png" style="width: 80%; height: auto;" alt="Terminal工具配置界面" />
+  <img src="./../assets/local-tools/terminal-tool-setting.png" style="width: 80%; height: auto;" alt="终端工具配置界面" />
 </div>
 
 

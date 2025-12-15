@@ -48,4 +48,4 @@ Nexent首页展示了平台的核心功能，为您提供快速入口：
 
 ## 💡 获取帮助
 
-如果您在配置过程中遇到任何问题，请参考我们的 **[常见问题](../getting-started/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在配置过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

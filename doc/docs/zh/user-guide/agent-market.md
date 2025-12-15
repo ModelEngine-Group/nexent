@@ -36,4 +36,4 @@
 2. 通过 **[智能体开发](./agent-development)** 创建专属智能体
 3. 在 **[开始问答](./start-chat)** 中体验智能体的强大功能
 
-如果您使用过程中遇到任何问题，请参考我们的 **[常见问题](../getting-started/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

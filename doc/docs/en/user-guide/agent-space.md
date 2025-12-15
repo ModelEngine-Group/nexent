@@ -62,4 +62,4 @@ Once you finish reviewing agents you can:
 2. Continue iterating in **[Agent Development](./agent-development)**.
 3. Enhance retention with **[Memory Management](./memory-management)**.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
