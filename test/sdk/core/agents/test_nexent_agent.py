@@ -111,11 +111,34 @@ class _MockProcessType:
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
 
+MessageObserver = _MockMessageObserver
+ProcessType = _MockProcessType
+
 
 mock_nexent_core_utils_module = types.ModuleType("nexent.core.utils")
 mock_nexent_core_utils_observer_module = types.ModuleType("nexent.core.utils.observer")
 mock_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
 mock_nexent_core_utils_observer_module.ProcessType = _MockProcessType
+
+mock_sdk_module = types.ModuleType("sdk")
+mock_sdk_nexent_module = types.ModuleType("sdk.nexent")
+mock_sdk_nexent_core_module = types.ModuleType("sdk.nexent.core")
+mock_sdk_nexent_core_agents_module = types.ModuleType("sdk.nexent.core.agents")
+mock_sdk_nexent_core_utils_module = types.ModuleType("sdk.nexent.core.utils")
+mock_sdk_nexent_core_utils_observer_module = types.ModuleType(
+    "sdk.nexent.core.utils.observer"
+)
+mock_sdk_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
+mock_sdk_nexent_core_utils_observer_module.ProcessType = _MockProcessType
+
+mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
+mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
+mock_sdk_nexent_core_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
+mock_sdk_nexent_core_agents_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents")
+]
+mock_sdk_nexent_core_utils_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "utils")]
+mock_sdk_nexent_core_utils_observer_module.__path__ = []
 
 mock_prompt_template_utils_module = types.ModuleType(
     "nexent.core.utils.prompt_template_utils"
@@ -193,15 +216,8 @@ module_mocks = {
     "openai.types.chat.chat_completion_message_param": MagicMock(),
     # Mock exa_py to avoid importing the real package when sdk.nexent.core.tools imports it
     "exa_py": MagicMock(Exa=MagicMock()),
-    # Mock paramiko and cryptography to avoid PyO3 import issues in tests
+    # Mock paramiko to avoid PyO3 import issues in tests
     "paramiko": MagicMock(),
-    "cryptography": MagicMock(),
-    "cryptography.hazmat": MagicMock(),
-    "cryptography.hazmat.primitives": MagicMock(),
-    "cryptography.hazmat.primitives.ciphers": MagicMock(),
-    "cryptography.hazmat.primitives.ciphers.base": MagicMock(),
-    "cryptography.hazmat.bindings": MagicMock(),
-    "cryptography.hazmat.bindings._rust": MagicMock(),
     "boto3": MagicMock(),
     "botocore": mock_botocore_module,
     "botocore.client": mock_botocore_client,
@@ -213,6 +229,12 @@ module_mocks = {
     "nexent.core": mock_nexent_core_module,
     "nexent.core.utils": mock_nexent_core_utils_module,
     "nexent.core.utils.observer": mock_nexent_core_utils_observer_module,
+    "sdk": mock_sdk_module,
+    "sdk.nexent": mock_sdk_nexent_module,
+    "sdk.nexent.core": mock_sdk_nexent_core_module,
+    "sdk.nexent.core.agents": mock_sdk_nexent_core_agents_module,
+    "sdk.nexent.core.utils": mock_sdk_nexent_core_utils_module,
+    "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
     "nexent.core.utils.prompt_template_utils": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
@@ -234,7 +256,6 @@ module_mocks = {
 # Import the classes under test with patched dependencies in place
 # ---------------------------------------------------------------------------
 with patch.dict("sys.modules", module_mocks):
-    from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
     from sdk.nexent.core.agents import nexent_agent
     from sdk.nexent.core.agents.nexent_agent import NexentAgent, ActionStep, TaskStep
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory
