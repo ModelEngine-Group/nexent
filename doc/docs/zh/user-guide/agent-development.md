@@ -19,6 +19,8 @@
 > - **直接导入**：保留重复名称，导入后的智能体会处于不可用状态，需手动修改 Agent 名称和变量名后才能使用
 > - **重新生成并导入**：系统将调用 LLM 对 Agent 进行重命名，会消耗一定的模型 token 数，可能耗时较长
 
+> 📌 **重要说明**：通过导入创建的智能体，如果其工具中包含 `knowledge_base_search` 等知识库检索工具，这些工具只会检索**当前登录用户在本环境中有权限访问的知识库**。导入文件中原有的知识库配置不会自动继承，因此实际检索结果和回答效果，可能与智能体原作者环境下的表现存在差异。
+
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
 </div>
