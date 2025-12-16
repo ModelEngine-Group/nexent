@@ -19,6 +19,8 @@ If you have an existing agent configuration, you can also import it:
 > - **Import anyway**: Keep the duplicate name; the imported agent will be in an unavailable state and requires manual modification of the Agent name and variable name before it can be used
 > - **Regenerate and import**: The system will call the LLM to rename the Agent, which will consume a certain amount of model tokens and may take longer
 
+> 📌 **Important:** For agents created via import, if their tools include `knowledge_base_search` or other knowledge base search tools, these tools will only search **knowledge bases that the currently logged-in user is allowed to access in this environment**. The original knowledge base configuration in the exported agent will *not* be automatically inherited, so actual search results and answer quality may differ from what the original author observed.
+
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
 </div>
