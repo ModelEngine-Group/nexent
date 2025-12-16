@@ -90,7 +90,7 @@ export default defineConfig({
                 link: "/en/user-guide/knowledge-base",
               },
               { text: "MCP Tools", link: "/en/user-guide/mcp-tools" },
-              { text: "Monitoring & Operations", link: "/en/user-guide/monitor" },
+              { text: "Monitoring & Ops", link: "/en/user-guide/monitor" },
               {
                 text: "Model Management",
                 link: "/en/user-guide/model-management",
@@ -269,7 +269,7 @@ export default defineConfig({
             items: [
               { text: "首页", link: "/zh/user-guide/home-page" },
               { text: "开始问答", link: "/zh/user-guide/start-chat" },
-              { text: "快速设置", link: "/zh/user-guide/quick-setup" },
+              { text: "快速配置", link: "/zh/user-guide/quick-setup" },
               { text: "智能体空间", link: "/zh/user-guide/agent-space" },
               { text: "智能体市场", link: "/zh/user-guide/agent-market" },
               {
