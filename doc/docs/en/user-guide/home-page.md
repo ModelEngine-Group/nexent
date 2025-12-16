@@ -26,12 +26,14 @@ The left sidebar exposes every major module:
 - **Start Chat** – Open the chat interface.
 - **Quick Setup** – Complete the recommended setup flow (Models → Knowledge Base → Agent).
 - **Agent Space** – Manage all existing agents.
-- **Agent Market** – Discover and install published agents (coming soon).
+- **Agent Market** – Discover and install published agents.
 - **Agent Development** – Create and configure agents.
-- **Knowledge Base** – Upload and curate documents.
-- **Model Management** – Configure app info and connect models.
-- **Memory Management** – Enable and tune the multi-layer memory system.
-- **User Management** – Manage platform users (coming soon).
+- **Knowledge Base** – Upload documents and materials to help agents understand your exclusive knowledge.
+- **MCP Tools** – Connect servers, sync tools, and view status at a glance (coming soon).
+- **Monitoring & Operations** – Monitor agent runtime status in real time (coming soon).
+- **Model Management** – Manage app information and model configuration, connect the AI capabilities you need.
+- **Memory Management** – Control agents' long-term memory for more efficient conversations.
+- **User Management** – Provide unified user, role, and permission control for teams (coming soon).
 
 Use the language switcher in the top-right corner to toggle between Simplified Chinese and English. The lower-left corner shows the running Nexent version to simplify troubleshooting when asking for help.
 

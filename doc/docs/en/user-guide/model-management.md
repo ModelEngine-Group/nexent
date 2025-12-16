@@ -123,8 +123,16 @@ After adding models, assign the platform-level defaults. These models handle sys
 
 #### Embedding Model
 
-- Powers semantic search for text, images, and other knowledge-base content.
-- Select one of the added embedding models.
+Embedding models are primarily used for vectorization processing of text, images, and other data in knowledge bases, forming the foundation for efficient retrieval and semantic understanding. Configuring an appropriate embedding model can significantly improve knowledge base search accuracy and multimodal data processing capabilities.
+
+- Click the embedding model dropdown to select one from the added embedding models.
+- Embedding model configuration affects the stable operation of knowledge bases.
+
+Choose appropriate document chunk size and chunks per request based on model capabilities. Smaller chunks provide more stability, but may affect file parsing quality.
+
+<div style="display: flex; gap: 8px;">
+  <img src="./assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
+</div>
 
 #### Vision-Language Model
 
