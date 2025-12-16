@@ -6,7 +6,6 @@
 
 1. 点击"创建知识库"按钮
 2. 为知识库设置一个易于识别的名称
-   > **注意**：知识库名称不能重复，只能使用中文或者小写字母，且不能包含空格、斜线等特殊字符
 
 ## 📁 上传文件
 
@@ -18,6 +17,10 @@
 4. 可在列表中查看文件的处理状态（解析中/入库中/已就绪）
 
 ![文件上传](./assets/knowledge-base/create-knowledge-base.png)
+
+💡 光标移动至状态，以了解进度及报错原因
+
+![文件上传](./assets/knowledge-base/tip.png)
 
 ### 支持的文件格式
 
@@ -76,4 +79,4 @@ Nexent支持多种文件格式，包括：
 1. **[智能体开发](./agent-development)** - 创建和配置智能体
 2. **[开始问答](./start-chat)** - 与智能体进行交互
 
-如果您在知识库配置过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

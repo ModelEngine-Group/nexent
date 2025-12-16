@@ -9,6 +9,7 @@
 
 - **智能体图标**：智能体的标识图标
 - **智能体名称**：智能体的显示名称
+- **智能体作者**：智能体的作者
 - **智能体描述**：智能体的功能描述
 - **智能体状态**：智能体是否可用的状态
 - **操作按钮**：快速操作入口
@@ -66,4 +67,4 @@
 2. 继续 **[智能体开发](./agent-development)** 创建更多智能体
 3. 配置 **[记忆管理](./memory-management)** 以提升智能体的记忆能力
 
-如果您在配置过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。

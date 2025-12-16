@@ -39,7 +39,7 @@
 
 1. **按顺序配置**：建议按照快速配置的顺序进行，确保每个步骤都正确完成
 2. **保存配置**：每个步骤完成后记得保存配置
-3. **启用知识库**：若要启用本地知识检索能力，需在智能体配置中选中knowledge_base_serch工具
+3. **启用知识库**：若要启用本地知识检索能力，需在智能体配置中选中knowledge_base_search工具
 4. **测试验证**：配置完成后，建议在对话页面测试智能体的功能
 
 ## 🚀 下一步
@@ -50,4 +50,4 @@
 2. 在 **[开始问答](./start-chat)** 中与智能体进行交互
 3. 配置 **[记忆管理](./memory-management)** 以提升智能体的记忆能力
 
-如果您在配置过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
+如果您在使用过程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在[GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions)中进行提问获取支持。
