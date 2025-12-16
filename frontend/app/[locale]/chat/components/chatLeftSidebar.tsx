@@ -28,6 +28,7 @@ import {
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { USER_ROLES } from "@/const/modelConfig";
 import { useTranslation } from "react-i18next";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ConversationListItem, ChatSidebarProps } from "@/types/chat";
 
 // conversation status indicator component
@@ -114,7 +115,7 @@ export function ChatSidebar({
   userRole = USER_ROLES.USER,
 }: ChatSidebarProps) {
   const { t } = useTranslation();
-  const { modal } = App.useApp();
+  const { confirm } = useConfirmModal();
   const router = useRouter();
   const { today, week, older } = categorizeDialogs(conversationList);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -179,14 +180,9 @@ export function ChatSidebar({
     onDropdownOpenChange(false, null);
 
     // Show confirmation modal
-    modal.confirm({
+    confirm({
       title: t("chatLeftSidebar.confirmDeletionTitle"),
       content: t("chatLeftSidebar.confirmDeletionDescription"),
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      okType: "danger",
-      centered: true,
-      maskClosable: false, 
       onOk: () => {
         onDelete(dialogId);
       },

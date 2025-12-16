@@ -497,7 +497,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       danger: true,
-      onConfirm: async () => {
+      onOk: async () => {
         try {
           await deleteKnowledgeBase(id);
 
@@ -554,7 +554,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       danger: true,
-      onConfirm: async () => {
+      onOk: async () => {
         try {
           await deleteDocument(kbId, docId);
           message.success(t("document.message.deleteSuccess"));

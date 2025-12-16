@@ -2003,7 +2003,7 @@ export default function AgentSetupOrchestrator({
       content: t("agentConfig.agents.copyConfirmContent", {
         name: agent?.display_name || agent?.name || "",
       }),
-      onConfirm: () => handleCopyAgentFromList(agent),
+      onOk: () => handleCopyAgentFromList(agent),
     });
   };
 
@@ -2326,10 +2326,6 @@ export default function AgentSetupOrchestrator({
         >
           <div className="py-2">
             <div className="flex items-center">
-              <WarningFilled
-                className="text-yellow-500 mt-1 mr-2"
-                style={{ fontSize: "48px" }}
-              />
               <div className="ml-3 mt-2">
                 <div className="text-sm leading-6">
                   {t("businessLogic.config.modal.deleteContent", {

@@ -34,6 +34,7 @@ import {
   checkMcpServerHealth,
 } from "@/services/mcpService";
 import { McpServer, McpTool } from "@/types/agentConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -43,7 +44,8 @@ export default function McpConfigModal({
   onCancel,
 }: McpConfigModalProps) {
   const { t } = useTranslation("common");
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const [serverList, setServerList] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
@@ -159,16 +161,12 @@ export default function McpConfigModal({
 
   // Delete MCP server
   const handleDeleteServer = async (server: McpServer) => {
-    modal.confirm({
+    confirm({
       title: t("mcpConfig.delete.confirmTitle"),
       content: t("mcpConfig.delete.confirmContent", {
         name: server.service_name,
       }),
       okText: t("common.delete", "Delete"),
-      cancelText: t("common.cancel", "Cancel"),
-      okType: "danger",
-      cancelButtonProps: { disabled: updatingTools },
-      okButtonProps: { disabled: updatingTools, loading: updatingTools },
       onOk: async () => {
         try {
           const result = await deleteMcpServer(
