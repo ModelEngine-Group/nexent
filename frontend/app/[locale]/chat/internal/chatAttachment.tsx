@@ -1,30 +1,31 @@
 import { chatConfig } from "@/const/chatConfig";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink } from "lucide-react";
-import { storageService, convertImageUrlToApiUrl, extractObjectNameFromUrl } from "@/services/storageService";
-import { message } from "antd";
-import log from "@/lib/logger";
 import {
-  AiFillFileImage,
-  AiFillFilePdf,
-  AiFillFileWord,
-  AiFillFileExcel,
-  AiFillFilePpt,
-  AiFillFileZip,
-  AiFillFileText,
-  AiFillFileMarkdown,
-  AiFillHtml5,
-  AiFillCode,
-  AiFillFileUnknown,
-} from "react-icons/ai";
+  Download,
+  FileImage,
+  FileText,
+  File,
+  Archive,
+  Code,
+  FileSpreadsheet,
+  Presentation,
+  FileCode,
+} from "lucide-react";
+import {
+  FilePdfOutlined,
+  FileWordOutlined,
+  Html5Outlined,
+} from "@ant-design/icons";
+import {
+  storageService,
+  convertImageUrlToApiUrl,
+  extractObjectNameFromUrl,
+} from "@/services/storageService";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import log from "@/lib/logger";
+
+import { Modal, App } from "antd";
 import { cn } from "@/lib/utils";
 import { AttachmentItem, ChatAttachmentProps } from "@/types/chat";
 
@@ -40,23 +41,22 @@ const ImageViewer = ({
 }) => {
   if (!isOpen) return null;
   const { t } = useTranslation("common");
-  
+
   // Convert image URL to backend API URL
   const imageUrl = convertImageUrlToApiUrl(url);
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black/90">
-        <DialogHeader>
-          <DialogTitle className="sr-only">
-            {t("chatAttachment.imagePreview")}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex items-center justify-center h-full">
-          <img src={imageUrl} alt="Full size" className="max-h-[80vh] max-w-full" />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <Modal
+      open={isOpen}
+      onCancel={onClose}
+      footer={null}
+      centered
+      title={t("chatAttachment.imagePreview")}
+    >
+      <div className="flex items-center justify-center">
+        <img src={imageUrl} alt="img" />
+      </div>
+    </Modal>
   );
 };
 
@@ -78,15 +78,15 @@ const FileViewer = ({
 }) => {
   if (!isOpen) return null;
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const [isDownloading, setIsDownloading] = useState(false);
-
 
   // Handle file download
   const handleDownload = async (e: React.MouseEvent) => {
     // Prevent dialog from closing immediately
     e.preventDefault();
     e.stopPropagation();
-    
+
     // Check if URL is a direct http/https URL that can be accessed directly
     // Exclude backend API endpoints (containing /api/file/download/)
     if (
@@ -104,16 +104,18 @@ const FileViewer = ({
       setTimeout(() => {
         document.body.removeChild(link);
       }, 100);
-      message.success(t("chatAttachment.downloadSuccess", "File download started"));
+      message.success(
+        t("chatAttachment.downloadSuccess", "File download started")
+      );
       setTimeout(() => {
         onClose();
       }, 500);
       return;
     }
-    
+
     // Try to get object_name from props or extract from URL
     let finalObjectName: string | undefined = objectName;
-    
+
     if (!finalObjectName && url) {
       finalObjectName = extractObjectNameFromUrl(url) || undefined;
     }
@@ -131,10 +133,17 @@ const FileViewer = ({
         setTimeout(() => {
           document.body.removeChild(link);
         }, 100);
-        message.success(t("chatAttachment.downloadSuccess", "File download started"));
+        message.success(
+          t("chatAttachment.downloadSuccess", "File download started")
+        );
         return;
       } else {
-        message.error(t("chatAttachment.downloadError", "File object name or URL is missing"));
+        message.error(
+          t(
+            "chatAttachment.downloadError",
+            "File object name or URL is missing"
+          )
+        );
         return;
       }
     }
@@ -144,7 +153,9 @@ const FileViewer = ({
       // Start download (non-blocking, browser handles it)
       await storageService.downloadFile(finalObjectName, name);
       // Show success message immediately after triggering download
-      message.success(t("chatAttachment.downloadSuccess", "File download started"));
+      message.success(
+        t("chatAttachment.downloadSuccess", "File download started")
+      );
       // Keep dialog open for a moment to show the message, then close
       setTimeout(() => {
         setIsDownloading(false);
@@ -165,56 +176,68 @@ const FileViewer = ({
           setTimeout(() => {
             document.body.removeChild(link);
           }, 100);
-          message.success(t("chatAttachment.downloadSuccess", "File download started"));
+          message.success(
+            t("chatAttachment.downloadSuccess", "File download started")
+          );
           setTimeout(() => {
             onClose();
           }, 500);
         } catch (fallbackError) {
           message.error(
-            t("chatAttachment.downloadError", "Failed to download file. Please try again.")
+            t(
+              "chatAttachment.downloadError",
+              "Failed to download file. Please try again."
+            )
           );
         }
       } else {
         message.error(
-          t("chatAttachment.downloadError", "Failed to download file. Please try again.")
+          t(
+            "chatAttachment.downloadError",
+            "Failed to download file. Please try again."
+          )
         );
       }
     }
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl p-4 overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="text-lg font-medium flex items-center gap-2">
-            {getFileIcon(name, contentType)}
-            <span className="truncate max-w-[600px]">{name}</span>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="border rounded-md max-h-[70vh] overflow-auto">
-          <div className="p-16 text-center">
-            <div className="flex justify-center mb-4">
-              {getFileIcon(name, contentType)}
-            </div>
-            <p className="text-gray-600 mb-4">
-              {t("chatAttachment.previewNotSupported")}
-            </p>
-            <button
-              onClick={handleDownload}
-              disabled={(!objectName && !url) || isDownloading}
-              type="button"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ExternalLink size={16} />
-              {isDownloading
-                ? t("chatAttachment.downloading", "Downloading...")
-                : t("chatAttachment.downloadToView")}
-            </button>
-          </div>
+    <Modal
+      open={isOpen}
+      onCancel={onClose}
+      footer={null}
+      centered
+      title={
+        <div className="flex items-center gap-2">
+          {getFileIcon(name, contentType)}
+          <span className="truncate max-w-[400px]" title={name}>
+            {name}
+          </span>
         </div>
-      </DialogContent>
-    </Dialog>
+      }
+    >
+      <div className="border rounded-md max-h-[70vh] overflow-auto">
+        <div className="p-16 text-center">
+          <div className="flex justify-center mb-4">
+            {getFileIcon(name, contentType)}
+          </div>
+          <p className="text-gray-600 mb-4">
+            {t("chatAttachment.previewNotSupported")}
+          </p>
+          <button
+            onClick={handleDownload}
+            disabled={(!objectName && !url) || isDownloading}
+            type="button"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download size={16} />
+            {isDownloading
+              ? t("chatAttachment.downloading", "Downloading...")
+              : t("chatAttachment.downloadToView")}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 };
 
@@ -231,56 +254,68 @@ const getFileIcon = (name: string, contentType?: string) => {
   const fileType = contentType || "";
   const iconSize = 32;
 
-  // Image file
+  // Image file - using lucide-react
   if (
     fileType.startsWith("image/") ||
     ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension)
   ) {
-    return <AiFillFileImage size={iconSize} color="#8e44ad" />;
+    return <FileImage size={iconSize} color="#8e44ad" />;
   }
 
   // Identify by extension name
-    // Document file
+  // Document file
   if (chatConfig.fileIcons.pdf.includes(extension)) {
-    return <AiFillFilePdf size={iconSize} color="#e74c3c" />;
+    // PDF - using ant-design (lucide doesn't have a specific PDF icon)
+    return <FilePdfOutlined style={{ fontSize: iconSize, color: "#e74c3c" }} />;
   }
   if (chatConfig.fileIcons.word.includes(extension)) {
-    return <AiFillFileWord size={iconSize} color="#3498db" />;
+    // Word - using ant-design (lucide doesn't have a specific Word icon)
+    return (
+      <FileWordOutlined style={{ fontSize: iconSize, color: "#3498db" }} />
+    );
   }
   if (chatConfig.fileIcons.text.includes(extension)) {
-    return <AiFillFileText size={iconSize} color="#7f8c8d" />;
+    // Text - using lucide-react
+    return <FileText size={iconSize} color="#7f8c8d" />;
   }
   if (chatConfig.fileIcons.markdown.includes(extension)) {
-    return <AiFillFileMarkdown size={iconSize} color="#34495e" />;
+    // Markdown - using lucide-react FileText
+    return <FileText size={iconSize} color="#34495e" />;
   }
   // Table file
   if (chatConfig.fileIcons.excel.includes(extension)) {
-    return <AiFillFileExcel size={iconSize} color="#27ae60" />;
+    // Excel - using lucide-react
+    return <FileSpreadsheet size={iconSize} color="#27ae60" />;
   }
   // Presentation file
   if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    return <AiFillFilePpt size={iconSize} color="#e67e22" />;
+    // PowerPoint - using lucide-react
+    return <Presentation size={iconSize} color="#e67e22" />;
   }
 
   // Code file
   if (chatConfig.fileIcons.html.includes(extension)) {
-    return <AiFillHtml5 size={iconSize} color="#e67e22" />;
+    // HTML - using ant-design (more specific)
+    return <Html5Outlined style={{ fontSize: iconSize, color: "#e67e22" }} />;
   }
   if (chatConfig.fileIcons.code.includes(extension)) {
-    return <AiFillCode size={iconSize} color="#f39c12" />;
+    // Code - using lucide-react
+    return <Code size={iconSize} color="#f39c12" />;
   }
   if (chatConfig.fileIcons.json.includes(extension)) {
-    return <AiFillCode size={iconSize} color="#f1c40f" />;
+    // JSON - using lucide-react FileCode
+    return <FileCode size={iconSize} color="#f1c40f" />;
   }
 
   // Compressed file
   if (chatConfig.fileIcons.compressed.includes(extension)) {
-    return <AiFillFileZip size={iconSize} color="#f39c12" />;
+    // Archive - using lucide-react
+    return <Archive size={iconSize} color="#f39c12" />;
   }
 
-    // Default file icon
-    return <AiFillFileUnknown size={iconSize} color="#95a5a6" />;
-  };
+  // Default file icon - using lucide-react
+  return <File size={iconSize} color="#95a5a6" />;
+};
 
 // Format file size
 const formatFileSize = (size: number): string => {
@@ -307,12 +342,12 @@ export function ChatAttachment({
 
   // Handle image click
   const handleImageClick = (url: string) => {
+    // Use internal preview
+    setSelectedImage(url);
+
+    // Also call external callback if provided (for compatibility)
     if (onImageClick) {
-      // Call external callback
       onImageClick(url);
-    } else {
-      // Use internal preview when there is no external callback
-      setSelectedImage(url);
     }
   };
 

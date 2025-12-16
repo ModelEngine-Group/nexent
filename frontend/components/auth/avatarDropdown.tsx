@@ -14,6 +14,7 @@ import {
 import type { ItemType } from "antd/es/menu/interface";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 
 export function AvatarDropdown() {
@@ -22,6 +23,7 @@ export function AvatarDropdown() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
   const { modal } = App.useApp();
+  const { confirm } = useConfirmModal();
 
   if (isLoading) {
     return <Spin size="small" />;
@@ -115,11 +117,9 @@ export function AvatarDropdown() {
       icon: <LogoutOutlined />,
       label: t("auth.logout"),
       onClick: () => {
-        modal.confirm({
+        confirm({
           title: t("auth.confirmLogout"),
           content: t("auth.confirmLogoutPrompt"),
-          okText: t("auth.confirm"),
-          cancelText: t("auth.cancel"),
           onOk: () => {
             logout();
           },
@@ -141,13 +141,10 @@ export function AvatarDropdown() {
             okText: t("auth.confirm"),
           });
         } else {
-          modal.confirm({
+          confirm({
             title: t("auth.confirmRevoke"),
             content: t("auth.confirmRevokePrompt"),
-            icon: <CloseCircleFilled style={{ color: "red" }} />,
             okText: t("auth.confirmRevokeOk"),
-            cancelText: t("auth.cancel"),
-            okButtonProps: { danger: true },
             onOk: () => {
               revoke();
             },

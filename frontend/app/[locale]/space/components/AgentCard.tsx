@@ -23,6 +23,7 @@ import {
 } from "@/services/agentConfigService";
 import { generateAvatarFromName } from "@/lib/avatar";
 import { useAuth } from "@/hooks/useAuth";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { USER_ROLES } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
@@ -45,8 +46,9 @@ interface AgentCardProps {
 
 export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCardProps) {
   const { t } = useTranslation("common");
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const { user, isSpeedMode } = useAuth();
+  const { confirm } = useConfirmModal();
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -63,15 +65,12 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
 
   // Handle delete agent
   const handleDelete = () => {
-    modal.confirm({
+    confirm({
       title: t("space.deleteConfirm.title", "Delete Agent"),
       content: t(
         "space.deleteConfirm.content",
         `Are you sure you want to delete agent "${agent.display_name}"? This action cannot be undone.`
       ),
-      okText: t("common.confirm", "Confirm"),
-      cancelText: t("common.cancel", "Cancel"),
-      okButtonProps: { danger: true },
       onOk: async () => {
         setIsDeleting(true);
         try {

@@ -18,14 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdownMenu";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { App } from "antd";
 import {
   Tooltip,
   TooltipContent,
@@ -35,6 +28,7 @@ import {
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { USER_ROLES } from "@/const/modelConfig";
 import { useTranslation } from "react-i18next";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ConversationListItem, ChatSidebarProps } from "@/types/chat";
 
 // conversation status indicator component
@@ -67,7 +61,6 @@ const ConversationStatusIndicator = ({
 
   return null;
 };
-
 
 // Helper function - dialog classification
 const categorizeDialogs = (dialogs: ConversationListItem[]) => {
@@ -122,15 +115,12 @@ export function ChatSidebar({
   userRole = USER_ROLES.USER,
 }: ChatSidebarProps) {
   const { t } = useTranslation();
+  const { confirm } = useConfirmModal();
   const router = useRouter();
   const { today, week, older } = categorizeDialogs(conversationList);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Add delete dialog status
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [dialogToDelete, setDialogToDelete] = useState<number | null>(null);
 
   const [animationComplete, setAnimationComplete] = useState(false);
 
@@ -186,19 +176,17 @@ export function ChatSidebar({
 
   // Handle delete click
   const handleDeleteClick = (dialogId: number) => {
-    setDialogToDelete(dialogId);
-    setIsDeleteDialogOpen(true);
     // Close dropdown menus
     onDropdownOpenChange(false, null);
-  };
 
-  // Confirm delete
-  const confirmDelete = () => {
-    if (dialogToDelete !== null) {
-      onDelete(dialogToDelete);
-      setIsDeleteDialogOpen(false);
-      setDialogToDelete(null);
-    }
+    // Show confirmation modal
+    confirm({
+      title: t("chatLeftSidebar.confirmDeletionTitle"),
+      content: t("chatLeftSidebar.confirmDeletionDescription"),
+      onOk: () => {
+        onDelete(dialogId);
+      },
+    });
   };
 
   // Render dialog list items
@@ -439,31 +427,6 @@ export function ChatSidebar({
           renderCollapsedSidebar()
         )}
       </div>
-
-      {/* Delete confirmation dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>
-              {t("chatLeftSidebar.confirmDeletionTitle")}
-            </DialogTitle>
-            <DialogDescription>
-              {t("chatLeftSidebar.confirmDeletionDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteDialogOpen(false)}
-            >
-              {t("chatLeftSidebar.cancel")}
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete}>
-              {t("chatLeftSidebar.delete")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
