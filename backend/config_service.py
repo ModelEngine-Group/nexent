@@ -1,7 +1,6 @@
 import uvicorn
 import logging
 import warnings
-import asyncio
 
 from consts.const import APP_VERSION
 

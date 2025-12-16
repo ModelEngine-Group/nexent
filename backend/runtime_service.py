@@ -1,7 +1,6 @@
 import uvicorn
 import logging
 import warnings
-import asyncio
 
 from consts.const import APP_VERSION
 
@@ -16,7 +15,7 @@ from utils.logging_utils import configure_logging, configure_elasticsearch_loggi
 
 configure_logging(logging.INFO)
 configure_elasticsearch_logging()
-logger = logging.getLogger("config_service")
+logger = logging.getLogger("runtime_service")
 
 
 if __name__ == "__main__":
