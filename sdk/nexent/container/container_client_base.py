@@ -50,11 +50,12 @@ class ContainerClient(ABC):
     async def start_container(
         self,
         service_name: str,
-        command: str,
-        args: List[str],
         tenant_id: str,
         user_id: str,
+        full_command: List[str],
         env_vars: Optional[Dict[str, str]] = None,
+        host_port: Optional[int] = None,
+        image: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Start a container and return access information
@@ -65,11 +66,12 @@ class ContainerClient(ABC):
 
         Args:
             service_name: Name of the service
-            command: Command to run (e.g., 'npx')
-            args: Command arguments (e.g., ['-y', '12306-mcp'])
             tenant_id: Tenant ID for isolation (used for namespace/labeling)
             user_id: User ID for isolation (used for labeling/naming)
+            full_command: Complete command list to run inside container (must start an HTTP endpoint)
             env_vars: Optional environment variables
+            host_port: Optional host port to bind (if None, auto assign)
+            image: Optional image override
 
         Returns:
             Dictionary with container_id (or pod_id for k8s), service_url,

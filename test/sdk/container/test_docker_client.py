@@ -167,15 +167,15 @@ class TestIsRunningInDocker:
             result = DockerContainerClient._is_running_in_docker()
             assert result is True
 
-    def test_is_running_in_docker_with_env_var(self):
-        """Test detection when container environment variable is set"""
+    def test_is_running_in_docker_ignores_env_var(self):
+        """Test detection ignores container environment variable (SDK must not read env)"""
         def mock_exists(self):
             return False
         
         with patch.object(Path, "exists", mock_exists), \
              patch.dict(os.environ, {"container": "docker"}):
             result = DockerContainerClient._is_running_in_docker()
-            assert result is True
+            assert result is False
 
     def test_is_running_in_docker_not_in_docker(self):
         """Test detection when not in Docker"""
@@ -237,13 +237,13 @@ class TestGetServiceHost:
     def test_get_service_host_in_docker(self):
         """Test host selection when running in Docker"""
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True):
-            result = DockerContainerClient._get_service_host()
-            assert result == "host.docker.internal"
+            result = DockerContainerClient._get_service_host("test-service")
+            assert result == "test-service"
 
     def test_get_service_host_local(self):
         """Test host selection when running locally"""
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
-            result = DockerContainerClient._get_service_host()
+            result = DockerContainerClient._get_service_host("test-service")
             assert result == "localhost"
 
 
@@ -317,13 +317,12 @@ class TestGenerateContainerName:
     def test_generate_container_name_basic(self, docker_container_client):
         """Test basic container name generation"""
         name = docker_container_client._generate_container_name("test-service", "user12345")
-        assert name == "mcp-test-service-user1234"
-        assert name.startswith("mcp-")
+        assert name == "test-service-user1234"
 
     def test_generate_container_name_with_special_chars(self, docker_container_client):
         """Test container name generation with special characters"""
         name = docker_container_client._generate_container_name("test@service#123", "user12345")
-        assert name == "mcp-test-service-123-user1234"
+        assert name == "test-service-123-user1234"
         assert "@" not in name
         assert "#" not in name
 
@@ -332,12 +331,12 @@ class TestGenerateContainerName:
         long_user_id = "a" * 20
         name = docker_container_client._generate_container_name("test-service", long_user_id)
         # Should only use first 8 characters of user_id
-        assert name == f"mcp-test-service-{long_user_id[:8]}"
+        assert name == f"test-service-{long_user_id[:8]}"
 
     def test_generate_container_name_short_user_id(self, docker_container_client):
         """Test container name generation with short user ID"""
         name = docker_container_client._generate_container_name("test-service", "user")
-        assert name == "mcp-test-service-user"
+        assert name == "test-service-user"
 
 
 # ---------------------------------------------------------------------------
@@ -357,10 +356,9 @@ class TestStartContainer:
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             assert result["status"] == "existing"
@@ -387,10 +385,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             mock_container.remove.assert_called_once_with(force=True)
@@ -412,10 +409,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             assert result["status"] == "started"
@@ -436,10 +432,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             assert result["status"] == "started"
@@ -453,10 +448,9 @@ class TestStartContainer:
             with pytest.raises(ContainerError, match="No ports available"):
                 await docker_container_client.start_container(
                     service_name="test-service",
-                    command="npx",
-                    args=["-y", "test-mcp"],
                     tenant_id="tenant123",
                     user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
                 )
 
     @pytest.mark.asyncio
@@ -476,10 +470,9 @@ class TestStartContainer:
             env_vars = {"CUSTOM_VAR": "value", "ANOTHER_VAR": "another_value"}
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
                 env_vars=env_vars,
             )
 
@@ -493,7 +486,7 @@ class TestStartContainer:
 
     @pytest.mark.asyncio
     async def test_start_container_npx_command(self, docker_container_client):
-        """Test starting container with npx command"""
+        """Test starting container with npx full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -507,21 +500,19 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
             assert call_args is not None
             assert call_args.kwargs["image"] == "node:22-alpine"
-            assert "sh" in call_args.kwargs["command"][0]
-            assert "-c" in call_args.kwargs["command"][1]
+            assert call_args.kwargs["command"] == ["npx", "-y", "test-mcp"]
 
     @pytest.mark.asyncio
     async def test_start_container_node_command(self, docker_container_client):
-        """Test starting container with node command"""
+        """Test starting container with node full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -535,10 +526,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="node",
-                args=["script.js"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["node", "script.js"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
@@ -547,7 +537,7 @@ class TestStartContainer:
 
     @pytest.mark.asyncio
     async def test_start_container_python_command(self, docker_container_client):
-        """Test starting container with python command"""
+        """Test starting container with python full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -561,23 +551,19 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="python",
-                args=["script.py"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["python", "script.py"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
             assert call_args is not None
-            # Python command should use default image (alpine:latest for generic commands)
-            # But wait, python is in the list, so it should use python image
-            # Actually, looking at the code, python is not in ["npx", "node", "npm"]
-            # So it should use alpine:latest
+            # Non-node commands default to alpine:latest unless overridden
             assert call_args.kwargs["image"] == "alpine:latest"
 
     @pytest.mark.asyncio
     async def test_start_container_generic_command(self, docker_container_client):
-        """Test starting container with generic command"""
+        """Test starting container with generic full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -591,10 +577,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="custom-command",
-                args=["arg1", "arg2"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["custom-command", "arg1", "arg2"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
@@ -611,10 +596,9 @@ class TestStartContainer:
             with pytest.raises(ContainerError, match="Container startup failed"):
                 await docker_container_client.start_container(
                     service_name="test-service",
-                    command="npx",
-                    args=["-y", "test-mcp"],
                     tenant_id="tenant123",
                     user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
                 )
 
     @pytest.mark.asyncio
@@ -627,10 +611,9 @@ class TestStartContainer:
             with pytest.raises(ContainerError, match="Container startup failed"):
                 await docker_container_client.start_container(
                     service_name="test-service",
-                    command="npx",
-                    args=["-y", "test-mcp"],
                     tenant_id="tenant123",
                     user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
                 )
 
     @pytest.mark.asyncio
@@ -652,10 +635,9 @@ class TestStartContainer:
             with pytest.raises(ContainerError, match="stopped unexpectedly"):
                 await docker_container_client.start_container(
                     service_name="test-service",
-                    command="npx",
-                    args=["-y", "test-mcp"],
                     tenant_id="tenant123",
                     user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
                 )
 
     @pytest.mark.asyncio
@@ -677,10 +659,9 @@ class TestStartContainer:
             with pytest.raises(ContainerError, match="not found after start"):
                 await docker_container_client.start_container(
                     service_name="test-service",
-                    command="npx",
-                    args=["-y", "test-mcp"],
                     tenant_id="tenant123",
                     user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
                 )
 
     @pytest.mark.asyncio
@@ -702,10 +683,9 @@ class TestStartContainer:
             # Should not raise error, just log warning
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             assert result["status"] == "started"
@@ -732,10 +712,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             # Should create new container since existing one has no port
@@ -743,7 +722,7 @@ class TestStartContainer:
 
     @pytest.mark.asyncio
     async def test_start_container_npm_command(self, docker_container_client):
-        """Test starting container with npm command"""
+        """Test starting container with npm full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -757,10 +736,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="npm",
-                args=["run", "start"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npm", "run", "start"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
@@ -769,7 +747,7 @@ class TestStartContainer:
 
     @pytest.mark.asyncio
     async def test_start_container_python3_command(self, docker_container_client):
-        """Test starting container with python3 command"""
+        """Test starting container with python3 full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -783,22 +761,19 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="python3",
-                args=["script.py"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["python3", "script.py"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
             assert call_args is not None
-            # python3 is in the list, so it should use default image (not alpine:latest)
-            # Actually, looking at code, python3 is not in ["npx", "node", "npm"]
-            # So it should use alpine:latest
+            # Non-node commands default to alpine:latest unless overridden
             assert call_args.kwargs["image"] == "alpine:latest"
 
     @pytest.mark.asyncio
     async def test_start_container_bash_command(self, docker_container_client):
-        """Test starting container with bash command"""
+        """Test starting container with bash full_command"""
         docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
 
         new_container = MagicMock()
@@ -812,17 +787,14 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
-                command="bash",
-                args=["script.sh"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["bash", "script.sh"],
             )
 
             call_args = docker_container_client.client.containers.run.call_args
             assert call_args is not None
-            # bash is in the list, so it should use default image (not alpine:latest)
-            # Actually, looking at code, bash is not in ["npx", "node", "npm"]
-            # So it should use alpine:latest
+            # Non-node commands default to alpine:latest unless overridden
             assert call_args.kwargs["image"] == "alpine:latest"
 
     @pytest.mark.asyncio
@@ -849,10 +821,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             # Should create new container since existing one has no valid port mapping
@@ -882,10 +853,9 @@ class TestStartContainer:
              patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             # Should create new container since existing one has no HostPort
@@ -908,10 +878,9 @@ class TestStartContainer:
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = await docker_container_client.start_container(
                 service_name="test-service",
-                command="npx",
-                args=["-y", "test-mcp"],
                 tenant_id="tenant123",
                 user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
             )
 
             # Should use existing container with first available port

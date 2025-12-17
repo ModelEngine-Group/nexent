@@ -20,8 +20,9 @@ async def mcp_server_health(remote_mcp_server: str) -> bool:
         async with client:
             connected = client.is_connected()
             return connected
-    except Exception as e:
-        logger.error(f"Remote MCP server health check failed: {e}")
+    except BaseException as e:
+        logger.error(f"Remote MCP server health check failed: {e}", exc_info=True)
+        # Prevent library-level exits (e.g., SystemExit) from crashing the service
         raise MCPConnectionError("MCP connection failed")
 
 
@@ -76,7 +77,7 @@ async def check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_
     # check the health of the MCP server
     try:
         status = await mcp_server_health(remote_mcp_server=mcp_url)
-    except Exception:
+    except BaseException:
         status = False
     # update the status of the MCP server in the database
     update_mcp_status_by_name_and_url(

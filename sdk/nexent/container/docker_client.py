@@ -3,9 +3,7 @@ Docker container client implementation
 """
 
 import asyncio
-import json
 import logging
-import os
 import socket
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -34,6 +32,8 @@ class ContainerConnectionError(Exception):
 
 class DockerContainerClient(ContainerClient):
     """Docker container client implementation"""
+
+    DEFAULT_NETWORK_NAME = "nexent_nexent"
 
     def __init__(self, config: DockerContainerConfig):
         """
@@ -82,24 +82,69 @@ class DockerContainerClient(ContainerClient):
         except Exception:
             pass
 
-        # Check environment variable (some setups set this)
-        if os.getenv("container") == "docker":
-            return True
-
         return False
 
     @staticmethod
-    def _get_service_host() -> str:
+    def _get_service_host(service_name: str) -> str:
         """
         Get the appropriate host for service URLs based on running environment
 
         Returns:
-            'host.docker.internal' if running in Docker container,
+            Service name if running in Docker container (container-to-container DNS),
             'localhost' if running in local development environment
         """
         if DockerContainerClient._is_running_in_docker():
-            return "host.docker.internal"
+            return service_name
         return "localhost"
+
+    def _ensure_network(self, network_name: str) -> None:
+        """Ensure the Docker network exists (create it if missing)."""
+        try:
+            self.client.networks.get(network_name)
+        except NotFound:
+            try:
+                self.client.networks.create(network_name)
+                logger.info(f"Created Docker network: {network_name}")
+            except APIError as e:
+                # Handle race where another process created it.
+                try:
+                    self.client.networks.get(network_name)
+                except Exception as inner:
+                    raise ContainerError(
+                        f"Failed to create or get Docker network '{network_name}': {e}"
+                    ) from inner
+        except APIError as e:
+            raise ContainerError(f"Failed to get Docker network '{network_name}': {e}")
+
+    @staticmethod
+    def _get_container_service_port(container: Any) -> Optional[str]:
+        """
+        Get the service port for a container.
+
+        - In Docker-to-Docker mode (no published ports required), prefer PORT from env.
+        - Otherwise fall back to published host port if available.
+        """
+        try:
+            # Prefer PORT from environment if present.
+            env_list = container.attrs.get("Config", {}).get("Env", []) or []
+            for item in env_list:
+                if isinstance(item, str) and item.startswith("PORT="):
+                    return item.split("=", 1)[1]
+        except Exception:
+            pass
+
+        # Fall back to published host port mapping
+        try:
+            ports = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+            for _, host_mappings in ports.items():
+                if host_mappings and len(host_mappings) > 0:
+                    host_port = host_mappings[0].get("HostPort")
+                    if host_port:
+                        return str(host_port)
+        except Exception:
+            pass
+
+        return None
 
     def find_free_port(self, start_port: int = 5020, max_attempts: int = 100) -> int:
         """
@@ -131,26 +176,26 @@ class DockerContainerClient(ContainerClient):
         """Generate unique container name"""
         # Sanitize service name for container name (only alphanumeric and hyphens)
         safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
-        return f"mcp-{safe_name}-{user_id[:8]}"
+        return f"{safe_name}-{user_id[:8]}"
 
     async def start_container(
         self,
         service_name: str,
-        command: str,
-        args: List[str],
         tenant_id: str,
         user_id: str,
+        full_command: List[str],
         env_vars: Optional[Dict[str, str]] = None,
+        host_port: Optional[int] = None,
+        image: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Start container and return access URL
 
         Args:
             service_name: Name of the service
-            command: Command to run (e.g., 'npx')
-            args: Command arguments (e.g., ['-y', '12306-mcp'])
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
+            full_command: Complete command list to run inside container (must start an HTTP endpoint)
             env_vars: Optional environment variables
 
         Returns:
@@ -160,28 +205,38 @@ class DockerContainerClient(ContainerClient):
             ContainerError: If container startup fails
         """
         container_name = self._generate_container_name(service_name, user_id)
+        self._ensure_network(self.DEFAULT_NETWORK_NAME)
 
         # Check if container already exists
         try:
             existing = self.client.containers.get(container_name)
             if existing.status == "running":
-                # Get port from existing container
-                ports = existing.attrs.get("NetworkSettings", {}).get("Ports", {})
-                host_port = None
-                for container_port, host_mappings in ports.items():
-                    if host_mappings and len(host_mappings) > 0:
-                        host_port = host_mappings[0].get("HostPort")
-                        if host_port:
-                            break
-
-                if host_port:
-                    host = self._get_service_host()
-                    service_url = f"http://{host}:{host_port}/mcp"
-                    logger.info(f"Using existing container {container_name} on port {host_port}")
+                if DockerContainerClient._is_running_in_docker():
+                    service_port = self._get_container_service_port(existing) or (
+                        str(host_port) if host_port is not None else None
+                    )
+                else:
+                    # Local mode: prefer published host port mapping over internal PORT env.
+                    service_port = None
+                    ports = existing.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+                    for _, host_mappings in ports.items():
+                        if host_mappings and len(host_mappings) > 0:
+                            mapped = host_mappings[0].get("HostPort")
+                            if mapped:
+                                service_port = str(mapped)
+                                break
+                    if service_port is None and host_port is not None:
+                        service_port = str(host_port)
+                if service_port:
+                    host = self._get_service_host(container_name)
+                    service_url = f"http://{host}:{service_port}/mcp"
+                    logger.info(
+                        f"Using existing container {container_name} on port {service_port}"
+                    )
                     return {
                         "container_id": existing.id,
                         "service_url": service_url,
-                        "host_port": host_port,
+                        "host_port": service_port,
                         "status": "existing",
                         "container_name": container_name,
                     }
@@ -194,11 +249,16 @@ class DockerContainerClient(ContainerClient):
             logger.warning(f"Error checking existing container: {e}")
 
         # Find free port
-        try:
-            host_port = self.find_free_port()
-        except ContainerError as e:
-            logger.error(f"Failed to find free port: {e}")
-            raise
+        if host_port is None:
+            if DockerContainerClient._is_running_in_docker():
+                # Inside Docker we do not need to publish host ports; use a stable default.
+                host_port = 5020
+            else:
+                try:
+                    host_port = self.find_free_port()
+                except ContainerError as e:
+                    logger.error(f"Failed to find free port: {e}")
+                    raise
 
         # Prepare environment variables
         container_env = {
@@ -209,138 +269,25 @@ class DockerContainerClient(ContainerClient):
         if env_vars:
             container_env.update(env_vars)
 
-        # Build command for container
-        # For npx/node-based services, we need to wrap them to expose a streamable HTTP endpoint
-        image_name = "node:22-alpine"
+        if not full_command:
+            raise ContainerError("full_command is required to start container")
 
-        # For npx/node commands, use wrapper script to convert stdio to streamable HTTP
-        if command in ["npx", "node", "npm"]:
-            args_json = json.dumps(args)
-            wrapper_script_template = r'''
-const { spawn } = require("child_process");
-const http = require("http");
-const PORT = process.env.PORT || __HOST_PORT__;
-const mcp = spawn("__COMMAND__", __ARGS_JSON__, { stdio: ["pipe", "pipe", "pipe"] });
-let reqId = 0;
-const pending = new Map();
-
-function sendError(res, message, status = 500) {
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*"
-  });
-  res.end(JSON.stringify({ type: "error", error: message }));
-}
-
-mcp.stdout.on("data", (data) => {
-  const lines = data.toString().split("\\n").filter((l) => l.trim());
-  for (const line of lines) {
-    try {
-      const msg = JSON.parse(line);
-      if (msg.id !== undefined && pending.has(msg.id)) {
-        const res = pending.get(msg.id);
-        pending.delete(msg.id);
-        res.write(JSON.stringify(msg) + "\\n");
-        res.end();
-      }
-    } catch (e) {
-      console.error("MCP:", line);
-    }
-  }
-});
-
-mcp.stderr.on("data", (d) => console.error("MCP err:", d.toString()));
-
-const server = http.createServer((req, res) => {
-  const pathOk = req.url === "/mcp" || req.url === "/";
-  if (!pathOk) {
-    res.writeHead(404);
-    res.end("Not Found");
-    return;
-  }
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
-
-  if (req.method !== "POST") {
-    res.writeHead(405);
-    res.end("Method Not Allowed");
-    return;
-  }
-
-  let body = "";
-  req.on("data", (c) => (body += c.toString()));
-  req.on("end", () => {
-    try {
-      const payload = JSON.parse(body || "{}");
-      const id = payload.id ?? reqId++;
-      const mcpReq = { jsonrpc: "2.0", id, method: payload.method, params: payload.params || {} };
-
-      res.writeHead(200, {
-        "Content-Type": "application/x-ndjson",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "Transfer-Encoding": "chunked"
-      });
-
-      pending.set(id, res);
-      mcp.stdin.write(JSON.stringify(mcpReq) + "\\n");
-
-      setTimeout(() => {
-        if (pending.has(id)) {
-          pending.delete(id);
-          res.write(JSON.stringify({ type: "error", error: "timeout" }) + "\\n");
-          res.end();
-        }
-      }, 30000);
-    } catch (err) {
-      sendError(res, err.message);
-    }
-  });
-});
-
-server.listen(PORT, () => console.log(`MCP streamable-http wrapper on ${PORT}`));
-
-const shutdown = () => {
-  mcp.kill();
-  server.close(() => process.exit(0));
-};
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
-            '''
-            wrapper_script_content = (
-                wrapper_script_template.replace("__HOST_PORT__", str(host_port))
-                .replace("__COMMAND__", command.replace('"', '\\"'))
-                .replace("__ARGS_JSON__", args_json)
-            )
-
-            # Escape the script for shell
-            escaped_script = wrapper_script_content.replace("'", "'\"'\"'")
-            full_command = ["sh", "-c", f"node -e '{escaped_script}'"]
+        command0 = full_command[0] if full_command else ""
+        if image is not None:
+            image_name = image
+        elif command0 in ["npx", "node", "npm"]:
+            image_name = "node:22-alpine"
         else:
-            # For other commands, use alpine image
             image_name = "alpine:latest"
-            # For python, python3, bash, sh, use as-is (assuming they already support HTTP/SSE)
-            if command in ["python", "python3", "bash", "sh"]:
-                full_command = [command] + args
-            else:
-                # For generic commands, wrap in sh -c
-                full_command = ["sh", "-c", f"{command} {' '.join(args)}"]
+
+        full_command_to_run = full_command
 
         container_config = {
             "image": image_name,
             "name": container_name,
-            "command": full_command,
-            "ports": {f"{host_port}/tcp": host_port},
+            "command": full_command_to_run,
             "environment": container_env,
-            "network_mode": "bridge",  # Use bridge network to access from other containers
+            "network": self.DEFAULT_NETWORK_NAME,
             "restart_policy": {"Name": "unless-stopped"},
             "detach": True,
             "remove": False,
@@ -348,15 +295,19 @@ process.on("SIGINT", shutdown);
             "tty": False,
         }
 
+        # Only publish ports when running locally; inside Docker network DNS is used.
+        if not DockerContainerClient._is_running_in_docker():
+            container_config["ports"] = {f"{host_port}/tcp": host_port}
+
         try:
-            logger.info(f"Starting container {container_name} with command: {full_command}")
+            logger.info(f"Starting container {container_name} with command: {full_command_to_run}")
             container = self.client.containers.run(**container_config)
 
             # Wait a bit for container to start
             await asyncio.sleep(2)
 
             # Wait for service to be ready
-            host = self._get_service_host()
+            host = self._get_service_host(container_name)
             service_url = f"http://{host}:{host_port}/mcp"
             try:
                 await self._wait_for_service_ready(service_url, max_retries=30)
@@ -389,7 +340,7 @@ process.on("SIGINT", shutdown);
             raise ContainerError(f"Container startup failed: {e}")
 
     async def _wait_for_service_ready(
-        self, url: str, max_retries: int = 30, retry_delay: int = 2
+        self, url: str, max_retries: int = 30, retry_delay: int = 5
     ):
         """
         Wait for service to be ready by checking connection
@@ -497,16 +448,22 @@ process.on("SIGINT", shutdown);
                         if host_port:
                             break
 
-                host = self._get_service_host()
+                service_port = None
+                if DockerContainerClient._is_running_in_docker():
+                    service_port = self._get_container_service_port(container)
+                else:
+                    service_port = host_port
+
+                host = self._get_service_host(container.name)
                 result.append(
                     {
                         "container_id": container.id,
                         "name": container.name,
                         "status": container.status,
                         "service_url": (
-                            f"http://{host}:{host_port}/mcp" if host_port else None
+                            f"http://{host}:{service_port}/mcp" if service_port else None
                         ),
-                        "host_port": host_port,
+                        "host_port": service_port,
                     }
                 )
             return result
@@ -556,15 +513,21 @@ process.on("SIGINT", shutdown);
                     if host_port:
                         break
 
-            host = self._get_service_host()
+            service_port = None
+            if DockerContainerClient._is_running_in_docker():
+                service_port = self._get_container_service_port(container)
+            else:
+                service_port = host_port
+
+            host = self._get_service_host(container.name)
             return {
                 "container_id": container.id,
                 "name": container.name,
                 "status": container.status,
                 "service_url": (
-                    f"http://{host}:{host_port}/mcp" if host_port else None
+                    f"http://{host}:{service_port}/mcp" if service_port else None
                 ),
-                "host_port": host_port,
+                "host_port": service_port,
                 "created": container.attrs.get("Created"),
                 "image": container.attrs.get("Config", {}).get("Image"),
             }
