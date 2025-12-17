@@ -17,7 +17,7 @@ import { updateAgent } from "@/services/agentConfigService";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
 
-import AgentConfigModal from "./agent/AgentConfigModal";
+import AgentConfigModal, { AgentConfigModalProps } from "./agent/AgentConfigModal";
 
 import log from "@/lib/logger";
 
