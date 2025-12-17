@@ -116,9 +116,7 @@ export default function AgentSetupOrchestrator({
   const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
   // Use generation state passed from parent component, not local state
 
-  // Delete confirmation popup status
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
+
 
   // Embedding auto-unselect notice modal
   const [isEmbeddingAutoUnsetOpen, setIsEmbeddingAutoUnsetOpen] =
@@ -1770,19 +1768,17 @@ export default function AgentSetupOrchestrator({
   }, [pendingImportData, runAgentImport, t]);
 
   // Handle confirmed deletion
-  const handleConfirmDelete = async (t: TFunction) => {
-    if (!agentToDelete) return;
-
+  const handleConfirmDelete = async (agent: Agent) => {
     try {
-      const result = await deleteAgent(Number(agentToDelete.id));
+      const result = await deleteAgent(Number(agent.id));
       if (result.success) {
         message.success(
           t("businessLogic.config.error.agentDeleteSuccess", {
-            name: agentToDelete.name,
+            name: agent.name,
           })
         );
         // If currently editing the deleted agent, reset to initial clean state and avoid confirm modal on next switch
-        const deletedId = Number(agentToDelete.id);
+        const deletedId = Number(agent.id);
         const currentEditingId =
           (isEditingAgent && editingAgent ? Number(editingAgent.id) : null) ??
           null;
@@ -1815,7 +1811,7 @@ export default function AgentSetupOrchestrator({
         } else {
           // If deleting another agent that is in enabledAgentIds, remove it and update baseline
           // to avoid triggering false unsaved changes indicator
-          const deletedId = Number(agentToDelete.id);
+          const deletedId = Number(agent.id);
           if (enabledAgentIds.includes(deletedId)) {
             const updatedEnabledAgentIds = enabledAgentIds.filter(
               (id) => id !== deletedId
@@ -1840,9 +1836,6 @@ export default function AgentSetupOrchestrator({
     } catch (error) {
       log.error(t("agentConfig.agents.deleteFailed"), error);
       message.error(t("businessLogic.config.error.agentDeleteFailed"));
-    } finally {
-      setIsDeleteConfirmOpen(false);
-      setAgentToDelete(null);
     }
   };
 
@@ -2009,8 +2002,13 @@ export default function AgentSetupOrchestrator({
 
   // Handle delete agent from list
   const handleDeleteAgentFromList = (agent: Agent) => {
-    setAgentToDelete(agent);
-    setIsDeleteConfirmOpen(true);
+    confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", {
+        name: agent.name,
+      }),
+      onOk: () => handleConfirmDelete(agent),
+    });
   };
 
   // Handle exit edit mode
@@ -2305,37 +2303,7 @@ export default function AgentSetupOrchestrator({
           </Col>
         </Row>
 
-        {/* Delete confirmation popup */}
-        <Modal
-          title={t("businessLogic.config.modal.deleteTitle")}
-          open={isDeleteConfirmOpen}
-          onCancel={() => setIsDeleteConfirmOpen(false)}
-          centered
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button
-                type="primary"
-                danger
-                onClick={() => handleConfirmDelete(t)}
-              >
-                {t("common.confirm")}
-              </Button>
-            </div>
-          }
-          width={520}
-        >
-          <div className="py-2">
-            <div className="flex items-center">
-              <div className="ml-3 mt-2">
-                <div className="text-sm leading-6">
-                  {t("businessLogic.config.modal.deleteContent", {
-                    name: agentToDelete?.name,
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
+
         {/* Save confirmation modal for unsaved changes (debug/navigation hooks) */}
         <SaveConfirmModal
           open={isSaveConfirmOpen}

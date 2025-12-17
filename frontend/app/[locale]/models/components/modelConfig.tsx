@@ -25,7 +25,7 @@ import log from "@/lib/logger";
 import { ModelListCard } from "./model/ModelListCard";
 import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
-import EmbedderCheckModal from "./model/EmbedderCheckModal";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 // ModelConnectStatus type definition
 type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
@@ -98,13 +98,13 @@ export const ModelConfigSection = forwardRef<
   const { skipVerification = false, canAccessProtectedData = false } = props;
   const { modelConfig, updateModelConfig } = useConfig();
   const modelData = getModelData(t);
+  const { confirm } = useConfirmModal();
 
   // State management
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isModifyWarningOpen, setIsModifyWarningOpen] = useState(false);
 
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
@@ -118,11 +118,6 @@ export const ModelConfigSection = forwardRef<
   // Throttle timer
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingChangeRef = useRef<{
-    category: string;
-    option: string;
-    displayName: string;
-  } | null>(null);
 
   // Debounced auto-save scheduler
   const scheduleAutoSave = () => {
@@ -777,8 +772,22 @@ export const ModelConfigSection = forwardRef<
       const currentValue = selectedModels[category]?.[option] || "";
       // Only prompt when modifying from a non-empty value to a different value
       if (currentValue && currentValue !== displayName) {
-        pendingChangeRef.current = { category, option, displayName };
-        setIsModifyWarningOpen(true);
+        confirm({
+          title: t("embedding.modifyWarningModal.title"),
+          content: (
+            <div className="py-2">
+              <div className="text-sm leading-6">
+                {t("embedding.modifyWarningModal.content")}
+              </div>
+            </div>
+          ),
+          okText: t("embedding.modifyWarningModal.ok_proceed"),
+          cancelText: t("common.cancel"),
+          danger: false,
+          onOk: async () => {
+            await applyModelChange(category, option, displayName);
+          },
+        });
         return;
       }
       if (currentValue === displayName) {
@@ -787,25 +796,6 @@ export const ModelConfigSection = forwardRef<
     }
 
     await applyModelChange(category, option, displayName);
-  };
-
-  const handleModifyOk = async () => {
-    const pending = pendingChangeRef.current;
-    if (pending) {
-      await handleModelChange(
-        pending.category,
-        pending.option,
-        pending.displayName,
-        true
-      );
-    }
-    pendingChangeRef.current = null;
-    setIsModifyWarningOpen(false);
-  };
-
-  const handleModifyCancel = () => {
-    pendingChangeRef.current = null;
-    setIsModifyWarningOpen(false);
   };
 
   // Only update local UI state, no database operations involved
@@ -1058,17 +1048,7 @@ export const ModelConfigSection = forwardRef<
           models={models}
         />
 
-        <EmbedderCheckModal
-          emptyWarningOpen={false}
-          onEmptyOk={() => {}}
-          onEmptyCancel={() => {}}
-          connectivityWarningOpen={false}
-          onConnectivityOk={() => {}}
-          onConnectivityCancel={() => {}}
-          modifyWarningOpen={isModifyWarningOpen}
-          onModifyOk={handleModifyOk}
-          onModifyCancel={handleModifyCancel}
-        />
+
       </div>
     </>
   );

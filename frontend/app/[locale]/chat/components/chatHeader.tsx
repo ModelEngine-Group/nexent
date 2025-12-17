@@ -2,8 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Button } from "antd";
-import { WarningFilled } from "@ant-design/icons";
+import { Button } from "antd";
 
 import { Input } from "@/components/ui/input";
 import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
@@ -13,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { USER_ROLES } from "@/const/modelConfig";
 import { saveView } from "@/lib/viewPersistence";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 interface ChatHeaderProps {
   title: string;
@@ -24,16 +24,41 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
 
-  const [showConfigPrompt, setShowConfigPrompt] = useState(false);
-  const [showAutoOffPrompt, setShowAutoOffPrompt] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const { t, i18n } = useTranslation("common");
   const { user, isSpeedMode } = useAuth();
+  const { confirm } = useConfirmModal();
   const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   const goToModelSetup = () => {
     saveView("models");
     router.push(`/${i18n.language}`);
+  };
+
+  const showAutoOffConfirm = () => {
+    confirm({
+      title: t("embedding.chatMemoryAutoDeselectModal.title"),
+      content: (
+        <div className="py-2">
+          <div className="text-sm leading-6">
+            {t("embedding.chatMemoryAutoDeselectModal.content")}
+          </div>
+          {!isAdmin && (
+            <div className="mt-2 text-xs opacity-70">
+              {t("embedding.chatMemoryAutoDeselectModal.tip")}
+            </div>
+          )}
+          {isAdmin && (
+            <div className="mt-4 flex justify-end">
+              <Button type="primary" danger onClick={goToModelSetup}>
+                {t("embedding.chatMemoryAutoDeselectModal.ok_config")}
+              </Button>
+            </div>
+          )}
+        </div>
+      ),
+    });
   };
 
   // Update editTitle when the title attribute changes
@@ -73,7 +98,7 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
                   "Failed to auto turn off memory switch when embedding is not configured"
                 );
               }
-              setShowAutoOffPrompt(true);
+              showAutoOffConfirm();
             }
           })
           .catch((e) => {
@@ -145,83 +170,7 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
           </div>
         </div>
       </header>
-      {/* Embedding not configured prompt */}
-      <Modal
-        title={t("embedding.chatMemoryWarningModal.title")}
-        open={showConfigPrompt}
-        onCancel={() => setShowConfigPrompt(false)}
-        centered
-        footer={
-          <div className="flex justify-end mt-3 gap-4">
-            {isAdmin && (
-              <Button type="primary" onClick={goToModelSetup}>
-                {t("embedding.chatMemoryWarningModal.ok_config")}
-              </Button>
-            )}
-            <Button onClick={() => setShowConfigPrompt(false)}>
-              {t("embedding.chatMemoryWarningModal.ok")}
-            </Button>
-          </div>
-        }
-      >
-        <div className="py-2">
-          <div className="flex items-center">
-            <WarningFilled
-              className="text-yellow-500 mt-1 mr-2"
-              style={{ fontSize: "48px" }}
-            />
-            <div className="ml-3 mt-2">
-              <div className="text-sm leading-6">
-                {t("embedding.chatMemoryWarningModal.content")}
-              </div>
-              {!isAdmin && (
-                <div className="mt-2 text-xs opacity-70">
-                  {t("embedding.chatMemoryWarningModal.tip")}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </Modal>
 
-      {/* Auto-off memory prompt when embedding missing */}
-      <Modal
-        title={t("embedding.chatMemoryAutoDeselectModal.title")}
-        open={showAutoOffPrompt}
-        onCancel={() => setShowAutoOffPrompt(false)}
-        centered
-        footer={
-          <div className="flex justify-end mt-3 gap-4">
-            {isAdmin && (
-              <Button type="primary" onClick={goToModelSetup}>
-                {t("embedding.chatMemoryAutoDeselectModal.ok_config")}
-              </Button>
-            )}
-            <Button onClick={() => setShowAutoOffPrompt(false)}>
-              {t("embedding.chatMemoryAutoDeselectModal.ok")}
-            </Button>
-          </div>
-        }
-      >
-        <div className="py-2">
-          <div className="flex items-center">
-            <WarningFilled
-              className="text-yellow-500 mt-1 mr-2"
-              style={{ fontSize: "48px" }}
-            />
-            <div className="ml-3 mt-2">
-              <div className="text-sm leading-6">
-                {t("embedding.chatMemoryAutoDeselectModal.content")}
-              </div>
-              {!isAdmin && (
-                <div className="mt-2 text-xs opacity-70">
-                  {t("embedding.chatMemoryAutoDeselectModal.tip")}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </Modal>
     </>
   );
 }

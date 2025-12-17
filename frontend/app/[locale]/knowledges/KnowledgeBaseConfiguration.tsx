@@ -4,8 +4,8 @@ import type React from "react";
 import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal, Row, Col } from "antd";
-import { InfoCircleFilled, WarningFilled } from "@ant-design/icons";
+import { App, Modal, Row, Col, theme } from "antd";
+import { ExclamationCircleFilled, WarningFilled, InfoCircleFilled } from "@ant-design/icons";
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
@@ -116,6 +116,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
   const { modelConfig } = useConfig();
+  const { token } = theme.useToken();
 
   // Clear cache when component initializes
   useEffect(() => {
@@ -828,24 +829,29 @@ function DataConfig({ isActive }: DataConfigProps) {
       >
         <Modal
           open={showAutoDeselectModal}
-          title={t("embedding.knowledgeBaseAutoDeselectModal.title")}
+          title={null}
           onOk={() => setShowAutoDeselectModal(false)}
           onCancel={() => setShowAutoDeselectModal(false)}
           okText={t("common.confirm")}
           cancelButtonProps={{ style: { display: "none" } }}
           centered
+          okButtonProps={{ type: "primary", danger: true }}
           getContainer={() => contentRef.current || document.body}
         >
-          <div className="py-2">
-            <div className="flex items-center px-4">
-              <InfoCircleFilled
-                className="text-blue-500 mt-1 mr-2"
-                style={{ fontSize: "48px" }}
-              />
-              <div className="ml-3 mt-2">
-                <div className="text-sm leading-6">
-                  {t("embedding.knowledgeBaseAutoDeselectModal.content")}
-                </div>
+          <div className="flex items-start gap-4">
+            <ExclamationCircleFilled 
+              style={{
+                color: token.colorWarning,
+                fontSize: '22px',
+                marginTop: '2px'
+              }}
+            />
+            <div className="flex-1">
+              <div className="text-base font-medium mb-3">
+                {t("embedding.knowledgeBaseAutoDeselectModal.title")}
+              </div>
+              <div className="text-sm leading-6">
+                {t("embedding.knowledgeBaseAutoDeselectModal.content")}
               </div>
             </div>
           </div>
