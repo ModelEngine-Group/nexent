@@ -11,10 +11,10 @@ import {
   Tooltip,
 } from "antd";
 import {
-  CloseOutlined,
-  SettingOutlined,
-  EditOutlined,
-} from "@ant-design/icons";
+  Settings,
+  PenLine,
+  X,
+} from "lucide-react";
 
 import { ToolParam, Tool } from "@/types/agentConfig";
 import {
@@ -325,7 +325,7 @@ export default function ToolTestPanel({
               </div>
               <Button
                 type="text"
-                icon={<CloseOutlined />}
+                icon={< X size={16} />}
                 onClick={handleClose}
                 size="small"
               />
@@ -408,9 +408,9 @@ export default function ToolTestPanel({
                           size="small"
                           icon={
                             isManualInputMode ? (
-                              <SettingOutlined />
+                              <Settings size={16} />
                             ) : (
-                              <EditOutlined />
+                              <PenLine size={16} />
                             )
                           }
                           onClick={() => {

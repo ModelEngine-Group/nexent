@@ -3,10 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Input, Select, InputNumber } from "antd";
-import {
-  LoadingOutlined,
-} from "@ant-design/icons";
-import { Bug, Save, Maximize2 } from "lucide-react";
+import { Bug, Save, Maximize2, LoaderCircle } from "lucide-react";
 
 import log from "@/lib/logger";
 import { ModelOption } from "@/types/modelConfig";
@@ -860,7 +857,7 @@ export default function AgentConfigModal({
             >
               {t("systemPrompt.card.duty.title")}
               {isGeneratingAgent && activeSegment === "duty" && (
-                <LoadingOutlined className="ml-2 text-white" />
+                <LoaderCircle className="ml-2 text-white animate-spin" size={16} />
               )}
             </button>
             <button
@@ -875,7 +872,7 @@ export default function AgentConfigModal({
             >
               {t("systemPrompt.card.constraint.title")}
               {isGeneratingAgent && activeSegment === "constraint" && (
-                <LoadingOutlined className="ml-2 text-white" />
+                <LoaderCircle className="ml-2 text-white animate-spin" size={16} />
               )}
             </button>
             <button
@@ -890,7 +887,7 @@ export default function AgentConfigModal({
             >
               {t("systemPrompt.card.fewShots.title")}
               {isGeneratingAgent && activeSegment === "few-shots" && (
-                <LoadingOutlined className="ml-2 text-white" />
+                <LoaderCircle className="ml-2 text-white animate-spin" size={16} />
               )}
             </button>
           </div>

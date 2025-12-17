@@ -4,9 +4,8 @@ import { Button } from "@/components/ui/button";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
-import { Globe } from "lucide-react";
+import { ChevronDown, Globe } from "lucide-react";
 import { Dropdown } from "antd";
-import { DownOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import { HEADER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import { languageOptions } from "@/const/constants";
@@ -122,7 +121,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
             <Globe className="h-3.5 w-3.5" />
             {languageOptions.find((o) => o.value === currentLanguage)?.label ||
               currentLanguage}
-            <DownOutlined className="text-[9px]" />
+            <ChevronDown size={12} />
           </Flex>
         </a>
       </Dropdown>

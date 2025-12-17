@@ -3,14 +3,13 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd";
-import {
-  UserOutlined,
-  LogoutOutlined,
-  LoginOutlined,
-  PoweroffOutlined,
-  CloseCircleFilled,
-  UserAddOutlined,
-} from "@ant-design/icons";
+import { 
+  UserRound, 
+  LogOut, 
+  LogIn, 
+  Power, 
+  UserRoundPlus,
+} from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -51,7 +50,7 @@ export function AvatarDropdown() {
       },
       {
         key: "login",
-        icon: <LoginOutlined />,
+        icon: <LogIn size={16} />,
         label: t("auth.login"),
         onClick: () => {
           setDropdownOpen(false);
@@ -60,7 +59,7 @@ export function AvatarDropdown() {
       },
       {
         key: "register",
-        icon: <UserAddOutlined />,
+        icon: <UserRoundPlus size={16} />,
         label: t("auth.register"),
         onClick: () => {
           setDropdownOpen(false);
@@ -83,7 +82,7 @@ export function AvatarDropdown() {
           )}
           getPopupContainer={() => document.body}
         >
-          <Button type="text" icon={<UserOutlined />} shape="circle" />
+          <Button type="text" icon={<UserRound size={18} />} shape="circle" />
         </Dropdown>
       </ConfigProvider>
     );
@@ -114,7 +113,7 @@ export function AvatarDropdown() {
     },
     {
       key: "logout",
-      icon: <LogoutOutlined />,
+      icon: <LogOut size={16} />,
       label: t("auth.logout"),
       onClick: () => {
         confirm({
@@ -128,7 +127,7 @@ export function AvatarDropdown() {
     },
     {
       key: "revoke",
-      icon: <PoweroffOutlined />,
+      icon: <Power size={16} />,
       label: t("auth.revoke"),
       // danger: true,
       className:
@@ -170,7 +169,7 @@ export function AvatarDropdown() {
           src={user.avatar_url}
           className="cursor-pointer"
           size="default"
-          icon={<UserOutlined />}
+          icon={<UserRound size={18} />}
         />
       </Dropdown>
     </ConfigProvider>

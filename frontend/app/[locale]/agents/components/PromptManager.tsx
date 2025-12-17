@@ -3,11 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Badge, Input, App, Select } from "antd";
-import {
-  LoadingOutlined,
-  InfoCircleOutlined,
-} from "@ant-design/icons";
-import { Zap } from "lucide-react";
+import { Zap, LoaderCircle, Info } from "lucide-react";
 
 import {
   SimplePromptEditorProps,
@@ -544,16 +540,19 @@ export default function PromptManager({
       {/* Non-editing mode overlay */}
       {!isEditingMode && (
         <div className="absolute inset-0 bg-white bg-opacity-95 flex items-center justify-center z-50 transition-all duration-300 ease-out animate-in fade-in-0">
-          <div className="text-center space-y-4 animate-in fade-in-50 duration-400 delay-50">
-            <InfoCircleOutlined className="text-6xl text-gray-400 transition-all duration-300 animate-in zoom-in-75 delay-100" />
-            <div className="animate-in slide-in-from-bottom-2 duration-300 delay-150">
-              <h3 className="text-lg font-medium text-gray-700 mb-2 transition-all duration-300">
+          <div className="space-y-3 animate-in fade-in-50 duration-400 delay-50 text-center">
+            <div className="flex items-center justify-center gap-3 animate-in slide-in-from-bottom-2 duration-300 delay-150">
+              <Info
+                className="text-gray-400 transition-all duration-300 animate-in zoom-in-75 delay-100"
+                size={48}
+              />
+              <h3 className="text-lg font-medium text-gray-700 transition-all duration-300">
                 {t("systemPrompt.nonEditing.title")}
               </h3>
-              <p className="text-sm text-gray-500 transition-all duration-300">
-                {t("systemPrompt.nonEditing.subtitle")}
-              </p>
             </div>
+            <p className="text-sm text-gray-500 transition-all duration-300">
+              {t("systemPrompt.nonEditing.subtitle")}
+            </p>
           </div>
         </div>
       )}
@@ -641,7 +640,7 @@ export default function PromptManager({
                     className="px-3 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ border: "none" }}
                   >
-                    <LoadingOutlined spin className="mr-1" />
+                    <LoaderCircle className="mr-1 animate-spin" size={16}/>
                     {t("businessLogic.config.button.generating")}
                   </button>
                 ) : (
@@ -652,7 +651,7 @@ export default function PromptManager({
                     style={{ border: "none" }}
                   >
                     {loadingModels ? (
-                      <LoadingOutlined className="mr-1" />
+                      <LoaderCircle className="mr-1 animate-spin" size={16}/>
                     ) : (
                       <Zap size={16} className="mr-1" />
                     )}

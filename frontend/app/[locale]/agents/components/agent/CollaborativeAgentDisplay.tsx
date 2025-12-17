@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Tag, App } from "antd";
-import { PlusOutlined, CloseOutlined } from "@ant-design/icons";
+import { Plus, X } from "lucide-react";
 
 import { CollaborativeAgentDisplayProps } from "@/types/agentConfig";
 
@@ -174,7 +174,7 @@ export default function CollaborativeAgentDisplay({
               }`}
               title={isEditingMode ? t("collaborativeAgent.button.add") : ""}
             >
-              <PlusOutlined className="text-sm" />
+              <Plus size={16} />
             </button>
             {/* Dropdown only renders in editing mode */}
             {isEditingMode && renderDropdown()}
@@ -186,7 +186,7 @@ export default function CollaborativeAgentDisplay({
               className="flex items-center h-8"
               closable={isEditingMode && !isGeneratingAgent}
               onClose={() => handleRemoveCollaborativeAgent(Number(agent.id))}
-              closeIcon={<CloseOutlined className="text-xs" />}
+              closeIcon={<X size={16} />}
               style={{
                 maxWidth: "200px",
               }}

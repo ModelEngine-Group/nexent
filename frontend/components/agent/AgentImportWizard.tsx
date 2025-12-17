@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Modal, Steps, Button, Select, Input, Form, Tag, Space, Spin, App, Collapse, Radio } from "antd";
-import { DownloadOutlined, CheckCircleOutlined, CloseCircleOutlined, PlusOutlined, ToolOutlined } from "@ant-design/icons";
+import { Download, CircleCheck, CircleX, Plus, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
@@ -1036,7 +1036,7 @@ export default function AgentImportWizard({
           {allConflictsResolved ? (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
               <div className="flex items-center gap-2">
-                <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-lg" />
+                <CircleCheck className="text-green-600 dark:text-green-400 text-lg" size={16} />
                 <p className="text-sm font-semibold text-green-800 dark:text-green-200">
                   {t(
                     "market.install.rename.success",
@@ -1050,7 +1050,7 @@ export default function AgentImportWizard({
               {hasResolvedAgents && (
                 <div className="mb-2 pb-2 border-b border-yellow-300 dark:border-yellow-700">
                   <div className="flex items-center gap-2">
-                    <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-sm" />
+                    <CircleCheck className="text-green-600 dark:text-green-400 text-sm" size={16} />
                     <p className="text-xs text-green-700 dark:text-green-300">
                       {t(
                         "market.install.rename.partialSuccess",
@@ -1119,7 +1119,7 @@ export default function AgentImportWizard({
                   {successfullyRenamedAgents.has(agentKey) ? (
                     <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-2 mb-3">
                       <div className="flex items-center gap-2">
-                        <CheckCircleOutlined className="text-green-600 dark:text-green-400 text-sm" />
+                        <CircleCheck className="text-green-600 dark:text-green-400 text-sm" size={16} />
                         <p className="text-xs text-green-700 dark:text-green-300">
                           {t(
                             "market.install.rename.agentResolved",
@@ -1285,7 +1285,7 @@ export default function AgentImportWizard({
                 >
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2">
-                      <ToolOutlined className="text-red-500" />
+                      <Wrench className="text-red-500" size={18} />
                       <span className="font-medium text-gray-900 dark:text-gray-100">
                         {tool.name}
                       </span>
@@ -1600,11 +1600,11 @@ export default function AgentImportWizard({
                         {mcp.mcp_server_name}
                       </span>
                       {mcp.isInstalled ? (
-                        <Tag icon={<CheckCircleOutlined />} color="success" className="text-xs">
+                        <Tag icon={<CircleCheck size={14} />} color="success" className="text-xs">
                           {t("market.install.mcp.installed", "Installed")}
                         </Tag>
                       ) : (
-                        <Tag icon={<CloseCircleOutlined />} color="default" className="text-xs">
+                        <Tag icon={<CircleX size={14} />} color="default" className="text-xs">
                           {t("market.install.mcp.notInstalled", "Not Installed")}
                         </Tag>
                       )}
@@ -1614,7 +1614,7 @@ export default function AgentImportWizard({
                       <Button
                         type="primary"
                         size="middle"
-                        icon={<PlusOutlined />}
+                        icon={<Plus size={16} />}
                         onClick={() => handleInstallMcp(index)}
                         loading={installingMcp[String(index)]}
                         disabled={!mcp.editedUrl || mcp.editedUrl.trim() === ""}
@@ -1679,7 +1679,7 @@ export default function AgentImportWizard({
     <Modal
       title={
         <div className="flex items-center gap-2">
-          <DownloadOutlined />
+          <Download size={20} />
           <span>{title || t("market.install.title", "Install Agent")}</span>
         </div>
       }
@@ -1712,7 +1712,7 @@ export default function AgentImportWizard({
                 onClick={handleImport}
                 disabled={!canProceed()}
                 loading={isImporting}
-                icon={<DownloadOutlined />}
+                icon={<Download size={16} />}
               >
                 {isImporting 
                   ? t("market.install.button.installing", "Installing...")

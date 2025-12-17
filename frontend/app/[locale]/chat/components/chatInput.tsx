@@ -1,19 +1,18 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, Mic, MicOff, Square, X, AlertCircle } from "lucide-react";
+import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
 import {
-  AiFillFileImage,
-  AiFillFilePdf,
-  AiFillFileWord,
-  AiFillFileExcel,
-  AiFillFilePpt,
-  AiFillFileText,
-  AiFillFileMarkdown,
-  AiFillHtml5,
-  AiFillCode,
-  AiFillFileUnknown,
-  AiOutlineUpload,
-} from "react-icons/ai";
+  FileImageFilled,
+  FilePdfFilled,
+  FileWordFilled,
+  FileExcelFilled,
+  FilePptFilled,
+  FileTextFilled,
+  FileMarkdownFilled,
+  Html5Filled,
+  CodeFilled,
+  FileUnknownFilled,
+} from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -245,48 +244,48 @@ const getFileIcon = (file: File) => {
 
   // Image file
   if (fileType.startsWith("image/")) {
-    return <AiFillFileImage size={iconSize} color="#8e44ad" />;
+    return <FileImageFilled size={iconSize} color="#8e44ad" />;
   }
 
   // Check each file type category using config
   if (chatConfig.fileIcons.pdf.includes(extension)) {
-    return <AiFillFilePdf size={iconSize} color="#e74c3c" />;
+    return <FilePdfFilled size={iconSize} color="#e74c3c" />;
   }
   
   if (chatConfig.fileIcons.word.includes(extension)) {
-    return <AiFillFileWord size={iconSize} color="#3498db" />;
+    return <FileWordFilled size={iconSize} color="#3498db" />;
   }
   
   if (chatConfig.fileIcons.text.includes(extension)) {
-    return <AiFillFileText size={iconSize} color="#7f8c8d" />;
+    return <FileTextFilled size={iconSize} color="#7f8c8d" />;
   }
   
   if (chatConfig.fileIcons.markdown.includes(extension)) {
-    return <AiFillFileMarkdown size={iconSize} color="#34495e" />;
+    return <FileMarkdownFilled size={iconSize} color="#34495e" />;
   }
   
   if (chatConfig.fileIcons.excel.includes(extension)) {
-    return <AiFillFileExcel size={iconSize} color="#27ae60" />;
+    return <FileExcelFilled size={iconSize} color="#27ae60" />;
   }
   
   if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    return <AiFillFilePpt size={iconSize} color="#e67e22" />;
+    return <FilePptFilled size={iconSize} color="#e67e22" />;
   }
   
   if (chatConfig.fileIcons.html.includes(extension)) {
-    return <AiFillHtml5 size={iconSize} color="#e67e22" />;
+    return <Html5Filled size={iconSize} color="#e67e22" />;
   }
   
   if (chatConfig.fileIcons.code.includes(extension)) {
-    return <AiFillCode size={iconSize} color="#f39c12" />;
+    return <CodeFilled size={iconSize} color="#f39c12" />;
   }
   
   if (chatConfig.fileIcons.json.includes(extension)) {
-    return <AiFillCode size={iconSize} color="#f1c40f" />;
+    return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
   // Default file icon
-  return <AiFillFileUnknown size={iconSize} color="#95a5a6" />;
+  return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
 };
 
 // File limit constants from config
@@ -965,7 +964,7 @@ export function ChatInput({
         <div className="p-4 max-w-md text-center">
           <div className="flex justify-center mb-2">
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <AiOutlineUpload className="h-5 w-5 text-blue-500" />
+              <Upload className="h-5 w-5 text-blue-500" />
             </div>
           </div>
           <h3 className="text-base font-medium mb-1 text-blue-700">

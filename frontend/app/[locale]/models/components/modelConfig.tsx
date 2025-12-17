@@ -2,12 +2,12 @@ import { forwardRef, useEffect, useImperativeHandle, useState, useRef, ReactNode
 import { useTranslation } from 'react-i18next'
 
 import { Button, Card, Col, Row, Space, App } from 'antd'
-import {
-  PlusOutlined,
-  SafetyCertificateOutlined,
-  SyncOutlined,
-  EditOutlined,
-} from "@ant-design/icons";
+import { 
+  Plus,
+  ShieldCheck,
+  RefreshCw,
+  PenLine
+} from "lucide-react";
 
 import {
   MODEL_TYPES,
@@ -848,7 +848,7 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <SyncOutlined />
+                <RefreshCw className="mr-1" size={16} />
                 <span style={{ marginLeft: 4 }}>
                   <span className="hidden xl:inline button-text-full">
                     {t("modelConfig.button.syncModelEngine")}
@@ -863,7 +863,7 @@ export const ModelConfigSection = forwardRef<
               <Button
                 type="primary"
                 size="middle"
-                icon={<PlusOutlined />}
+                icon={<Plus size={16} />}
                 onClick={() => setIsAddModalOpen(true)}
                 style={{ width: "100%" }}
                 block
@@ -880,7 +880,7 @@ export const ModelConfigSection = forwardRef<
               <Button
                 type="primary"
                 size="middle"
-                icon={<EditOutlined />}
+                icon={<PenLine size={16} />}
                 onClick={() => setIsDeleteModalOpen(true)}
                 style={{ width: "100%" }}
                 block
@@ -897,7 +897,7 @@ export const ModelConfigSection = forwardRef<
               <Button
                 type="primary"
                 size="middle"
-                icon={<SafetyCertificateOutlined />}
+                icon={<ShieldCheck size={16} />}
                 onClick={verifyModels}
                 loading={isVerifying}
                 style={{ width: "100%" }}

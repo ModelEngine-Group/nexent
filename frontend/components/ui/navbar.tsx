@@ -4,9 +4,8 @@ import { Button } from "@/components/ui/button";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
-import { Globe } from "lucide-react";
+import { ChevronDown, Globe } from "lucide-react";
 import { Dropdown } from "antd";
-import { DownOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import { HEADER_CONFIG } from "@/const/layoutConstants";
 import { languageOptions } from "@/const/constants";
@@ -83,7 +82,7 @@ export function Navbar() {
             <Globe className="h-4 w-4" />
             {languageOptions.find((o) => o.value === currentLanguage)?.label ||
               currentLanguage}
-            <DownOutlined className="text-[10px]" />
+            <ChevronDown size={12} />
           </a>
         </Dropdown>
 
