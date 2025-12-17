@@ -1,88 +1,7 @@
 "use client";
 
-import React, {ReactNode} from "react";
+import {ReactNode} from "react";
 import {useTranslation} from "react-i18next";
-
-import {Badge, Button, Dropdown} from "antd";
-import {DownOutlined} from "@ant-design/icons";
-import {FiRefreshCw} from "react-icons/fi";
-import {Globe} from "lucide-react";
-import {languageOptions} from "@/const/constants";
-import {useLanguageSwitch} from "@/lib/language";
-import {CONNECTION_STATUS, ConnectionStatus,} from "@/const/modelConfig";
-
-// ================ Setup Header Content Components ================
-// These components are exported so they can be used to customize the TopNavbar
-
-interface SetupHeaderRightContentProps {
-  connectionStatus: ConnectionStatus;
-  isCheckingConnection: boolean;
-  onCheckConnection: () => void;
-}
-
-export function SetupHeaderRightContent({
-  connectionStatus,
-  isCheckingConnection,
-  onCheckConnection,
-}: SetupHeaderRightContentProps) {
-  const { t } = useTranslation();
-  const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
-
-  // Get status text
-  const getStatusText = () => {
-    switch (connectionStatus) {
-      case CONNECTION_STATUS.SUCCESS:
-        return t("setup.header.status.connected");
-      case CONNECTION_STATUS.ERROR:
-        return t("setup.header.status.disconnected");
-      case CONNECTION_STATUS.PROCESSING:
-        return t("setup.header.status.checking");
-      default:
-        return t("setup.header.status.unknown");
-    }
-  };
-
-  return (
-      <div className="flex items-center gap-3">
-        <Dropdown
-          menu={{
-            items: languageOptions.map((opt) => ({
-              key: opt.value,
-              label: opt.label,
-            })),
-            onClick: ({ key }) => handleLanguageChange(key as string),
-          }}
-        >
-          <a className="ant-dropdown-link text-sm !font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2 cursor-pointer w-[110px] border-0 shadow-none bg-transparent text-left">
-            <Globe className="h-4 w-4" />
-            {languageOptions.find((o) => o.value === currentLanguage)?.label ||
-              currentLanguage}
-            <DownOutlined className="text-[10px]" />
-          </a>
-        </Dropdown>
-        {/* ModelEngine connectivity status */}
-        <div className="flex items-center px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700">
-          <Badge
-            status={connectionStatus}
-            text={getStatusText()}
-            className="[&>.ant-badge-status-dot]:w-[8px] [&>.ant-badge-status-dot]:h-[8px] [&>.ant-badge-status-text]:text-base [&>.ant-badge-status-text]:ml-2 [&>.ant-badge-status-text]:font-medium"
-          />
-          <Button
-            icon={
-              <FiRefreshCw
-                className={isCheckingConnection ? "animate-spin" : ""}
-              />
-            }
-            size="small"
-            type="text"
-            onClick={onCheckConnection}
-            disabled={isCheckingConnection}
-            className="ml-2"
-          />
-        </div>
-      </div>
-  );
-}
 
 // ================ Navigation ================
 interface NavigationProps {
@@ -179,7 +98,6 @@ interface SetupLayoutProps {
 /**
  * SetupLayout - Content wrapper for setup pages
  * This component should be wrapped by NavigationLayout
- * Use SetupHeaderRightContent for customizing the top navbar
  */
 export default function SetupLayout({
   children,
