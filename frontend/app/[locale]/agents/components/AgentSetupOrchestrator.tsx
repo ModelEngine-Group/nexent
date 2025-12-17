@@ -118,9 +118,7 @@ export default function AgentSetupOrchestrator({
 
 
 
-  // Embedding auto-unselect notice modal
-  const [isEmbeddingAutoUnsetOpen, setIsEmbeddingAutoUnsetOpen] =
-    useState(false);
+
   const lastProcessedAgentIdForEmbedding = useRef<number | null>(null);
 
   // Flag to track if we need to refresh enabledToolIds after tools update
@@ -672,7 +670,12 @@ export default function AgentSetupOrchestrator({
       } catch (error) {
         // Even if API fails, still inform user and prevent usage in UI
       } finally {
-        setIsEmbeddingAutoUnsetOpen(true);
+        confirm({
+          title: t("embedding.agentToolAutoDeselectModal.title"),
+          content: t("embedding.agentToolAutoDeselectModal.content"),
+          okText: t("common.confirm"),
+          onOk: () => {},
+        });
         lastProcessedAgentIdForEmbedding.current = currentAgentId;
       }
     };
@@ -2011,32 +2014,6 @@ export default function AgentSetupOrchestrator({
     });
   };
 
-  // Handle exit edit mode
-  const handleExitEdit = () => {
-    setIsEditingAgent(false);
-    setEditingAgent(null);
-    // Use the parent's exit creation handler to properly clear cache
-    if (isCreatingNewAgent && onExitCreation) {
-      onExitCreation();
-    } else {
-      setIsCreatingNewAgent(false);
-    }
-    setBusinessLogic("");
-    setDutyContent("");
-    setConstraintContent("");
-    setFewShotsContent("");
-    setAgentName?.("");
-    setAgentDescription?.("");
-    // Reset mainAgentId and enabledAgentIds
-    setMainAgentId(null);
-    setEnabledAgentIds([]);
-    // Reset selected tools
-    setSelectedTools([]);
-    setEnabledToolIds([]);
-    // Notify parent component about editing state change
-    onEditingStateChange?.(false, null);
-  };
-
   // Refresh tool list
   const handleToolsRefresh = useCallback(
     async (showSuccessMessage = true) => {
@@ -2295,8 +2272,6 @@ export default function AgentSetupOrchestrator({
               isCreatingNewAgent={isCreatingNewAgent}
               canSaveAgent={localCanSaveAgent}
               getButtonTitle={getLocalButtonTitle}
-              onDeleteAgent={onDeleteAgent || (() => {})}
-              onDeleteSuccess={handleExitEdit}
               editingAgent={editingAgentFromParent || editingAgent}
               onViewCallRelationship={handleViewCallRelationship}
             />
@@ -2443,37 +2418,7 @@ export default function AgentSetupOrchestrator({
           }
         />
         {/* Auto unselect knowledge_base_search notice when embedding not configured */}
-        <Modal
-          title={t("embedding.agentToolAutoDeselectModal.title")}
-          open={isEmbeddingAutoUnsetOpen}
-          onCancel={() => setIsEmbeddingAutoUnsetOpen(false)}
-          centered
-          footer={
-            <div className="flex justify-end mt-6 gap-4">
-              <Button
-                type="primary"
-                onClick={() => setIsEmbeddingAutoUnsetOpen(false)}
-              >
-                {t("common.confirm")}
-              </Button>
-            </div>
-          }
-          width={520}
-        >
-          <div className="py-2">
-            <div className="flex items-center">
-              <WarningFilled
-                className="text-yellow-500 mt-1 mr-2"
-                style={{ fontSize: "48px" }}
-              />
-              <div className="ml-3 mt-2">
-                <div className="text-sm leading-6">
-                  {t("embedding.agentToolAutoDeselectModal.content")}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
+
         {/* Agent call relationship modal */}
         <AgentCallRelationshipModal
           visible={callRelationshipModalVisible}

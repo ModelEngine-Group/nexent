@@ -17,7 +17,7 @@ import { updateAgent } from "@/services/agentConfigService";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
 
-import AgentConfigModal from "./agent/AgentConfigModal";
+import AgentConfigModal, { AgentConfigModalProps } from "./agent/AgentConfigModal";
 
 import log from "@/lib/logger";
 
@@ -229,8 +229,6 @@ export interface PromptManagerProps {
   onGenerateAgent?: (model: ModelOption) => void;
   onSaveAgent?: () => void;
   onDebug?: () => void;
-  onDeleteAgent?: () => void;
-  onDeleteSuccess?: () => void;
   getButtonTitle?: () => string;
   onViewCallRelationship?: () => void;
 
@@ -276,8 +274,6 @@ export default function PromptManager({
   onGenerateAgent,
   onSaveAgent,
   onDebug,
-  onDeleteAgent,
-  onDeleteSuccess,
   getButtonTitle,
   onViewCallRelationship,
   editingAgent,
@@ -692,8 +688,6 @@ export default function PromptManager({
             onExpandCard={handleExpandCard}
             isGeneratingAgent={isGeneratingAgent}
             onDebug={onDebug}
-            onDeleteAgent={onDeleteAgent}
-            onDeleteSuccess={onDeleteSuccess}
             onSaveAgent={onSaveAgent}
             isCreatingNewAgent={isCreatingNewAgent}
             editingAgent={editingAgent}
