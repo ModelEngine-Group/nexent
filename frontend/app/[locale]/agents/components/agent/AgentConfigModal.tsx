@@ -48,8 +48,6 @@ export interface AgentConfigModalProps {
   isGeneratingAgent?: boolean;
   // Add new props for action buttons
   onDebug?: () => void;
-  onDeleteAgent?: () => void;
-  onDeleteSuccess?: () => void; // New prop for handling delete success
   onSaveAgent?: () => void;
   isCreatingNewAgent?: boolean;
   editingAgent?: Agent | null;
@@ -84,8 +82,6 @@ export default function AgentConfigModal({
   isGeneratingAgent = false,
   // Add new props for action buttons
   onDebug,
-  onDeleteAgent,
-  onDeleteSuccess,
   onSaveAgent,
   isCreatingNewAgent = false,
   editingAgent = null,
@@ -106,9 +102,6 @@ export default function AgentConfigModal({
 
   // Add segmented state management
   const [activeSegment, setActiveSegment] = useState<string>("agent-info");
-
-  // Add state for delete confirmation modal
-  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
 
   // Add state for agent name validation error
   const [agentNameError, setAgentNameError] = useState<string>("");
@@ -472,16 +465,6 @@ export default function AgentConfigModal({
       setAgentDisplayNameStatus(NAME_CHECK_STATUS.AVAILABLE);
     }
   }, [isCreatingNewAgent, currentDisplayName, originalDisplayName]);
-
-  // Handle delete confirmation
-  const handleDeleteConfirm = useCallback(() => {
-    setIsDeleteModalVisible(false);
-    // Execute the delete operation
-    onDeleteAgent?.();
-    // Call the success callback immediately after triggering delete
-    // The actual success/failure will be handled by the parent component
-    onDeleteSuccess?.();
-  }, [onDeleteAgent, onDeleteSuccess]);
 
   // Optimized click handlers using useCallback
   const handleSegmentClick = useCallback((segment: string) => {
@@ -1196,25 +1179,6 @@ export default function AgentConfigModal({
           </div>
         </div>
       )}
-
-      {/* Delete Confirmation Modal */}
-      <Modal
-        title={t("businessLogic.config.modal.deleteTitle")}
-        open={isDeleteModalVisible}
-        onOk={handleDeleteConfirm}
-        onCancel={() => setIsDeleteModalVisible(false)}
-        okText={t("businessLogic.config.modal.button.confirm")}
-        cancelText={t("businessLogic.config.modal.button.cancel")}
-        okButtonProps={{
-          danger: true,
-        }}
-      >
-        <p>
-          {t("businessLogic.config.modal.deleteContent", {
-            name: agentName || "Unnamed Agent",
-          })}
-        </p>
-      </Modal>
     </div>
   );
 }

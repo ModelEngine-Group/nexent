@@ -2014,32 +2014,6 @@ export default function AgentSetupOrchestrator({
     });
   };
 
-  // Handle exit edit mode
-  const handleExitEdit = () => {
-    setIsEditingAgent(false);
-    setEditingAgent(null);
-    // Use the parent's exit creation handler to properly clear cache
-    if (isCreatingNewAgent && onExitCreation) {
-      onExitCreation();
-    } else {
-      setIsCreatingNewAgent(false);
-    }
-    setBusinessLogic("");
-    setDutyContent("");
-    setConstraintContent("");
-    setFewShotsContent("");
-    setAgentName?.("");
-    setAgentDescription?.("");
-    // Reset mainAgentId and enabledAgentIds
-    setMainAgentId(null);
-    setEnabledAgentIds([]);
-    // Reset selected tools
-    setSelectedTools([]);
-    setEnabledToolIds([]);
-    // Notify parent component about editing state change
-    onEditingStateChange?.(false, null);
-  };
-
   // Refresh tool list
   const handleToolsRefresh = useCallback(
     async (showSuccessMessage = true) => {
@@ -2298,8 +2272,6 @@ export default function AgentSetupOrchestrator({
               isCreatingNewAgent={isCreatingNewAgent}
               canSaveAgent={localCanSaveAgent}
               getButtonTitle={getLocalButtonTitle}
-              onDeleteAgent={onDeleteAgent || (() => {})}
-              onDeleteSuccess={handleExitEdit}
               editingAgent={editingAgentFromParent || editingAgent}
               onViewCallRelationship={handleViewCallRelationship}
             />
