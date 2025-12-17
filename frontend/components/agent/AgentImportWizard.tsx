@@ -602,6 +602,12 @@ export default function AgentImportWizard({
       const agentDisplayName = (agentInfo as any)?.display_name || (agentInfo as any)?.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
       if (Array.isArray((agentInfo as any)?.tools)) {
         (agentInfo as any).tools.forEach((tool: any) => {
+          // Skip MCP tools as they will be handled in the MCP server installation step
+          const toolSource = (tool?.source || "").toLowerCase();
+          if (toolSource === "mcp") {
+            return;
+          }
+
           const rawName = tool?.name || tool?.origin_name || tool?.class_name;
           const name = typeof rawName === "string" ? rawName.trim() : "";
           if (!name) return;
