@@ -783,6 +783,7 @@ export const ModelConfigSection = forwardRef<
           ),
           okText: t("embedding.modifyWarningModal.ok_proceed"),
           cancelText: t("common.cancel"),
+          danger: false,
           onOk: async () => {
             await applyModelChange(category, option, displayName);
           },
