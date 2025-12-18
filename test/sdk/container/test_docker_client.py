@@ -55,7 +55,7 @@ def mock_container():
     """Create a mock Docker container"""
     container = MagicMock()
     container.id = "test-container-id"
-    container.name = "mcp-test-service-user12345"
+    container.name = "mcp-test-service-tenant12-user1234"
     container.status = "running"
     container.attrs = {
         "NetworkSettings": {
@@ -316,27 +316,27 @@ class TestGenerateContainerName:
 
     def test_generate_container_name_basic(self, docker_container_client):
         """Test basic container name generation"""
-        name = docker_container_client._generate_container_name("test-service", "user12345")
-        assert name == "test-service-user1234"
+        name = docker_container_client._generate_container_name("test-service", "tenant123", "user12345")
+        assert name == "mcp-test-service-tenant12-user1234"
 
     def test_generate_container_name_with_special_chars(self, docker_container_client):
         """Test container name generation with special characters"""
-        name = docker_container_client._generate_container_name("test@service#123", "user12345")
-        assert name == "test-service-123-user1234"
+        name = docker_container_client._generate_container_name("test@service#123", "tenant123", "user12345")
+        assert name == "mcp-test-service-123-tenant12-user1234"
         assert "@" not in name
         assert "#" not in name
 
     def test_generate_container_name_long_user_id(self, docker_container_client):
         """Test container name generation with long user ID"""
         long_user_id = "a" * 20
-        name = docker_container_client._generate_container_name("test-service", long_user_id)
-        # Should only use first 8 characters of user_id
-        assert name == f"test-service-{long_user_id[:8]}"
+        name = docker_container_client._generate_container_name("test-service", "tenant123", long_user_id)
+        # Should only use first 8 characters of tenant_id and user_id
+        assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}"
 
     def test_generate_container_name_short_user_id(self, docker_container_client):
         """Test container name generation with short user ID"""
-        name = docker_container_client._generate_container_name("test-service", "user")
-        assert name == "test-service-user"
+        name = docker_container_client._generate_container_name("test-service", "tenant123", "user")
+        assert name == "mcp-test-service-tenant12-user"
 
 
 # ---------------------------------------------------------------------------
@@ -1132,7 +1132,7 @@ class TestListContainers:
 
             assert len(result) == 1
             assert result[0]["container_id"] == "test-container-id"
-            assert result[0]["name"] == "mcp-test-service-user12345"
+            assert result[0]["name"] == "mcp-test-service-tenant12-user1234"
             assert result[0]["status"] == "running"
             assert result[0]["host_port"] == "5020"
 
@@ -1189,7 +1189,7 @@ class TestListContainers:
         """Test listing containers without port mapping"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "NetworkSettings": {
@@ -1209,7 +1209,7 @@ class TestListContainers:
         """Test listing containers with empty port mapping"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "NetworkSettings": {
@@ -1230,7 +1230,7 @@ class TestListContainers:
         """Test listing containers when host_port is None or empty string (line 448)"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "NetworkSettings": {
@@ -1269,7 +1269,7 @@ class TestListContainers:
             result = docker_container_client.list_containers(service_name="test@service#123")
 
             # Should match because sanitized name is "test-service-123"
-            assert len(result) == 0  # Actually won't match because container name is "mcp-test-service-user12345"
+            assert len(result) == 0  # Actually will not match because container name is "mcp-test-service-tenant12-user1234"
 
 
 # ---------------------------------------------------------------------------
@@ -1343,7 +1343,7 @@ class TestGetContainerStatus:
 
             assert result is not None
             assert result["container_id"] == "test-container-id"
-            assert result["name"] == "mcp-test-service-user12345"
+            assert result["name"] == "mcp-test-service-tenant12-user1234"
             assert result["status"] == "running"
             assert result["host_port"] == "5020"
             assert result["created"] == "2024-01-01T00:00:00Z"
@@ -1361,7 +1361,7 @@ class TestGetContainerStatus:
         """Test getting container status without port mapping"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "NetworkSettings": {
@@ -1391,7 +1391,7 @@ class TestGetContainerStatus:
         """Test getting container status with empty port mapping"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "NetworkSettings": {
@@ -1414,7 +1414,7 @@ class TestGetContainerStatus:
         """Test getting container status when host_port is None or empty string (line 513)"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "NetworkSettings": {
@@ -1864,7 +1864,7 @@ class TestListContainersInDocker:
         """Test listing containers in Docker mode uses PORT env variable"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "Config": {
@@ -1877,18 +1877,18 @@ class TestListContainersInDocker:
         docker_container_client.client.containers.list.return_value = [container]
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
             result = docker_container_client.list_containers()
 
             assert len(result) == 1
             assert result[0]["host_port"] == "5020"
-            assert result[0]["service_url"] == "http://mcp-test-service-user12345:5020/mcp"
+            assert result[0]["service_url"] == "http://mcp-test-service-tenant12-user1234:5020/mcp"
 
     def test_list_containers_in_docker_no_port_env(self, docker_container_client):
         """Test listing containers in Docker mode when no PORT env variable"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "Config": {
@@ -1901,7 +1901,7 @@ class TestListContainersInDocker:
         docker_container_client.client.containers.list.return_value = [container]
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
             result = docker_container_client.list_containers()
 
             assert len(result) == 1
@@ -1921,7 +1921,7 @@ class TestGetContainerStatusInDocker:
         """Test getting container status in Docker mode uses PORT env variable"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "Config": {
@@ -1936,18 +1936,18 @@ class TestGetContainerStatusInDocker:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
             result = docker_container_client.get_container_status("test-container-id")
 
             assert result is not None
             assert result["host_port"] == "5020"
-            assert result["service_url"] == "http://mcp-test-service-user12345:5020/mcp"
+            assert result["service_url"] == "http://mcp-test-service-tenant12-user1234:5020/mcp"
 
     def test_get_container_status_in_docker_no_port_env(self, docker_container_client):
         """Test getting container status in Docker mode when no PORT env variable"""
         container = MagicMock()
         container.id = "test-container-id"
-        container.name = "mcp-test-service-user12345"
+        container.name = "mcp-test-service-tenant12-user1234"
         container.status = "running"
         container.attrs = {
             "Config": {
@@ -1962,7 +1962,7 @@ class TestGetContainerStatusInDocker:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
             result = docker_container_client.get_container_status("test-container-id")
 
             assert result is not None

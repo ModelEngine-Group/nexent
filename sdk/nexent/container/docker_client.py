@@ -172,11 +172,13 @@ class DockerContainerClient(ContainerClient):
             f"No available port found in range {start_port}-{start_port + max_attempts}"
         )
 
-    def _generate_container_name(self, service_name: str, user_id: str) -> str:
-        """Generate unique container name"""
+    def _generate_container_name(self, service_name: str, tenant_id: str, user_id: str) -> str:
+        """Generate unique container name with service, tenant, and user segments."""
         # Sanitize service name for container name (only alphanumeric and hyphens)
         safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
-        return f"{safe_name}-{user_id[:8]}"
+        tenant_part = (tenant_id or "")[:8]
+        user_part = (user_id or "")[:8]
+        return f"mcp-{safe_name}-{tenant_part}-{user_part}"
 
     async def start_container(
         self,
@@ -204,7 +206,7 @@ class DockerContainerClient(ContainerClient):
         Raises:
             ContainerError: If container startup fails
         """
-        container_name = self._generate_container_name(service_name, user_id)
+        container_name = self._generate_container_name(service_name, tenant_id, user_id)
         self._ensure_network(self.DEFAULT_NETWORK_NAME)
 
         # Check if container already exists
