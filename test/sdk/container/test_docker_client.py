@@ -887,6 +887,100 @@ class TestStartContainer:
             assert result["status"] == "existing"
             assert result["host_port"] == "5020"
 
+    @pytest.mark.asyncio
+    async def test_start_container_existing_no_port_mapping_with_host_port(self, docker_container_client, mock_container):
+        """Test starting container when existing container has no port mapping but host_port is provided (line 228-229)"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.status = "running"
+        mock_container.attrs = {
+            "NetworkSettings": {
+                "Ports": {}  # No port mappings
+            }
+        }
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+                host_port=5025,  # Provide host_port parameter
+            )
+
+            # Should use existing container with provided host_port
+            assert result["status"] == "existing"
+            assert result["host_port"] == "5025"
+
+    @pytest.mark.asyncio
+    async def test_start_container_empty_full_command(self, docker_container_client):
+        """Test starting container with empty full_command raises error (line 272-273)"""
+        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+
+        with pytest.raises(ContainerError, match="full_command is required to start container"):
+            await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=[],  # Empty command
+            )
+
+    @pytest.mark.asyncio
+    async def test_start_container_with_custom_image(self, docker_container_client):
+        """Test starting container with custom image parameter (line 276-277)"""
+        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["python", "script.py"],
+                image="python:3.11-alpine",  # Custom image
+            )
+
+            call_args = docker_container_client.client.containers.run.call_args
+            assert call_args is not None
+            assert call_args.kwargs["image"] == "python:3.11-alpine"
+
+    @pytest.mark.asyncio
+    async def test_start_container_with_host_port_provided(self, docker_container_client):
+        """Test starting container when host_port is provided (line 252 - skip find_free_port)"""
+        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port") as mock_find_port, \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+             patch("asyncio.sleep", new_callable=AsyncMock), \
+             patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+            await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+                host_port=8080,  # Provide host_port, should skip find_free_port
+            )
+
+            # find_free_port should not be called when host_port is provided
+            mock_find_port.assert_not_called()
+            call_args = docker_container_client.client.containers.run.call_args
+            assert call_args.kwargs["environment"]["PORT"] == "8080"
+
 
 # ---------------------------------------------------------------------------
 # Test _wait_for_service_ready
@@ -949,6 +1043,27 @@ class TestWaitForServiceReady:
              patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(ContainerConnectionError):
                 await docker_container_client._wait_for_service_ready("http://localhost:5020/mcp", max_retries=3, retry_delay=0.1)
+
+    @pytest.mark.asyncio
+    async def test_wait_for_service_ready_loop_iterations(self, docker_container_client):
+        """Test waiting for service ready with multiple loop iterations (line 356)"""
+        mock_client = MagicMock()
+        # Simulate multiple failures before success to test loop
+        call_count = 0
+        def is_connected():
+            nonlocal call_count
+            call_count += 1
+            return call_count >= 5  # Success on 5th attempt
+        mock_client.is_connected.side_effect = is_connected
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("nexent.container.docker_client.Client", return_value=mock_client), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await docker_container_client._wait_for_service_ready("http://localhost:5020/mcp", max_retries=10, retry_delay=0.01)
+            
+            # Should have slept 4 times (before 5th attempt succeeds)
+            assert mock_sleep.call_count == 4
 
 
 # ---------------------------------------------------------------------------
@@ -1111,6 +1226,32 @@ class TestListContainers:
             assert len(result) == 1
             assert result[0]["host_port"] is None
 
+    def test_list_containers_host_port_none_or_empty(self, docker_container_client):
+        """Test listing containers when host_port is None or empty string (line 448)"""
+        container = MagicMock()
+        container.id = "test-container-id"
+        container.name = "mcp-test-service-user12345"
+        container.status = "running"
+        container.attrs = {
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{"HostPort": None}],  # None value
+                    "5021/tcp": [{"HostPort": ""}],   # Empty string
+                }
+            }
+        }
+        docker_container_client.client.containers.list.return_value = [container]
+
+        with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+             patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+            result = docker_container_client.list_containers()
+
+            assert len(result) == 1
+            # Should not break on None or empty HostPort
+            # When HostPort is empty string, it will be returned as empty string (not None)
+            # Since the last HostPort value is empty string, host_port will be empty string
+            assert result[0]["host_port"] == ""
+
     def test_list_containers_exception(self, docker_container_client):
         """Test listing containers when exception occurs"""
         docker_container_client.client.containers.list.side_effect = Exception("Connection error")
@@ -1268,6 +1409,34 @@ class TestGetContainerStatus:
 
             assert result is not None
             assert result["host_port"] is None
+
+    def test_get_container_status_host_port_none_or_empty(self, docker_container_client):
+        """Test getting container status when host_port is None or empty string (line 513)"""
+        container = MagicMock()
+        container.id = "test-container-id"
+        container.name = "mcp-test-service-user12345"
+        container.status = "running"
+        container.attrs = {
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{"HostPort": None}],  # None value
+                    "5021/tcp": [{"HostPort": ""}],   # Empty string
+                }
+            },
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {"Image": "node:22-alpine"},
+        }
+        docker_container_client.client.containers.get.return_value = container
+
+        with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+             patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+            result = docker_container_client.get_container_status("test-container-id")
+
+            assert result is not None
+            # Should not break on None or empty HostPort
+            # When HostPort is empty string, it will be returned as empty string (not None)
+            # Since the last HostPort value is empty string, host_port will be empty string
+            assert result["host_port"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1502,6 +1671,22 @@ class TestGetContainerServicePort:
 
         port = DockerContainerClient._get_container_service_port(container)
         assert port is None
+
+    def test_get_container_service_port_non_string_env_item(self):
+        """Test getting port when env list contains non-string items (line 131)"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": [123, "PORT=5020", None, {"key": "value"}]  # Mixed types
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        # Should still find PORT=5020 despite non-string items
+        assert port == "5020"
 
 
 # ---------------------------------------------------------------------------

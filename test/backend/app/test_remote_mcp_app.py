@@ -623,6 +623,34 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_empty_command(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server with empty command string (covers line 189-191)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "command is required" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
     def test_add_mcp_from_config_missing_port(self, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with missing port"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -689,6 +717,48 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    def test_add_mcp_from_config_name_exists_stop_fails(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server when name exists and stopping container fails (covers line 236)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+        # stop_mcp_container raises exception, should be silently caught
+        mock_container_manager.stop_mcp_container = AsyncMock(side_effect=Exception("Stop failed"))
+        
+        mock_add_server.side_effect = MCPNameIllegal("MCP name already exists")
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "MCP name already exists" in data["detail"]
+        # Verify stop was attempted even though it failed
+        mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
     def test_add_mcp_from_config_container_error(self, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when container startup fails"""
         from consts.exceptions import MCPContainerError
@@ -717,6 +787,36 @@ class TestAddMCPFromConfig:
         data = response.json()
         assert "All MCP servers failed" in data["detail"]
         assert "Container failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server when unexpected exception occurs in loop (covers line 253-255)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Raise a non-MCPContainerError exception to trigger the general Exception handler
+        mock_container_manager.start_mcp_container = AsyncMock(side_effect=ValueError("Unexpected error"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Unexpected error" in data["detail"]
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
@@ -814,6 +914,30 @@ class TestAddMCPFromConfig:
         mock_container_manager.start_mcp_container.assert_called_once()
         call_kwargs = mock_container_manager.start_mcp_container.call_args[1]
         assert call_kwargs["image"] == "custom-image:latest"
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_add_mcp_from_config_outer_exception(self, mock_get_user_id):
+        """Test adding MCP server when exception occurs outside loop (covers line 275-277)"""
+        # Make get_current_user_id raise an exception to trigger outer exception handler
+        mock_get_user_id.side_effect = RuntimeError("Failed to get user ID")
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to add MCP servers" in data["detail"]
 
 
 # ---------------------------------------------------------------------------
