@@ -27,7 +27,7 @@ import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ChatContent } from "./chat/internal/ChatContent";
 import { ChatTopNavContent } from "./chat/internal/ChatTopNavContent";
 import { Badge, Button as AntButton } from "antd";
-import { FiRefreshCw } from "react-icons/fi";
+import { RefreshCw } from "lucide-react";
 import { USER_ROLES } from "@/const/modelConfig";
 import MarketContent from "./market/MarketContent";
 import UsersContent from "./users/UsersContent";
@@ -578,7 +578,7 @@ export default function Home() {
         />
         <AntButton
           icon={
-            <FiRefreshCw
+            <RefreshCw
               className={`h-3.5 w-3.5 ${isCheckingConnection ? "animate-spin" : ""}`}
             />
           }

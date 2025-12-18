@@ -4,13 +4,13 @@ import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, App, Tabs, Collapse, Tooltip } from "antd";
-import {
-  SettingOutlined,
-  LoadingOutlined,
-  ApiOutlined,
-  ReloadOutlined,
-  BulbOutlined,
-} from "@ant-design/icons";
+import { 
+  LoaderCircle, 
+  Settings, 
+  RefreshCw, 
+  Lightbulb, 
+  Plug,
+} from "lucide-react";
 
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
 import log from "@/lib/logger";
@@ -524,7 +524,7 @@ function ToolPool({
             }`}
             style={{ border: "none", padding: "4px" }}
           >
-            <SettingOutlined style={{ fontSize: "16px" }} />
+            <Settings size={16} />
           </button>
         </div>
       </div>
@@ -658,17 +658,23 @@ function ToolPool({
               },
             }}
           >
-            <BulbOutlined className="ml-2 text-yellow-500" />
+            <Lightbulb className="ml-2 text-yellow-500" size={16} />
           </Tooltip>
         </div>
         <div className="flex items-center gap-2">
           <Button
             type="text"
             size="small"
-            icon={isRefreshing ? <LoadingOutlined /> : <ReloadOutlined />}
+            icon={
+              isRefreshing ? (
+                <LoaderCircle className="animate-spin" size={16} />
+              ) : (
+                <RefreshCw size={16} />
+              )
+            }
             onClick={handleRefreshTools}
             disabled={localIsGenerating || isRefreshing || isGeneratingAgent}
-            className="text-green-500 hover:text-green-600 hover:bg-green-50"
+            className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
             title={t("toolManagement.refresh.title")}
           >
             {isRefreshing
@@ -678,10 +684,10 @@ function ToolPool({
           <Button
             type="text"
             size="small"
-            icon={<ApiOutlined />}
+            icon={<Plug size={16} />}
             onClick={() => setIsMcpModalOpen(true)}
             disabled={localIsGenerating || isGeneratingAgent}
-            className="text-blue-500 hover:text-blue-600 hover:bg-blue-50"
+            className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
             title={t("toolManagement.mcp.title")}
           >
             {t("toolManagement.mcp.button")}

@@ -1,21 +1,18 @@
 import { chatConfig } from "@/const/chatConfig";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Download } from "lucide-react";
 import {
-  Download,
-  FileImage,
-  FileText,
-  File,
-  Archive,
-  Code,
-  FileSpreadsheet,
-  Presentation,
-  FileCode,
-} from "lucide-react";
-import {
-  FilePdfOutlined,
-  FileWordOutlined,
-  Html5Outlined,
+  FileImageFilled,
+  FilePdfFilled,
+  FileWordFilled,
+  FileExcelFilled,
+  FilePptFilled,
+  FileTextFilled,
+  Html5Filled,
+  CodeFilled,
+  FileUnknownFilled,
+  FileZipFilled,
 } from "@ant-design/icons";
 import {
   storageService,
@@ -259,62 +256,52 @@ const getFileIcon = (name: string, contentType?: string) => {
     fileType.startsWith("image/") ||
     ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(extension)
   ) {
-    return <FileImage size={iconSize} color="#8e44ad" />;
+    return <FileImageFilled size={iconSize} color="#8e44ad" />;
   }
 
   // Identify by extension name
   // Document file
   if (chatConfig.fileIcons.pdf.includes(extension)) {
-    // PDF - using ant-design (lucide doesn't have a specific PDF icon)
-    return <FilePdfOutlined style={{ fontSize: iconSize, color: "#e74c3c" }} />;
+    return <FilePdfFilled size={iconSize} color="#e74c3c" />;
   }
   if (chatConfig.fileIcons.word.includes(extension)) {
-    // Word - using ant-design (lucide doesn't have a specific Word icon)
     return (
-      <FileWordOutlined style={{ fontSize: iconSize, color: "#3498db" }} />
+      <FileWordFilled size={iconSize} color="#3498db" />
     );
   }
   if (chatConfig.fileIcons.text.includes(extension)) {
-    // Text - using lucide-react
-    return <FileText size={iconSize} color="#7f8c8d" />;
+    return <FileTextFilled size={iconSize} color="#7f8c8d" />;
   }
   if (chatConfig.fileIcons.markdown.includes(extension)) {
-    // Markdown - using lucide-react FileText
-    return <FileText size={iconSize} color="#34495e" />;
+    return <FileTextFilled size={iconSize} color="#34495e" />;
   }
   // Table file
   if (chatConfig.fileIcons.excel.includes(extension)) {
-    // Excel - using lucide-react
-    return <FileSpreadsheet size={iconSize} color="#27ae60" />;
+    return <FileExcelFilled size={iconSize} color="#27ae60" />;
   }
   // Presentation file
   if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    // PowerPoint - using lucide-react
-    return <Presentation size={iconSize} color="#e67e22" />;
+    return <FilePptFilled size={iconSize} color="#e67e22" />;
   }
 
   // Code file
   if (chatConfig.fileIcons.html.includes(extension)) {
-    // HTML - using ant-design (more specific)
-    return <Html5Outlined style={{ fontSize: iconSize, color: "#e67e22" }} />;
+    return <Html5Filled size={iconSize} color="#e67e22" />;
   }
   if (chatConfig.fileIcons.code.includes(extension)) {
-    // Code - using lucide-react
-    return <Code size={iconSize} color="#f39c12" />;
+    return <CodeFilled size={iconSize} color="#f39c12" />;
   }
   if (chatConfig.fileIcons.json.includes(extension)) {
-    // JSON - using lucide-react FileCode
-    return <FileCode size={iconSize} color="#f1c40f" />;
+    return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
   // Compressed file
   if (chatConfig.fileIcons.compressed.includes(extension)) {
-    // Archive - using lucide-react
-    return <Archive size={iconSize} color="#f39c12" />;
+    return <FileZipFilled size={iconSize} color="#f39c12" />;
   }
 
-  // Default file icon - using lucide-react
-  return <File size={iconSize} color="#95a5a6" />;
+  // Default file icon
+  return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
 };
 
 // Format file size

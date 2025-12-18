@@ -4,8 +4,16 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Row, Col } from "antd";
-import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { Copy, FileOutput, Network, FileInput, Trash2, Plus, X } from "lucide-react";
+import {
+  AlertCircle,
+  Copy,
+  FileOutput,
+  Network,
+  FileInput,
+  Trash2,
+  Plus,
+  X,
+} from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import {
@@ -333,7 +341,7 @@ export default function SubAgentPool({
                           >
                             <div className="flex items-center gap-1.5 max-w-full pr-1">
                               {!isAvailable && (
-                                <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0" />
+                                <AlertCircle size={16} className="text-amber-500 text-sm flex-shrink-0" />
                               )}
                               {displayName && (
                                 <span className="text-base leading-normal max-w-[220px] truncate break-all">
