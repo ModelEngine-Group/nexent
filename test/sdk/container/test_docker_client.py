@@ -1269,3 +1269,518 @@ class TestGetContainerStatus:
             assert result is not None
             assert result["host_port"] is None
 
+
+# ---------------------------------------------------------------------------
+# Test _ensure_network
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureNetwork:
+    """Test _ensure_network method"""
+
+    def test_ensure_network_exists(self, docker_container_client):
+        """Test ensuring network when it already exists"""
+        mock_network = MagicMock()
+        docker_container_client.client.networks.get.return_value = mock_network
+
+        docker_container_client._ensure_network("nexent_nexent")
+
+        docker_container_client.client.networks.get.assert_called_once_with("nexent_nexent")
+        docker_container_client.client.networks.create.assert_not_called()
+
+    def test_ensure_network_create_new(self, docker_container_client):
+        """Test ensuring network when it doesn't exist"""
+        docker_container_client.client.networks.get.side_effect = NotFound("Network not found")
+        mock_network = MagicMock()
+        docker_container_client.client.networks.create.return_value = mock_network
+
+        docker_container_client._ensure_network("nexent_nexent")
+
+        docker_container_client.client.networks.get.assert_called_once_with("nexent_nexent")
+        docker_container_client.client.networks.create.assert_called_once_with("nexent_nexent")
+
+    def test_ensure_network_race_condition(self, docker_container_client):
+        """Test ensuring network when race condition occurs (another process creates it)"""
+        # First call raises NotFound, create raises APIError, second get succeeds
+        docker_container_client.client.networks.get.side_effect = [
+            NotFound("Network not found"),
+            MagicMock()  # Second call succeeds
+        ]
+        docker_container_client.client.networks.create.side_effect = APIError("Network already exists")
+
+        docker_container_client._ensure_network("nexent_nexent")
+
+        assert docker_container_client.client.networks.get.call_count == 2
+        docker_container_client.client.networks.create.assert_called_once()
+
+    def test_ensure_network_create_fails_then_get_fails(self, docker_container_client):
+        """Test ensuring network when create fails and subsequent get also fails"""
+        docker_container_client.client.networks.get.side_effect = [
+            NotFound("Network not found"),
+            Exception("Get failed")
+        ]
+        docker_container_client.client.networks.create.side_effect = APIError("Create failed")
+
+        with pytest.raises(ContainerError, match="Failed to create or get Docker network"):
+            docker_container_client._ensure_network("nexent_nexent")
+
+    def test_ensure_network_get_api_error(self, docker_container_client):
+        """Test ensuring network when get raises APIError"""
+        docker_container_client.client.networks.get.side_effect = APIError("API error")
+
+        with pytest.raises(ContainerError, match="Failed to get Docker network"):
+            docker_container_client._ensure_network("nexent_nexent")
+
+
+# ---------------------------------------------------------------------------
+# Test _get_container_service_port
+# ---------------------------------------------------------------------------
+
+
+class TestGetContainerServicePort:
+    """Test _get_container_service_port static method"""
+
+    def test_get_container_service_port_from_env(self):
+        """Test getting port from PORT environment variable"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": ["PORT=5020", "NODE_ENV=production"]
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port == "5020"
+
+    def test_get_container_service_port_from_published_port(self):
+        """Test getting port from published port mapping"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{"HostPort": "5020"}]
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port == "5020"
+
+    def test_get_container_service_port_env_takes_precedence(self):
+        """Test that PORT env variable takes precedence over published port"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": ["PORT=5021", "NODE_ENV=production"]
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{"HostPort": "5020"}]
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port == "5021"
+
+    def test_get_container_service_port_no_env_no_published(self):
+        """Test getting port when neither env nor published port exists"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port is None
+
+    def test_get_container_service_port_empty_env_list(self):
+        """Test getting port when env list is empty"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": None
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{"HostPort": "5020"}]
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port == "5020"
+
+    def test_get_container_service_port_env_exception(self):
+        """Test getting port when env access raises exception"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": Exception("Access error")
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{"HostPort": "5020"}]
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port == "5020"
+
+    def test_get_container_service_port_published_port_exception(self):
+        """Test getting port when published port access raises exception"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": Exception("Access error")
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port is None
+
+    def test_get_container_service_port_multiple_published_ports(self):
+        """Test getting port when multiple published ports exist"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5021/tcp": [{"HostPort": "5021"}],
+                    "5020/tcp": [{"HostPort": "5020"}]
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        # Should return first available port
+        assert port in ["5020", "5021"]
+
+    def test_get_container_service_port_empty_host_mappings(self):
+        """Test getting port when host mappings are empty"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": []
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port is None
+
+    def test_get_container_service_port_no_hostport(self):
+        """Test getting port when host mapping has no HostPort"""
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {
+                    "5020/tcp": [{}]  # Empty dict, no HostPort
+                }
+            }
+        }
+
+        port = DockerContainerClient._get_container_service_port(container)
+        assert port is None
+
+
+# ---------------------------------------------------------------------------
+# Test start_container in Docker mode
+# ---------------------------------------------------------------------------
+
+
+class TestStartContainerInDocker:
+    """Test start_container method when running inside Docker"""
+
+    @pytest.mark.asyncio
+    async def test_start_container_in_docker_uses_port_env(self, docker_container_client):
+        """Test starting container in Docker mode uses PORT env variable"""
+        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        new_container.attrs = {
+            "Config": {
+                "Env": ["PORT=5020"]
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            }
+        }
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
+             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+            )
+
+            assert result["status"] == "started"
+            # Should not publish ports when running in Docker
+            call_args = docker_container_client.client.containers.run.call_args
+            assert "ports" not in call_args.kwargs or call_args.kwargs.get("ports") is None
+            # Should use container name as host
+            assert "test-service-user1234" in result["service_url"]
+
+    @pytest.mark.asyncio
+    async def test_start_container_in_docker_existing_uses_port_env(self, docker_container_client, mock_container):
+        """Test starting container in Docker mode when existing container uses PORT env"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.status = "running"
+        mock_container.attrs = {
+            "Config": {
+                "Env": ["PORT=5020", "NODE_ENV=production"]
+            },
+            "NetworkSettings": {
+                "Ports": {}  # No published ports in Docker mode
+            }
+        }
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+            )
+
+            assert result["status"] == "existing"
+            assert result["host_port"] == "5020"
+            assert "test-service-user1234" in result["service_url"]
+
+    @pytest.mark.asyncio
+    async def test_start_container_in_docker_no_port_env_fallback(self, docker_container_client, mock_container):
+        """Test starting container in Docker mode when no PORT env, falls back to host_port param"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.status = "running"
+        mock_container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            }
+        }
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+                host_port=5021,
+            )
+
+            assert result["status"] == "existing"
+            assert result["host_port"] == "5021"
+
+    @pytest.mark.asyncio
+    async def test_start_container_in_docker_default_port(self, docker_container_client):
+        """Test starting container in Docker mode uses default port 5020"""
+        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
+             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+            )
+
+            assert result["status"] == "started"
+            # Should use default port 5020 when running in Docker
+            call_args = docker_container_client.client.containers.run.call_args
+            assert call_args.kwargs["environment"]["PORT"] == "5020"
+            assert "ports" not in call_args.kwargs or call_args.kwargs.get("ports") is None
+
+    @pytest.mark.asyncio
+    async def test_start_container_in_docker_existing_no_port(self, docker_container_client, mock_container):
+        """Test starting container in Docker mode when existing container has no PORT env and no host_port param"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.status = "running"
+        mock_container.attrs = {
+            "Config": {
+                "Env": []  # No PORT env
+            },
+            "NetworkSettings": {
+                "Ports": {}  # No published ports
+            }
+        }
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
+             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+             patch("asyncio.sleep", new_callable=AsyncMock):
+            # Should create new container since existing one has no port info
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=["npx", "-y", "test-mcp"],
+            )
+
+            assert result["status"] == "started"
+            mock_container.remove.assert_called_once_with(force=True)
+
+
+# ---------------------------------------------------------------------------
+# Test list_containers in Docker mode
+# ---------------------------------------------------------------------------
+
+
+class TestListContainersInDocker:
+    """Test list_containers method when running inside Docker"""
+
+    def test_list_containers_in_docker_uses_port_env(self, docker_container_client):
+        """Test listing containers in Docker mode uses PORT env variable"""
+        container = MagicMock()
+        container.id = "test-container-id"
+        container.name = "mcp-test-service-user12345"
+        container.status = "running"
+        container.attrs = {
+            "Config": {
+                "Env": ["PORT=5020"]
+            },
+            "NetworkSettings": {
+                "Ports": {}  # No published ports in Docker mode
+            }
+        }
+        docker_container_client.client.containers.list.return_value = [container]
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+            result = docker_container_client.list_containers()
+
+            assert len(result) == 1
+            assert result[0]["host_port"] == "5020"
+            assert result[0]["service_url"] == "http://mcp-test-service-user12345:5020/mcp"
+
+    def test_list_containers_in_docker_no_port_env(self, docker_container_client):
+        """Test listing containers in Docker mode when no PORT env variable"""
+        container = MagicMock()
+        container.id = "test-container-id"
+        container.name = "mcp-test-service-user12345"
+        container.status = "running"
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            }
+        }
+        docker_container_client.client.containers.list.return_value = [container]
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+            result = docker_container_client.list_containers()
+
+            assert len(result) == 1
+            assert result[0]["host_port"] is None
+            assert result[0]["service_url"] is None
+
+
+# ---------------------------------------------------------------------------
+# Test get_container_status in Docker mode
+# ---------------------------------------------------------------------------
+
+
+class TestGetContainerStatusInDocker:
+    """Test get_container_status method when running inside Docker"""
+
+    def test_get_container_status_in_docker_uses_port_env(self, docker_container_client):
+        """Test getting container status in Docker mode uses PORT env variable"""
+        container = MagicMock()
+        container.id = "test-container-id"
+        container.name = "mcp-test-service-user12345"
+        container.status = "running"
+        container.attrs = {
+            "Config": {
+                "Env": ["PORT=5020"],
+                "Image": "node:22-alpine"
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            },
+            "Created": "2024-01-01T00:00:00Z",
+        }
+        docker_container_client.client.containers.get.return_value = container
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+            result = docker_container_client.get_container_status("test-container-id")
+
+            assert result is not None
+            assert result["host_port"] == "5020"
+            assert result["service_url"] == "http://mcp-test-service-user12345:5020/mcp"
+
+    def test_get_container_status_in_docker_no_port_env(self, docker_container_client):
+        """Test getting container status in Docker mode when no PORT env variable"""
+        container = MagicMock()
+        container.id = "test-container-id"
+        container.name = "mcp-test-service-user12345"
+        container.status = "running"
+        container.attrs = {
+            "Config": {
+                "Env": []
+            },
+            "NetworkSettings": {
+                "Ports": {}
+            },
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {"Image": "node:22-alpine"},
+        }
+        docker_container_client.client.containers.get.return_value = container
+
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
+             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-user12345"):
+            result = docker_container_client.get_container_status("test-container-id")
+
+            assert result is not None
+            assert result["host_port"] is None
+            assert result["service_url"] is None
+

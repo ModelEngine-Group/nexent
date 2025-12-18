@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -491,6 +491,603 @@ class TestDataValidation:
             headers={"Authorization": "Bearer valid_token"}
         )
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+
+
+# ---------------------------------------------------------------------------
+# Test add_mcp_from_config
+# ---------------------------------------------------------------------------
+
+
+class TestAddMCPFromConfig:
+    """Test endpoint for adding MCP servers from configuration"""
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    def test_add_mcp_from_config_success(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+        """Test successful addition of MCP server from config"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        # Mock container manager
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+        
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "env": {"NODE_ENV": "production"},
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["results"]) == 1
+        assert data["results"][0]["service_name"] == "test-service"
+        assert data["results"][0]["status"] == "success"
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    def test_add_mcp_from_config_multiple_servers(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+        """Test adding multiple MCP servers from config"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(side_effect=[
+            {
+                "container_id": "container-1",
+                "mcp_url": "http://localhost:5020/mcp",
+                "host_port": "5020",
+                "status": "started",
+                "container_name": "service1-user1234"
+            },
+            {
+                "container_id": "container-2",
+                "mcp_url": "http://localhost:5021/mcp",
+                "host_port": "5021",
+                "status": "started",
+                "container_name": "service2-user1234"
+            }
+        ])
+        
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "service1": {
+                        "command": "npx",
+                        "args": ["-y", "service1"],
+                        "port": 5020
+                    },
+                    "service2": {
+                        "command": "npx",
+                        "args": ["-y", "service2"],
+                        "port": 5021
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["results"]) == 2
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_missing_command(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server with missing command"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        data = response.json()
+        assert "command" in str(data["detail"]).lower()
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_missing_port(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server with missing port"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"]
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "port is required" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    def test_add_mcp_from_config_name_exists(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server when name already exists"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+        mock_container_manager.stop_mcp_container = AsyncMock(return_value=True)
+        
+        mock_add_server.side_effect = MCPNameIllegal("MCP name already exists")
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "MCP name already exists" in data["detail"]
+        mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_container_error(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server when container startup fails"""
+        from consts.exceptions import MCPContainerError
+        
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(side_effect=MCPContainerError("Container failed"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Container failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_all_fail(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP servers when all fail"""
+        from consts.exceptions import MCPContainerError
+        
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(side_effect=MCPContainerError("Container failed"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "service1": {
+                        "command": "npx",
+                        "args": ["-y", "service1"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_add_mcp_from_config_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server when Docker is unavailable"""
+        from consts.exceptions import MCPContainerError
+        
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker service unavailable" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    def test_add_mcp_from_config_with_custom_image(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+        """Test adding MCP server with custom Docker image"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+        
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "python",
+                        "args": ["script.py"],
+                        "port": 5020,
+                        "image": "custom-image:latest"
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        # Verify custom image was passed
+        mock_container_manager.start_mcp_container.assert_called_once()
+        call_kwargs = mock_container_manager.start_mcp_container.call_args[1]
+        assert call_kwargs["image"] == "custom-image:latest"
+
+
+# ---------------------------------------------------------------------------
+# Test stop_mcp_container
+# ---------------------------------------------------------------------------
+
+
+class TestStopMCPContainer:
+    """Test endpoint for stopping MCP container"""
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_stop_mcp_container_success(self, mock_container_manager_class, mock_get_user_id):
+        """Test successful stopping of MCP container"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.stop_mcp_container = AsyncMock(return_value=True)
+
+        response = client.delete(
+            "/mcp/container/container-123",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert "stopped successfully" in data["message"]
+        mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_stop_mcp_container_not_found(self, mock_container_manager_class, mock_get_user_id):
+        """Test stopping non-existent container"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.stop_mcp_container = AsyncMock(return_value=False)
+
+        response = client.delete(
+            "/mcp/container/non-existent",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert data["status"] == "error"
+        assert "not found" in data["message"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_stop_mcp_container_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+        """Test stopping container when Docker is unavailable"""
+        from consts.exceptions import MCPContainerError
+        
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+
+        response = client.delete(
+            "/mcp/container/container-123",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker service unavailable" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_stop_mcp_container_exception(self, mock_container_manager_class, mock_get_user_id):
+        """Test stopping container when exception occurs"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.stop_mcp_container = AsyncMock(side_effect=Exception("Unexpected error"))
+
+        response = client.delete(
+            "/mcp/container/container-123",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to stop container" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Test list_mcp_containers
+# ---------------------------------------------------------------------------
+
+
+class TestListMCPContainers:
+    """Test endpoint for listing MCP containers"""
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_list_mcp_containers_success(self, mock_container_manager_class, mock_get_user_id):
+        """Test successful listing of MCP containers"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.list_mcp_containers.return_value = [
+            {
+                "container_id": "container-1",
+                "name": "service1-user1234",
+                "status": "running",
+                "mcp_url": "http://localhost:5020/mcp",
+                "host_port": "5020"
+            },
+            {
+                "container_id": "container-2",
+                "name": "service2-user1234",
+                "status": "running",
+                "mcp_url": "http://localhost:5021/mcp",
+                "host_port": "5021"
+            }
+        ]
+
+        response = client.get(
+            "/mcp/containers",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["containers"]) == 2
+        mock_container_manager.list_mcp_containers.assert_called_once_with(tenant_id="tenant456")
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_list_mcp_containers_empty(self, mock_container_manager_class, mock_get_user_id):
+        """Test listing containers when none exist"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.list_mcp_containers.return_value = []
+
+        response = client.get(
+            "/mcp/containers",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["containers"]) == 0
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_list_mcp_containers_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+        """Test listing containers when Docker is unavailable"""
+        from consts.exceptions import MCPContainerError
+        
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+
+        response = client.get(
+            "/mcp/containers",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker service unavailable" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_list_mcp_containers_exception(self, mock_container_manager_class, mock_get_user_id):
+        """Test listing containers when exception occurs"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.list_mcp_containers.side_effect = Exception("Unexpected error")
+
+        response = client.get(
+            "/mcp/containers",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to list containers" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Test get_container_logs
+# ---------------------------------------------------------------------------
+
+
+class TestGetContainerLogs:
+    """Test endpoint for getting container logs"""
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_success(self, mock_container_manager_class, mock_get_user_id):
+        """Test successful retrieval of container logs"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.get_container_logs.return_value = "Log line 1\nLog line 2\nLog line 3"
+
+        response = client.get(
+            "/mcp/container/container-123/logs?tail=100",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert "Log line 1" in data["logs"]
+        mock_container_manager.get_container_logs.assert_called_once_with("container-123", tail=100)
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_custom_tail(self, mock_container_manager_class, mock_get_user_id):
+        """Test getting container logs with custom tail"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.get_container_logs.return_value = "Log line 1"
+
+        response = client.get(
+            "/mcp/container/container-123/logs?tail=50",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_container_manager.get_container_logs.assert_called_once_with("container-123", tail=50)
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+        """Test getting logs when Docker is unavailable"""
+        from consts.exceptions import MCPContainerError
+        
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+
+        response = client.get(
+            "/mcp/container/container-123/logs",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker service unavailable" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_exception(self, mock_container_manager_class, mock_get_user_id):
+        """Test getting logs when exception occurs"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.get_container_logs.side_effect = Exception("Unexpected error")
+
+        response = client.get(
+            "/mcp/container/container-123/logs",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to get container logs" in data["detail"]
 
 
 if __name__ == "__main__":
