@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { App, Modal } from "antd";
-import { AlertCircle } from "lucide-react";
+import { ExclamationCircleOutlined } from "@ant-design/icons";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
@@ -50,7 +50,7 @@ export function SessionListeners() {
 
     modal.confirm({
       title: t("login.expired.title"),
-      icon: <AlertCircle />,
+      icon: <ExclamationCircleOutlined />,
       content: t("login.expired.content"),
       okText: t("login.expired.okText"),
       cancelText: t("login.expired.cancelText"),
