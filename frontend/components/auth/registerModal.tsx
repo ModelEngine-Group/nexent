@@ -14,13 +14,13 @@ import {
   App,
 } from "antd";
 import {
-  UserOutlined,
-  LockOutlined,
-  SafetyOutlined,
-  KeyOutlined,
-  CrownOutlined,
-  FileTextOutlined,
-} from "@ant-design/icons";
+  UserRound,
+  LockKeyhole,
+  ShieldCheck,
+  KeyRound,
+  Crown,
+  BookMarked,
+} from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { AuthFormValues } from "@/types/auth"
@@ -360,7 +360,7 @@ export function RegisterModal() {
           ]}
         >
           <Input
-            prefix={<UserOutlined className="text-gray-400" />}
+            prefix={<UserRound className="text-gray-400" size={16} />}
             placeholder="your@email.com"
             size="large"
             onChange={handleEmailInputChange}
@@ -401,7 +401,7 @@ export function RegisterModal() {
         >
           <Input.Password
             id="register-password"
-            prefix={<LockOutlined className="text-gray-400" />}
+            prefix={<LockKeyhole className="text-gray-400" size={16} />}
             placeholder={t("auth.passwordRequired")}
             size="large"
             onChange={handlePasswordChange}
@@ -457,7 +457,7 @@ export function RegisterModal() {
         >
           <Input.Password
             id="register-confirm-password"
-            prefix={<SafetyOutlined className="text-gray-400" />}
+            prefix={<ShieldCheck className="text-gray-400" size={16} />}
             placeholder={t("auth.confirmPasswordRequired")}
             size="large"
             onChange={handleConfirmPasswordChange}
@@ -469,7 +469,7 @@ export function RegisterModal() {
         <Form.Item className="mb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <CrownOutlined className="text-amber-500" />
+              <Crown className="text-amber-500" size={18} />
               <span className="font-medium">{t("auth.adminAccount")}</span>
             </div>
             <Switch
@@ -522,7 +522,7 @@ export function RegisterModal() {
                       className="ml-2 text-blue-600 dark:text-blue-400 hover:underline"
                       title={t("auth.inviteCodeHint.viewDocumentation")}
                     >
-                      <FileTextOutlined />
+                      <BookMarked size={16} />
                     </a>
                   </div>
                   <div>
@@ -551,7 +551,7 @@ export function RegisterModal() {
               ]}
             >
               <Input
-                prefix={<KeyOutlined className="text-gray-400" />}
+                prefix={<KeyRound className="text-gray-400" size={16} />}
                 placeholder={t("auth.inviteCodeRequired")}
                 size="large"
               />

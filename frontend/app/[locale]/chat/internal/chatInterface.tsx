@@ -1450,7 +1450,6 @@ export function ChatInterface() {
                 onKeyDown={handleKeyDown}
                 onSelectMessage={handleMessageSelect}
                 selectedMessageId={selectedMessageId}
-                onImageClick={handleImageClick}
                 attachments={attachments}
                 onAttachmentsChange={handleAttachmentsChange}
                 onFileUpload={handleFileUpload}
@@ -1490,38 +1489,6 @@ export function ChatInterface() {
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
-
-      {/* Image preview */}
-      {viewingImage && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
-          onClick={() => setViewingImage(null)}
-        >
-          <div
-            className="relative max-w-[90%] max-h-[90%]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img
-              src={convertImageUrlToApiUrl(viewingImage)}
-              alt={t("chatInterface.imagePreview")}
-              className="max-w-full max-h-[90vh] object-contain"
-              onError={() => {
-                handleImageError(viewingImage);
-              }}
-            />
-            <button
-              onClick={() => setViewingImage(null)}
-              className="absolute -top-4 -right-4 bg-white p-1 rounded-full shadow-md hover:bg-white transition-colors"
-              title={t("chatInterface.close")}
-            >
-              <X
-                size={16}
-                className="text-gray-600 hover:text-red-500 transition-colors"
-              />
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 }

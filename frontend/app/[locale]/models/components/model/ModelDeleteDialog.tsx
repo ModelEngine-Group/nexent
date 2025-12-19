@@ -2,13 +2,8 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Modal, Button, Switch, App, Tooltip, Input } from "antd";
-import {
-  DeleteOutlined,
-  ExclamationCircleFilled,
-  RightOutlined,
-  ReloadOutlined,
-  SettingOutlined,
-} from "@ant-design/icons";
+import { Trash, ChevronRight, RefreshCw, Settings } from "lucide-react";
+import { ExclamationCircleFilled } from "@ant-design/icons";
 
 import { MODEL_TYPES, MODEL_SOURCES } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
@@ -815,7 +810,7 @@ export const ModelDeleteDialog = ({
                       </div>
                     </div>
                   </div>
-                  <RightOutlined className="h-5 w-5" />
+                  <ChevronRight size={24} className="self-center" />
                 </button>
               );
             })}
@@ -915,7 +910,7 @@ export const ModelDeleteDialog = ({
                       </div>
                     </div>
                   </div>
-                  <RightOutlined className="h-5 w-5" />
+                  <ChevronRight size={24} className="self-center" />
                 </button>
               );
             })}
@@ -951,7 +946,7 @@ export const ModelDeleteDialog = ({
               <div className="flex gap-2">
                 <Button
                   size="small"
-                  icon={<ReloadOutlined className="text-blue-500" />}
+                  icon={<RefreshCw className="text-blue-500" size={16} />}
                   onClick={async () => {
                     if (
                       selectedSource === MODEL_SOURCES.SILICON &&
@@ -1049,7 +1044,7 @@ export const ModelDeleteDialog = ({
                           >
                             <Button
                               type="text"
-                              icon={<SettingOutlined />}
+                              icon={<Settings size={16} />}
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent switch toggle
@@ -1175,7 +1170,7 @@ export const ModelDeleteDialog = ({
                             ></path>
                           </svg>
                         ) : (
-                          <DeleteOutlined className="h-5 w-5" />
+                          <Trash size={16} />
                         )}
                       </button>
                     </div>

@@ -16,7 +16,7 @@ import {
   Pagination,
   Input,
 } from "antd";
-import { WarningFilled } from "@ant-design/icons";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   Download,
   ScanText,
@@ -81,6 +81,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -107,8 +108,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   const [chunkSubmitting, setChunkSubmitting] = useState(false);
   const [editingChunk, setEditingChunk] = useState<Chunk | null>(null);
   const [chunkForm] = Form.useForm<ChunkFormValues>();
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [chunkToDelete, setChunkToDelete] = useState<Chunk | null>(null);
   const [tooltipResetKey, setTooltipResetKey] = useState(0);
 
   const resetChunkSearch = React.useCallback(() => {
@@ -455,39 +454,32 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
 
     forceCloseTooltips();
-    setChunkToDelete(chunk);
-    setDeleteModalOpen(true);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!chunkToDelete?.id || !knowledgeBaseName) {
-      return;
-    }
-
-    try {
-      await knowledgeBaseService.deleteChunk(
-        knowledgeBaseName,
-        chunkToDelete.id
-      );
-      message.success(t("document.chunk.success.delete"));
-      setDeleteModalOpen(false);
-      setChunkToDelete(null);
-      forceCloseTooltips();
-      await refreshChunks();
-    } catch (error) {
-      log.error("Failed to delete chunk:", error);
-      message.error(
-        error instanceof Error && error.message
-          ? error.message
-          : t("document.chunk.error.deleteFailed")
-      );
-    }
-  };
-
-  const handleDeleteCancel = () => {
-    setDeleteModalOpen(false);
-    setChunkToDelete(null);
-    forceCloseTooltips();
+    
+    confirm({
+      title: t("document.chunk.confirm.deleteTitle"),
+      content: t("document.chunk.confirm.deleteContent"),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
+      danger: true,
+      onOk: async () => {
+        try {
+          await knowledgeBaseService.deleteChunk(knowledgeBaseName, chunk.id);
+          message.success(t("document.chunk.success.delete"));
+          forceCloseTooltips();
+          await refreshChunks();
+        } catch (error) {
+          log.error("Failed to delete chunk:", error);
+          message.error(
+            error instanceof Error && error.message
+              ? error.message
+              : t("document.chunk.error.deleteFailed")
+          );
+        }
+      },
+      onCancel: () => {
+        forceCloseTooltips();
+      },
+    });
   };
 
   const renderDocumentLabel = (doc: Document, chunkCount: number) => {
@@ -847,34 +839,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           </Form.Item>
         </Form>
       </Modal>
-      <Modal
-        title={t("document.chunk.confirm.deleteTitle")}
-        open={deleteModalOpen}
-        onCancel={handleDeleteCancel}
-        centered
-        footer={
-          <div className="flex justify-end mt-6 gap-4">
-            <Button onClick={handleDeleteCancel}>{t("common.cancel")}</Button>
-            <Button type="primary" danger onClick={handleDeleteConfirm}>
-              {t("common.delete")}
-            </Button>
-          </div>
-        }
-      >
-        <div className="py-2">
-          <div className="flex items-center">
-            <WarningFilled
-              className="text-yellow-500 mt-1 mr-2"
-              style={{ fontSize: "48px" }}
-            />
-            <div className="ml-3 mt-2">
-              <div className="text-sm leading-6">
-                {t("document.chunk.confirm.deleteContent")}
-              </div>
-            </div>
-          </div>
-        </div>
-      </Modal>
+
     </TooltipProvider>
   );
 };

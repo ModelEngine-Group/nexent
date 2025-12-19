@@ -1,7 +1,6 @@
 import uvicorn
 import logging
 import warnings
-import asyncio
 
 from consts.const import APP_VERSION
 
@@ -12,31 +11,16 @@ load_dotenv()
 
 from apps.runtime_app import app
 from utils.logging_utils import configure_logging, configure_elasticsearch_logging
-from services.tool_configuration_service import initialize_tools_on_startup
+
 
 configure_logging(logging.INFO)
 configure_elasticsearch_logging()
 logger = logging.getLogger("runtime_service")
 
 
-async def startup_initialization():
-    """
-    Perform initialization tasks during server startup
-    """
+if __name__ == "__main__":
     logger.info("Starting server initialization...")
     logger.info(f"APP version is: {APP_VERSION}")
-    try:
-        # Initialize tools on startup - service layer handles detailed logging
-        await initialize_tools_on_startup()
-        logger.info("Server initialization completed successfully!")
-    except Exception as e:
-        logger.error(f"Server initialization failed: {str(e)}")
-        # Don't raise the exception to allow server to start even if initialization fails
-        logger.warning("Server will continue to start despite initialization issues")
-
-
-if __name__ == "__main__":
-    asyncio.run(startup_initialization())
     uvicorn.run(app, host="0.0.0.0", port=5014, log_level="info")
 
 
