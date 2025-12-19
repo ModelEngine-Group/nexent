@@ -13,6 +13,7 @@ from services.remote_mcp_service import (
     delete_remote_mcp_server_list,
     get_remote_mcp_server_list,
     check_mcp_health_and_update_db,
+    delete_mcp_by_container_id,
 )
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.mcp_container_service import MCPContainerManager
@@ -58,7 +59,8 @@ async def add_remote_proxies(
         await add_remote_mcp_server_list(tenant_id=tenant_id,
                                          user_id=user_id,
                                          remote_mcp_server=mcp_url,
-                                         remote_mcp_server_name=service_name)
+                                         remote_mcp_server_name=service_name,
+                                         container_id=None)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully added remote MCP proxy",
@@ -227,7 +229,8 @@ async def add_mcp_from_config(
                         tenant_id=tenant_id,
                         user_id=user_id,
                         remote_mcp_server=container_info["mcp_url"],
-                        remote_mcp_server_name=service_name
+                        remote_mcp_server_name=service_name,
+                        container_id=container_info["container_id"],
                     )
                 except MCPNameIllegal:
                     # If name already exists, try to stop the container we just created
@@ -297,18 +300,27 @@ async def stop_mcp_container(
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 detail="Docker service unavailable"
             )
-        
+
         success = await container_manager.stop_mcp_container(container_id)
-        
+
         if success:
+            # Soft delete the corresponding MCP record (if any) by container ID
+            await delete_mcp_by_container_id(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                container_id=container_id,
+            )
             return JSONResponse(
                 status_code=HTTPStatus.OK,
-                content={"message": "Container stopped successfully", "status": "success"}
+                content={
+                    "message": "Container and MCP service stopped successfully",
+                    "status": "success",
+                },
             )
         else:
             return JSONResponse(
                 status_code=HTTPStatus.NOT_FOUND,
-                content={"message": "Container not found", "status": "error"}
+                content={"message": "Container not found", "status": "error"},
             )
     except HTTPException:
         raise
