@@ -15,16 +15,16 @@ import {
   App,
 } from "antd";
 import {
-  DeleteOutlined,
-  EyeOutlined,
-  PlusOutlined,
-  LoadingOutlined,
-  ExpandAltOutlined,
-  CompressOutlined,
-  RedoOutlined,
+  Trash,
+  Eye,
+  Plus,
+  LoaderCircle,
+  Maximize,
+  Minimize,
+  RefreshCw,
   FileTextOutlined,
   ContainerOutlined,
-} from "@ant-design/icons";
+} from "lucide-react";
 
 import { McpConfigModalProps, AgentRefreshEvent } from "@/types/agentConfig";
 import {
@@ -40,6 +40,7 @@ import {
   deleteMcpContainer,
 } from "@/services/mcpService";
 import { McpServer, McpTool, McpContainer } from "@/types/agentConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -49,7 +50,8 @@ export default function McpConfigModal({
   onCancel,
 }: McpConfigModalProps) {
   const { t } = useTranslation("common");
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const [serverList, setServerList] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
@@ -66,7 +68,7 @@ export default function McpConfigModal({
   const [healthCheckLoading, setHealthCheckLoading] = useState<{
     [key: string]: boolean;
   }>({});
-  
+
   // Container-related state
   const [containerList, setContainerList] = useState<McpContainer[]>([]);
   const [loadingContainers, setLoadingContainers] = useState(false);
@@ -179,16 +181,12 @@ export default function McpConfigModal({
 
   // Delete MCP server
   const handleDeleteServer = async (server: McpServer) => {
-    modal.confirm({
+    confirm({
       title: t("mcpConfig.delete.confirmTitle"),
       content: t("mcpConfig.delete.confirmContent", {
         name: server.service_name,
       }),
       okText: t("common.delete", "Delete"),
-      cancelText: t("common.cancel", "Cancel"),
-      okType: "danger",
-      cancelButtonProps: { disabled: updatingTools },
-      okButtonProps: { disabled: updatingTools, loading: updatingTools },
       onOk: async () => {
         try {
           const result = await deleteMcpServer(
@@ -321,8 +319,9 @@ export default function McpConfigModal({
               }}
             >
               {healthCheckLoading[key] ? (
-                <LoadingOutlined
-                  style={{ color: record.status ? "#52c41a" : "#ff4d4f" }}
+                <LoaderCircle
+                  className="animate-spin"
+                  style={{ color: record.status ? "#52c41a" : "#ff4d4f", width: 16, height: 16 }}
                 />
               ) : null}
             </div>
@@ -350,7 +349,7 @@ export default function McpConfigModal({
           <Space size="small">
             <Button
               type="link"
-              icon={<RedoOutlined />}
+              icon={<RefreshCw size={16} className={healthCheckLoading[key] ? "animate-spin" : ""} />}
               onClick={() => handleCheckHealth(record)}
               size="small"
               loading={healthCheckLoading[key]}
@@ -361,7 +360,7 @@ export default function McpConfigModal({
             {record.status ? (
               <Button
                 type="link"
-                icon={<EyeOutlined />}
+                icon={<Eye size={16} />}
                 onClick={() => handleViewTools(record)}
                 size="small"
                   disabled={actionsLocked}
@@ -375,7 +374,7 @@ export default function McpConfigModal({
               >
                 <Button
                   type="link"
-                  icon={<EyeOutlined />}
+                  icon={<Eye size={16} />}
                   size="small"
                   disabled
                 >
@@ -386,7 +385,7 @@ export default function McpConfigModal({
             <Button
               type="link"
               danger
-              icon={<DeleteOutlined />}
+              icon={<Trash size={16} />}
               onClick={() => handleDeleteServer(record)}
               size="small"
                   disabled={actionsLocked}
@@ -428,7 +427,7 @@ export default function McpConfigModal({
               <Button
                 type="link"
                 size="small"
-                icon={isExpanded ? <CompressOutlined /> : <ExpandAltOutlined />}
+                icon={isExpanded ? <Minimize size={16} /> : <Maximize size={16} />}
                 onClick={() => toggleDescription(record.name)}
                 style={{ padding: 0, height: "auto" }}
               >
@@ -514,10 +513,10 @@ export default function McpConfigModal({
         setContainerPort(undefined);
         await loadContainerList();
         await loadServerList(); // Reload server list as containers are registered as servers
-        
+
         // Refresh tools and agents
         await refreshToolsAndAgents();
-        
+
         message.success(t("mcpService.message.addContainerSuccess"));
       } else {
         message.error(result.message);
@@ -570,9 +569,9 @@ export default function McpConfigModal({
           if (result.success) {
             await loadContainerList();
             await loadServerList(); // Reload server list as container is removed
-            
+
             message.success(t("mcpService.message.deleteContainerSuccess"));
-            
+
             // Refresh tools and agents
             refreshToolsAndAgents().catch((error) => {
               log.error("Failed to refresh tools and agents after container deletion:", error);
@@ -637,7 +636,7 @@ export default function McpConfigModal({
                 alignItems: "center",
               }}
             >
-              <LoadingOutlined style={{ marginRight: 8, color: "#52c41a" }} />
+              <LoaderCircle className="animate-spin" style={{ marginRight: 8, color: "#52c41a", width: 16, height: 16 }} />
               <Text style={{ color: "#52c41a" }}>
                 {t("mcpConfig.status.updatingToolsHint")}
               </Text>
@@ -646,7 +645,6 @@ export default function McpConfigModal({
           {/* Add server section */}
           <Card size="small" style={{ marginBottom: 16 }}>
             <Title level={5} style={{ margin: "0 0 12px 0" }}>
-              <PlusOutlined style={{ marginRight: 8 }} />
               {t("mcpConfig.addServer.title")}
             </Title>
             <Space direction="vertical" style={{ width: "100%" }}>
@@ -672,9 +670,9 @@ export default function McpConfigModal({
                   loading={addingServer || updatingTools}
                   icon={
                     addingServer || updatingTools ? (
-                      <LoadingOutlined />
+                      <LoaderCircle className="animate-spin" style={{ width: 16, height: 16 }} />
                     ) : (
-                      <PlusOutlined />
+                      <Plus style={{ width: 16, height: 16 }} />
                     )
                   }
                   disabled={actionsLocked}
@@ -880,7 +878,7 @@ export default function McpConfigModal({
         <div style={{ padding: "0 0 16px 0" }}>
           {loadingTools ? (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <LoadingOutlined style={{ fontSize: 24, marginRight: 8 }} />
+              <LoaderCircle className="animate-spin" style={{ width: 16, height: 16, marginRight: 8, display: "inline-block" }} />
               <Text>{t("mcpConfig.toolsList.loading")}</Text>
             </div>
           ) : (

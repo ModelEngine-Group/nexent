@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Volume2, ChevronRight, Square, Loader2 } from "lucide-react";
-import { FaRegThumbsDown, FaRegThumbsUp } from "react-icons/fa";
+import { 
+  Copy, 
+  Volume2, 
+  ChevronRight, 
+  Square, 
+  Loader2, 
+  ThumbsDown, 
+  ThumbsUp,
+} from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { Button } from "@/components/ui/button";
@@ -360,7 +367,7 @@ export function ChatStreamFinalMessage({
                             } transition-all duration-200 shadow-sm`}
                             onClick={handleThumbsUp}
                           >
-                            <FaRegThumbsUp className="h-4 w-4" />
+                            <ThumbsUp className="h-4 w-4" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -387,7 +394,7 @@ export function ChatStreamFinalMessage({
                             } transition-all duration-200 shadow-sm`}
                             onClick={handleThumbsDown}
                           >
-                            <FaRegThumbsDown className="h-4 w-4" />
+                            <ThumbsDown className="h-4 w-4" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>

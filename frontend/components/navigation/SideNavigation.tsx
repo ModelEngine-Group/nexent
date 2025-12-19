@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuth } from "@/hooks/useAuth";
-import { HEADER_CONFIG, FOOTER_CONFIG } from "@/const/layoutConstants";
+import { HEADER_CONFIG, FOOTER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 
 const { Sider } = Layout;
 
@@ -75,10 +75,6 @@ export function SideNavigation({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [selectedKey, setSelectedKey] = useState("0");
-  const expandedWidth = 277;
-  const collapsedWidth = 64;
-  const siderWidth = collapsed ? collapsedWidth : expandedWidth;
-  
   // Update selected key when pathname or currentView changes
   useEffect(() => {
     // If we have a currentView from parent, use it to determine the key
@@ -105,197 +101,61 @@ export function SideNavigation({
     }
   }, [pathname, currentView]);
 
+  // Helper function to create menu item with consistent icon styling
+  const createMenuItem = (key: string, Icon: any, labelKey: string, view: string, requiresAuth = false, requiresAdmin = false) => ({
+    key,
+    icon: <Icon className="w-4 h-4" />,
+    label: t(labelKey),
+    onClick: () => {
+      if (!isSpeedMode && requiresAdmin && user?.role !== "admin") {
+        onAdminRequired?.();
+      } else if (!isSpeedMode && requiresAuth && !user) {
+        onAuthRequired?.();
+      } else {
+        onViewChange?.(view);
+      }
+    },
+  });
+
   // Menu items configuration
   const menuItems: MenuProps["items"] = [
-    {
-      key: "0",
-      icon: <Home className="h-4 w-4" />,
-      label: t("sidebar.homePage"),
-      onClick: () => {
-        onViewChange?.("home");
-      },
-    },
-    {
-      key: "1",
-      icon: <Bot className="h-4 w-4" />,
-      label: t("sidebar.startChat"),
-      onClick: () => {
-        if (!isSpeedMode && !user) {
-          onAuthRequired?.();
-        } else {
-          onViewChange?.("chat");
-        }
-      },
-    },
-    {
-      key: "2",
-      icon: <Zap className="h-4 w-4" />,
-      label: t("sidebar.quickConfig"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("setup");
-        }
-      },
-    },
-    {
-      key: "3",
-      icon: <Globe className="h-4 w-4" />,
-      label: t("sidebar.agentSpace"),
-      onClick: () => {
-        if (!isSpeedMode && !user) {
-          onAuthRequired?.();
-        } else {
-          onViewChange?.("space");
-        }
-      },
-    },
-    {
-      key: "4",
-      icon: <ShoppingBag className="h-4 w-4" />,
-      label: t("sidebar.agentMarket"),
-      onClick: () => {
-        if (!isSpeedMode && !user) {
-          onAuthRequired?.();
-        } else {
-          onViewChange?.("market");
-        }
-      },
-    },
-    {
-      key: "5",
-      icon: <Code className="h-4 w-4" />,
-      label: t("sidebar.agentDev"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("agents");
-        }
-      },
-    },
-    {
-      key: "6",
-      icon: <BookOpen className="h-4 w-4" />,
-      label: t("sidebar.knowledgeBase"),
-      onClick: () => {
-        if (!isSpeedMode && !user) {
-          onAuthRequired?.();
-        } else {
-          onViewChange?.("knowledges");
-        }
-      },
-    },
-    {
-      key: "10",
-      icon: <Puzzle className="h-4 w-4" />,
-      label: t("sidebar.mcpToolsManagement"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("mcpTools");
-        }
-      },
-    },
-    {
-      key: "11",
-      icon: <Activity className="h-4 w-4" />,
-      label: t("sidebar.monitoringManagement"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("monitoring");
-        }
-      },
-    },
-    {
-      key: "7",
-      icon: <Settings className="h-4 w-4" />,
-      label: t("sidebar.modelManagement"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("models");
-        }
-      },
-    },
-    {
-      key: "8",
-      icon: <Database className="h-4 w-4" />,
-      label: t("sidebar.memoryManagement"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("memory");
-        }
-      },
-    },
-    {
-      key: "9",
-      icon: <Users className="h-4 w-4" />,
-      label: t("sidebar.userManagement"),
-      onClick: () => {
-        if (!isSpeedMode && user?.role !== "admin") {
-          onAdminRequired?.();
-        } else {
-          onViewChange?.("users");
-        }
-      },
-    },
+    createMenuItem("0", Home, "sidebar.homePage", "home"),
+    createMenuItem("1", Bot, "sidebar.startChat", "chat", true),
+    createMenuItem("2", Zap, "sidebar.quickConfig", "setup", false, true),
+    createMenuItem("3", Globe, "sidebar.agentSpace", "space", true),
+    createMenuItem("4", ShoppingBag, "sidebar.agentMarket", "market", true),
+    createMenuItem("5", Code, "sidebar.agentDev", "agents", false, true),
+    createMenuItem("6", BookOpen, "sidebar.knowledgeBase", "knowledges", true),
+    createMenuItem("10", Puzzle, "sidebar.mcpToolsManagement", "mcpTools", false, true),
+    createMenuItem("11", Activity, "sidebar.monitoringManagement", "monitoring", false, true),
+    createMenuItem("7", Settings, "sidebar.modelManagement", "models", false, true),
+    createMenuItem("8", Database, "sidebar.memoryManagement", "memory", false, true),
+    createMenuItem("9", Users, "sidebar.userManagement", "users", false, true),
   ];
 
-  // Calculate sidebar height dynamically based on header and footer reserved heights
-  const headerReservedHeight = parseInt(HEADER_CONFIG.RESERVED_HEIGHT);
-  const footerReservedHeight = parseInt(FOOTER_CONFIG.RESERVED_HEIGHT);
-  const sidebarHeight = `calc(100vh - ${headerReservedHeight}px - ${footerReservedHeight}px)`;
-  const sidebarTop = `${headerReservedHeight}px`;
+  // Calculate sidebar height and position dynamically
+  const sidebarHeight = `calc(100vh - ${HEADER_CONFIG.RESERVED_HEIGHT} - ${FOOTER_CONFIG.RESERVED_HEIGHT})`;
+  const sidebarTop = HEADER_CONFIG.RESERVED_HEIGHT;
 
   return (
-    <ConfigProvider
-      theme={{
-        components: {
-          Layout: {
-            siderBg: "rgba(255, 255, 255, 0.95)",
-          },
-          Menu: {
-            itemBg: "transparent",
-            itemSelectedBg: "#e6f4ff",
-            itemSelectedColor: "#1677ff",
-            itemHoverBg: "#f5f5f5",
-            itemHoverColor: "#1677ff",
-            itemActiveBg: "#e6f4ff",
-            itemColor: "#334155",
-            iconSize: 16,
-            itemBorderRadius: 6,
-            itemMarginInline: 6,
-            itemPaddingInline: 12,
-            itemHeight: 36,
-          },
-        },
-      }}
-    >
-      <div style={{ position: "relative" }}>
-        <div style={{ width: `${siderWidth}px`, flexShrink: 0 }}>
+    <ConfigProvider>
+      <div className="relative">
+        <div 
+          className="flex-shrink-0" 
+          style={{ 
+            width: collapsed ? SIDER_CONFIG.COLLAPSED_WIDTH : SIDER_CONFIG.EXPANDED_WIDTH 
+          }}
+        >
           <Sider
             collapsed={collapsed}
             trigger={null}
             breakpoint="lg"
-            collapsedWidth={collapsedWidth}
-            width={expandedWidth}
-            className="!bg-white/95 dark:!bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
+            collapsedWidth={SIDER_CONFIG.COLLAPSED_WIDTH}
+            width={SIDER_CONFIG.EXPANDED_WIDTH}
+            className="fixed left-0 bg-white/95 dark:bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
             style={{
-              overflow: "auto",
-              minHeight: sidebarHeight,
               height: sidebarHeight,
-              position: "fixed",
               top: sidebarTop,
-              left: 0,
-              width: `${siderWidth}px`,
             }}
           >
             <div className="py-2 h-full">
@@ -304,11 +164,7 @@ export function SideNavigation({
                 selectedKeys={[selectedKey]}
                 items={menuItems}
                 onClick={({ key }) => setSelectedKey(key)}
-                className="!bg-transparent !border-r-0"
-                style={{
-                  height: "100%",
-                  borderRight: 0,
-                }}
+                className="bg-transparent border-r-0 h-full"
               />
             </div>
           </Sider>
@@ -320,30 +176,14 @@ export function SideNavigation({
           shape="circle"
           size="small"
           onClick={() => setCollapsed(!collapsed)}
-          className="shadow-md hover:shadow-lg transition-all"
+          className="fixed top-1/2 -translate-y-1/2 w-6 h-6 min-w-6 p-0 border-2 border-white shadow-md hover:shadow-lg transition-all z-[800]"
           style={{
-            position: "fixed",
-            left: collapsed ? "52px" : "264px",
-            top: "50vh",
-            transform: "translateY(-50%)",
-            width: "24px",
-            height: "24px",
-            minWidth: "24px",
-            padding: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "2px solid white",
-            zIndex: 800,
+            left: collapsed 
+              ? `${SIDER_CONFIG.COLLAPSED_WIDTH - 12}px` 
+              : `${SIDER_CONFIG.EXPANDED_WIDTH - 13}px`,
             transition: "left 0.2s ease",
           }}
-          icon={
-            collapsed ? (
-              <ChevronRight className="h-3 w-3" />
-            ) : (
-              <ChevronLeft className="h-3 w-3" />
-            )
-          }
+          icon={collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
         />
       </div>
     </ConfigProvider>

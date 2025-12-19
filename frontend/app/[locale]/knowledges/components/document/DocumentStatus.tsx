@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Popover, Progress } from "antd";
-import { QuestionCircleOutlined } from "@ant-design/icons";
+import { CircleHelp } from "lucide-react";
 import { DOCUMENT_STATUS } from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
@@ -272,9 +272,9 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
           open={isPopoverOpen}
           onOpenChange={handlePopoverVisibleChange}
         >
-          <QuestionCircleOutlined
+          <CircleHelp
             className="ml-1.5 cursor-help text-gray-500 hover:text-gray-700"
-            style={{ fontSize: "12px" }}
+            size={12}
           />
         </Popover>
       )}

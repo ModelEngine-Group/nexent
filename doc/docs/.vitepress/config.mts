@@ -1,4 +1,4 @@
-// https://vitepress.dev/reference/site-config
+﻿// https://vitepress.dev/reference/site-config
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
@@ -89,6 +89,8 @@ export default defineConfig({
                 text: "Knowledge Base",
                 link: "/en/user-guide/knowledge-base",
               },
+              { text: "MCP Tools", link: "/en/user-guide/mcp-tools" },
+              { text: "Monitoring & Ops", link: "/en/user-guide/monitor" },
               {
                 text: "Model Management",
                 link: "/en/user-guide/model-management",
@@ -267,7 +269,7 @@ export default defineConfig({
             items: [
               { text: "首页", link: "/zh/user-guide/home-page" },
               { text: "开始问答", link: "/zh/user-guide/start-chat" },
-              { text: "快速设置", link: "/zh/user-guide/quick-setup" },
+              { text: "快速配置", link: "/zh/user-guide/quick-setup" },
               { text: "智能体空间", link: "/zh/user-guide/agent-space" },
               { text: "智能体市场", link: "/zh/user-guide/agent-market" },
               {
@@ -278,6 +280,8 @@ export default defineConfig({
                 text: "知识库",
                 link: "/zh/user-guide/knowledge-base",
               },
+              { text: "MCP工具", link: "/zh/user-guide/mcp-tools" },
+              { text: "监控与运维", link: "/zh/user-guide/monitor" },
               { text: "模型管理", link: "/zh/user-guide/model-management" },
               { text: "记忆管理", link: "/zh/user-guide/memory-management" },
               { text: "用户管理", link: "/zh/user-guide/user-management" },
