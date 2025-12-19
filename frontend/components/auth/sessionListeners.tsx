@@ -57,7 +57,6 @@ export function SessionListeners() {
       centered: true,
       closable: false,
       okButtonProps: { 
-        danger: true, 
         type: "primary"
       },
       onOk() {

@@ -1606,11 +1606,19 @@ export default function AgentImportWizard({
                         {mcp.mcp_server_name}
                       </span>
                       {mcp.isInstalled ? (
-                        <Tag icon={<CircleCheck size={14} />} color="success" className="text-xs">
+                        <Tag
+                          icon={<CircleCheck size={14} />}
+                          color="success"
+                          className="inline-flex items-center gap-1 text-xs"
+                        >
                           {t("market.install.mcp.installed", "Installed")}
                         </Tag>
                       ) : (
-                        <Tag icon={<CircleX size={14} />} color="default" className="text-xs">
+                        <Tag
+                          icon={<CircleX size={14} />}
+                          color="default"
+                          className="inline-flex items-center gap-1 text-xs"
+                        >
                           {t("market.install.mcp.notInstalled", "Not Installed")}
                         </Tag>
                       )}
