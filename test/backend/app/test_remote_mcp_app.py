@@ -150,7 +150,8 @@ class TestAddRemoteProxies:
             tenant_id="tenant456",
             user_id="user123",
             remote_mcp_server="http://test.com",
-            remote_mcp_server_name="test_service"
+            remote_mcp_server_name="test_service",
+            container_id=None,
         )
 
     @patch('apps.remote_mcp_app.get_current_user_id')
@@ -949,8 +950,9 @@ class TestStopMCPContainer:
     """Test endpoint for stopping MCP container"""
 
     @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.delete_mcp_by_container_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_stop_mcp_container_success(self, mock_container_manager_class, mock_get_user_id):
+    def test_stop_mcp_container_success(self, mock_container_manager_class, mock_delete_mcp, mock_get_user_id):
         """Test successful stopping of MCP container"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         
@@ -968,6 +970,11 @@ class TestStopMCPContainer:
         assert data["status"] == "success"
         assert "stopped successfully" in data["message"]
         mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+        mock_delete_mcp.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            container_id="container-123",
+        )
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
