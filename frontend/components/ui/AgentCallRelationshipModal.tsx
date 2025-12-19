@@ -228,7 +228,7 @@ const customPathFunc = (
   return `M ${srcX} ${srcY} L ${srcX} ${midY} L ${tgtX} ${midY} L ${tgtX} ${tgtY}`;
 };
 
-
+declare module "react-d3-tree";
 
 export default function AgentCallRelationshipModal({
   visible,
