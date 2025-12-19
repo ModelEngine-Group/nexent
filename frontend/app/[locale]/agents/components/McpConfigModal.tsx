@@ -22,8 +22,8 @@ import {
   Maximize,
   Minimize,
   RefreshCw,
-  FileTextOutlined,
-  ContainerOutlined,
+  FileText,
+  Container,
 } from "lucide-react";
 
 import { McpConfigModalProps, AgentRefreshEvent } from "@/types/agentConfig";
@@ -93,7 +93,7 @@ export default function McpConfigModal({
         // Notify parent component to update tool list
         window.dispatchEvent(new CustomEvent("toolsUpdated"));
       }
-      
+
       // Refresh agent list to update agent availability status
       window.dispatchEvent(
         new CustomEvent("refreshAgentList") as AgentRefreshEvent
@@ -166,7 +166,7 @@ export default function McpConfigModal({
         // Refresh tools and agents asynchronously after adding server
         // This will update MCP tool availability and agent availability status
         await refreshToolsAndAgents();
-        
+
         // Show success message after refresh completes to avoid message overlap
         message.success(t("mcpService.message.addServerSuccess"));
       } else {
@@ -266,7 +266,7 @@ export default function McpConfigModal({
       if (result.success) {
         message.success(t("mcpConfig.message.healthCheckSuccess"));
         await loadServerList();
-        
+
         // Refresh tools and agents asynchronously after health check
         // This will update MCP tool availability and agent availability status
         refreshToolsAndAgents();
@@ -275,7 +275,7 @@ export default function McpConfigModal({
           result.message || t("mcpConfig.message.healthCheckFailed")
         );
         await loadServerList();
-        
+
         // Refresh tools and agents even if health check failed
         // This will update MCP tool availability and agent availability status
         refreshToolsAndAgents();
@@ -283,7 +283,7 @@ export default function McpConfigModal({
     } catch (error) {
       message.error(t("mcpConfig.message.healthCheckFailed"));
       await loadServerList();
-      
+
       // Refresh tools and agents even if health check failed
       // This will update MCP tool availability and agent availability status
       refreshToolsAndAgents();
@@ -552,17 +552,13 @@ export default function McpConfigModal({
   };
 
   // Delete container
-  const handleDeleteContainer = async (container: any) => {
-    modal.confirm({
+  const handleDeleteContainer = async (container: McpContainer) => {
+    confirm({
       title: t("mcpConfig.deleteContainer.confirmTitle"),
       content: t("mcpConfig.deleteContainer.confirmContent", {
         name: container.name || container.container_id,
       }),
       okText: t("common.delete", "Delete"),
-      cancelText: t("common.cancel", "Cancel"),
-      okType: "danger",
-      cancelButtonProps: { disabled: updatingTools },
-      okButtonProps: { disabled: updatingTools, loading: updatingTools },
       onOk: async () => {
         try {
           const result = await deleteMcpContainer(container.container_id);
@@ -574,14 +570,19 @@ export default function McpConfigModal({
 
             // Refresh tools and agents
             refreshToolsAndAgents().catch((error) => {
-              log.error("Failed to refresh tools and agents after container deletion:", error);
+              log.error(
+                "Failed to refresh tools and agents after container deletion:",
+                error
+              );
             });
           } else {
             message.error(result.message);
+            // Throw error to prevent modal from closing
             throw new Error(result.message);
           }
         } catch (error) {
           message.error(t("mcpConfig.message.deleteContainerFailed"));
+          // Throw error to prevent modal from closing
           throw error;
         }
       },
@@ -688,8 +689,16 @@ export default function McpConfigModal({
           {/* Add containerized MCP server section */}
           <Card size="small" style={{ marginBottom: 16 }}>
             <Title level={5} style={{ margin: "0 0 12px 0" }}>
-              <ContainerOutlined style={{ marginRight: 8 }} />
-              {t("mcpConfig.addContainer.title")}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Container style={{ width: 16, height: 16 }} />
+                {t("mcpConfig.addContainer.title")}
+              </span>
             </Title>
             <Space direction="vertical" style={{ width: "100%" }} size="middle">
               <div>
@@ -727,9 +736,9 @@ export default function McpConfigModal({
                   loading={addingContainer || updatingTools}
                   icon={
                     addingContainer || updatingTools ? (
-                      <LoadingOutlined />
+                      <LoaderCircle className="animate-spin" size={16} />
                     ) : (
-                      <PlusOutlined />
+                      <Plus className="size-4" />
                     )
                   }
                   disabled={actionsLocked}
@@ -745,7 +754,7 @@ export default function McpConfigModal({
           <Divider style={{ margin: "16px 0" }} />
 
           {/* Server list */}
-          <div style={{ marginBottom: 24 }}>
+          <div>
             <div
               style={{
                 display: "flex",
@@ -829,7 +838,7 @@ export default function McpConfigModal({
                     <Space size="small">
                       <Button
                         type="link"
-                        icon={<FileTextOutlined />}
+                        icon={<FileText className="size-4" />}
                         onClick={() => handleViewLogs(record.container_id)}
                         size="small"
                         disabled={updatingTools}
@@ -839,7 +848,7 @@ export default function McpConfigModal({
                       <Button
                         type="link"
                         danger
-                        icon={<DeleteOutlined />}
+                        icon={<Trash className="size-4" />}
                         onClick={() => handleDeleteContainer(record)}
                         size="small"
                         disabled={actionsLocked}
@@ -911,7 +920,7 @@ export default function McpConfigModal({
         <div style={{ padding: "0 0 16px 0" }}>
           {loadingLogs ? (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <LoadingOutlined style={{ fontSize: 24, marginRight: 8 }} />
+              <LoaderCircle className="animate-spin" size={16} />
               <Text>{t("mcpConfig.containerLogs.loading")}</Text>
             </div>
           ) : (
