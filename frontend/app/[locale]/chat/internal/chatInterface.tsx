@@ -15,6 +15,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { conversationService } from "@/services/conversationService";
 import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
+import { fetchAllAgents } from "@/services/agentConfigService";
+import type { Agent } from "@/types/chat";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -137,6 +139,7 @@ export function ChatInterface() {
 
   // Add agent selection state
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   // Reset scroll to bottom state
   useEffect(() => {
@@ -200,6 +203,24 @@ export function ChatInterface() {
         });
     }
   }, [appConfig]); // Add appConfig as dependency
+
+  // Load agent list once and reuse across child components to avoid duplicate /agent/list calls.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetchAllAgents();
+        if (mounted && res?.success) {
+          setAgents(res.data || []);
+        }
+      } catch (e) {
+        log.error("Failed to fetch agents for chat page:", e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Add useEffect to listen for conversationId changes, ensure right sidebar is always closed when conversation switches
   useEffect(() => {
@@ -1459,6 +1480,7 @@ export function ChatInterface() {
                 shouldScrollToBottom={shouldScrollToBottom}
                 selectedAgentId={selectedAgentId}
                 onAgentSelect={setSelectedAgentId}
+                initialAgents={agents}
                 onCitationHover={clearCompletedIndicator}
                 onScroll={clearCompletedIndicator}
               />

@@ -12,6 +12,10 @@ import log from "@/lib/logger";
 // @ts-ignore
 const fetch = fetchWithAuth;
 
+// Simple in-memory cache to ensure conversation list is fetched once per app session
+// and reused by callers. Provide an invalidate function if callers need to refresh.
+let conversationListCache: { ts: number; data: ConversationListItem[] } | null = null;
+
 // This helper function now ALWAYS connects through the current host and port.
 // This relies on our custom `server.js` to handle the proxying in all environments.
 const getWebSocketUrl = (endpoint: string): string => {
@@ -24,15 +28,34 @@ const getWebSocketUrl = (endpoint: string): string => {
 export const conversationService = {
   // Get conversation list
   async getList(): Promise<ConversationListItem[]> {
-    const response = await fetch(API_ENDPOINTS.conversation.list);
+    try {
+      // If we already fetched the conversation list earlier in this session, return it.
+      if (conversationListCache) {
+        return conversationListCache.data;
+      }
 
-    const data = await response.json() as ConversationListResponse;
-    
-    if (data.code === 0) {
-      return data.data || [];
+      const response = await fetch(API_ENDPOINTS.conversation.list);
+      const data = (await response.json()) as ConversationListResponse;
+
+      if (data.code === 0) {
+        const list = data.data || [];
+        conversationListCache = { ts: Date.now(), data: list };
+        return list;
+      }
+
+      throw new ApiError(data.code, data.message);
+    } catch (error) {
+      // On error, if we have cached data return it as a fallback
+      if (conversationListCache) {
+        return conversationListCache.data;
+      }
+      throw error;
     }
-    
-    throw new ApiError(data.code, data.message);
+  },
+
+  // Invalidate the cached conversation list (call when you need to force refresh)
+  invalidateListCache() {
+    conversationListCache = null;
   },
 
   // Create new conversation
@@ -48,6 +71,8 @@ export const conversationService = {
     const data = await response.json();
     
     if (data.code === 0) {
+      // Invalidate conversation list cache so callers will fetch updated list
+      conversationListCache = null;
       return data.data;
     }
     
@@ -68,6 +93,8 @@ export const conversationService = {
     const data = await response.json();
     
     if (data.code === 0) {
+      // Invalidate conversation list cache since titles changed
+      conversationListCache = null;
       return data.data;
     }
     
@@ -114,6 +141,8 @@ export const conversationService = {
     const data = await response.json();
     
     if (data.code === 0) {
+      // Invalidate conversation list cache because an item was removed
+      conversationListCache = null;
       return true;
     }
     
@@ -802,7 +831,21 @@ export const conversationService = {
     const data = await response.json();
 
     if (data.code === 0) {
-      return data.data;
+      const title = data.data;
+      // If we have a cached conversation list, update the corresponding item's title
+      if (conversationListCache && Array.isArray(conversationListCache.data)) {
+        const idx = conversationListCache.data.findIndex(
+          (c) => c.conversation_id === params.conversation_id
+        );
+        if (idx >= 0) {
+          // Update in-place and refresh timestamp
+          conversationListCache.data[idx].conversation_title =
+            title || conversationListCache.data[idx].conversation_title;
+          conversationListCache.ts = Date.now();
+        }
+      }
+
+      return title;
     }
 
     throw new ApiError(data.code, data.message);

@@ -48,19 +48,32 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
   }, [isLoginModalOpen, isRegisterModalOpen])
 
   // Check deployment version and handle speed mode
+  // This function deduplicates network requests across the app instance using a module/global promise.
   const checkDeploymentVersion = async () => {
     try {
       setIsReady(false);
-      const response = await fetch(API_ENDPOINTS.tenantConfig.deploymentVersion);
-      if (response.ok) {
-        const data = await response.json();
-        const version = data.content?.deployment_version || data.deployment_version;
-        
-        setIsSpeedMode(version === 'speed');
-        // In speed mode, do not perform any auto login; UI should not depend on login
+      if (!(globalThis as any).__deploymentVersionPromise) {
+        (globalThis as any).__deploymentVersionPromise = (async () => {
+          try {
+            const resp = await fetch(API_ENDPOINTS.tenantConfig.deploymentVersion);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return data.content?.deployment_version || data.deployment_version || null;
+          } catch (e) {
+            return null;
+          }
+        })();
       }
+
+      const version = await (globalThis as any).__deploymentVersionPromise;
+      if (version) {
+        setIsSpeedMode(version === "speed");
+      } else {
+        setIsSpeedMode(false);
+      }
+      // In speed mode, do not perform any auto login; UI should not depend on login
     } catch (error) {
-      log.error('Failed to check deployment version:', error);
+      log.error("Failed to check deployment version:", error);
       setIsSpeedMode(false);
     } finally {
       setIsReady(true);
