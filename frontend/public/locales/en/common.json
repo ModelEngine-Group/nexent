@@ -583,6 +583,8 @@
   "document.chunk.search.document": "Docs",
   "document.chunk.search.chunk": "Chunk",
   "document.chunk.pagination.range": "{{start}}-{{end}} of {{total}}",
+  "document.chunk.pagination.jumpTo": "Go to",
+  "document.chunk.pagination.page": "Page",
 
   "model.dialog.title": "Add Model",
   "model.dialog.label.type": "Model Type",

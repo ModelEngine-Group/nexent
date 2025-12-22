@@ -29,10 +29,14 @@ def build_memory_config(tenant_id: str) -> Dict[str, Any]:
         raise ValueError("ES_HOST must include scheme, host and port, e.g. http://host:9200")
     es_host = f"{parsed.scheme}://{parsed.hostname}"
     es_port = parsed.port
+    # Normalize repo/name to avoid problematic characters in index names
+    safe_repo = embed_raw["model_repo"].lower().replace(
+        "/", "_") if embed_raw["model_repo"] else ""
+    safe_name = embed_raw["model_name"].lower().replace("/", "_")
     index_name = (
-        f"mem0_{embed_raw['model_repo'].lower()}_{embed_raw['model_name'].lower()}_{embed_raw['max_tokens']}"
+        f"mem0_{safe_repo}_{safe_name}_{embed_raw['max_tokens']}"
         if embed_raw["model_repo"]
-        else f"mem0_{embed_raw['model_name'].lower()}_{embed_raw['max_tokens']}"
+        else f"mem0_{safe_name}_{embed_raw['max_tokens']}"
     )
 
     # 3. Assemble final configuration

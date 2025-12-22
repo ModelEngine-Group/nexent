@@ -781,6 +781,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
               onChange={handlePaginationChange}
               disabled={loading}
               showQuickJumper
+              locale={{
+                jump_to: t("document.chunk.pagination.jumpTo"),
+                page: t("document.chunk.pagination.page"),
+              }}
               showTotal={(pageTotal, range) =>
                 t("document.chunk.pagination.range", {
                   defaultValue: "{{start}}-{{end}} of {{total}}",
