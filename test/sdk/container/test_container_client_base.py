@@ -54,6 +54,7 @@ class TestContainerClient:
         """Test that ContainerClient has required abstract methods"""
         assert hasattr(ContainerClient, "start_container")
         assert hasattr(ContainerClient, "stop_container")
+        assert hasattr(ContainerClient, "remove_container")
         assert hasattr(ContainerClient, "list_containers")
         assert hasattr(ContainerClient, "get_container_logs")
         assert hasattr(ContainerClient, "get_container_status")

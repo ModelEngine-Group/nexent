@@ -231,30 +231,61 @@ class TestStopMCPContainer:
 
     @pytest.mark.asyncio
     async def test_stop_mcp_container_success(self, mock_manager):
-        """Test successful stopping of MCP container"""
+        """Test successful stopping and removal of MCP container"""
         mock_manager.client.stop_container = AsyncMock(return_value=True)
+        mock_manager.client.remove_container = AsyncMock(return_value=True)
 
         result = await mock_manager.stop_mcp_container("container-123")
 
         assert result is True
         mock_manager.client.stop_container.assert_called_once_with("container-123")
+        mock_manager.client.remove_container.assert_called_once_with("container-123")
 
     @pytest.mark.asyncio
-    async def test_stop_mcp_container_not_found(self, mock_manager):
+    async def test_stop_mcp_container_stop_not_found(self, mock_manager):
         """Test stopping non-existent container"""
         mock_manager.client.stop_container = AsyncMock(return_value=False)
 
         result = await mock_manager.stop_mcp_container("non-existent")
 
         assert result is False
+        mock_manager.client.stop_container.assert_called_once_with("non-existent")
+        mock_manager.client.remove_container.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_stop_mcp_container_error(self, mock_manager):
-        """Test stopping container when ContainerError occurs"""
+    async def test_stop_mcp_container_remove_not_found(self, mock_manager):
+        """Test removing container when stop succeeds but remove fails (not found)"""
+        mock_manager.client.stop_container = AsyncMock(return_value=True)
+        mock_manager.client.remove_container = AsyncMock(return_value=False)
+
+        result = await mock_manager.stop_mcp_container("container-123")
+
+        assert result is False
+        mock_manager.client.stop_container.assert_called_once_with("container-123")
+        mock_manager.client.remove_container.assert_called_once_with("container-123")
+
+    @pytest.mark.asyncio
+    async def test_stop_mcp_container_stop_error(self, mock_manager):
+        """Test stopping container when ContainerError occurs during stop"""
         mock_manager.client.stop_container = AsyncMock(side_effect=ContainerError("Stop failed"))
 
         with pytest.raises(MCPContainerError, match="Failed to stop container"):
             await mock_manager.stop_mcp_container("container-123")
+
+        mock_manager.client.stop_container.assert_called_once_with("container-123")
+        mock_manager.client.remove_container.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stop_mcp_container_remove_error(self, mock_manager):
+        """Test removing container when ContainerError occurs during remove"""
+        mock_manager.client.stop_container = AsyncMock(return_value=True)
+        mock_manager.client.remove_container = AsyncMock(side_effect=ContainerError("Remove failed"))
+
+        with pytest.raises(MCPContainerError, match="Failed to stop container"):
+            await mock_manager.stop_mcp_container("container-123")
+
+        mock_manager.client.stop_container.assert_called_once_with("container-123")
+        mock_manager.client.remove_container.assert_called_once_with("container-123")
 
 
 # ---------------------------------------------------------------------------

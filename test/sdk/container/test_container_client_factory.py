@@ -44,6 +44,9 @@ class TestRegisterContainerClient:
             async def stop_container(self, container_id):
                 pass
 
+            async def remove_container(self, container_id):
+                pass
+
             def list_containers(self, tenant_id=None, service_name=None):
                 pass
 

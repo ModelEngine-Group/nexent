@@ -85,16 +85,32 @@ class ContainerClient(ABC):
     @abstractmethod
     async def stop_container(self, container_id: str) -> bool:
         """
-        Stop and remove a container
+        Stop a container
 
         Args:
             container_id: Container ID or name
 
         Returns:
-            True if container was stopped successfully
+            True if container was stopped successfully, False if not found
 
         Raises:
             ContainerError: If container stop fails
+        """
+        pass
+
+    @abstractmethod
+    async def remove_container(self, container_id: str) -> bool:
+        """
+        Remove a container
+
+        Args:
+            container_id: Container ID or name
+
+        Returns:
+            True if container was removed successfully, False if not found
+
+        Raises:
+            ContainerError: If container removal fails
         """
         pass
 

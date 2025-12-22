@@ -108,15 +108,22 @@ class MCPContainerManager:
             container_id: Container ID or name
 
         Returns:
-            True if container was stopped successfully
+            True if container was stopped and removed successfully
 
         Raises:
-            MCPContainerError: If container stop fails
+            MCPContainerError: If container stop or removal fails
         """
         try:
-            return await self.client.stop_container(container_id)
+            # First stop the container
+            stop_result = await self.client.stop_container(container_id)
+            if not stop_result:
+                return False
+            
+            # Then remove the container
+            remove_result = await self.client.remove_container(container_id)
+            return remove_result
         except ContainerError as e:
-            logger.error(f"Failed to stop container: {e}")
+            logger.error(f"Failed to stop or remove container: {e}")
             raise MCPContainerError(f"Failed to stop container: {e}")
 
     def list_mcp_containers(self, tenant_id: Optional[str] = None) -> List[Dict[str, any]]:

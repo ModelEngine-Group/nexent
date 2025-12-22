@@ -385,13 +385,13 @@ class DockerContainerClient(ContainerClient):
 
     async def stop_container(self, container_id: str) -> bool:
         """
-        Stop and remove container
+        Stop container
 
         Args:
             container_id: Container ID or name
 
         Returns:
-            True if container was stopped successfully
+            True if container was stopped successfully, False if not found
 
         Raises:
             ContainerError: If container stop fails
@@ -400,8 +400,7 @@ class DockerContainerClient(ContainerClient):
             container = self.client.containers.get(container_id)
             logger.info(f"Stopping container {container.name} ({container.id})")
             container.stop(timeout=10)
-            container.remove()
-            logger.info(f"Container {container.name} stopped and removed")
+            logger.info(f"Container {container.name} stopped")
             return True
         except NotFound:
             logger.warning(f"Container {container_id} not found")
@@ -412,6 +411,35 @@ class DockerContainerClient(ContainerClient):
         except Exception as e:
             logger.error(f"Unexpected error stopping container {container_id}: {e}")
             raise ContainerError(f"Failed to stop container: {e}")
+
+    async def remove_container(self, container_id: str) -> bool:
+        """
+        Remove container
+
+        Args:
+            container_id: Container ID or name
+
+        Returns:
+            True if container was removed successfully, False if not found
+
+        Raises:
+            ContainerError: If container removal fails
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            logger.info(f"Removing container {container.name} ({container.id})")
+            container.remove()
+            logger.info(f"Container {container.name} removed")
+            return True
+        except NotFound:
+            logger.warning(f"Container {container_id} not found")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to remove container {container_id}: {e}")
+            raise ContainerError(f"Failed to remove container: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error removing container {container_id}: {e}")
+            raise ContainerError(f"Failed to remove container: {e}")
 
     def list_containers(
         self, tenant_id: Optional[str] = None, service_name: Optional[str] = None

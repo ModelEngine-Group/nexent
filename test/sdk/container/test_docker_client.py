@@ -1079,13 +1079,12 @@ class TestStopContainer:
         """Test stopping container successfully"""
         docker_container_client.client.containers.get.return_value = mock_container
         mock_container.stop.return_value = None
-        mock_container.remove.return_value = None
 
         result = await docker_container_client.stop_container("test-container-id")
 
         assert result is True
         mock_container.stop.assert_called_once_with(timeout=10)
-        mock_container.remove.assert_called_once()
+        mock_container.remove.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stop_container_not_found(self, docker_container_client):
@@ -1113,6 +1112,53 @@ class TestStopContainer:
 
         with pytest.raises(ContainerError, match="Failed to stop container"):
             await docker_container_client.stop_container("test-container-id")
+
+
+# ---------------------------------------------------------------------------
+# Test remove_container
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveContainer:
+    """Test remove_container method"""
+
+    @pytest.mark.asyncio
+    async def test_remove_container_success(self, docker_container_client, mock_container):
+        """Test removing container successfully"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.remove.return_value = None
+
+        result = await docker_container_client.remove_container("test-container-id")
+
+        assert result is True
+        mock_container.remove.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_remove_container_not_found(self, docker_container_client):
+        """Test removing container that doesn't exist"""
+        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+
+        result = await docker_container_client.remove_container("non-existent-container")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_remove_container_api_error(self, docker_container_client, mock_container):
+        """Test removing container when API error occurs"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.remove.side_effect = APIError("API error")
+
+        with pytest.raises(ContainerError, match="Failed to remove container"):
+            await docker_container_client.remove_container("test-container-id")
+
+    @pytest.mark.asyncio
+    async def test_remove_container_generic_exception(self, docker_container_client, mock_container):
+        """Test removing container when generic exception occurs"""
+        docker_container_client.client.containers.get.return_value = mock_container
+        mock_container.remove.side_effect = Exception("Unexpected error")
+
+        with pytest.raises(ContainerError, match="Failed to remove container"):
+            await docker_container_client.remove_container("test-container-id")
 
 
 # ---------------------------------------------------------------------------
