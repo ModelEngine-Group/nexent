@@ -200,6 +200,9 @@ class TestCreateContainerClientFromConfig:
             async def stop_container(self, container_id):
                 return True
 
+            async def remove_container(self, container_id):
+                return True
+
             def list_containers(self, tenant_id=None, service_name=None):
                 return []
 
