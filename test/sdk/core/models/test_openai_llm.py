@@ -62,9 +62,16 @@ def _setup_stubs():
     sys.modules["smolagents.models"] = sa_mod
 
 _setup_stubs()
-# Now that stubs are in place, execute the module so imports resolve to our stubs
-spec.loader.exec_module(openai_llm_module)
-OpenAIModel = openai_llm_module.OpenAIModel
+# Now that stubs are in place, attempt to execute the module so imports resolve to our stubs.
+# If this early import fails, clean up the partial module so the later, properly-patched import can run.
+try:
+    spec.loader.exec_module(openai_llm_module)
+    OpenAIModel = getattr(openai_llm_module, "OpenAIModel", None)
+except Exception:
+    # Remove any partially-imported module to avoid interfering with later imports
+    if MODULE_NAME in sys.modules:
+        del sys.modules[MODULE_NAME]
+    OpenAIModel = None
 
 
 def make_chunk(content, reasoning=None, role=None):
@@ -82,7 +89,8 @@ def make_chunk(content, reasoning=None, role=None):
 
 def test_modelengine_message_flattening(monkeypatch):
     # Create instance with model_factory set to 'modelengine'
-    m = OpenAIModel(model_id="m", api_base="u", api_key="k", model_factory="modelengine")
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    m = ModelClass(model_id="m", api_base="u", api_key="k", model_factory="modelengine")
 
     captured = {}
 
@@ -188,11 +196,15 @@ nexent_monitor_mock.MonitoringManager = MagicMock
 nexent_monitor_mock.MonitoringConfig = MagicMock
 
 # Create mock parent package structure for nexent module
-nexent_mock = MagicMock()
+nexent_mock = types.ModuleType("nexent")
 nexent_mock.monitor = nexent_monitor_mock
-nexent_core_mock = MagicMock()
-nexent_core_models_mock = MagicMock()
-nexent_core_utils_mock = MagicMock()
+# Create package-like module objects for nested package structure so relative imports work
+nexent_core_mock = types.ModuleType("nexent.core")
+nexent_core_mock.__path__ = []
+nexent_core_models_mock = types.ModuleType("nexent.core.models")
+nexent_core_models_mock.__path__ = []
+nexent_core_utils_mock = types.ModuleType("nexent.core.utils")
+nexent_core_utils_mock.__path__ = []
 
 # Mock MessageObserver and ProcessType for utils.observer
 class MockMessageObserver:
@@ -218,12 +230,8 @@ module_mocks = {
     "openai.types.chat.chat_completion_message": MagicMock(),
     "openai": MagicMock(),
     "openai.lib": MagicMock(),
-    "nexent": nexent_mock,
     "nexent.monitor": nexent_monitor_mock,
     "nexent.monitor.monitoring": nexent_monitor_mock,
-    "nexent.core": nexent_core_mock,
-    "nexent.core.models": nexent_core_models_mock,
-    "nexent.core.utils": nexent_core_utils_mock,
     "nexent.core.utils.observer": nexent_core_utils_mock.observer,
 }
 
@@ -245,6 +253,23 @@ MODULE_PATH = (
 )
 
 with patch.dict("sys.modules", module_mocks):
+    # Ensure package modules exist so relative imports in the SDK module
+    # (e.g. `from .message_utils import ...`) resolve without executing
+    # the package's __init__.py which would import OpenAIModel and cause a cycle.
+    models_pkg = types.ModuleType("nexent.core.models")
+    models_pkg.__path__ = [str(MODULE_PATH.parent)]
+    sys.modules["nexent.core.models"] = models_pkg
+    core_pkg = sys.modules.get("nexent.core")
+    if core_pkg is None:
+        core_pkg = types.ModuleType("nexent.core")
+        core_pkg.__path__ = [str(MODULE_PATH.parent.parent)]
+        sys.modules["nexent.core"] = core_pkg
+    top_pkg = sys.modules.get("nexent")
+    if top_pkg is None:
+        top_pkg = types.ModuleType("nexent")
+        top_pkg.__path__ = [str(MODULE_PATH.parent.parent.parent)]
+        sys.modules["nexent"] = top_pkg
+
     spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
     openai_llm_module = importlib.util.module_from_spec(spec)
     sys.modules[MODULE_NAME] = openai_llm_module
@@ -984,6 +1009,55 @@ def test_call_context_length_exceeded_with_token_tracker(openai_model_instance):
         # Verify error event was added
         monitoring_manager_mock.add_span_event.assert_any_call("error_occurred", ANY)
 
+def test_call_with_chatmessage_instance_passed_through(openai_model_instance):
+    """Passing a ChatMessage instance should be preserved and passed to _prepare_completion_kwargs."""
+
+    # Create a ChatMessage instance (should be preserved as-is)
+    chat_msg = mock_models_module.ChatMessage(role="user", content=[{"text": "Hello"}])
+
+    captured = {}
+
+    def fake_prepare_completion_kwargs(messages=None, **kwargs):
+        captured["messages"] = messages
+        return {}
+
+    # Prepare a simple stream response to satisfy __call__ output handling
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 1
+    mock_chunk.usage.completion_tokens = 1
+
+    mock_result_message = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", side_effect=fake_prepare_completion_kwargs), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        result = openai_model_instance.__call__([chat_msg])
+
+    # Ensure the same ChatMessage object instance was passed through unchanged
+    assert "messages" in captured
+    assert captured["messages"][0] is chat_msg
+
+    # Ensure the final returned message is the constructed result (from_dict used for output)
+    assert result == mock_result_message
+
+def test_call_invalid_dict_message_raises_value_error(openai_model_instance):
+    """Passing a dict missing 'content' should raise ValueError during normalization."""
+    messages = [{"role": "user"}]  # missing 'content'
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(ValueError, match="Each message dict must include 'role' and 'content'."):
+            openai_model_instance.__call__(messages)
+
+
+def test_call_invalid_message_type_raises_type_error(openai_model_instance):
+    """Passing a message that is neither dict nor ChatMessage should raise TypeError."""
+    messages = [42]  # invalid type
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(TypeError, match="Messages must be ChatMessage or dict objects."):
+            openai_model_instance.__call__(messages)
 
 if __name__ == "__main__":
     pytest.main([__file__])

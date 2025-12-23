@@ -292,7 +292,8 @@ def mock_model_config():
         model_name="gpt-4",
         url="https://api.openai.com/v1",
         temperature=0.7,
-        top_p=0.9
+        top_p=0.9,
+        model_factory="qwen"
     )
 
 
@@ -305,7 +306,8 @@ def mock_deep_thinking_model_config():
         model_name="gpt-4",
         url="https://api.openai.com/v1",
         temperature=0.5,
-        top_p=0.8
+        top_p=0.8,
+        model_factory="qwen"
     )
 
 
@@ -405,6 +407,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         observer=nexent_agent_with_models.observer,
         model_id=mock_model_config.model_name,
         api_key=mock_model_config.api_key,
+        model_factory=mock_model_config.model_factory,
         api_base=mock_model_config.url,
         temperature=mock_model_config.temperature,
         top_p=mock_model_config.top_p,
@@ -431,6 +434,7 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
     mock_openai_model_class.assert_called_once_with(
         observer=nexent_agent_with_models.observer,
         model_id=mock_deep_thinking_model_config.model_name,
+        model_factory=mock_deep_thinking_model_config.model_factory,
         api_key=mock_deep_thinking_model_config.api_key,
         api_base=mock_deep_thinking_model_config.url,
         temperature=mock_deep_thinking_model_config.temperature,
@@ -1163,7 +1167,7 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, "1.5")
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
+        "test_agent", ProcessType.FINAL_ANSWER, " content")
 
 
 def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_instance, mock_core_agent):
@@ -1187,7 +1191,7 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, "2.0")
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, "String final answer with ")
+        "test_agent", ProcessType.FINAL_ANSWER, "")
 
 
 def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_core_agent):

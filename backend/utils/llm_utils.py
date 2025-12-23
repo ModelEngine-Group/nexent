@@ -72,7 +72,7 @@ def call_llm_for_system_prompt(
         temperature=0.3,
         top_p=0.95,
         model_factory=llm_model_config.get("model_factory") if llm_model_config else None,
-        ssl_verify=llm_model_config.get("ssl_verify", True),
+        ssl_verify=llm_model_config.get("ssl_verify", True) if llm_model_config else True,
     )
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},

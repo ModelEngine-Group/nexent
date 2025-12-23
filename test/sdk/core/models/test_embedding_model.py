@@ -565,3 +565,85 @@ def test_api_key_normalization_and_verify_openaicompatible(monkeypatch):
     resp = emb._make_request(data, timeout=1)
     assert captured['headers']["Authorization"].count("Bearer") == 1
     assert captured['verify'] is True
+
+
+def test_textembedding_super_init_executes():
+    """Create a concrete subclass of TextEmbedding that calls super().__init__
+    to execute the `super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)` line.
+    """
+    # Use the dynamically-loaded module alias from earlier in this file
+    TextEmbedding = OpenAICompatibleEmbedding.__mro__[1]  # TextEmbedding class (parent of OpenAICompatibleEmbedding)
+
+    class ConcreteTextEmbedding(TextEmbedding):  # type: ignore[misc]
+        def __init__(self, *args, **kwargs):
+            # This will call TextEmbedding.__init__, which in turn calls BaseEmbedding.__init__
+            super().__init__(*args, **kwargs)
+
+        def get_embeddings(self, *args, **kwargs):
+            return []
+
+        async def dimension_check(self, timeout: float = 5.0):
+            return []
+
+    # Instantiation should succeed and therefore the super().__init__ line was executed
+    inst = ConcreteTextEmbedding(model_name="m", base_url="u", api_key="k", embedding_dim=16, ssl_verify=False)
+    assert inst is not None
+    # Also assert that it's an instance of TextEmbedding for clarity
+    assert isinstance(inst, TextEmbedding)
+
+
+def test_jina_make_request_raises_http_error(monkeypatch):
+    """Ensure _make_request propagates HTTP errors from requests.post"""
+
+    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+        class BadResp:
+            status_code = 500
+
+            def raise_for_status(self):
+                raise requests.HTTPError("Server error")
+
+        return BadResp()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    emb = JinaEmbedding(api_key="k", base_url="https://api.jina.ai/v1/embeddings", ssl_verify=True)
+    data = emb._prepare_multimodal_input([{"text": "hi"}])
+    with pytest.raises(requests.HTTPError):
+        emb._make_request(data, timeout=1)
+
+
+def test_openai_make_request_raises_http_error(monkeypatch):
+    """Ensure OpenAICompatibleEmbedding._make_request propagates HTTP errors"""
+
+    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+        class BadResp:
+            status_code = 502
+
+            def raise_for_status(self):
+                raise requests.HTTPError("Bad Gateway")
+
+        return BadResp()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    emb = OpenAICompatibleEmbedding(model_name="m", base_url="https://api.example.com/emb", api_key="k", embedding_dim=16, ssl_verify=False)
+    data = emb._prepare_input("hello")
+    with pytest.raises(requests.HTTPError):
+        emb._make_request(data, timeout=2)
+
+
+def test_jina_get_multimodal_embeddings_missing_data_key(monkeypatch):
+    """If the response JSON lacks 'data', a KeyError should surface when with_metadata=False"""
+
+    class RespNoData:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"meta": {"ok": True}}
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: RespNoData())
+
+    emb = JinaEmbedding(api_key="k")
+    with pytest.raises(KeyError):
+        emb.get_multimodal_embeddings([{"text": "t"}], with_metadata=False, timeout=1)

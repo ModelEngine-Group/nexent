@@ -79,10 +79,32 @@ sys.modules["consts.model"] = consts_model_mod
 # Also ensure backend.consts.model resolves to our stub for tests that import via backend.consts.model
 sys.modules["backend.consts.model"] = consts_model_mod
 
-# Stub database.client.as_dict to avoid import-time DB helpers
+# Stub database.client to avoid import-time DB helpers
 db_client_stub = types.ModuleType("database.client")
 db_client_stub.as_dict = lambda obj: {}
-db_client_stub.get_db_session = lambda *a, **k: (_ for _ in ()).throw(StopIteration)
+
+# Minimal dummy db_client with clean_string_values and session_maker to satisfy imports.
+db_client_stub.db_client = types.SimpleNamespace(
+    clean_string_values=lambda d: d,
+    session_maker=lambda: None
+)
+
+# Provide a simple context manager compatible get_db_session used with `with get_db_session() as session:`
+class _DummySessionCM:
+    def __enter__(self):
+        # Return a minimal session-like object with methods used in tests (execute, scalars, commit/rollback/close)
+        return types.SimpleNamespace(
+            execute=lambda *a, **k: types.SimpleNamespace(rowcount=0),
+            scalars=lambda *a, **k: types.SimpleNamespace(all=lambda: []),
+            commit=lambda: None,
+            rollback=lambda: None,
+            close=lambda: None,
+        )
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
 sys.modules["database.client"] = db_client_stub
 
 # Stub utils.prompt_template_utils to avoid requiring PyYAML
