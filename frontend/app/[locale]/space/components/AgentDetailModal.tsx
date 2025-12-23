@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Modal, Tabs, Tag, Descriptions, Empty } from "antd";
+import { Modal, Tabs, Tag, Descriptions, Empty, Avatar } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle,
@@ -13,7 +13,7 @@ import {
   Users,
   Sparkles,
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+// Using AntD Avatar directly in this component
 import { generateAvatarFromName } from "@/lib/avatar";
 import { getToolSourceLabel, getCategoryLabel } from "@/lib/agentLabelMapper";
 
@@ -300,11 +300,10 @@ export default function AgentDetailModal({
     <Modal
       title={
         <div className="flex items-center gap-3">
-          <Avatar className="w-10 h-10">
-            <AvatarImage src={avatarUrl} alt={agentDetails?.display_name || agentDetails?.name} />
-            <AvatarFallback className="bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 text-lg font-bold text-blue-600 dark:text-blue-400">
+          <Avatar src={avatarUrl} size={40} className="w-10 h-10">
+            <span className="bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 text-lg font-bold text-blue-600 dark:text-blue-400">
               {agentDetails?.display_name?.charAt(0)?.toUpperCase() || agentDetails?.name?.charAt(0)?.toUpperCase() || "A"}
-            </AvatarFallback>
+            </span>
           </Avatar>
           <div>
             <div className="text-lg font-semibold">
