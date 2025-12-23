@@ -31,6 +31,7 @@ interface SideNavigationProps {
   onAdminRequired?: () => void;
   onViewChange?: (view: string) => void;
   currentView?: string;
+  collapsed?: boolean;
 }
 
 /**
@@ -69,12 +70,15 @@ export function SideNavigation({
   onAdminRequired,
   onViewChange,
   currentView,
+  collapsed: collapsedProp,
 }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { user, isSpeedMode } = useAuth();
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  // Support controlled collapse from parent; fall back to internal state if needed
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
   const [selectedKey, setSelectedKey] = useState("0");
+  const isCollapsed = typeof collapsedProp === "boolean" ? collapsedProp : internalCollapsed;
   // Update selected key when pathname or currentView changes
   useEffect(() => {
     // If we have a currentView from parent, use it to determine the key
@@ -140,51 +144,23 @@ export function SideNavigation({
   return (
     <ConfigProvider>
       <div className="relative">
-        <div 
-          className="flex-shrink-0" 
-          style={{ 
-            width: collapsed ? SIDER_CONFIG.COLLAPSED_WIDTH : SIDER_CONFIG.EXPANDED_WIDTH 
+        <div
+          className="flex-shrink-0"
+          style={{
+            width: isCollapsed ? SIDER_CONFIG.COLLAPSED_WIDTH : SIDER_CONFIG.EXPANDED_WIDTH,
           }}
         >
-          <Sider
-            collapsed={collapsed}
-            trigger={null}
-            breakpoint="lg"
-            collapsedWidth={SIDER_CONFIG.COLLAPSED_WIDTH}
-            width={SIDER_CONFIG.EXPANDED_WIDTH}
-            className="fixed left-0 bg-white/95 dark:bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
-            style={{
-              height: sidebarHeight,
-              top: sidebarTop,
-            }}
-          >
             <div className="py-2 h-full">
               <Menu
                 mode="inline"
+                inlineCollapsed={isCollapsed}
                 selectedKeys={[selectedKey]}
                 items={menuItems}
                 onClick={({ key }) => setSelectedKey(key)}
                 className="bg-transparent border-r-0 h-full"
               />
             </div>
-          </Sider>
         </div>
-
-        {/* Custom circular floating toggle button - positioned outside Sider */}
-        <Button
-          type="primary"
-          shape="circle"
-          size="small"
-          onClick={() => setCollapsed(!collapsed)}
-          className="fixed top-1/2 -translate-y-1/2 w-6 h-6 min-w-6 p-0 border-2 border-white shadow-md hover:shadow-lg transition-all z-[800]"
-          style={{
-            left: collapsed 
-              ? `${SIDER_CONFIG.COLLAPSED_WIDTH - 12}px` 
-              : `${SIDER_CONFIG.EXPANDED_WIDTH - 13}px`,
-            transition: "left 0.2s ease",
-          }}
-          icon={collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-        />
       </div>
     </ConfigProvider>
   );
