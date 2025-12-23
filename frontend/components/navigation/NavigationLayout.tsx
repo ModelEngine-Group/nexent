@@ -133,7 +133,7 @@ export function NavigationLayout({
           />
         </Header>
 
-        <Layout>
+        <Layout >
           <Sider
             style={siderStyle}
             width={SIDER_CONFIG.EXPANDED_WIDTH}
@@ -173,7 +173,7 @@ export function NavigationLayout({
           {/* Main content area */}
           <Content style={contentStyle}
           >
-            {contentMode === "centered" ? (
+            {contentMode === "centered" || "scrollable" ? (
               <div className="w-full h-full flex items-center justify-center p-4">
                 {children}
               </div>
