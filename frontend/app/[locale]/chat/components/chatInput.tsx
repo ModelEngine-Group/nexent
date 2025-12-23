@@ -15,7 +15,7 @@ import {
 } from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { Button } from "antd";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { conversationService } from "@/services/conversationService";
@@ -1034,11 +1034,12 @@ export function ChatInput({
             }
           >
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-              onClick={toggleRecording}
-              disabled={recordingStatus === "connecting" || isStreaming}
+                  type="default"
+                  shape="circle"
+                  size="middle"
+                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+                  onClick={toggleRecording}
+                  disabled={recordingStatus === "connecting" || isStreaming}
             >
               {isRecording ? (
                 <MicOff className="h-5 w-5" />
@@ -1051,8 +1052,9 @@ export function ChatInput({
           {/* Upload file button */}
           <Tooltip title={t("chatInput.uploadFiles")}>
             <Button
-              variant="ghost"
-              size="icon"
+              type="default"
+              shape="circle"
+              size="middle"
               className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
               onClick={() =>
                 document.getElementById("file-upload-regular")?.click()
@@ -1078,7 +1080,9 @@ export function ChatInput({
             >
               <Button
                 onClick={onStop}
-                size="icon"
+                type="primary"
+                shape="circle"
+                size="middle"
                 className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
               >
                 <Square className="h-5 w-5" />
@@ -1088,7 +1092,9 @@ export function ChatInput({
             <Button
               onClick={handleSend}
               disabled={!input.trim() || isLoading || !selectedAgentId}
-              size="icon"
+              type="primary"
+              shape="circle"
+              size="middle"
               className={`h-10 w-10 ${
                 hasUnsupportedFiles || !selectedAgentId
                   ? "bg-gray-400 cursor-not-allowed"

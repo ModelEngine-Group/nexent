@@ -2,13 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Database, X, Server } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
 import { API_ENDPOINTS } from "@/services/api";
 import { formatDate, formatUrl } from "@/lib/utils";
 import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
-import { message, Tabs } from "antd";
+import { message, Button, Tabs } from "antd";
 import log from "@/lib/logger";
 
 
@@ -95,10 +94,10 @@ export function ChatRightPanel({
     try {
       // Convert image URL to backend API URL
       const apiUrl = convertImageUrlToApiUrl(imageUrl);
-      
+
       // Use backend API to get the image
       const response = await fetch(apiUrl);
-      
+
       if (!response.ok) {
         throw new Error(`Failed to load image: ${response.statusText}`);
       }
@@ -106,12 +105,12 @@ export function ChatRightPanel({
       // Get image as blob and convert to base64
       const blob = await response.blob();
       const reader = new FileReader();
-      
+
       reader.onloadend = () => {
         const base64Data = reader.result as string;
         // Remove data URL prefix (e.g., "data:image/png;base64,")
         const base64 = base64Data.split(',')[1] || base64Data;
-        
+
         setImageData((prev) => ({
           ...prev,
           [imageUrl]: {
@@ -123,13 +122,13 @@ export function ChatRightPanel({
         }));
         loadingImages.current.delete(imageUrl);
       };
-      
+
       reader.onerror = () => {
         log.error("Failed to read image blob");
         handleImageLoadFail(imageUrl);
         loadingImages.current.delete(imageUrl);
       };
-      
+
       reader.readAsDataURL(blob);
     } catch (error) {
       log.error(t("chatRightPanel.imageProxyError"), error);
@@ -234,7 +233,7 @@ export function ChatRightPanel({
     const handleFileDownload = async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      
+
       if (!filename && !url) {
         message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
         return;
@@ -481,9 +480,9 @@ export function ChatRightPanel({
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
             <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-2 right-2 z-50 rounded-full bg-black/50 text-white hover:bg-black/70"
+              type="text"
+              size="middle"
+              className="absolute top-2 right-2 z-50 rounded-full bg-black/50 text-white hover:bg-black/70 h-8 w-8 p-0"
               onClick={(e: React.MouseEvent) => {
                 e.stopPropagation();
                 setViewingImage(null);
@@ -522,9 +521,9 @@ export function ChatRightPanel({
 
         {toggleRightPanel && (
           <Button
-            variant="ghost"
-            size="sm"
-            className="p-1 h-7 w-7 rounded hover:bg-gray-200"
+            type="text"
+            size="small"
+            className="p-0 h-7 w-7 min-w-[28px] rounded hover:bg-gray-200 active:bg-gray-300 flex items-center justify-center transition-colors duration-200"
             onClick={toggleRightPanel}
             title={t("chatRightPanel.closeSidebarTitle")}
           >
@@ -627,10 +626,10 @@ export function ChatRightPanel({
                       {processedImages.length > maxInitialImages && (
                         <div className="mt-4 text-center">
                           <Button
-                            variant="outline"
-                            size="sm"
+                            type="default"
+                            size="small"
                             onClick={() => setExpandedImages(!expandedImages)}
-                            className="w-full"
+                            className="w-full border border-slate-300 hover:border-slate-400 hover:bg-white transition-colors duration-200"
                           >
                             {expandedImages
                               ? t("chatRightPanel.collapseImages")

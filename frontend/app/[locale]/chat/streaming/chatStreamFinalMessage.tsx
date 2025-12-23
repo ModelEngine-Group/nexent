@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
-import { Button } from "@/components/ui/button";
+import { Button } from "antd";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { ChatMessageType } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
@@ -288,9 +288,7 @@ export function ChatStreamFinalMessage({
                       message.searchResults.length > 0) ||
                       (message?.images && message.images.length > 0)) && (
                       <div className="flex items-center text-xs text-gray-500">
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                          <Button
                           className={`flex items-center gap-1 p-1 pl-3 hover:bg-gray-100 rounded transition-all duration-200 border border-gray-200 ${
                             isSelected ? "bg-gray-100" : ""
                           }`}
@@ -330,8 +328,6 @@ export function ChatStreamFinalMessage({
                         }
                       >
                         <Button
-                          variant="outline"
-                          size="icon"
                           className={`h-8 w-8 rounded-full bg-white hover:bg-gray-100 transition-all duration-200 shadow-sm ${
                             copied
                               ? "bg-green-100 text-green-600 border-green-200"
@@ -339,6 +335,8 @@ export function ChatStreamFinalMessage({
                           }`}
                           onClick={handleCopyContent}
                           disabled={copied}
+                          shape="circle"
+                          size="small"
                         >
                           <Copy className="h-4 w-4" />
                         </Button>
@@ -353,16 +351,14 @@ export function ChatStreamFinalMessage({
                         }
                       >
                         <Button
-                          variant={
-                            localOpinion === chatConfig.opinion.POSITIVE ? "secondary" : "outline"
-                          }
-                          size="icon"
                           className={`h-8 w-8 rounded-full ${
                             localOpinion === chatConfig.opinion.POSITIVE
                               ? "bg-green-100 text-green-600 border-green-200"
                               : "bg-white hover:bg-gray-100"
                           } transition-all duration-200 shadow-sm`}
                           onClick={handleThumbsUp}
+                          shape="circle"
+                          size="small"
                         >
                           <ThumbsUp className="h-4 w-4" />
                         </Button>
@@ -377,16 +373,14 @@ export function ChatStreamFinalMessage({
                         }
                       >
                         <Button
-                          variant={
-                            localOpinion === chatConfig.opinion.NEGATIVE ? "secondary" : "outline"
-                          }
-                          size="icon"
                           className={`h-8 w-8 rounded-full ${
                             localOpinion === chatConfig.opinion.NEGATIVE
                               ? "bg-red-100 text-red-600 border-red-200"
                               : "bg-white hover:bg-gray-100"
                           } transition-all duration-200 shadow-sm`}
                           onClick={handleThumbsDown}
+                          shape="circle"
+                          size="small"
                         >
                           <ThumbsDown className="h-4 w-4" />
                         </Button>
@@ -395,8 +389,6 @@ export function ChatStreamFinalMessage({
                       {/* Voice playback button */}
                       <Tooltip title={ttsButtonContent.tooltip}>
                         <Button
-                          variant="outline"
-                          size="icon"
                           className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
                           onClick={handleTTSPlay}
                           disabled={
@@ -404,6 +396,8 @@ export function ChatStreamFinalMessage({
                             (message.finalAnswer === undefined &&
                               message.content === undefined)
                           }
+                          shape="circle"
+                          size="small"
                         >
                           {ttsButtonContent.icon}
                         </Button>
