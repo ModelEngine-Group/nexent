@@ -80,7 +80,7 @@ export function NavigationLayout({
     backgroundColor: "#fff",
     overflow: "visible",
     // Ensure the sider (and its toggle) sits above main content
-    zIndex: 2000,
+    zIndex: 998,
   };
 
   const siderInnerStyle: React.CSSProperties = {
@@ -165,7 +165,7 @@ export function NavigationLayout({
                 right: "-12px",
                 transition: "right 0.2s ease, left 0.2s ease",
                 // Place toggle above most content; Sider already has high z-index
-                zIndex: 3000,
+                zIndex: 999,
               }}
               icon={collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
             />
