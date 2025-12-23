@@ -51,7 +51,6 @@ export function NavigationLayout({
   onViewChange,
   currentView,
 }: NavigationLayoutProps) {
-  showFooter = false
   // Use RESERVED_HEIGHT for layout calculations (actual space occupied)
   const headerReservedHeight = parseInt(HEADER_CONFIG.RESERVED_HEIGHT);
   const footerReservedHeight = parseInt(FOOTER_CONFIG.RESERVED_HEIGHT);
@@ -79,6 +78,9 @@ export function NavigationLayout({
     bottom: showFooter? footerReservedHeight: 0,
     left: 0,
     backgroundColor: "#fff",
+    overflow: "visible",
+    // Ensure the sider (and its toggle) sits above main content
+    zIndex: 2000,
   };
 
   const siderInnerStyle: React.CSSProperties = {
@@ -99,7 +101,6 @@ export function NavigationLayout({
     flexShrink: 0, // Prevent shrinking
   };
 
-  // 4. Footer: fixed height
   const footerStyle: React.CSSProperties = {
     textAlign: "center",
     height: showFooter? footerReservedHeight: 0, // Fixed height 64px
@@ -109,9 +110,7 @@ export function NavigationLayout({
     backgroundColor: "#fff",
   };
 
-  // 5. Content: main flexible area
   const contentStyle: React.CSSProperties = {
-
     // Key settings:
     overflowY: "auto", // If content overflows vertically, scroll inside Content only
     overflowX: "hidden", // Hide horizontal scrollbar (optional)
@@ -165,7 +164,8 @@ export function NavigationLayout({
                 transform: "translateY(-50%)",
                 right: "-12px",
                 transition: "right 0.2s ease, left 0.2s ease",
-                zIndex: 20,
+                // Place toggle above most content; Sider already has high z-index
+                zIndex: 3000,
               }}
               icon={collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
             />
