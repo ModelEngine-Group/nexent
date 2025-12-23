@@ -173,8 +173,8 @@ export function NavigationLayout({
           {/* Main content area */}
           <Content style={contentStyle}
           >
-            {contentMode === "centered" || "scrollable" ? (
-              <div className="w-full h-full flex items-center justify-center p-4">
+            {contentMode === "centered" ? (
+              <div className="w-full h-full flex items-center justify-center">
                 {children}
               </div>
             ) : (
