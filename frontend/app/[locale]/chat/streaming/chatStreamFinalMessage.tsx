@@ -1,23 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { 
-  Copy, 
-  Volume2, 
-  ChevronRight, 
-  Square, 
-  Loader2, 
-  ThumbsDown, 
+import {
+  Copy,
+  Volume2,
+  ChevronRight,
+  Square,
+  Loader2,
+  ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { ChatMessageType } from "@/types/chat";
 import { chatConfig, Opinion } from "@/const/chatConfig";
 import { conversationService } from "@/services/conversationService";
@@ -327,105 +322,91 @@ export function ChatStreamFinalMessage({
                   <div className="flex items-center space-x-2 mt-1 justify-end">
                     <TooltipProvider>
                       {/* Copy button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className={`h-8 w-8 rounded-full bg-white hover:bg-gray-100 transition-all duration-200 shadow-sm ${
-                              copied
-                                ? "bg-green-100 text-green-600 border-green-200"
-                                : ""
-                            }`}
-                            onClick={handleCopyContent}
-                            disabled={copied}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            {copied
-                              ? t("chatStreamMessage.copied")
-                              : t("chatStreamMessage.copyContent")}
-                          </p>
-                        </TooltipContent>
+                      <Tooltip
+                        title={
+                          copied
+                            ? t("chatStreamMessage.copied")
+                            : t("chatStreamMessage.copyContent")
+                        }
+                      >
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full bg-white hover:bg-gray-100 transition-all duration-200 shadow-sm ${
+                            copied
+                              ? "bg-green-100 text-green-600 border-green-200"
+                              : ""
+                          }`}
+                          onClick={handleCopyContent}
+                          disabled={copied}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
                       </Tooltip>
 
                       {/* Thumbs up button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant={
-                              localOpinion === chatConfig.opinion.POSITIVE ? "secondary" : "outline"
-                            }
-                            size="icon"
-                            className={`h-8 w-8 rounded-full ${
-                              localOpinion === chatConfig.opinion.POSITIVE
-                                ? "bg-green-100 text-green-600 border-green-200"
-                                : "bg-white hover:bg-gray-100"
-                            } transition-all duration-200 shadow-sm`}
-                            onClick={handleThumbsUp}
-                          >
-                            <ThumbsUp className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            {localOpinion === chatConfig.opinion.POSITIVE
-                              ? t("chatStreamMessage.cancelLike")
-                              : t("chatStreamMessage.like")}
-                          </p>
-                        </TooltipContent>
+                      <Tooltip
+                        title={
+                          localOpinion === chatConfig.opinion.POSITIVE
+                            ? t("chatStreamMessage.cancelLike")
+                            : t("chatStreamMessage.like")
+                        }
+                      >
+                        <Button
+                          variant={
+                            localOpinion === chatConfig.opinion.POSITIVE ? "secondary" : "outline"
+                          }
+                          size="icon"
+                          className={`h-8 w-8 rounded-full ${
+                            localOpinion === chatConfig.opinion.POSITIVE
+                              ? "bg-green-100 text-green-600 border-green-200"
+                              : "bg-white hover:bg-gray-100"
+                          } transition-all duration-200 shadow-sm`}
+                          onClick={handleThumbsUp}
+                        >
+                          <ThumbsUp className="h-4 w-4" />
+                        </Button>
                       </Tooltip>
 
                       {/* Thumbs down button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant={
-                              localOpinion === chatConfig.opinion.NEGATIVE ? "secondary" : "outline"
-                            }
-                            size="icon"
-                            className={`h-8 w-8 rounded-full ${
-                              localOpinion === chatConfig.opinion.NEGATIVE
-                                ? "bg-red-100 text-red-600 border-red-200"
-                                : "bg-white hover:bg-gray-100"
-                            } transition-all duration-200 shadow-sm`}
-                            onClick={handleThumbsDown}
-                          >
-                            <ThumbsDown className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            {localOpinion === chatConfig.opinion.NEGATIVE
-                              ? t("chatStreamMessage.cancelDislike")
-                              : t("chatStreamMessage.dislike")}
-                          </p>
-                        </TooltipContent>
+                      <Tooltip
+                        title={
+                          localOpinion === chatConfig.opinion.NEGATIVE
+                            ? t("chatStreamMessage.cancelDislike")
+                            : t("chatStreamMessage.dislike")
+                        }
+                      >
+                        <Button
+                          variant={
+                            localOpinion === chatConfig.opinion.NEGATIVE ? "secondary" : "outline"
+                          }
+                          size="icon"
+                          className={`h-8 w-8 rounded-full ${
+                            localOpinion === chatConfig.opinion.NEGATIVE
+                              ? "bg-red-100 text-red-600 border-red-200"
+                              : "bg-white hover:bg-gray-100"
+                          } transition-all duration-200 shadow-sm`}
+                          onClick={handleThumbsDown}
+                        >
+                          <ThumbsDown className="h-4 w-4" />
+                        </Button>
                       </Tooltip>
 
                       {/* Voice playback button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
-                            onClick={handleTTSPlay}
-                            disabled={
-                              ttsStatus === "generating" ||
-                              (message.finalAnswer === undefined &&
-                                message.content === undefined)
-                            }
-                          >
-                            {ttsButtonContent.icon}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{ttsButtonContent.tooltip}</p>
-                        </TooltipContent>
+                      <Tooltip title={ttsButtonContent.tooltip}>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className={`h-8 w-8 rounded-full ${ttsButtonContent.className} transition-all duration-200 shadow-sm`}
+                          onClick={handleTTSPlay}
+                          disabled={
+                            ttsStatus === "generating" ||
+                            (message.finalAnswer === undefined &&
+                              message.content === undefined)
+                          }
+                        >
+                          {ttsButtonContent.icon}
+                        </Button>
                       </Tooltip>
                     </TooltipProvider>
                   </div>

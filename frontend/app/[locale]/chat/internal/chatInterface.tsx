@@ -30,12 +30,7 @@ import {
   createMessageAttachments,
   cleanupAttachmentUrls,
 } from "@/app/chat/internal/chatPreprocess";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 
 import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
@@ -70,7 +65,7 @@ export function ChatInterface() {
   const [isSwitchedConversation, setIsSwitchedConversation] = useState(false); // Add conversation switching tracking state
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
-  
+
   // Use conversation management hook
   const conversationManagement = useConversationManagement();
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
@@ -746,7 +741,7 @@ export function ChatInterface() {
     setInput("");
     setIsLoading(false);
     setIsSwitchedConversation(false);
-    
+
     // Use conversation management hook
     conversationManagement.handleNewConversation();
     setIsLoadingHistoricalConversation(false); // Ensure not loading historical conversation
@@ -1476,17 +1471,12 @@ export function ChatInterface() {
         </div>
       </div>
       <TooltipProvider>
-        <Tooltip open={false}>
-          <TooltipTrigger asChild>
-            <div className="fixed inset-0 pointer-events-none" />
-          </TooltipTrigger>
-          <TooltipContent
-            side="top"
-            align="center"
-            className="absolute bottom-24 left-1/2 transform -translate-x-1/2"
-          >
-            {t("chatInterface.stopGenerating")}
-          </TooltipContent>
+        <Tooltip
+          title={t("chatInterface.stopGenerating")}
+          open={false}
+          placement="top"
+        >
+          <div className="fixed inset-0 pointer-events-none" />
         </Tooltip>
       </TooltipProvider>
     </>

@@ -34,12 +34,7 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { Document } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
 import { formatScoreAsPercentage, getScoreColor } from "@/lib/utils";
-import {
-  Tooltip as UITooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 
 interface Chunk {
   id: string;
@@ -454,7 +449,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
 
     forceCloseTooltips();
-    
+
     confirm({
       title: t("document.chunk.confirm.deleteTitle"),
       content: t("document.chunk.confirm.deleteContent"),
@@ -603,51 +598,36 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                         </div>
                         <div className="flex items-center gap-1">
                           {!isReadOnlyMode && (
-                            <UITooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  icon={<SquarePen size={16} />}
-                                  onClick={() => openEditChunkModal(chunk)}
-                                  size="small"
-                                  className="self-center"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent className="font-normal">
-                                {t("document.chunk.tooltip.edit")}
-                              </TooltipContent>
-                            </UITooltip>
-                          )}
-                          <UITooltip>
-                            <TooltipTrigger asChild>
+                            <Tooltip title={t("document.chunk.tooltip.edit")}>
                               <Button
                                 type="text"
-                                icon={<Download size={16} />}
-                                onClick={() => handleDownloadChunk(chunk)}
+                                icon={<SquarePen size={16} />}
+                                onClick={() => openEditChunkModal(chunk)}
                                 size="small"
                                 className="self-center"
                               />
-                            </TooltipTrigger>
-                            <TooltipContent className="font-normal">
-                              {t("document.chunk.tooltip.download")}
-                            </TooltipContent>
-                          </UITooltip>
+                            </Tooltip>
+                          )}
+                          <Tooltip title={t("document.chunk.tooltip.download")}>
+                            <Button
+                              type="text"
+                              icon={<Download size={16} />}
+                              onClick={() => handleDownloadChunk(chunk)}
+                              size="small"
+                              className="self-center"
+                            />
+                          </Tooltip>
                           {!isReadOnlyMode && (
-                            <UITooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  danger
-                                  icon={<Trash2 size={16} />}
-                                  onClick={() => handleDeleteChunk(chunk)}
-                                  size="small"
-                                  className="self-center"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent className="font-normal">
-                                {t("document.chunk.tooltip.delete")}
-                              </TooltipContent>
-                            </UITooltip>
+                            <Tooltip title={t("document.chunk.tooltip.delete")}>
+                              <Button
+                                type="text"
+                                danger
+                                icon={<Trash2 size={16} />}
+                                onClick={() => handleDeleteChunk(chunk)}
+                                size="small"
+                                className="self-center"
+                              />
+                            </Tooltip>
                           )}
                         </div>
                       </div>
@@ -749,18 +729,13 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
             />
           </div>
           {!isReadOnlyMode && (
-            <UITooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="text"
-                  icon={<FilePlus2 size={16} />}
-                  onClick={openCreateChunkModal}
-                ></Button>
-              </TooltipTrigger>
-              <TooltipContent className="font-normal">
-                {t("document.chunk.tooltip.create")}
-              </TooltipContent>
-            </UITooltip>
+            <Tooltip title={t("document.chunk.tooltip.create")}>
+              <Button
+                type="text"
+                icon={<FilePlus2 size={16} />}
+                onClick={openCreateChunkModal}
+              ></Button>
+            </Tooltip>
           )}
         </div>
 
