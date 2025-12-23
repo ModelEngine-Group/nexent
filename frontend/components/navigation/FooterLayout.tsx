@@ -34,7 +34,7 @@ export function FooterLayout() {
   }, []);
 
   return (
-    <div className="py-3 px-4 w-full flex items-center justify-between">
+    <div className="py-[9px] px-4 w-full flex items-center justify-between border-t border-b">
       <div className="flex items-center gap-8">
         <span className="text-sm text-slate-900 dark:text-white">
           {t("page.copyright", { year: new Date().getFullYear() })}
