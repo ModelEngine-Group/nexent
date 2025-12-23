@@ -1,12 +1,11 @@
 """
-Analyze Text File Tool
+Analyze Document Tool
 
-Extracts content from text files (excluding images) and analyzes it using a large language model.
+Extracts content from documents and analyzes it using a large language model.
 Supports files from S3, HTTP, and HTTPS URLs.
 """
-import json
 import logging
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import httpx
 from jinja2 import Template, StrictUndefined
@@ -21,15 +20,15 @@ from nexent.storage import MinIOStorageClient
 from nexent.multi_modal.load_save_object import LoadSaveObjectManager
 
 
-logger = logging.getLogger("analyze_text_file_tool")
+logger = logging.getLogger("analyze_document_tool")
 
 
-class AnalyzeTextFileTool(Tool):
-    """Tool for analyzing text file content using a large language model"""
+class AnalyzeDocumentTool(Tool):
+    """Tool for analyzing document content using a large language model"""
     
-    name = "analyze_text_file"
+    name = "analyze_document"
     description = (
-        "Extract content from text files and analyze them using a large language model based on your query. "
+        "Extract content from documents and analyze them using a large language model based on your query. "
         "Supports multiple files from S3 URLs (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs. "
         "The tool will extract the text content from each file and return an analysis based on your question."
     )
@@ -75,6 +74,7 @@ class AnalyzeTextFileTool(Tool):
         self.llm_model = llm_model
         self.data_process_service_url = data_process_service_url
         self.mm = LoadSaveObjectManager(storage_client=self.storage_client)
+        self.time_out = 60 * 5
 
         self.running_prompt_zh = "正在分析文件..."
         self.running_prompt_en = "Analyzing file..."
@@ -87,7 +87,7 @@ class AnalyzeTextFileTool(Tool):
         query: str,
     ) -> List[str]:
         """
-        Analyze text file content using a large language model.
+        Analyze document content using a large language model.
 
         Note: This method is wrapped by load_object decorator which downloads
         the image from S3 URL, HTTP URL, or HTTPS URL and passes bytes to this method.
@@ -139,18 +139,18 @@ class AnalyzeTextFileTool(Tool):
             return analysis_results
             
         except Exception as e:
-            logger.error(f"Error analyzing text file: {str(e)}", exc_info=True)
-            error_msg = f"Error analyzing text file: {str(e)}"
+            logger.error(f"Error analyzing document: {str(e)}", exc_info=True)
+            error_msg = f"Error analyzing document: {str(e)}"
             raise Exception(error_msg)
 
 
     def process_text_file(self, filename: str, file_content: bytes,) -> str:
         """
-        Process text file, convert to text using external API
+        Process document, convert to text using external API
         """
         # file_content is byte data, need to send to API through file upload
         api_url = f"{self.data_process_service_url}/tasks/process_text_file"
-        logger.info(f"Processing text file {filename} with API: {api_url}")
+        logger.info(f"Processing document {filename} with API: {api_url}")
 
         raw_text = ""
         try:
@@ -160,9 +160,9 @@ class AnalyzeTextFileTool(Tool):
             }
             data = {
                 'chunking_strategy': 'basic',
-                'timeout': 60
+                'timeout': self.time_out,
             }
-            with httpx.Client(timeout=60) as client:
+            with httpx.Client(timeout=self.time_out) as client:
                 response = client.post(api_url, files=files, data=data)
 
             if response.status_code == 200:
@@ -178,14 +178,14 @@ class AnalyzeTextFileTool(Tool):
                 raise Exception(error_detail)
 
         except Exception as e:
-            logger.error(f"Failed to process text file {filename}: {str(e)}", exc_info=True)
+            logger.error(f"Failed to process document {filename}: {str(e)}", exc_info=True)
             raise
 
         return raw_text
 
     def analyze_file(self, query: str, raw_text: str,):
         """
-        Process text file, convert to text using external API
+        Process document, convert to text using external API
         """
         language = getattr(self.observer, "lang", "en") if self.observer else "en"
         prompts = get_prompt_template(template_type='analyze_file', language=language)
