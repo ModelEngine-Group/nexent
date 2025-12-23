@@ -24,6 +24,17 @@ spec.loader.exec_module(embedding_model_module)
 OpenAICompatibleEmbedding = embedding_model_module.OpenAICompatibleEmbedding
 JinaEmbedding = embedding_model_module.JinaEmbedding
 
+class DummyResponse:
+    def __init__(self, status_code=200, json_data=None):
+        self.status_code = status_code
+        self._json = json_data or {"data": []}
+
+    def raise_for_status(self):
+        if not (200 <= self.status_code < 300):
+            raise requests.HTTPError(f"Status {self.status_code}")
+
+    def json(self):
+        return self._json
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -39,6 +50,7 @@ def openai_embedding_instance():
         base_url="https://api.example.com",
         api_key="dummy-key",
         embedding_dim=1536,
+        ssl_verify=True,
     )
 
 
@@ -46,7 +58,7 @@ def openai_embedding_instance():
 def jina_embedding_instance():
     """Return a JinaEmbedding instance with minimal viable attributes for tests."""
 
-    return JinaEmbedding(api_key="dummy-key")
+    return JinaEmbedding(api_key="dummy-key", ssl_verify=True)
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +375,7 @@ def test_jina_get_multimodal_embeddings_timeout_retry_succeeds(jina_embedding_in
 
     captured_jsons = []
 
-    def side_effect(url, headers=None, json=None, timeout=None):
+    def side_effect(url, headers=None, json=None, timeout=None, **kwargs):
         calls = side_effect.calls
         side_effect.calls += 1
         if calls == 0:
@@ -516,3 +528,40 @@ async def test_openai_dimension_check_connection_error_returns_empty(openai_embe
         result = await openai_embedding_instance.dimension_check()
 
         assert result == []
+
+def test_api_key_normalization_and_verify_jina(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+        captured['url'] = url
+        captured['headers'] = headers
+        captured['verify'] = verify
+        return DummyResponse()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    # api_key containing Bearer prefix should be normalized
+    emb = JinaEmbedding(api_key="my-secret", base_url="https://example.com/emb", ssl_verify=False)
+    data = emb._prepare_multimodal_input([{"text": "hello"}])
+    resp = emb._make_request(data, timeout=1)
+    assert captured['headers']["Authorization"].startswith("Bearer ")
+    # verify should be passed through
+    assert captured['verify'] is False
+
+
+def test_api_key_normalization_and_verify_openaicompatible(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None, verify=True):
+        captured['url'] = url
+        captured['headers'] = headers
+        captured['verify'] = verify
+        return DummyResponse()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    emb = OpenAICompatibleEmbedding(model_name="m", base_url="https://api.example/emb", api_key="KEY", embedding_dim=16, ssl_verify=True)
+    data = emb._prepare_input("hi")
+    resp = emb._make_request(data, timeout=1)
+    assert captured['headers']["Authorization"].count("Bearer") == 1
+    assert captured['verify'] is True

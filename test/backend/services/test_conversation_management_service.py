@@ -1,3 +1,109 @@
+import sys
+import types
+
+def _stub_nexent_openai_model():
+    # Provide a simple OpenAIModel stub for import-time safety
+    mod = types.ModuleType("nexent.core.models")
+    class Stub:
+        def __init__(self, *a, **k):
+            self.generated = None
+        def generate(self, messages):
+            # record messages for assertion and return object with content
+            self.generated = messages
+            return types.SimpleNamespace(content="The Title")
+    mod.OpenAIModel = Stub
+    sys.modules["nexent.core.models"] = mod
+
+_stub_nexent_openai_model()
+
+# Stub jinja2 to avoid importing the dependency during tests
+jinja2_mod = types.ModuleType("jinja2")
+class StrictUndefined:
+    pass
+class Template:
+    def __init__(self, text, undefined=None):
+        self.text = text
+    def render(self, ctx):
+        # very small render: replace {{content}} occurrence
+        return self.text.replace("{{content}}", ctx.get("content", ""))
+jinja2_mod.StrictUndefined = StrictUndefined
+jinja2_mod.Template = Template
+sys.modules["jinja2"] = jinja2_mod
+# Stub nexent.core.agents.agent_model to satisfy imports in consts.model
+agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+agent_model_mod.ToolConfig = object
+sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
+sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+# Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
+observer_mod = types.ModuleType("nexent.core.utils.observer")
+observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
+observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
+sys.modules["nexent.core.utils.observer"] = observer_mod
+#
+# Stub consts.model to avoid pydantic/email-validator heavy imports during tests.
+consts_model_mod = types.ModuleType("consts.model")
+class AgentRequest:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+class ConversationResponse:
+    def __init__(self, code=0, message="", data=None):
+        self.code = code
+        self.message = message
+        self.data = data
+class MessageUnit:
+    def __init__(self, type="", content=""):
+        self.type = type
+        self.content = content
+class MessageRequest:
+    def __init__(self, conversation_id=None, message_idx=None, role=None, message=None, minio_files=None):
+        self.conversation_id = conversation_id
+        self.message_idx = message_idx
+        self.role = role
+        self.message = message
+        self.minio_files = minio_files
+    def model_dump(self):
+        return {
+            "conversation_id": self.conversation_id,
+            "message_idx": self.message_idx,
+            "role": self.role,
+            "message": [m.__dict__ if hasattr(m, "__dict__") else m for m in (self.message or [])],
+            "minio_files": self.minio_files,
+        }
+
+consts_model_mod.AgentRequest = AgentRequest
+consts_model_mod.ConversationResponse = ConversationResponse
+consts_model_mod.MessageUnit = MessageUnit
+consts_model_mod.MessageRequest = MessageRequest
+sys.modules["consts.model"] = consts_model_mod
+# Also ensure backend.consts.model resolves to our stub for tests that import via backend.consts.model
+sys.modules["backend.consts.model"] = consts_model_mod
+
+# Stub database.client.as_dict to avoid import-time DB helpers
+db_client_stub = types.ModuleType("database.client")
+db_client_stub.as_dict = lambda obj: {}
+db_client_stub.get_db_session = lambda *a, **k: (_ for _ in ()).throw(StopIteration)
+sys.modules["database.client"] = db_client_stub
+
+# Stub utils.prompt_template_utils to avoid requiring PyYAML
+prompt_mod = types.ModuleType("utils.prompt_template_utils")
+prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{content}}", "SYSTEM_PROMPT":"SYS"}
+sys.modules["utils.prompt_template_utils"] = prompt_mod
+
+
+
+def test_call_llm_for_title_flattening(monkeypatch):
+    # Patch tenant_config_manager.get_model_config and prompt template
+
+    monkeypatch.setattr("backend.services.conversation_management_service.tenant_config_manager", types.SimpleNamespace(get_model_config=lambda *a, **k: {"base_url":"u","api_key":"k","model_factory":"modelengine","model_name":"m"}))
+    monkeypatch.setattr("backend.services.conversation_management_service.get_generate_title_prompt_template", lambda language="zh": {"USER_PROMPT":"{{content}}", "SYSTEM_PROMPT":"SYS"})
+    # Stub get_model_name_from_config to avoid dependency on config utils
+    monkeypatch.setattr("backend.services.conversation_management_service.get_model_name_from_config", lambda cfg: cfg.get("model_name", "") if cfg else "")
+
+    # Call with some content; expect OpenAIModel.generate to receive flattened messages
+    title = call_llm_for_title("some conversation content", tenant_id="t", language="zh")
+    assert title == "The Title"
+
 from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
 import unittest
 import json
@@ -307,9 +413,12 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.role, "assistant")
         # Check that consecutive model_output_thinking messages were merged
         self.assertEqual(len(request_arg.message), 1)
-        self.assertEqual(request_arg.message[0].type, "model_output_thinking")
-        self.assertEqual(
-            request_arg.message[0].content, "Machine learning is a field of AI")
+        first_unit = request_arg.message[0]
+        unit_type = getattr(first_unit, "type", None) or (first_unit.get("type") if isinstance(first_unit, dict) else None)
+        self.assertEqual(unit_type, "model_output_thinking")
+        first_unit = request_arg.message[0]
+        unit_content = getattr(first_unit, "content", None) or (first_unit.get("content") if isinstance(first_unit, dict) else None)
+        self.assertEqual(unit_content, "Machine learning is a field of AI")
 
     def test_extract_user_messages(self):
         # Setup

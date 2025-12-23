@@ -570,7 +570,7 @@ class TestCallLLMForSystemPromptExtended(unittest.TestCase):
         )
 
         # chunk1: "Start " -> added to token_join
-        # chunk2: "<think>thinking</think>" -> 
+        # chunk2: "<think>thinking</think>" ->
         #   end tag clears token_join (since is_thinking=False), new_token becomes ""
         # chunk3: " End" -> added to token_join
         # Final result should be " End" (chunk1 content was cleared by chunk2's end tag)

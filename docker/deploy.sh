@@ -376,10 +376,10 @@ generate_env_for_infrastructure() {
 
   # Make sure the script is executable and run it
   chmod +x generate_env.sh
-  
+
   # Export DEPLOYMENT_VERSION to ensure generate_env.sh can access it
   export DEPLOYMENT_VERSION
-  
+
   if ./generate_env.sh; then
       echo "   ✅ Environment file generated successfully for infrastructure mode!"
       # Source the generated .env file to make variables available
@@ -446,7 +446,7 @@ select_deployment_mode() {
   # Sanitize potential Windows CR in input
   mode_choice=$(sanitize_input "$mode_choice")
   MODE_CHOICE_SAVED="$mode_choice"
-  
+
   case $mode_choice in
       2)
           export DEPLOYMENT_MODE="infrastructure"
@@ -466,7 +466,7 @@ select_deployment_mode() {
           ;;
   esac
   echo ""
-  
+
   if [ -n "$ROOT_DIR_PARAM" ]; then
   # Check if root-dir parameter is provided (highest priority)
     ROOT_DIR="$ROOT_DIR_PARAM"
@@ -486,7 +486,7 @@ select_deployment_mode() {
     env_root_dir=$(grep "^ROOT_DIR=" .env | cut -d'=' -f2 | sed 's/^"//;s/"$//')
     ROOT_DIR="$env_root_dir"
     echo "   📁 Use existing ROOT_DIR path: $env_root_dir"
-  
+
   else
   # Use default value and prompt user input (lowest priority)
     default_root_dir="$HOME/nexent-data"
@@ -603,7 +603,7 @@ deploy_infrastructure() {
   # Start infrastructure services (basic services only)
   echo "🔧 Starting infrastructure services..."
   INFRA_SERVICES="nexent-elasticsearch nexent-postgresql nexent-minio redis"
-  
+
   # Add openssh-server if Terminal tool container is enabled
   if [ "$ENABLE_TERMINAL_TOOL_CONTAINER" = "true" ]; then
     INFRA_SERVICES="$INFRA_SERVICES nexent-openssh-server"
@@ -619,7 +619,7 @@ deploy_infrastructure() {
     echo "🔧 Terminal tool container (openssh-server) is now available for AI agents"
   fi
 
-  # Deploy Supabase services based on DEPLOYMENT_VERSION 
+  # Deploy Supabase services based on DEPLOYMENT_VERSION
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
       echo ""
       echo "🔧 Starting Supabase services..."
@@ -628,19 +628,19 @@ deploy_infrastructure() {
           echo "   ❌ ERROR Supabase compose file not found: docker-compose-supabase${COMPOSE_FILE_SUFFIX}"
           return 1
       fi
-      
+
       # Start Supabase services
       if ! $docker_compose_command -p nexent -f "docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
           echo "   ❌ ERROR Failed to start supabase services"
           return 1
       fi
-      
+
       echo "   ✅ Supabase services started successfully"
   else
       echo "   🚧 Skipping Supabase services..."
   fi
 
-  echo "   ✅ Infrastructure services started successfully"  
+  echo "   ✅ Infrastructure services started successfully"
 }
 
 select_deployment_version() {
@@ -668,7 +668,7 @@ select_deployment_version() {
           echo "✅ Selected speed version ⚡️"
           ;;
   esac
-  
+
   # Save the version choice to .env file
   local key="DEPLOYMENT_VERSION"
   local value="$DEPLOYMENT_VERSION"
@@ -686,7 +686,7 @@ select_deployment_version() {
     # Key doesn't exist, so add it
     echo "${key}=\"${value}\"" >> "$env_file"
   fi
-  
+
   echo ""
   echo "--------------------------------"
   echo ""
@@ -748,7 +748,7 @@ select_terminal_tool() {
         export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}terminal"
         echo "✅ Terminal tool container will be created 🔧"
         echo "   🔧 Creating openssh-server container for secure command execution"
-        
+
         # Ask user to specify directory mapping for container
         default_terminal_dir="/opt/terminal"
         echo "   📁 Terminal container directory mapping:"
@@ -760,20 +760,20 @@ select_terminal_tool() {
         terminal_mount_dir=$(sanitize_input "$terminal_mount_dir")
         TERMINAL_MOUNT_DIR="${terminal_mount_dir:-$default_terminal_dir}"
         TERMINAL_MOUNT_DIR_SAVED="$TERMINAL_MOUNT_DIR"
-        
+
         # Save to environment variables
         export TERMINAL_MOUNT_DIR
         update_env_var "TERMINAL_MOUNT_DIR" "$TERMINAL_MOUNT_DIR"
-        
+
         echo "   📁 Terminal mount configuration:"
         echo "      • Host: $TERMINAL_MOUNT_DIR"
         echo "      • Container: /opt/terminal"
         echo "      • This directory will be created if it doesn't exist"
         echo ""
-        
+
         # Setup SSH credentials for Terminal tool container
         echo "🔐 Setting up SSH credentials for Terminal tool container..."
-        
+
         # Check if SSH credentials are already set
         if [ -n "$SSH_USERNAME" ] && [ -n "$SSH_PASSWORD" ]; then
             echo "🚧 SSH credentials already configured, skipping setup..."
@@ -783,13 +783,13 @@ select_terminal_tool() {
             # Prompt for SSH credentials
             echo "Please enter SSH credentials for Terminal tool container:"
             echo ""
-            
+
             # Get SSH username
             if [ -z "$SSH_USERNAME" ]; then
                 read -p "SSH Username (default: root): " input_username
                 SSH_USERNAME=${input_username:-root}
             fi
-            
+
             # Get SSH password
             if [ -z "$SSH_PASSWORD" ]; then
                 echo "SSH Password (will be hidden): "
@@ -801,21 +801,21 @@ select_terminal_tool() {
                 fi
                 SSH_PASSWORD="$input_password"
             fi
-            
+
             # Validate credentials
             if [ -z "$SSH_USERNAME" ] || [ -z "$SSH_PASSWORD" ]; then
                 echo "❌ Both username and password are required"
                 return 1
             fi
-            
+
             # Export environment variables
             export SSH_USERNAME
             export SSH_PASSWORD
-            
+
             # Add to .env file
             update_env_var "SSH_USERNAME" "$SSH_USERNAME"
             update_env_var "SSH_PASSWORD" "$SSH_PASSWORD"
-            
+
             echo "   ✅ SSH credentials configured successfully!"
             echo "      👤 Username: $SSH_USERNAME"
             echo "      🔑 Password: [HIDDEN]"

@@ -1,9 +1,41 @@
+import pytest
+
+
+class DummyTenantConfig:
+    def __init__(self, cfg):
+        self._cfg = cfg
+
+    def get_model_config(self, key, tenant_id=None, default=None):
+        return self._cfg
+
+
+def test_get_embedding_model_passes_ssl_verify(monkeypatch):
+    cfg = {
+        "model_type": "embedding",
+        "model_repo": "",
+        "model_name": "test-model",
+        "api_key": "KEY",
+        "base_url": "https://example.com",
+        "max_tokens": 128,
+        "ssl_verify": "false",
+    }
+
+    # Monkeypatch tenant_config_manager used inside the module
+    import backend.services.vectordatabase_service as svc
+    monkeypatch.setattr("backend.services.vectordatabase_service.tenant_config_manager", DummyTenantConfig(cfg))
+
+    emb = svc.get_embedding_model("tenant-x")
+    # JinaEmbedding or OpenAICompatibleEmbedding should expose ssl_verify attribute
+    assert hasattr(emb, "ssl_verify")
+
+# Lightweight stubs for heavy third-party libs used at import time
 import asyncio
 import sys
 import os
 import time
 import unittest
 from unittest.mock import MagicMock, ANY, AsyncMock
+sys.modules.setdefault('numpy', MagicMock())
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
 import numpy as np
@@ -40,6 +72,7 @@ openai_model_module = ModuleType('nexent.core.models')
 openai_model_module.OpenAIModel = MagicMock
 sys.modules['nexent.core.models'] = openai_model_module
 sys.modules['nexent.core.models.embedding_model'] = MagicMock()
+openai_model_module.embedding_model = sys.modules['nexent.core.models.embedding_model']
 sys.modules['nexent.core.models.stt_model'] = MagicMock()
 sys.modules['nexent.core.nlp'] = _create_package_mock('nexent.core.nlp')
 sys.modules['nexent.core.nlp.tokenizer'] = MagicMock()
@@ -1445,7 +1478,7 @@ class TestElasticSearchService(unittest.TestCase):
     def test_summary_index_name_no_tenant_id(self):
         """
         Test summary_index_name raises exception when tenant_id is missing.
-        
+
         This test verifies that:
         1. An exception is raised when tenant_id is None
         2. The exception message contains "Tenant ID is required"
@@ -1468,7 +1501,7 @@ class TestElasticSearchService(unittest.TestCase):
     def test_summary_index_name_no_documents(self):
         """
         Test summary_index_name when no documents are found in index.
-        
+
         This test verifies that:
         1. An exception is raised when document_samples is empty
         2. The exception message contains "No documents found in index"
@@ -1478,13 +1511,13 @@ class TestElasticSearchService(unittest.TestCase):
                 patch('utils.document_vector_utils.kmeans_cluster_documents'), \
                 patch('utils.document_vector_utils.summarize_clusters_map_reduce'), \
                 patch('utils.document_vector_utils.merge_cluster_summaries'):
-            
+
             # Mock return empty document_samples
             mock_process_docs.return_value = (
                 {},  # Empty document_samples
                 {}  # Empty doc_embeddings
             )
-            
+
             # Execute
             async def run_test():
                 with self.assertRaises(Exception) as context:
@@ -1500,15 +1533,15 @@ class TestElasticSearchService(unittest.TestCase):
                     generator = result.body_iterator
                     async for item in generator:
                         break
-                
+
                 self.assertIn("No documents found in index", str(context.exception))
-            
+
             asyncio.run(run_test())
 
     def test_summary_index_name_runtime_error_fallback(self):
         """
         Test summary_index_name fallback when get_running_loop raises RuntimeError.
-        
+
         This test verifies that:
         1. When get_running_loop() raises RuntimeError, get_event_loop() is used as fallback
         2. The summary generation still works correctly
@@ -1518,7 +1551,7 @@ class TestElasticSearchService(unittest.TestCase):
              patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
              patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
              patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
-            
+
             # Mock return values
             mock_process_docs.return_value = (
                 {"doc1": {"chunks": [{"content": "test content"}]}},  # document_samples
@@ -1527,18 +1560,18 @@ class TestElasticSearchService(unittest.TestCase):
             mock_cluster.return_value = {"doc1": 0}  # clusters
             mock_summarize.return_value = {0: "Test cluster summary"}  # cluster_summaries
             mock_merge.return_value = "Final merged summary"  # final_summary
-            
+
             # Create a mock loop with run_in_executor that returns a coroutine
             mock_loop = MagicMock()
             async def mock_run_in_executor(executor, func, *args):
                 # Execute the function synchronously and return its result
                 return func()
             mock_loop.run_in_executor = mock_run_in_executor
-            
+
             # Patch asyncio functions to trigger RuntimeError fallback
             with patch('backend.services.vectordatabase_service.asyncio.get_running_loop', side_effect=RuntimeError("No running event loop")), \
                  patch('backend.services.vectordatabase_service.asyncio.get_event_loop', return_value=mock_loop) as mock_get_event_loop:
-                
+
                 # Execute
                 async def run_test():
                     result = await self.es_service.summary_index_name(
@@ -1549,7 +1582,7 @@ class TestElasticSearchService(unittest.TestCase):
                         model_id=1,
                         tenant_id="test_tenant"
                     )
-                    
+
                     # Consume part of the stream to trigger execution
                     generator = result.body_iterator
                     try:
@@ -1557,11 +1590,11 @@ class TestElasticSearchService(unittest.TestCase):
                             break
                     except StopAsyncIteration:
                         pass
-                    
+
                     return result
-                
+
                 result = asyncio.run(run_test())
-                
+
                 # Assert
                 self.assertIsInstance(result, StreamingResponse)
                 # Verify fallback was used
@@ -1570,7 +1603,7 @@ class TestElasticSearchService(unittest.TestCase):
     def test_summary_index_name_generator_exception(self):
         """
         Test summary_index_name handles exceptions in the generator function.
-        
+
         This test verifies that:
         1. Exceptions in the generator are caught and streamed as error messages
         2. The error status is properly formatted
@@ -1580,7 +1613,7 @@ class TestElasticSearchService(unittest.TestCase):
              patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
              patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
              patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
-            
+
             # Mock return values
             mock_process_docs.return_value = (
                 {"doc1": {"chunks": [{"content": "test content"}]}},  # document_samples
@@ -1589,7 +1622,7 @@ class TestElasticSearchService(unittest.TestCase):
             mock_cluster.return_value = {"doc1": 0}  # clusters
             mock_summarize.return_value = {0: "Test cluster summary"}  # cluster_summaries
             mock_merge.return_value = "Final merged summary"  # final_summary
-            
+
             # Execute
             async def run_test():
                 result = await self.es_service.summary_index_name(
@@ -1600,7 +1633,7 @@ class TestElasticSearchService(unittest.TestCase):
                     model_id=1,
                     tenant_id="test_tenant"
                 )
-                
+
                 # Consume the stream completely
                 generator = result.body_iterator
                 items = []
@@ -1609,11 +1642,11 @@ class TestElasticSearchService(unittest.TestCase):
                         items.append(item)
                 except Exception:
                     pass
-                
+
                 return result, items
-            
+
             result, items = asyncio.run(run_test())
-            
+
             # Assert
             self.assertIsInstance(result, StreamingResponse)
             # Verify that items were generated (at least the completed message)
@@ -1622,7 +1655,7 @@ class TestElasticSearchService(unittest.TestCase):
     def test_summary_index_name_sample_count_calculation(self):
         """
         Test summary_index_name correctly calculates sample_count from batch_size.
-        
+
         This test verifies that:
         1. sample_count is calculated as min(batch_size // 5, 200)
         2. The sample_doc_count parameter is passed correctly to process_documents_for_clustering
@@ -1632,7 +1665,7 @@ class TestElasticSearchService(unittest.TestCase):
              patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
              patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
              patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
-            
+
             # Mock return values
             mock_process_docs.return_value = (
                 {"doc1": {"chunks": [{"content": "test content"}]}},  # document_samples
@@ -1641,7 +1674,7 @@ class TestElasticSearchService(unittest.TestCase):
             mock_cluster.return_value = {"doc1": 0}  # clusters
             mock_summarize.return_value = {0: "Test cluster summary"}  # cluster_summaries
             mock_merge.return_value = "Final merged summary"  # final_summary
-            
+
             # Execute with batch_size=1000
             async def run_test():
                 result = await self.es_service.summary_index_name(
@@ -1652,7 +1685,7 @@ class TestElasticSearchService(unittest.TestCase):
                     model_id=1,
                     tenant_id="test_tenant"
                 )
-                
+
                 # Consume part of the stream to trigger execution
                 generator = result.body_iterator
                 try:
@@ -1660,22 +1693,22 @@ class TestElasticSearchService(unittest.TestCase):
                         break
                 except StopAsyncIteration:
                     pass
-                
+
                 return result
-            
+
             asyncio.run(run_test())
-            
+
             # Verify sample_doc_count was called with 200 (min(1000 // 5, 200) = 200)
             self.assertTrue(mock_process_docs.called)
             call_args = mock_process_docs.call_args
             self.assertEqual(call_args.kwargs['sample_doc_count'], 200)
-        
+
         # Test with batch_size=50 -> sample_count should be min(10, 200) = 10
         with patch('utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
              patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
              patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
              patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
-            
+
             # Mock return values
             mock_process_docs.return_value = (
                 {"doc1": {"chunks": [{"content": "test content"}]}},
@@ -1684,7 +1717,7 @@ class TestElasticSearchService(unittest.TestCase):
             mock_cluster.return_value = {"doc1": 0}
             mock_summarize.return_value = {0: "Test cluster summary"}
             mock_merge.return_value = "Final merged summary"
-            
+
             # Execute with batch_size=50
             async def run_test_small():
                 result = await self.es_service.summary_index_name(
@@ -1695,7 +1728,7 @@ class TestElasticSearchService(unittest.TestCase):
                     model_id=1,
                     tenant_id="test_tenant"
                 )
-                
+
                 # Consume part of the stream to trigger execution
                 generator = result.body_iterator
                 try:
@@ -1703,11 +1736,11 @@ class TestElasticSearchService(unittest.TestCase):
                         break
                 except StopAsyncIteration:
                     pass
-                
+
                 return result
-            
+
             asyncio.run(run_test_small())
-            
+
             # Verify sample_doc_count was called with 10 (min(50 // 5, 200) = 10)
             self.assertTrue(mock_process_docs.called)
             call_args = mock_process_docs.call_args
@@ -2489,7 +2522,8 @@ class TestElasticSearchService(unittest.TestCase):
                     api_key="test_api_key",
                     base_url="https://test.api.com",
                     model_name="test-model",
-                    embedding_dim=1024
+                    embedding_dim=1024,
+                    ssl_verify=True
                 )
         finally:
             # Restart the mock for other tests
@@ -2536,7 +2570,8 @@ class TestElasticSearchService(unittest.TestCase):
                     api_key="test_api_key",
                     base_url="https://test.api.com",
                     model_name="test-model",
-                    embedding_dim=2048
+                    embedding_dim=2048,
+                    ssl_verify=True
                 )
         finally:
             # Restart the mock for other tests
@@ -2646,7 +2681,7 @@ class TestElasticSearchService(unittest.TestCase):
             # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
- 
+
     @patch('backend.services.vectordatabase_service.get_redis_service')
     def test_update_progress_success(self, mock_get_redis):
         """Ensure _update_progress updates Redis progress when not cancelled."""
@@ -3128,7 +3163,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             messages = asyncio.run(run_test())
             self.assertTrue(any("error" in msg for msg in messages))
 
- 
+
 if __name__ == '__main__':
     unittest.main()
 

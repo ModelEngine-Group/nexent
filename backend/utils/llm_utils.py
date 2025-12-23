@@ -71,6 +71,8 @@ def call_llm_for_system_prompt(
         api_key=llm_model_config.get("api_key", "") if llm_model_config else "",
         temperature=0.3,
         top_p=0.95,
+        model_factory=llm_model_config.get("model_factory") if llm_model_config else None,
+        ssl_verify=llm_model_config.get("ssl_verify", True),
     )
     messages = [
         {"role": MESSAGE_ROLE["SYSTEM"], "content": system_prompt},
@@ -108,7 +110,7 @@ def call_llm_for_system_prompt(
                     token_join,
                     callback,
                 )
-        
+
         result = "".join(token_join)
         if not result and content_tokens_seen > 0:
             logger.warning(
@@ -116,7 +118,7 @@ def call_llm_for_system_prompt(
                 "This suggests all content was filtered out.",
                 content_tokens_seen
             )
-        
+
         return result
     except Exception as exc:
         logger.error("Failed to generate prompt from LLM: %s", str(exc))
