@@ -31,7 +31,6 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
-import type { Agent } from "@/types/chat";
 
 // Image viewer component
 function ImageViewer({
@@ -311,8 +310,7 @@ interface ChatInputProps {
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: number | null;
   onAgentSelect?: (agentId: number | null) => void;
-  // Optional agents list passed from parent to avoid redundant fetching
-  initialAgents?: Agent[];
+  cachedAgents?: Agent[]; // Optional cached agents to avoid repeated API calls
 }
 
 export function ChatInput({
@@ -325,13 +323,13 @@ export function ChatInput({
   onStop,
   onKeyDown,
   onRecordingStatusChange,
+  cachedAgents,
   onFileUpload,
   onImageUpload,
   attachments = [],
   onAttachmentsChange,
   selectedAgentId = null,
   onAgentSelect,
-  initialAgents,
 }: ChatInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState<
@@ -1030,7 +1028,7 @@ export function ChatInput({
             onAgentSelect={onAgentSelect || (() => {})}
             disabled={isLoading || isStreaming}
             isInitialMode={isInitialMode}
-            initialAgents={initialAgents}
+            agents={cachedAgents}
           />
         </div>
 

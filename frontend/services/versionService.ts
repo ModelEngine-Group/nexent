@@ -17,27 +17,22 @@ export class VersionService {
    */
   async getAppVersion(): Promise<string> {
     try {
-      // Reuse a global promise to deduplicate deployment_version calls across the app
-      if (!(globalThis as any).__deploymentVersionPromise) {
-        (globalThis as any).__deploymentVersionPromise = (async () => {
-          try {
-            const response = await fetchWithErrorHandling(
-              API_ENDPOINTS.tenantConfig.deploymentVersion
-            );
-            if (response.status !== STATUS_CODES.SUCCESS) {
-              return null;
-            }
-            const data: DeploymentVersionResponse = await response.json();
-            return data.app_version || data.content?.app_version || null;
-          } catch (e) {
-            log.error("Error fetching app version (inner):", e);
-            return null;
-          }
-        })();
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.tenantConfig.deploymentVersion
+      );
+
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        log.warn("Failed to fetch app version, using fallback");
+        return APP_VERSION;
       }
 
-      const version = await (globalThis as any).__deploymentVersionPromise;
-      if (version) return version;
+      const data: DeploymentVersionResponse = await response.json();
+      const version = data.app_version || data.content?.app_version;
+
+      if (version) {
+        return version;
+      }
+
       log.warn("App version not found in response, using fallback");
       return APP_VERSION;
     } catch (error) {

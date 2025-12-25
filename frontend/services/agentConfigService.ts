@@ -646,52 +646,38 @@ export const searchAgentInfo = async (agentId: number) => {
  * @returns list of available agents with agent_id, name, description, is_available
  */
 export const fetchAllAgents = async () => {
-  // Deduplicate concurrent fetches: reuse the in-flight promise if present.
-  // Use module-level promise variable.
-  if ((fetchAllAgents as any).__promise) {
-    return (fetchAllAgents as any).__promise;
-  }
-
-  const p = (async () => {
-    try {
-      const response = await fetch(API_ENDPOINTS.agent.list, {
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
-      }
-      const data = await response.json();
-
-      // convert backend data to frontend format
-      const formattedAgents = data.map((agent: any) => ({
-        agent_id: agent.agent_id,
-        name: agent.name,
-        display_name: agent.display_name || agent.name,
-        description: agent.description,
-        author: agent.author,
-        is_available: agent.is_available,
-      }));
-
-      return {
-        success: true,
-        data: formattedAgents,
-        message: "",
-      };
-    } catch (error) {
-      log.error("Failed to get all Agent list:", error);
-      return {
-        success: false,
-        data: [],
-        message: "agentConfig.agents.listFetchFailed",
-      };
-    } finally {
-      // clear the in-flight promise after completion so future calls can refetch
-      delete (fetchAllAgents as any).__promise;
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.list, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
     }
-  })();
+    const data = await response.json();
 
-  (fetchAllAgents as any).__promise = p;
-  return p;
+    // convert backend data to frontend format
+    const formattedAgents = data.map((agent: any) => ({
+      agent_id: agent.agent_id,
+      name: agent.name,
+      display_name: agent.display_name || agent.name,
+      description: agent.description,
+      author: agent.author,
+      is_available: agent.is_available,
+    }));
+
+    return {
+      success: true,
+      data: formattedAgents,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to get all Agent list:", error);
+    return {
+      success: false,
+      data: [],
+      message: "agentConfig.agents.listFetchFailed",
+    };
+  }
 };
 
 /**
