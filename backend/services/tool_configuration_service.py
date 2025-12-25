@@ -308,8 +308,9 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
                                      category=None)
                 tools_info.append(tool_info)
             return tools_info
-    except Exception as e:
-        logger.error(f"failed to get tool from remote MCP server, detail: {e}")
+    except BaseException as e:
+        logger.error(f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
+        # Convert all failures (including SystemExit) to domain error to avoid process exit
         raise MCPConnectionError(
             f"failed to get tool from remote MCP server, detail: {e}")
 

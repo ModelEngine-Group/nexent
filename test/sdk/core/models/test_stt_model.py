@@ -53,7 +53,8 @@ with patch.dict("sys.modules", module_mocks):
         PROTOCOL_VERSION, DEFAULT_HEADER_SIZE, CLIENT_FULL_REQUEST,
         CLIENT_AUDIO_ONLY_REQUEST, SERVER_FULL_RESPONSE, SERVER_ACK,
         SERVER_ERROR_RESPONSE, NO_SEQUENCE, POS_SEQUENCE, NEG_SEQUENCE,
-        NEG_WITH_SEQUENCE, JSON, GZIP, NO_COMPRESSION
+        NEG_WITH_SEQUENCE, JSON, GZIP, NO_COMPRESSION, wave, websockets,
+        aiofiles
     )
 
 
@@ -173,7 +174,7 @@ class TestSTTModel:
         mock_wave_fp.__enter__ = MagicMock(return_value=mock_wave_fp)
         mock_wave_fp.__exit__ = MagicMock(return_value=None)
         
-        with patch('sdk.nexent.core.models.stt_model.wave.open', return_value=mock_wave_fp):
+        with patch.object(wave, "open", return_value=mock_wave_fp):
             wav_data = b"fake_wav_data"
             nchannels, sampwidth, framerate, nframes, wave_bytes = STTModel.read_wav_info(wav_data)
             
@@ -282,8 +283,11 @@ class TestSTTModel:
         audio_data = b"test_audio_data"
         segment_size = 50
         
-        with patch('sdk.nexent.core.models.stt_model.websockets.connect', 
-                  side_effect=MockConnectionClosedError(1006, "Connection closed abnormally")):
+        with patch.object(
+            websockets,
+            "connect",
+            side_effect=MockConnectionClosedError(1006, "Connection closed abnormally"),
+        ):
             result = await stt_model.process_audio_data(audio_data, segment_size)
 
             assert 'error' in result
@@ -303,7 +307,7 @@ class TestSTTModel:
         # Mock read_wav_info to return expected values
         mock_wav_info = (1, 2, 16000, 1600, b'\x00\x00' * 1600)  # channels, sampwidth, framerate, nframes, wav_bytes
         
-        with patch('sdk.nexent.core.models.stt_model.aiofiles.open', return_value=mock_file), \
+        with patch.object(aiofiles, "open", return_value=mock_file), \
              patch.object(stt_model, 'read_wav_info', return_value=mock_wav_info), \
              patch.object(stt_model, 'process_audio_data', return_value={"result": "success"}) as mock_process:
             
@@ -333,7 +337,7 @@ class TestSTTModel:
         mock_file.__aenter__ = AsyncMock(return_value=mock_file)
         mock_file.__aexit__ = AsyncMock(return_value=None)
         
-        with patch('sdk.nexent.core.models.stt_model.aiofiles.open', return_value=mock_file), \
+        with patch.object(aiofiles, "open", return_value=mock_file), \
              patch.object(stt_model, 'process_audio_data', return_value={"result": "success"}) as mock_process:
             
             stt_model.config.format = "pcm"
@@ -359,7 +363,7 @@ class TestSTTModel:
         mock_file.__aenter__ = AsyncMock(return_value=mock_file)
         mock_file.__aexit__ = AsyncMock(return_value=None)
         
-        with patch('sdk.nexent.core.models.stt_model.aiofiles.open', return_value=mock_file), \
+        with patch.object(aiofiles, "open", return_value=mock_file), \
              patch.object(stt_model, 'process_audio_data', return_value={"result": "success"}) as mock_process:
             
             stt_model.config.format = "mp3"
@@ -381,7 +385,7 @@ class TestSTTModel:
         mock_file.__aenter__ = AsyncMock(return_value=mock_file)
         mock_file.__aexit__ = AsyncMock(return_value=None)
         
-        with patch('sdk.nexent.core.models.stt_model.aiofiles.open', return_value=mock_file):
+        with patch.object(aiofiles, "open", return_value=mock_file):
             stt_model.config.format = "unsupported"
             
             with pytest.raises(Exception, match="Unsupported format"):
@@ -419,7 +423,7 @@ class TestSTTModel:
                 return b"init"
         mock_ws_server = DummyWSServer()
         
-        with patch('sdk.nexent.core.models.stt_model.websockets.connect', return_value=mock_ws_server):
+        with patch.object(websockets, "connect", return_value=mock_ws_server):
             # Should not raise exception, should handle gracefully
             await stt_model.process_streaming_audio(mock_ws_client, 1024)
 
@@ -558,7 +562,7 @@ class TestProcessAudioItem:
         mock_file.__aenter__ = AsyncMock(return_value=mock_file)
         mock_file.__aexit__ = AsyncMock(return_value=None)
         
-        with patch('sdk.nexent.core.models.stt_model.aiofiles.open', return_value=mock_file), \
+        with patch.object(aiofiles, "open", return_value=mock_file), \
              patch.object(STTModel, 'process_audio_data', return_value=expected_result) as mock_process:
             
             result = await process_audio_item(audio_item, config, test_voice_path)
