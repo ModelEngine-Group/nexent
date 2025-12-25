@@ -1,7 +1,6 @@
 "use client";
 
 import { useConfig } from "@/hooks/useConfig";
-import { useResponsiveTextSize } from "@/hooks/useResponsiveTextSize";
 import { extractColorsFromUri } from "@/lib/avatar";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
@@ -15,12 +14,7 @@ export function ChatTopNavContent() {
   const { appConfig, getAppAvatarUrl } = useConfig();
   const sidebarAvatarUrl = getAppAvatarUrl(16);
   
-  // Calculate container width for responsive text - smaller for top navbar
-  const containerWidth = 100;
-  const { textRef, fontSize } = useResponsiveTextSize(
-    appConfig.appName,
-    containerWidth
-  );
+  // Static font-size for top navbar (no responsive sizing required)
 
   const colors = extractColorsFromUri(appConfig.avatarUri || "");
   const mainColor = colors.mainColor || "273746";
@@ -39,7 +33,6 @@ export function ChatTopNavContent() {
         />
       </div>
       <span
-        ref={textRef}
         className="font-bold truncate bg-clip-text text-transparent"
         style={{
           fontSize: '16px',
