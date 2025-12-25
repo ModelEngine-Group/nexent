@@ -2371,7 +2371,8 @@ class TestGetLlmModel:
             model_id="gpt-4",
             api_base="http://api.example.com",
             api_key="test_api_key",
-            max_context_tokens=4096
+            max_context_tokens=4096,
+            ssl_verify=True
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})

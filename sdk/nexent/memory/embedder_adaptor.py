@@ -20,6 +20,7 @@ class EmbedderAdaptor(EmbeddingBase):
             base_url=self.config.openai_base_url,
             api_key=self.config.api_key,
             embedding_dim=self.config.embedding_dims,
+            ssl_verify=getattr(self.config, "ssl_verify", True),
         )
 
     def embed(
