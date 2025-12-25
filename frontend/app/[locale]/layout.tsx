@@ -72,6 +72,7 @@ export default async function RootLayout({
   return (
     <html lang={resolvedLocale} suppressHydrationWarning>
       <body className={inter.className}>
+        <script src="/__runtime_config.js" />
         <NextThemesProvider
           attribute="class"
           defaultTheme="light"

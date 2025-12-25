@@ -55,6 +55,7 @@ export interface AppConfig {
   iconType: "preset" | "custom";
   customIconUrl: string | null;
   avatarUri: string | null;
+  enableModelEngine?: boolean;
 }
 
 // Model API configuration interface

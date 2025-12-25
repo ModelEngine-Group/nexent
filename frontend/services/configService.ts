@@ -57,13 +57,13 @@ export class ConfigService {
         if (frontendConfig.models) {
           localStorage.setItem('model', JSON.stringify(frontendConfig.models));
         }
-        
+
         // Trigger configuration reload and dispatch event
         if (typeof window !== 'undefined') {
           const configStore = ConfigStore.getInstance();
           configStore.reloadFromStorage();
         }
-        
+
         return true;
       }
       return false;
@@ -75,4 +75,4 @@ export class ConfigService {
 }
 
 // Export singleton instance
-export const configService = new ConfigService(); 
+export const configService = new ConfigService();

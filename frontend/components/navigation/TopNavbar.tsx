@@ -46,9 +46,9 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
             alt="ModelEngine"
             className="h-7"
           />
-          <span 
+          <span
             className="text-blue-600 dark:text-blue-500 font-bold"
-            style={{ 
+            style={{
               fontSize: '20px',
               lineHeight: '24px',
               height: '22px',
@@ -58,7 +58,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
           </span>
         </Flex>
       </Link>
-      
+
       {/* Additional title with separator - outside of sidebar width */}
       {additionalTitle && (
         <Flex align="center" gap={12}>
@@ -76,7 +76,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
     <Flex align="center" gap={16} className="hidden md:flex">
       {/* Additional right content (e.g., status badge) */}
       {additionalRightContent}
-      
+
       {/* GitHub link */}
       <Link
         href="https://github.com/ModelEngine-Group/nexent"
@@ -116,7 +116,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
           onClick: ({ key }) => handleLanguageChange(key as string),
         }}
       >
-        <a className="ant-dropdown-link text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer w-[90px] border-0 shadow-none bg-transparent text-left">
+        <a className="ant-dropdown-link text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer border-0 shadow-none bg-transparent text-left whitespace-nowrap">
           <Flex align="center" gap={6}>
             <Globe className="h-3.5 w-3.5" />
             {languageOptions.find((o) => o.value === currentLanguage)?.label ||

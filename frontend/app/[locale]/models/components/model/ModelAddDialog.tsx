@@ -168,7 +168,7 @@ export const ModelAddDialog = ({
     isMultimodal: false,
     // Whether to import multiple models at once
     isBatchImport: false,
-    provider: "modelengine",
+    provider: "silicon",
     vectorDimension: "1024",
     // Default chunk size range for embedding models
     chunkSizeRange: [
@@ -672,7 +672,6 @@ export const ModelAddDialog = ({
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
             >
-              <Option value="modelengine">{t("model.provider.modelengine")}</Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
           </div>
