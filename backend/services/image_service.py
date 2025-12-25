@@ -42,5 +42,6 @@ def get_vlm_model(tenant_id: str):
                 temperature=0.7,
                 top_p=0.7,
                 frequency_penalty=0.5,
-                max_tokens=512
+                max_tokens=512,
+                ssl_verify=vlm_model_config.get("ssl_verify", True),
             )

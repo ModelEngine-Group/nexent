@@ -12,7 +12,14 @@ class BaseEmbedding(ABC):
     """
 
     @abstractmethod
-    def __init__(self, model_name: str = None, base_url: str = None, api_key: str = None, embedding_dim: int = None):
+    def __init__(
+        self,
+        model_name: str = None,
+        base_url: str = None,
+        api_key: str = None,
+        embedding_dim: int = None,
+        ssl_verify: bool = True,
+    ):
         """
         Initialize the embedding model.
 
@@ -21,6 +28,7 @@ class BaseEmbedding(ABC):
             base_url: Base URL of the embedding API
             api_key: API key for the embedding API
             embedding_dim: Dimension of the embedding vector
+            ssl_verify: Whether to verify SSL certificates for network requests
         """
         pass
 
@@ -69,8 +77,15 @@ class TextEmbedding(BaseEmbedding):
     """
 
     @abstractmethod
-    def __init__(self, model_name: str = None, base_url: str = None, api_key: str = None, embedding_dim: int = None):
-        super().__init__(model_name, base_url, api_key, embedding_dim)
+    def __init__(
+        self,
+        model_name: str = None,
+        base_url: str = None,
+        api_key: str = None,
+        embedding_dim: int = None,
+        ssl_verify: bool = True,
+    ):
+        super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)
 
     @abstractmethod
     def get_embeddings(
@@ -104,8 +119,15 @@ class MultimodalEmbedding(BaseEmbedding):
     """
 
     @abstractmethod
-    def __init__(self, model_name: str = None, base_url: str = None, api_key: str = None, embedding_dim: int = None):
-        super().__init__(model_name, base_url, api_key, embedding_dim)
+    def __init__(
+        self,
+        model_name: str = None,
+        base_url: str = None,
+        api_key: str = None,
+        embedding_dim: int = None,
+        ssl_verify: bool = True,
+    ):
+        super().__init__(model_name, base_url, api_key, embedding_dim, ssl_verify=ssl_verify)
 
     @abstractmethod
     def get_multimodal_embeddings(
@@ -139,12 +161,14 @@ class JinaEmbedding(MultimodalEmbedding):
         base_url: str = "https://api.jina.ai/v1/embeddings",
         model_name: str = "jina-clip-v2",
         embedding_dim: int = 1024,
+        ssl_verify: bool = True,
     ):
         """Initialize JinaEmbedding with configuration."""
         self.api_key = api_key
         self.api_url = base_url
         self.model = model_name
         self.embedding_dim = embedding_dim
+        self.ssl_verify = ssl_verify
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
@@ -163,7 +187,7 @@ class JinaEmbedding(MultimodalEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout)
+        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
         response.raise_for_status()
         return response.json()
 
@@ -295,12 +319,13 @@ class JinaEmbedding(MultimodalEmbedding):
 
 
 class OpenAICompatibleEmbedding(TextEmbedding):
-    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int):
+    def __init__(self, model_name: str, base_url: str, api_key: str, embedding_dim: int, ssl_verify: bool = True):
         """Initialize OpenAICompatibleEmbedding with configuration from environment variables or provided parameters."""
         self.api_key = api_key
         self.api_url = base_url
         self.model = model_name
         self.embedding_dim = embedding_dim
+        self.ssl_verify = ssl_verify
 
         self.headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
 
@@ -321,7 +346,7 @@ class OpenAICompatibleEmbedding(TextEmbedding):
         Returns:
             Dict[str, Any]: API response
         """
-        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout)
+        response = requests.post(self.api_url, headers=self.headers, json=data, timeout=timeout, verify=self.ssl_verify)
         response.raise_for_status()
         return response.json()
 

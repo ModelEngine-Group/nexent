@@ -10,21 +10,23 @@ from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from ..utils.observer import MessageObserver, ProcessType
+from .message_utils import prepare_messages_for_completion
 
 logger = logging.getLogger("openai_llm")
 
 class OpenAIModel(OpenAIServerModel):
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, *args, **kwargs):
+                 ssl_verify=True, model_factory: Optional[str] = None, *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
-        
+
         Args:
             observer: MessageObserver instance for tracking model output
             temperature: Sampling temperature (default: 0.2)
             top_p: Top-p sampling parameter (default: 0.95)
-            ssl_verify: Whether to verify SSL certificates (default: True). 
+            ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
+            model_factory: Provider identifier (e.g., openai, modelengine)
             *args: Additional positional arguments for OpenAIServerModel
             **kwargs: Additional keyword arguments for OpenAIServerModel
         """
@@ -33,7 +35,8 @@ class OpenAIModel(OpenAIServerModel):
         self.top_p = top_p
         self.stop_event = threading.Event()
         self._monitoring = get_monitoring_manager()
-        
+        self.model_factory = (model_factory or "").lower()
+
         # Create http_client based on ssl_verify parameter
         if not ssl_verify:
             from openai import DefaultHttpxClient
@@ -41,7 +44,7 @@ class OpenAIModel(OpenAIServerModel):
             client_kwargs = kwargs.get('client_kwargs', {})
             client_kwargs['http_client'] = http_client
             kwargs['client_kwargs'] = client_kwargs
-        
+
         super().__init__(*args, **kwargs)
 
     @get_monitoring_manager().monitor_llm_call("openai_chat", "chat_completion")
@@ -50,6 +53,26 @@ class OpenAIModel(OpenAIServerModel):
         # Get token tracker from decorator (if monitoring is available)
         token_tracker = kwargs.pop('_token_tracker', None)
 
+        # Normalize incoming messages so we can accept plain dict payloads like
+        # {"role": "user", "content": "..."} alongside ChatMessage instances.
+        normalized_messages: List[ChatMessage] = []
+        for msg in messages or []:
+            if isinstance(msg, ChatMessage):
+                normalized_messages.append(msg)
+            elif isinstance(msg, dict):
+                if "role" not in msg or "content" not in msg:
+                    raise ValueError("Each message dict must include 'role' and 'content'.")
+                normalized_messages.append(ChatMessage.from_dict({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "tool_calls": msg.get("tool_calls"),
+                }))
+            else:
+                raise TypeError("Messages must be ChatMessage or dict objects.")
+
+        # Prepare messages for completion according to provider requirements.
+        messages_for_completion = prepare_messages_for_completion(normalized_messages, self.model_factory)
+
         # Add completion started event and model parameters
         if token_tracker:
             self._monitoring.add_span_event("completion_started")
@@ -57,12 +80,12 @@ class OpenAIModel(OpenAIServerModel):
                 model_id=self.model_id,
                 temperature=self.temperature,
                 top_p=self.top_p,
-                message_count=len(messages) if messages else 0,
+                message_count=len(messages_for_completion) if messages_for_completion else 0,
                 **{f"llm.param.{k}": v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))}
             )
 
         completion_kwargs = self._prepare_completion_kwargs(
-            messages=messages, stop_sequences=stop_sequences,
+            messages=messages_for_completion, stop_sequences=stop_sequences,
             response_format=response_format, tools_to_call_from=tools_to_call_from, model=self.model_id,
             custom_role_conversions=self.custom_role_conversions, convert_images_to_image_urls=True,
             temperature=self.temperature, top_p=self.top_p, **kwargs,

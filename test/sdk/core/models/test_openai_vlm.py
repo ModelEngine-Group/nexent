@@ -51,7 +51,7 @@ with patch.dict("sys.modules", module_mocks):
         """Return an OpenAIVLModel instance with minimal viable attributes for tests."""
 
         observer = MagicMock()
-        model = ImportedOpenAIVLModel(observer=observer)
+        model = ImportedOpenAIVLModel(observer=observer, ssl_verify=True)
 
         # Inject dummy attributes required by the method under test
         model.model_id = "dummy-model"
