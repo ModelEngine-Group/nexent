@@ -23,7 +23,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
 import log from "@/lib/logger";
 import { chatConfig } from "@/const/chatConfig";
-import { FilePreview } from "@/types/chat";
+import { FilePreview, Agent } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
 
