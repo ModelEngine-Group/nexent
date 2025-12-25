@@ -188,7 +188,7 @@ update_env_file() {
 
   # Supabase Configuration (Only for full version)
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    if [ -n "$SUPABASE_KEY" ]; then      
+    if [ -n "$SUPABASE_KEY" ]; then
       if grep -q "^SUPABASE_KEY=" ../.env; then
         sed -i.bak "s~^SUPABASE_KEY=.*~SUPABASE_KEY=$SUPABASE_KEY~" ../.env
       else
@@ -205,20 +205,20 @@ update_env_file() {
         echo "SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> ../.env
       fi
     fi
-    
+
     # Additional Supabase configuration
     if grep -q "^SUPABASE_URL=" ../.env; then
       sed -i.bak "s~^SUPABASE_URL=.*~SUPABASE_URL=http://localhost:8000~" ../.env
     else
       echo "SUPABASE_URL=http://localhost:8000" >> ../.env
     fi
-    
+
     if grep -q "^API_EXTERNAL_URL=" ../.env; then
       sed -i.bak "s~^API_EXTERNAL_URL=.*~API_EXTERNAL_URL=http://localhost:8000~" ../.env
     else
       echo "API_EXTERNAL_URL=http://localhost:8000" >> ../.env
     fi
-    
+
     if grep -q "^SITE_URL=" ../.env; then
       sed -i.bak "s~^SITE_URL=.*~SITE_URL=http://localhost:3011~" ../.env
     else

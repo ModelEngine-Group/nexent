@@ -10,7 +10,7 @@ from consts.const import (
     DEFAULT_EXPECTED_CHUNK_SIZE,
     DEFAULT_MAXIMUM_CHUNK_SIZE,
     MODEL_ENGINE_HOST,
-    MODEL_ENGINE_APIKEY,
+    MODEL_ENGINE_ENABLED,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
 from consts.provider import SILICON_GET_URL, ProviderEnum
@@ -85,12 +85,19 @@ class ModelEngineProvider(AbstractModelProvider):
             List of models with canonical fields
         """
         try:
-            if not MODEL_ENGINE_HOST or not MODEL_ENGINE_APIKEY:
-                logger.warning("ModelEngine environment variables not configured")
+            if not MODEL_ENGINE_ENABLED:
+                logger.info("ModelEngine integration is disabled via environment configuration")
+                return []
+
+            if not MODEL_ENGINE_HOST:
+                logger.warning("ModelEngine host not configured")
                 return []
 
             model_type: str = provider_config.get("model_type", "")
-            headers = {"Authorization": f"Bearer {MODEL_ENGINE_APIKEY}"}
+            headers: Dict[str, str] = {}
+            api_key = provider_config.get("api_key")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
 
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
@@ -130,9 +137,8 @@ class ModelEngineProvider(AbstractModelProvider):
                         "model_type": internal_type,
                         "model_tag": me_type,
                         "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
-                        # ModelEngine models will get base_url and api_key from environment
                         "base_url": MODEL_ENGINE_HOST,
-                        "api_key": MODEL_ENGINE_APIKEY,
+                        "api_key": api_key,
                     })
 
             return filtered_models
@@ -183,7 +189,6 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
             # Remove any trailing /open/router/v1 or similar paths to get base host
             raw_model_url = raw_model_url.split("/open/")[0] if "/open/" in raw_model_url else raw_model_url
         model_url = raw_model_url
-        model_api_key = model.get("api_key", model_api_key)
 
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
