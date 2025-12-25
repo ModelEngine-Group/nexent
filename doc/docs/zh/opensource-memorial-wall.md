@@ -635,3 +635,7 @@ Nexent开发者加油
 ::: hongmuxiangxun - 2025-12-19
 开放原子大赛接触到了Nexent平台，祝越来越好，越来越容易上手。
 :::
+
+::: 1-xiaozheng-1 - 2025-12-25
+从modelengine中看到Nexent，发现这个平台创建智能体简直一绝，希望越来越好。
+:::
