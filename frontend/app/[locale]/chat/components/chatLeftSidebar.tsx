@@ -10,15 +10,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { Button } from "antd";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdownMenu";
+import { Button, Dropdown } from "antd";
 import { Input } from "@/components/ui/input";
-import { App } from "antd";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { USER_ROLES } from "@/const/modelConfig";
@@ -254,7 +247,7 @@ export function ChatSidebar({
                   </Tooltip>
                 </TooltipProvider>
 
-                <DropdownMenu
+                <Dropdown
                   open={openDropdownId === dialog.conversation_id.toString()}
                   onOpenChange={(open) =>
                     onDropdownOpenChange(
@@ -262,37 +255,49 @@ export function ChatSidebar({
                       dialog.conversation_id.toString()
                     )
                   }
-                >
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="text"
-                      size="small"
-                      className="h-6 w-6 min-w-[24px] p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:bg-slate-100 hover:border hover:border-slate-200 mr-1 focus:outline-none focus:ring-0 rounded-full transition-opacity duration-200 flex items-center justify-center"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" side="bottom">
-                    <DropdownMenuItem
-                      onClick={() =>
+                  menu={{
+                    items: [
+                      {
+                        key: "rename",
+                        label: (
+                          <span className="flex items-center">
+                            <Pencil className="mr-2 h-5 w-5" />
+                            {t("chatLeftSidebar.rename")}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "delete",
+                        label: (
+                          <span className="flex items-center text-red-500">
+                            <Trash2 className="mr-2 h-5 w-5" />
+                            {t("chatLeftSidebar.delete")}
+                          </span>
+                        ),
+                      },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === "rename") {
                         handleStartEdit(
                           dialog.conversation_id,
                           dialog.conversation_title
-                        )
+                        );
+                      } else if (key === "delete") {
+                        handleDeleteClick(dialog.conversation_id);
                       }
-                    >
-                      <Pencil className="mr-2 h-5 w-5" />
-                      {t("chatLeftSidebar.rename")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                      onClick={() => handleDeleteClick(dialog.conversation_id)}
-                    >
-                      <Trash2 className="mr-2 h-5 w-5" />
-                      {t("chatLeftSidebar.delete")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    },
+                  }}
+                  placement="bottomRight"
+                  trigger={["click"]}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    className="h-6 w-6 min-w-[24px] p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:bg-slate-100 hover:border hover:border-slate-200 mr-1 focus:outline-none focus:ring-0 rounded-full transition-opacity duration-200 flex items-center justify-center"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </Dropdown>
               </>
             )}
           </div>
