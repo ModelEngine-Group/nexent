@@ -584,6 +584,8 @@
   "document.chunk.search.document": "文档",
   "document.chunk.search.chunk": "分片",
   "document.chunk.pagination.range": "{{start}}-{{end}} / 共 {{total}}",
+  "document.chunk.pagination.jumpTo": "跳转到",
+  "document.chunk.pagination.page": "页",
 
   "model.dialog.title": "添加模型",
   "model.dialog.label.type": "模型类型",
