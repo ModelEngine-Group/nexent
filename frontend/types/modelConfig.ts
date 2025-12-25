@@ -55,6 +55,7 @@ export interface AppConfig {
   iconType: "preset" | "custom";
   customIconUrl: string | null;
   avatarUri: string | null;
+  enableModelEngine?: boolean;
 }
 
 // Model API configuration interface
@@ -86,6 +87,9 @@ export interface ModelConfig {
 export interface GlobalConfig {
   app: AppConfig;
   models: ModelConfig;
+  modelengine?: {
+    apiKey?: string;
+  };
 }
 
 // Add the type for model validation response with error_code

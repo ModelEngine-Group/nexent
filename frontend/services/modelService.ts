@@ -138,6 +138,18 @@ export const modelService = {
     apiKey: string;
   }): Promise<any[]> => {
     try {
+      // For ModelEngine provider, source api_key directly from localStorage (may be empty)
+      let apiKeyToUse = model.apiKey;
+      if (model.provider === "modelengine") {
+        try {
+            if (typeof window !== "undefined") {
+              apiKeyToUse = localStorage.getItem("model_engine_api_key") || "";
+          }
+        } catch (e) {
+          // ignore and fall back to provided key
+        }
+      }
+
       const response = await fetch(
         API_ENDPOINTS.model.customModelCreateProvider,
         {
@@ -146,7 +158,7 @@ export const modelService = {
           body: JSON.stringify({
             provider: model.provider,
             model_type: model.type,
-            api_key: model.apiKey,
+            api_key: apiKeyToUse,
           }),
         }
       );

@@ -97,6 +97,8 @@ class ModelConfig(BaseModel):
     stt: SingleModelConfig
     tts: SingleModelConfig
 
+class ModelEngineConfig(BaseModel):
+    apiKey: str
 
 class AppConfig(BaseModel):
     appName: str
@@ -109,6 +111,7 @@ class AppConfig(BaseModel):
 class GlobalConfig(BaseModel):
     app: AppConfig
     models: ModelConfig
+    modelengine: ModelEngineConfig
 
 
 # Request models

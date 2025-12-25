@@ -19,7 +19,10 @@ cd nexent/docker
 cp .env.example .env # Configure environment variables
 ```
 
-> **💡 Tip**: If there are no special requirements, you can directly use `.env.example` for deployment without making any changes. If you need to configure voice models (STT/TTS), you will need to set the relevant parameters in `.env`. We will work on making this configuration available through the frontend soon—stay tuned.
+ 
+Note on ModelEngine configuration:
+- `MODEL_ENGINE_ENABLED` (default `false`) — set to `true` to enable ModelEngine integration.
+- `MODEL_ENGINE_HOST` — base URL for your ModelEngine deployment (only used when `MODEL_ENGINE_ENABLED=true`).
 
 ### 2. Deployment Options
 

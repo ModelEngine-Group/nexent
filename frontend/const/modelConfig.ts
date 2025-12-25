@@ -148,6 +148,7 @@ export const defaultConfig: GlobalConfig = {
     iconType: ICON_TYPES.PRESET,
     customIconUrl: "",
     avatarUri: "",
+    enableModelEngine: false,
   },
   models: {
     llm: {

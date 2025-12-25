@@ -14,7 +14,7 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
     LANGUAGE
 )
-from database.model_management_db import get_model_id_by_display_name
+from database.model_management_db import get_model_id_by_display_name, get_model_records, delete_model_record
 from utils.config_utils import (
     get_env_key,
     get_model_name_from_config,
@@ -64,6 +64,14 @@ def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id:
 async def save_config_impl(config, tenant_id, user_id):
     config_dict = config.model_dump(exclude_none=False)
     env_config = {}
+    # Extract modelengine.apiKey from payload and coerce to single string
+    model_engine_key = ""
+    try:
+        me_field = config_dict.get("modelengine") or {}
+        if isinstance(me_field, dict):
+            model_engine_key = me_field.get("apiKey")
+    except Exception:
+        model_engine_key = ""
     tenant_config_dict = tenant_config_manager.load_config(tenant_id)
     # Process app configuration - use key names directly without prefix
     for key, value in config_dict.get("app", {}).items():
@@ -106,14 +114,39 @@ async def save_config_impl(config, tenant_id, user_id):
                 embedding_api_config = model_config.get("apiConfig", {})
                 env_config[f"{model_prefix}_API_KEY"] = safe_value(
                     embedding_api_config.get("apiKey"))
+    # Persist collected ModelEngine API key (single value) under tenant config key MODEL_ENGINE_API_KEY
+    try:
+        tenant_config_manager.set_single_config(user_id, tenant_id, "MODEL_ENGINE_API_KEY", model_engine_key)
+    except Exception as e:
+        logger.warning(f"Failed to persist MODEL_ENGINE_API_KEY: {e}")
+
+    # If the ModelEngine API key was cleared (empty), remove all persisted ModelEngine models
+    # for this tenant without performing any connectivity checks.
+    if not model_engine_key:
+        try:
+            me_models = get_model_records({"model_factory": "modelengine"}, tenant_id)
+            for m in me_models:
+                mid = m.get("model_id") or m.get("id")
+                if not mid:
+                    continue
+                try:
+                    delete_model_record(int(mid), user_id, tenant_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete ModelEngine model {mid} for tenant {tenant_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to query or delete ModelEngine models for tenant {tenant_id}: {e}")
+
     logger.info("Configuration saved successfully")
 
 
 async def load_config_impl(language: str, tenant_id: str):
     try:
+        # Include modelengine apiKey (single string) in returned config
+        modelengine_key = tenant_config_manager.get_app_config("MODEL_ENGINE_API_KEY", "", tenant_id=tenant_id) or ""
         config = {
             "app": build_app_config(language, tenant_id),
-            "models": build_models_config(tenant_id)
+            "models": build_models_config(tenant_id),
+            "modelengine": {"apiKey": modelengine_key}
         }
         return config
     except Exception as e:

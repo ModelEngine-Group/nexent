@@ -18,7 +18,7 @@ class ConfigStoreClass {
     this.updateModelConfig = this.updateModelConfig.bind(this);
     this.clearConfig = this.clearConfig.bind(this);
     this.reloadFromStorage = this.reloadFromStorage.bind(this);
-    
+
     // Initialize config
     this.initializeConfig();
   }
@@ -43,13 +43,13 @@ class ConfigStoreClass {
   private deepMerge<T>(target: T, source: Partial<T>): T {
     if (!source) return target;
     if (!target) return source as T;
-    
+
     const result = { ...target } as T;
-    
+
     Object.keys(source).forEach(key => {
       const targetValue = (target as any)[key];
       const sourceValue = (source as any)[key];
-      
+
       if (sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)) {
         // If target has no value for this key, use source value directly
         if (targetValue !== undefined && targetValue !== null) {
@@ -61,7 +61,7 @@ class ConfigStoreClass {
         (result as any)[key] = sourceValue;
       }
     });
-    
+
     return result;
   }
 
@@ -87,7 +87,7 @@ class ConfigStoreClass {
           // Migrate old config to new format
           if (parsedOldConfig.app) localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(parsedOldConfig.app));
           if (parsedOldConfig.models) localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(parsedOldConfig.models));
-          
+
           // Remove old config
           localStorage.removeItem('config');
         } catch (error) {
@@ -123,7 +123,7 @@ class ConfigStoreClass {
   private saveToStorage(): void {
     try {
       if (typeof window === 'undefined' || !this.config) return;
-      
+
       localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(this.config.app));
       localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(this.config.models));
     } catch (error) {
@@ -263,6 +263,17 @@ class ConfigStoreClass {
       }
     } : undefined;
 
+    // Persist any ModelEngine API key returned from backend into localStorage (single string)
+    try {
+      const me = backendConfig?.modelengine;
+      if (typeof window !== 'undefined' && me) {
+        const apiKey = typeof me.apiKey === 'string' ? me.apiKey : "";
+        localStorage.setItem('model_engine_api_key', apiKey);
+      }
+    } catch (e) {
+      log.error('Failed to persist modelengine api key to localStorage:', e);
+    }
+
     return {
       app,
       models,
@@ -285,4 +296,4 @@ class ConfigStoreClass {
 export const ConfigStore = ConfigStoreClass;
 
 // Export singleton
-export const configStore = ConfigStoreClass.getInstance(); 
+export const configStore = ConfigStoreClass.getInstance();

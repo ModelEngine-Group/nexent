@@ -1,8 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useState, useRef, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button, Card, Col, Row, Space, App } from 'antd'
-import { 
+import { Button, Card, Col, Row, Space, App, Modal } from 'antd'
+import {
   Plus,
   ShieldCheck,
   RefreshCw,
@@ -26,6 +26,7 @@ import { ModelListCard } from "./model/ModelListCard";
 import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { syncModelEngine } from "@/services/modelSyncService";
 
 // ModelConnectStatus type definition
 type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
@@ -95,6 +96,26 @@ export const ModelConfigSection = forwardRef<
 >((props, ref): ReactNode => {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const parseBool = (val: any) =>
+    val === true || String(val).toLowerCase() === "true" || String(val) === "1";
+
+  const [enableModelEngine, setEnableModelEngine] = useState<boolean>(
+    typeof process !== "undefined" &&
+      parseBool(process.env.NEXT_PUBLIC_ENABLE_MODELENGINE)
+  );
+
+  // Read runtime flag injected by server (`/__runtime_config.js`) if available.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const runtimeVal = (window as any).__MODEL_ENGINE_ENABLED;
+      if (typeof runtimeVal !== "undefined") {
+        setEnableModelEngine(parseBool(runtimeVal));
+      }
+    } catch (e) {
+      // ignore errors reading runtime flag
+    }
+  }, []);
   const { skipVerification = false, canAccessProtectedData = false } = props;
   const { modelConfig, updateModelConfig } = useConfig();
   const modelData = getModelData(t);
@@ -118,6 +139,9 @@ export const ModelConfigSection = forwardRef<
   // Throttle timer
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Sync dedupe and status refs
+  const lastSyncAtRef = useRef<number>(0);
+  const isSyncingRef = useRef<boolean>(false);
 
   // Debounced auto-save scheduler
   const scheduleAutoSave = () => {
@@ -594,9 +618,110 @@ export const ModelConfigSection = forwardRef<
   };
 
   // Open batch add dialog with ModelEngine provider pre-selected
-  const handleSyncModels = () => {
-    setIsAddModalOpen(true);
+  const handleSyncModels = async () => {
+    // Prevent concurrent syncs or duplicate rapid triggers (1s window)
+    if (isSyncingRef.current) return;
+    const now = Date.now();
+    if (lastSyncAtRef.current && now - lastSyncAtRef.current < 1000) return;
+    lastSyncAtRef.current = now;
+
+    // Determine API key source: ONLY use localStorage cache (model_engine_api_key).
+    const readCachedApiKey = (): string => {
+      if (typeof window === "undefined") return "";
+      try {
+        const raw = localStorage.getItem("model_engine_api_key");
+        return raw || "";
+      } catch (e) {
+        return "";
+      }
+    };
+
+    const savedApiKey = readCachedApiKey();
+
+    if (!savedApiKey) {
+      Modal.error({
+        title: t("modelConfig.error.syncFailed"),
+        content:
+          t("modelConfig.error.missingApiKey") ||
+          "请先在“修改配置”中填写 ModelEngine 的 API Key",
+      });
+      return;
+    }
+
+    let hide: any = undefined;
+    try {
+      isSyncingRef.current = true;
+      message.info(t("common.loading") || "开始同步...");
+      hide = message.loading(t("common.loading") || "同步中...", 0);
+
+      const result = await syncModelEngine(savedApiKey);
+
+      // reload model lists to reflect persisted changes
+      await loadModelLists(true);
+
+      // update UI statuses according to verification results
+      if (result.verificationResults && result.verificationResults.length > 0) {
+        for (const r of result.verificationResults) {
+          updateModelStatus(r.displayName, r.type as any, r.connected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE);
+        }
+      }
+
+      hide();
+      // todo 同步结果判断
+      if (!result.success) {
+        message.error(t("modelConfig.error.syncFailedUrlApiKey"));
+        if (typeof window !== "undefined" && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent("modelengineSyncResult", { detail: { success: false } }));
+        }
+      } else {
+        message.success(t("modelConfig.message.syncSuccess"));
+        if (typeof window !== "undefined" && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent("modelengineSyncResult", { detail: { success: true } }));
+        }
+      }
+      isSyncingRef.current = false;
+    } catch (error: any) {
+      isSyncingRef.current = false;
+      // ensure loading indicator is hidden on errors
+      try {
+        if (typeof hide === "function") hide();
+      } catch (_e) {}
+      const errMsg =
+        (error && (error.message || error.toString())) ||
+        t("modelConfig.error.syncFailed");
+      message.error(t("modelConfig.error.syncFailed") + ": " + errMsg);
+    }
   };
+
+  // Listen for API saved events and auto-trigger sync
+  useEffect(() => {
+    const handler = (e: any) => {
+      // debounce small window to allow config store update propagation
+      const apiKey = e?.detail?.apiKey;
+      setTimeout(async () => {
+        try {
+          // If the saved API key is empty, backend should have removed ModelEngine models.
+          // Refresh the model list to reflect deletions instead of attempting a sync.
+          if (!apiKey) {
+            await loadModelLists(true);
+            return;
+          }
+          // Otherwise, run the normal sync flow
+          handleSyncModels();
+        } catch (err) {
+          // ignore errors here; loadModelLists will surface UI messages as needed
+        }
+      }, 50);
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("modelengineApiSaved", handler);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("modelengineApiSaved", handler);
+      }
+    };
+  }, []);
 
   // Verify single model connection status (with throttling logic)
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
@@ -840,25 +965,27 @@ export const ModelConfigSection = forwardRef<
           }}
         >
           <Row gutter={[8, 8]} style={{ width: "100%" }}>
-            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button 
-                type="primary" 
-                size="middle" 
-                onClick={handleSyncModels}
-                style={{ width: "100%" }}
-                block
-              >
-                <RefreshCw className="mr-1" size={16} />
-                <span style={{ marginLeft: 4 }}>
-                  <span className="hidden xl:inline button-text-full">
-                    {t("modelConfig.button.syncModelEngine")}
+            {enableModelEngine && (
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Button
+                  type="primary"
+                  size="middle"
+                  onClick={() => handleSyncModels()}
+                  style={{ width: "100%" }}
+                  block
+                >
+                  <RefreshCw className="mr-1" size={16} />
+                  <span style={{ marginLeft: 4 }}>
+                    <span className="hidden xl:inline button-text-full">
+                      {t("modelConfig.button.syncModelEngine")}
+                    </span>
+                    <span className="xl:hidden button-text-short">
+                      {t("modelConfig.button.sync")}
+                    </span>
                   </span>
-                  <span className="xl:hidden button-text-short">
-                    {t("modelConfig.button.sync")}
-                  </span>
-                </span>
-              </Button>
-            </Col>
+                </Button>
+              </Col>
+            )}
             <Col xs={24} sm={12} md={6} lg={6} xl={6}>
               <Button
                 type="primary"
@@ -1035,7 +1162,8 @@ export const ModelConfigSection = forwardRef<
               }, 100);
             }
           }}
-          defaultProvider="modelengine"
+          // avoid defaulting to ModelEngine so add dialog doesn't show ModelEngine models
+          defaultProvider="silicon"
         />
 
         <ModelDeleteDialog
@@ -1045,7 +1173,8 @@ export const ModelConfigSection = forwardRef<
             await loadModelLists(true);
             return;
           }}
-          models={models}
+          // do not show ModelEngine models in delete/edit dialog
+          models={models.filter((m) => m.source !== "modelengine")}
         />
 
 

@@ -1,14 +1,12 @@
-"use client";
+ "use client";
 
-import {ReactNode} from "react";
+import { useState, ReactNode } from "react";
 import {useTranslation} from "react-i18next";
 
-import {Badge, Button, Dropdown} from "antd";
-import {
-  ChevronDown,
-  Globe,
-  RefreshCw,
-} from "lucide-react";
+import { Button, Modal, Input, message, Row, Col } from "antd";
+import { configService } from "@/services/configService";
+import { configStore } from "@/lib/config";
+import { ChevronDown, Globe, Settings } from "lucide-react";
 import {languageOptions} from "@/const/constants";
 import {useLanguageSwitch} from "@/lib/language";
 import {CONNECTION_STATUS, ConnectionStatus,} from "@/const/modelConfig";
@@ -30,6 +28,77 @@ export function SetupHeaderRightContent({
   const { t } = useTranslation();
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
 
+  // ModelEngine config modal state
+  const [configModalVisible, setConfigModalVisible] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+
+  const openConfigModal = () => {
+    const currentConfig = configStore.getConfig();
+    // Read persisted ModelEngine API key only from localStorage (single string)
+    let persistedKey = "";
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("model_engine_api_key");
+        persistedKey = raw || "";
+      } catch (e) {
+        persistedKey = "";
+      }
+    }
+    setApiKey(persistedKey || "");
+    setConfigModalVisible(true);
+  };
+
+  const handleSave = async () => {
+    try {
+      // Update local config
+      configStore.updateModelConfig({
+        embedding: {
+          ...(configStore.getConfig().models?.embedding || {}),
+          apiConfig: {
+            ...(configStore.getConfig().models?.embedding?.apiConfig || {}),
+            apiKey: apiKey || "",
+          },
+        },
+      } as any);
+
+      // Persist to backend - include the modal's ModelEngine API key explicitly
+      const currentConfig = configStore.getConfig();
+      const payload = {
+        ...currentConfig,
+        modelengine: { apiKey: apiKey || "" },
+      } as any;
+      const ok = await configService.saveConfigToBackend(payload);
+      if (ok) {
+        message.success(t("common.button.save") || t("common.save"));
+        // Notify other components that API key/config was saved so they can react (e.g., trigger sync)
+        if (typeof window !== "undefined" && window.dispatchEvent) {
+          // Update in-memory config store so UI reflects the saved apiKey immediately
+          try {
+            configStore.updateConfig({ modelengine: { apiKey: apiKey || "" } } as any);
+            // Dispatch configChanged for listeners
+            window.dispatchEvent(new CustomEvent("configChanged", { detail: { config: configStore.getConfig() } }));
+          } catch (e) {
+            // ignore store update errors
+          }
+          // Also emit modelengineApiSaved for backward compatibility (sync handlers)
+          window.dispatchEvent(new CustomEvent("modelengineApiSaved", { detail: { apiKey: apiKey || "" } }));
+          // Listen once for sync result to keep error handling consistent (but don't duplicate messages)
+          const onResult = (ev: any) => {
+            // We intentionally do not show messages here to avoid duplicate; handler exists for future extensions.
+            window.removeEventListener("modelengineSyncResult", onResult);
+          };
+          window.addEventListener("modelengineSyncResult", onResult);
+        }
+      } else {
+        message.error(t("common.retryLater"));
+      }
+    } catch (e) {
+      message.error(t("common.retryLater"));
+    } finally {
+      setConfigModalVisible(false);
+    }
+  };
+
   // Get status text
   const getStatusText = () => {
     switch (connectionStatus) {
@@ -45,44 +114,47 @@ export function SetupHeaderRightContent({
   };
 
   return (
-      <div className="flex items-center gap-3">
-        <Dropdown
-          menu={{
-            items: languageOptions.map((opt) => ({
-              key: opt.value,
-              label: opt.label,
-            })),
-            onClick: ({ key }) => handleLanguageChange(key as string),
-          }}
-        >
-          <a className="ant-dropdown-link text-sm !font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2 cursor-pointer w-[110px] border-0 shadow-none bg-transparent text-left">
-            <Globe className="h-4 w-4" />
-            {languageOptions.find((o) => o.value === currentLanguage)?.label ||
-              currentLanguage}
-            <ChevronDown className="text-[10px]" />
-          </a>
-        </Dropdown>
-        {/* ModelEngine connectivity status */}
-        <div className="flex items-center px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700">
-          <Badge
-            status={connectionStatus}
-            text={getStatusText()}
-            className="[&>.ant-badge-status-dot]:w-[8px] [&>.ant-badge-status-dot]:h-[8px] [&>.ant-badge-status-text]:text-base [&>.ant-badge-status-text]:ml-2 [&>.ant-badge-status-text]:font-medium"
-          />
-          <Button
-            icon={
-              <RefreshCw
-                className={isCheckingConnection ? "animate-spin" : ""}
-              />
-            }
-            size="small"
-            type="text"
-            onClick={onCheckConnection}
-            disabled={isCheckingConnection}
-            className="ml-2"
+    <>
+      <Row gutter={[16, 16]} align="middle" className="w-full">
+        <Col xs={24} className="flex justify-end">
+          <div className="flex items-center gap-2">
+            <Button
+              size="small"
+              type="text"
+              onClick={openConfigModal}
+              className="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2"
+              style={{ padding: "4px 8px", background: "transparent" }}
+            >
+              <Settings className="h-4 w-4" />
+              <span>{t("common.button.editConfig")}</span>
+            </Button>
+          </div>
+        </Col>
+      </Row>
+
+      {/* 配置弹窗：API Key 输入 */}
+      <Modal
+        title={t("common.button.editConfig")}
+        open={configModalVisible}
+        onCancel={() => setConfigModalVisible(false)}
+        onOk={handleSave}
+        okText={t("common.button.save") || t("common.save")}
+        cancelText={t("common.cancel")}
+        destroyOnClose
+      >
+        <div className="space-y-3">
+          <label className="block mb-1 text-sm font-medium text-gray-700">
+            {t("model.dialog.label.apiKey")}
+          </label>
+          <Input.Password
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={t("model.dialog.placeholder.apiKey")}
+            autoComplete="new-password"
           />
         </div>
-      </div>
+      </Modal>
+    </>
   );
 }
 

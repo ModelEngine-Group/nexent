@@ -22,7 +22,7 @@ import SaveConfirmModal from "./agents/components/SaveConfirmModal";
 import { SpaceContent } from "./space/components/SpaceContent";
 import { fetchAgentList } from "@/services/agentConfigService";
 import { useAgentImport, ImportAgentData } from "@/hooks/useAgentImport";
-import SetupLayout from "./setup/SetupLayout";
+import SetupLayout, { SetupHeaderRightContent } from "./setup/SetupLayout";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ChatContent } from "./chat/internal/ChatContent";
 import { ChatTopNavContent } from "./chat/internal/ChatTopNavContent";
@@ -614,7 +614,13 @@ export default function Home() {
           currentView === "chat" ? <ChatTopNavContent /> : undefined
         }
         topNavbarAdditionalRightContent={
-          currentView === "setup" ? renderStatusBadge() : undefined
+          currentView === "setup" ? (
+            <SetupHeaderRightContent
+              connectionStatus={connectionStatus}
+              isCheckingConnection={isCheckingConnection}
+              onCheckConnection={checkModelEngineConnection}
+            />
+          ) : undefined
         }
       >
         {renderContent()}

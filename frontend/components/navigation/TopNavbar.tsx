@@ -116,8 +116,8 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
           onClick: ({ key }) => handleLanguageChange(key as string),
         }}
       >
-        <a className="ant-dropdown-link text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer w-[90px] border-0 shadow-none bg-transparent text-left">
-          <Flex align="center" gap={6}>
+        <a className="ant-dropdown-link text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors cursor-pointer border-0 shadow-none bg-transparent text-left whitespace-nowrap">
+          <Flex align="center" gap={4}>
             <Globe className="h-3.5 w-3.5" />
             {languageOptions.find((o) => o.value === currentLanguage)?.label ||
               currentLanguage}
