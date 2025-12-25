@@ -16,12 +16,7 @@ import {
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
@@ -251,35 +246,35 @@ const getFileIcon = (file: File) => {
   if (chatConfig.fileIcons.pdf.includes(extension)) {
     return <FilePdfFilled size={iconSize} color="#e74c3c" />;
   }
-  
+
   if (chatConfig.fileIcons.word.includes(extension)) {
     return <FileWordFilled size={iconSize} color="#3498db" />;
   }
-  
+
   if (chatConfig.fileIcons.text.includes(extension)) {
     return <FileTextFilled size={iconSize} color="#7f8c8d" />;
   }
-  
+
   if (chatConfig.fileIcons.markdown.includes(extension)) {
     return <FileMarkdownFilled size={iconSize} color="#34495e" />;
   }
-  
+
   if (chatConfig.fileIcons.excel.includes(extension)) {
     return <FileExcelFilled size={iconSize} color="#27ae60" />;
   }
-  
+
   if (chatConfig.fileIcons.powerpoint.includes(extension)) {
     return <FilePptFilled size={iconSize} color="#e67e22" />;
   }
-  
+
   if (chatConfig.fileIcons.html.includes(extension)) {
     return <Html5Filled size={iconSize} color="#e67e22" />;
   }
-  
+
   if (chatConfig.fileIcons.code.includes(extension)) {
     return <CodeFilled size={iconSize} color="#f39c12" />;
   }
-  
+
   if (chatConfig.fileIcons.json.includes(extension)) {
     return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
@@ -1031,73 +1026,64 @@ export function ChatInput({
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
           {/* Voice to text button */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                  onClick={toggleRecording}
-                  disabled={recordingStatus === "connecting" || isStreaming}
-                >
-                  {isRecording ? (
-                    <MicOff className="h-5 w-5" />
-                  ) : (
-                    <Mic className="h-5 w-5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {isRecording
-                  ? t("chatInput.stopRecording")
-                  : t("chatInput.startRecording")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip
+            title={
+              isRecording
+                ? t("chatInput.stopRecording")
+                : t("chatInput.startRecording")
+            }
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+              onClick={toggleRecording}
+              disabled={recordingStatus === "connecting" || isStreaming}
+            >
+              {isRecording ? (
+                <MicOff className="h-5 w-5" />
+              ) : (
+                <Mic className="h-5 w-5" />
+              )}
+            </Button>
+          </Tooltip>
 
           {/* Upload file button */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                  onClick={() =>
-                    document.getElementById("file-upload-regular")?.click()
-                  }
-                >
-                  <Paperclip className="h-5 w-5" />
-                  <Input
-                    type="file"
-                    id="file-upload-regular"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                    accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
-                    multiple
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("chatInput.uploadFiles")}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip title={t("chatInput.uploadFiles")}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+              onClick={() =>
+                document.getElementById("file-upload-regular")?.click()
+              }
+            >
+              <Paperclip className="h-5 w-5" />
+              <Input
+                type="file"
+                id="file-upload-regular"
+                className="hidden"
+                onChange={handleFileUpload}
+                accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                multiple
+              />
+            </Button>
+          </Tooltip>
 
           {isStreaming ? (
-            <TooltipProvider>
-              <Tooltip open={showStopTooltip} onOpenChange={setShowStopTooltip}>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={onStop}
-                    size="icon"
-                    className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
-                  >
-                    <Square className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("chatInput.stopGenerating")}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip
+              title={t("chatInput.stopGenerating")}
+              open={showStopTooltip}
+              onOpenChange={setShowStopTooltip}
+            >
+              <Button
+                onClick={onStop}
+                size="icon"
+                className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
+              >
+                <Square className="h-5 w-5" />
+              </Button>
+            </Tooltip>
           ) : (
             <Button
               onClick={handleSend}
