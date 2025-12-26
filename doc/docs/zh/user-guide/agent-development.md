@@ -62,12 +62,42 @@
 
 ### 🔌 添加 MCP 工具
 
-Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力。
+在"选择 Agent 的工具"页签右侧，点击"MCP 配置"，可在弹窗中进行 MCP 服务器的配置，查看已配置的 MCP 服务器
 
-1. 在"选择 Agent 的工具"页签右侧，点击"MCP 配置"，可在弹窗中进行 MCP 服务器的配置，查看已配置的 MCP 服务器
-2. 输入服务器名称和服务器 URL（支持 SSE 与 Streamble HTTP 协议）
-   - ⚠️ **注意**：服务器名称只能包含英文字母和数字，不能包含空格、下划线等其他字符
-3. 点击"添加"按钮，即可完成添加
+您可以通过以下两种方式在 Nexent 中添加 MCP 服务
+
+**1️⃣ 通过 URL 添加 MCP 服务**
+
+🔔 该方法适用于已有独立部署的 MCP 服务（支持 SSE 与 Streamble HTTP 协议）：
+
+>1. 在界面上方的 **Add MCP Server** 区域填写 **Server name** 、 **Server URL** 
+>
+>⚠️ **注意**：服务器名称只能包含英文字母和数字，不能包含空格、下划线等其他字符
+>
+>2. 点击 右侧 **+ Add** 按钮，完成单个服务添加
+
+**2️⃣ 通过 JSON 配置添加容器化 MCP 服务**
+
+🔔 该方法适用于 npx 部署的容器化 MCP 服务
+
+>1. 在 **Add Containerized MCP Service** 输入框中，填写符合示例格式的 JSON 配置
+>
+>```json
+>{
+> "mcpServers": {
+>   "service-name": {
+>     "args": [
+>       "mcp-package-name@version",
+>       "additional-parameters"
+>     ],
+>     "command": "npx"
+>   }
+> }
+>}
+>```
+>
+>2. 在下方 **Port** 输入框中，填写容器化服务对应的端口号
+>3. 点击右侧 **+ Add** 按钮，完成容器化服务添加
 
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/mcp.png" style="width: 80%; height: auto;" />

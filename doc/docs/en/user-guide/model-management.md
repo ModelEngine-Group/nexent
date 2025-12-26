@@ -41,7 +41,9 @@ Click the app icon to open the configuration panel. Nexent provides two options:
 
 ### 🔄 Sync ModelEngine Models
 
-Nexent will soon support seamless integration with the ModelEngine platform so you can automatically sync and reuse every model you deploy there. Stay tuned!
+Nexent supports seamless integration with the ModelEngine platform.
+
+👉 Click **Edit ModelEngine Configuration** in the upper right corner of the page, enter your API key, and you can retrieve all models deployed on ModelEngine.
 
 ### 🛠️ Add Custom Models
 
