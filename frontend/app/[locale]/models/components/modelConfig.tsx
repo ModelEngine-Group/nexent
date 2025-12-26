@@ -638,12 +638,11 @@ export const ModelConfigSection = forwardRef<
 
     const savedApiKey = readCachedApiKey();
 
-    if (!savedApiKey) {
+      if (!savedApiKey) {
       Modal.error({
         title: t("modelConfig.error.syncFailed"),
         content:
-          t("modelConfig.error.missingApiKey") ||
-          "请先在“修改配置”中填写 ModelEngine 的 API Key",
+          t("modelConfig.error.missingApiKey")
       });
       return;
     }
@@ -651,8 +650,13 @@ export const ModelConfigSection = forwardRef<
     let hide: any = undefined;
     try {
       isSyncingRef.current = true;
-      message.info(t("common.loading") || "开始同步...");
-      hide = message.loading(t("common.loading") || "同步中...", 0);
+      // Use i18n keys for sync start and syncing messages; fall back to common loading then to Chinese text.
+      message.info(
+        t("modelConfig.message.syncStart"));
+      hide = message.loading(
+        t("modelConfig.message.syncing") || t("common.loading") || "同步中...",
+        0
+      );
 
       const result = await syncModelEngine(savedApiKey);
 
@@ -667,7 +671,7 @@ export const ModelConfigSection = forwardRef<
       }
 
       hide();
-      // todo 同步结果判断
+
       if (!result.success) {
         message.error(t("modelConfig.error.syncFailedUrlApiKey"));
         if (typeof window !== "undefined" && window.dispatchEvent) {

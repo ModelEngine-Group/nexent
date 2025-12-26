@@ -64,14 +64,10 @@ def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id:
 async def save_config_impl(config, tenant_id, user_id):
     config_dict = config.model_dump(exclude_none=False)
     env_config = {}
-    # Extract modelengine.apiKey from payload and coerce to single string
     model_engine_key = ""
-    try:
-        me_field = config_dict.get("modelengine") or {}
-        if isinstance(me_field, dict):
-            model_engine_key = me_field.get("apiKey")
-    except Exception:
-        model_engine_key = ""
+    me_field = config_dict.get("modelengine", {})
+    if me_field:
+        model_engine_key = me_field.get("apiKey", "")
     tenant_config_dict = tenant_config_manager.load_config(tenant_id)
     # Process app configuration - use key names directly without prefix
     for key, value in config_dict.get("app", {}).items():
@@ -114,7 +110,6 @@ async def save_config_impl(config, tenant_id, user_id):
                 embedding_api_config = model_config.get("apiConfig", {})
                 env_config[f"{model_prefix}_API_KEY"] = safe_value(
                     embedding_api_config.get("apiKey"))
-    # Persist collected ModelEngine API key (single value) under tenant config key MODEL_ENGINE_API_KEY
     try:
         tenant_config_manager.set_single_config(user_id, tenant_id, "MODEL_ENGINE_API_KEY", model_engine_key)
     except Exception as e:
@@ -141,7 +136,6 @@ async def save_config_impl(config, tenant_id, user_id):
 
 async def load_config_impl(language: str, tenant_id: str):
     try:
-        # Include modelengine apiKey (single string) in returned config
         modelengine_key = tenant_config_manager.get_app_config("MODEL_ENGINE_API_KEY", "", tenant_id=tenant_id) or ""
         config = {
             "app": build_app_config(language, tenant_id),

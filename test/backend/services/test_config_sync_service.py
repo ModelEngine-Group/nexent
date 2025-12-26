@@ -687,7 +687,7 @@ class TestSaveConfigImpl:
         assert result is None
 
         # Verify that set_single_config is called for new keys
-        assert service_mocks['tenant_config_manager'].set_single_config.call_count == 2
+        assert service_mocks['tenant_config_manager'].set_single_config.call_count == 3
         service_mocks['tenant_config_manager'].delete_single_config.assert_not_called()
         service_mocks['tenant_config_manager'].update_single_config.assert_not_called()
 
@@ -719,14 +719,19 @@ class TestLoadConfigImpl:
             {}           # TTS_ID
         ]
 
-        # Mock app configurations
-        service_mocks['tenant_config_manager'].get_app_config.side_effect = [
-            "Custom App Name",  # APP_NAME
-            "Custom description",  # APP_DESCRIPTION
-            "preset",  # ICON_TYPE
-            "avatar-uri",  # AVATAR_URI
-            "https://custom-icon.com"  # CUSTOM_ICON_URL
-        ]
+        # Mock app configurations using a side_effect function to handle any call order
+        def get_app_config_side_effect(key, default="", tenant_id=None):
+            mapping = {
+                "APP_NAME": "Custom App Name",
+                "APP_DESCRIPTION": "Custom description",
+                "ICON_TYPE": "preset",
+                "AVATAR_URI": "avatar-uri",
+                "CUSTOM_ICON_URL": "https://custom-icon.com",
+                "MODEL_ENGINE_API_KEY": ""
+            }
+            return mapping.get(key, default)
+
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = get_app_config_side_effect
 
         # Mock model name conversion to return string values
         service_mocks['get_model_name'].side_effect = [

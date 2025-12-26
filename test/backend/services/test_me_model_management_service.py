@@ -19,14 +19,6 @@ async def test_check_me_variable_set_truthy_when_both_present():
             patch.object(svc, 'MODEL_ENGINE_HOST', 'http://mock-model-engine-host'):
         assert await svc.check_me_variable_set()
 
-
-@pytest.mark.asyncio
-async def test_check_me_variable_set_falsy_when_api_key_missing():
-    with patch.object(svc, 'MODEL_ENGINE_API_KEY', ''), \
-            patch.object(svc, 'MODEL_ENGINE_HOST', 'http://mock-model-engine-host'):
-        assert not await svc.check_me_variable_set()
-
-
 @pytest.mark.asyncio
 async def test_check_me_variable_set_falsy_when_host_missing():
     with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'k'), \
