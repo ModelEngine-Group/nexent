@@ -64,12 +64,42 @@ Agents can use various tools to complete tasks, such as knowledge base search, f
 
 ### 🔌 Add MCP Tools
 
-Nexent allows you to quickly and easily use third-party MCP tools to enrich agent capabilities.
+On the "Select Agent Tools" tab, click "MCP Config" to configure MCP servers in the popup and view configured servers.
 
-1. On the "Select Agent Tools" tab, click "MCP Config" to configure MCP servers in the popup and view configured servers
-2. Enter the server name and server URL (supports SSE and Streamable HTTP protocols)
-   - ⚠️ **Note:** The server name must contain only English letters or digits; spaces, underscores, and other characters are not allowed.
-3. Click "Add" to complete the addition
+You can add MCP services to Nexent in the following two ways:
+
+**1️⃣ Add MCP Service via URL**
+
+🔔 This method is suitable for independently deployed MCP services (supports SSE and Streamable HTTP protocols):
+
+>1. In the **Add MCP Server** section at the top of the interface, fill in **Server name** and **Server URL**
+>
+>⚠️ **Note:** The server name must contain only English letters or digits; spaces, underscores, and other characters are not allowed.
+>
+>2. Click the **+ Add** button on the right to complete adding a single service
+
+**2️⃣ Add Containerized MCP Service via JSON Configuration**
+
+🔔 This method is suitable for containerized MCP services deployed via npx:
+
+>1. In the **Add Containerized MCP Service** input box, fill in a JSON configuration that matches the example format:
+>
+>```json
+>{
+> "mcpServers": {
+>   "service-name": {
+>     "args": [
+>       "mcp-package-name@version",
+>       "additional-parameters"
+>     ],
+>     "command": "npx"
+>   }
+> }
+>}
+>```
+>
+>2. In the **Port** input box below, enter the port number corresponding to the containerized service
+>3. Click the **+ Add** button on the right to complete adding the containerized service
 
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/mcp.png" style="width: 80%; height: auto;" />
