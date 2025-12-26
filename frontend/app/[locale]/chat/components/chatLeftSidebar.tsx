@@ -19,12 +19,7 @@ import {
 } from "@/components/ui/dropdownMenu";
 import { Input } from "@/components/ui/input";
 import { App } from "antd";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { USER_ROLES } from "@/const/modelConfig";
 import { useTranslation } from "react-i18next";
@@ -233,29 +228,28 @@ export function ChatSidebar({
               // Display mode
               <>
                 <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        className="flex-1 justify-start text-left hover:bg-transparent min-w-0 max-w-[250px]"
-                        onClick={() => onDialogClick(dialog)}
-                      >
-                        <ConversationStatusIndicator
-                          isStreaming={streamingConversations.has(
-                            dialog.conversation_id
-                          )}
-                          isCompleted={completedConversations.has(
-                            dialog.conversation_id
-                          )}
-                        />
-                        <span className="truncate block text-base font-normal text-gray-800 tracking-wide font-sans">
-                          {dialog.conversation_title}
-                        </span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-xs">
-                      <p className="break-words">{dialog.conversation_title}</p>
-                    </TooltipContent>
+                  <Tooltip
+                    title={<p className="break-words">{dialog.conversation_title}</p>}
+                    placement="right"
+                    overlayStyle={{ maxWidth: "300px" }}
+                  >
+                    <Button
+                      variant="ghost"
+                      className="flex-1 justify-start text-left hover:bg-transparent min-w-0 max-w-[250px]"
+                      onClick={() => onDialogClick(dialog)}
+                    >
+                      <ConversationStatusIndicator
+                        isStreaming={streamingConversations.has(
+                          dialog.conversation_id
+                        )}
+                        isCompleted={completedConversations.has(
+                          dialog.conversation_id
+                        )}
+                      />
+                      <span className="truncate block text-base font-normal text-gray-800 tracking-wide font-sans">
+                        {dialog.conversation_title}
+                      </span>
+                    </Button>
                   </Tooltip>
                 </TooltipProvider>
 
@@ -313,20 +307,15 @@ export function ChatSidebar({
         {/* Expand/Collapse button */}
         <div className="py-3 flex justify-center">
           <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 rounded-full hover:bg-slate-100"
-                  onClick={onToggleSidebar}
-                >
-                  <ChevronRight className="h-6 w-6" strokeWidth={2.5} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {t("chatLeftSidebar.expandSidebar")}
-              </TooltipContent>
+            <Tooltip title={t("chatLeftSidebar.expandSidebar")} placement="right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-full hover:bg-slate-100"
+                onClick={onToggleSidebar}
+              >
+                <ChevronRight className="h-6 w-6" strokeWidth={2.5} />
+              </Button>
             </Tooltip>
           </TooltipProvider>
         </div>
@@ -334,20 +323,15 @@ export function ChatSidebar({
         {/* New conversation button */}
         <div className="py-3 flex justify-center">
           <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 rounded-full hover:bg-slate-100"
-                  onClick={onNewConversation}
-                >
-                  <Plus className="h-6 w-6" strokeWidth={2.5} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {t("chatLeftSidebar.newConversation")}
-              </TooltipContent>
+            <Tooltip title={t("chatLeftSidebar.newConversation")} placement="right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-full hover:bg-slate-100"
+                onClick={onNewConversation}
+              >
+                <Plus className="h-6 w-6" strokeWidth={2.5} />
+              </Button>
             </Tooltip>
           </TooltipProvider>
         </div>
@@ -383,7 +367,7 @@ export function ChatSidebar({
                 </Button>
                 <TooltipProvider>
                   <Tooltip>
-                    <TooltipTrigger asChild>
+                    <Tooltip title={t("chatLeftSidebar.collapseSidebar")}>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -392,10 +376,7 @@ export function ChatSidebar({
                       >
                         <ChevronLeft className="h-5 w-5" />
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t("chatLeftSidebar.collapseSidebar")}</p>
-                    </TooltipContent>
+                    </Tooltip>
                   </Tooltip>
                 </TooltipProvider>
               </div>

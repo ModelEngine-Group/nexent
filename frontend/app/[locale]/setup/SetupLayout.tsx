@@ -1,6 +1,6 @@
  "use client";
 
-import { useState, ReactNode } from "react";
+import { useState, ReactNode, useEffect } from "react";
 import {useTranslation} from "react-i18next";
 
 import { Button, Modal, Input, message, Row, Col } from "antd";
@@ -31,6 +31,29 @@ export function SetupHeaderRightContent({
   // ModelEngine config modal state
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  // Whether ModelEngine features are enabled (read from runtime flag or build-time env)
+  const [enableModelEngine, setEnableModelEngine] = useState<boolean>(
+    typeof process !== "undefined" &&
+      (process.env.NEXT_PUBLIC_ENABLE_MODELENGINE || "").toString().toLowerCase() ===
+        "true"
+  );
+
+  // Read runtime flag injected by server (`/__runtime_config.js`) if available.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const runtimeVal = (window as any).__MODEL_ENGINE_ENABLED;
+      if (typeof runtimeVal !== "undefined") {
+        const val =
+          runtimeVal === true ||
+          String(runtimeVal).toLowerCase() === "true" ||
+          String(runtimeVal) === "1";
+        setEnableModelEngine(val);
+      }
+    } catch (e) {
+      // ignore errors reading runtime flag
+    }
+  }, []);
 
   const openConfigModal = () => {
     const currentConfig = configStore.getConfig();
@@ -118,16 +141,18 @@ export function SetupHeaderRightContent({
       <Row gutter={[16, 16]} align="middle" className="w-full">
         <Col xs={24} className="flex justify-end">
           <div className="flex items-center gap-2">
-            <Button
-              size="small"
-              type="text"
-              onClick={openConfigModal}
-              className="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2"
-              style={{ padding: "4px 8px", background: "transparent" }}
-            >
-              <Settings className="h-4 w-4" />
-              <span>{t("common.button.editConfig")}</span>
-            </Button>
+            {enableModelEngine && (
+              <Button
+                size="small"
+                type="text"
+                onClick={openConfigModal}
+                className="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2"
+                style={{ padding: "4px 8px", background: "transparent" }}
+              >
+                <Settings className="h-4 w-4" />
+                <span>{t("common.button.editConfig")}</span>
+              </Button>
+            )}
           </div>
         </Col>
       </Row>

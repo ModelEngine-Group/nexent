@@ -20,6 +20,7 @@ MODEL_ENGINE_HOST = ""
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED", "false").lower() == "true"
 if MODEL_ENGINE_ENABLED:
     MODEL_ENGINE_HOST = os.getenv('MODEL_ENGINE_HOST')
+MODEL_ENGINE_API_KEY = os.getenv("MODEL_ENGINE_API_KEY") or ""
 
 
 # Elasticsearch Configuration
@@ -130,6 +131,8 @@ DISABLE_RAY_DASHBOARD = os.getenv(
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
+DOCKER_HOST = os.getenv("DOCKER_HOST")
+MCP_DOCKER_IMAGE = os.getenv("MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
 
 
 # Celery Configuration

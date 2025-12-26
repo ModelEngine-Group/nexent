@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 
-from consts.const import MODEL_ENGINE_HOST
+from consts.const import MODEL_ENGINE_HOST, MODEL_ENGINE_API_KEY
 from consts.exceptions import MEConnectionException, TimeoutException
 
 
@@ -32,7 +32,7 @@ async def check_me_connectivity(timeout: int = 30) -> bool:
         return False
 
     try:
-        headers = {"Authorization": f"Bearer {MODEL_ENGINE_APIKEY}"}
+        headers = {"Authorization": f"Bearer {MODEL_ENGINE_API_KEY}"}
 
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=timeout),

@@ -16,12 +16,7 @@ import {
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { Agent, SubAgentPoolProps } from "@/types/agentConfig";
 
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
@@ -176,14 +171,19 @@ export default function SubAgentPool({
             <div className="mb-4">
               <Row gutter={12}>
                 <Col xs={24} sm={12}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className={`rounded-md p-2 flex items-center cursor-pointer transition-all duration-200 min-h-[70px] ${
-                          isCreatingNewAgent
-                            ? "bg-blue-100 border border-blue-200 shadow-sm" // Highlight in creation mode
-                            : "bg-white hover:bg-blue-50 hover:shadow-sm"
-                        }`}
+                  <Tooltip
+                    title={
+                      isCreatingNewAgent
+                        ? t("subAgentPool.tooltip.exitCreateMode")
+                        : t("subAgentPool.tooltip.createNewAgent")
+                    }
+                  >
+                    <div
+                      className={`rounded-md p-2 flex items-center cursor-pointer transition-all duration-200 min-h-[70px] ${
+                        isCreatingNewAgent
+                          ? "bg-blue-100 border border-blue-200 shadow-sm" // Highlight in creation mode
+                          : "bg-white hover:bg-blue-50 hover:shadow-sm"
+                      }`}
                       onClick={() => {
                         if (isCreatingNewAgent) {
                           // If currently in creation mode, click to exit creation mode
@@ -230,26 +230,25 @@ export default function SubAgentPool({
                               : t("subAgentPool.description.createAgent")}
                           </div>
                         </div>
-                        </div>
                       </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {isCreatingNewAgent
-                        ? t("subAgentPool.tooltip.exitCreateMode")
-                        : t("subAgentPool.tooltip.createNewAgent")}
-                    </TooltipContent>
+                    </div>
                   </Tooltip>
                 </Col>
 
                 <Col xs={24} sm={12}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className={`rounded-md p-2 flex items-center transition-all duration-200 min-h-[70px] ${
-                          isImporting
-                            ? "bg-gray-100 cursor-not-allowed" // Importing: disabled state
-                            : "bg-white cursor-pointer hover:bg-green-50 hover:shadow-sm" // Normal state: clickable
-                        }`}
+                  <Tooltip
+                    title={
+                      isImporting
+                        ? t("subAgentPool.description.importing")
+                        : t("subAgentPool.description.importAgent")
+                    }
+                  >
+                    <div
+                      className={`rounded-md p-2 flex items-center transition-all duration-200 min-h-[70px] ${
+                        isImporting
+                          ? "bg-gray-100 cursor-not-allowed" // Importing: disabled state
+                          : "bg-white cursor-pointer hover:bg-green-50 hover:shadow-sm" // Normal state: clickable
+                      }`}
                       onClick={isImporting ? undefined : onImportAgent}
                     >
                       <div
@@ -280,14 +279,8 @@ export default function SubAgentPool({
                               : t("subAgentPool.description.importAgent")}
                           </div>
                         </div>
-                        </div>
                       </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {isImporting
-                        ? t("subAgentPool.description.importing")
-                        : t("subAgentPool.description.importAgent")}
-                    </TooltipContent>
+                    </div>
                   </Tooltip>
                 </Col>
               </Row>
@@ -371,84 +364,64 @@ export default function SubAgentPool({
                         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
                           {/* Copy agent button */}
                           {onCopyAgent && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<Copy className="w-4 h-4" />}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onCopyAgent(agent);
-                                  }}
-                                  className="agent-action-button agent-action-button-blue"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {t("agent.contextMenu.copy")}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                          {/* View call relationship button */}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                            <Tooltip title={t("agent.contextMenu.copy")}>
                               <Button
                                 type="text"
                                 size="small"
-                                icon={<Network className="w-4 h-4" />}
+                                icon={<Copy className="w-4 h-4" />}
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  handleViewCallRelationship(agent);
+                                  onCopyAgent(agent);
                                 }}
                                 className="agent-action-button agent-action-button-blue"
                               />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {t("agent.action.viewCallRelationship")}
-                            </TooltipContent>
+                            </Tooltip>
+                          )}
+                          {/* View call relationship button */}
+                          <Tooltip title={t("agent.action.viewCallRelationship")}>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<Network className="w-4 h-4" />}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleViewCallRelationship(agent);
+                              }}
+                              className="agent-action-button agent-action-button-blue"
+                            />
                           </Tooltip>
                           {/* Export button */}
                           {onExportAgent && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<FileOutput className="w-4 h-4" />}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onExportAgent(agent);
-                                  }}
-                                  className="agent-action-button agent-action-button-green"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {t("agent.contextMenu.export")}
-                              </TooltipContent>
+                            <Tooltip title={t("agent.contextMenu.export")}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<FileOutput className="w-4 h-4" />}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onExportAgent(agent);
+                                }}
+                                className="agent-action-button agent-action-button-green"
+                              />
                             </Tooltip>
                           )}
                           {/* Delete button */}
                           {onDeleteAgent && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<Trash2 className="w-4 h-4" />}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onDeleteAgent(agent);
-                                  }}
-                                  className="agent-action-button agent-action-button-red"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {t("agent.contextMenu.delete")}
-                              </TooltipContent>
+                            <Tooltip title={t("agent.contextMenu.delete")}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<Trash2 className="w-4 h-4" />}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onDeleteAgent(agent);
+                                }}
+                                className="agent-action-button agent-action-button-red"
+                              />
                             </Tooltip>
                           )}
                         </div>

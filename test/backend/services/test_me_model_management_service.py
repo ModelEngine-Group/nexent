@@ -15,21 +15,21 @@ sys.path.insert(0, os.path.abspath(
 @pytest.mark.asyncio
 async def test_check_me_variable_set_truthy_when_both_present():
     # Patch service module constants to have non-empty values
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'k'), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'k'), \
             patch.object(svc, 'MODEL_ENGINE_HOST', 'http://mock-model-engine-host'):
         assert await svc.check_me_variable_set()
 
 
 @pytest.mark.asyncio
 async def test_check_me_variable_set_falsy_when_api_key_missing():
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', ''), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', ''), \
             patch.object(svc, 'MODEL_ENGINE_HOST', 'http://mock-model-engine-host'):
         assert not await svc.check_me_variable_set()
 
 
 @pytest.mark.asyncio
 async def test_check_me_variable_set_falsy_when_host_missing():
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'k'), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'k'), \
             patch.object(svc, 'MODEL_ENGINE_HOST', ''):
         assert not await svc.check_me_variable_set()
 
@@ -37,7 +37,7 @@ async def test_check_me_variable_set_falsy_when_host_missing():
 @pytest.mark.asyncio
 async def test_check_me_connectivity_success():
     """Test successful ME connectivity check"""
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'mock-api-key'), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'mock-api-key'), \
             patch.object(svc, 'MODEL_ENGINE_HOST', 'https://me-host.com'), \
             patch('backend.services.me_model_management_service.aiohttp.ClientSession') as mock_session_class:
 
@@ -66,7 +66,7 @@ async def test_check_me_connectivity_success():
 @pytest.mark.asyncio
 async def test_check_me_connectivity_http_error():
     """Test ME connectivity check with HTTP error response"""
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'mock-api-key'), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'mock-api-key'), \
             patch.object(svc, 'MODEL_ENGINE_HOST', 'https://me-host.com'), \
             patch('backend.services.me_model_management_service.aiohttp.ClientSession') as mock_session_class:
 
@@ -96,7 +96,7 @@ async def test_check_me_connectivity_http_error():
 @pytest.mark.asyncio
 async def test_check_me_connectivity_timeout():
     """Test ME connectivity check with timeout error"""
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'mock-api-key'), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'mock-api-key'), \
             patch.object(svc, 'MODEL_ENGINE_HOST', 'https://me-host.com'), \
             patch('backend.services.me_model_management_service.aiohttp.ClientSession') as mock_session_class:
 
@@ -122,7 +122,7 @@ async def test_check_me_connectivity_timeout():
 @pytest.mark.asyncio
 async def test_check_me_connectivity_variables_not_set():
     """Test ME connectivity check when environment variables not set"""
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', ''), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', ''), \
             patch.object(svc, 'MODEL_ENGINE_HOST', ''):
 
         # Execute - should return False when env vars not set
@@ -135,7 +135,7 @@ async def test_check_me_connectivity_variables_not_set():
 @pytest.mark.asyncio
 async def test_check_me_connectivity_general_exception():
     """Test ME connectivity check with general exception (covers lines 54-55)"""
-    with patch.object(svc, 'MODEL_ENGINE_APIKEY', 'mock-api-key'), \
+    with patch.object(svc, 'MODEL_ENGINE_API_KEY', 'mock-api-key'), \
             patch.object(svc, 'MODEL_ENGINE_HOST', 'https://me-host.com'), \
             patch('backend.services.me_model_management_service.aiohttp.ClientSession') as mock_session_class:
 
