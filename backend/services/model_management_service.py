@@ -45,6 +45,10 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 model_base_url.replace(LOCALHOST_NAME, DOCKER_INTERNAL_HOST)
                 .replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
             )
+        model_data['ssl_verify'] = True
+        if "open/router" in model_base_url:
+            model_data['ssl_verify'] = False
+
 
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
@@ -286,7 +290,7 @@ async def delete_model_for_tenant(user_id: str, tenant_id: str, display_name: st
             raise LookupError(f"Model not found: {display_name}")
 
         deleted_types: List[str] = []
-        
+
         # Check if any of the models is multi_embedding (which means we have both types)
         has_multi_embedding = any(
             m.get("model_type") == "multi_embedding" for m in models
@@ -343,12 +347,12 @@ async def list_models_for_tenant(tenant_id: str):
     try:
         records = get_model_records(None, tenant_id)
         result: List[Dict[str, Any]] = []
-        
+
         # Type mapping for backwards compatibility (chat -> llm for frontend)
         type_map = {
             "chat": "llm",
         }
-        
+
         for record in records:
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
@@ -356,11 +360,11 @@ async def list_models_for_tenant(tenant_id: str):
             )
             record["connect_status"] = ModelConnectStatusEnum.get_value(
                 record.get("connect_status"))
-            
+
             # Map model_type if necessary (for ModelEngine compatibility)
             if record.get("model_type") in type_map:
                 record["model_type"] = type_map[record["model_type"]]
-            
+
             result.append(record)
 
         logging.debug("Successfully retrieved model list")

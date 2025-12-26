@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
-  LoaderCircle, 
-  ChevronRight, 
-  ChevronDown, 
-  Settings 
+  LoaderCircle,
+  ChevronRight,
+  ChevronDown,
+  Settings
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
@@ -169,6 +169,7 @@ export const ModelAddDialog = ({
     // Whether to import multiple models at once
     isBatchImport: false,
     provider: "modelengine",
+    modelEngineUrl: "",
     vectorDimension: "1024",
     // Default chunk size range for embedding models
     chunkSizeRange: [
@@ -306,6 +307,14 @@ export const ModelAddDialog = ({
   // Check if the form is valid
   const isFormValid = () => {
     if (form.isBatchImport) {
+      // If provider is ModelEngine, require the ModelEngine URL as well.
+      if (form.provider === "modelengine") {
+        return (
+          form.provider.trim() !== "" &&
+          form.apiKey.trim() !== "" &&
+          ((form as any).modelEngineUrl || "").toString().trim() !== ""
+        );
+      }
       return form.provider.trim() !== "" && form.apiKey.trim() !== "";
     }
     if (form.type === MODEL_TYPES.EMBEDDING) {
@@ -602,6 +611,7 @@ export const ModelAddDialog = ({
         isMultimodal: false,
         isBatchImport: false,
         provider: "silicon",
+        modelEngineUrl: "",
         vectorDimension: "1024",
         chunkSizeRange: [
           DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -675,6 +685,21 @@ export const ModelAddDialog = ({
               <Option value="modelengine">{t("model.provider.modelengine")}</Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
+            {/* ModelEngine URL input (only when provider is ModelEngine) */}
+            {form.provider === "modelengine" && (
+              <div className="mt-3">
+                <label className="block mb-1 text-sm font-medium text-gray-700">
+                  ModelEngine URL
+                </label>
+                <Input
+                  placeholder={t("model.dialog.placeholder.modelEngineUrl")}
+                  value={(form as any).modelEngineUrl}
+                  onChange={(e) =>
+                    handleFormChange("modelEngineUrl", e.target.value)
+                  }
+                />
+              </div>
+            )}
           </div>
         )}
 
