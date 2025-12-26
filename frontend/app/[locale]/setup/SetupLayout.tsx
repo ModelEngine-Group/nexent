@@ -55,19 +55,28 @@ export function SetupHeaderRightContent({
     }
   }, []);
 
-  const openConfigModal = () => {
-    const currentConfig = configStore.getConfig();
-    // Read persisted ModelEngine API key only from localStorage (single string)
-    let persistedKey = "";
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem("model_engine_api_key");
-        persistedKey = raw || "";
-      } catch (e) {
-        persistedKey = "";
-      }
+  const openConfigModal = async () => {
+    // Only load configuration from backend and echo the ModelEngine API key from that config.
+    try {
+      await configService.loadConfigToFrontend();
+    } catch (e) {
+      // ignore load errors; we'll still try to read configStore
     }
-    setApiKey(persistedKey || "");
+
+    const currentConfig = configStore.getConfig();
+    let backendKey = "";
+    try {
+      backendKey =
+        (currentConfig &&
+          (currentConfig as any).modelengine &&
+          (currentConfig as any).modelengine.apiKey) ||
+        "";
+    } catch (e) {
+      backendKey = "";
+    }
+
+    // Echo the backend-provided API key (may be empty string)
+    setApiKey(backendKey || "");
     setConfigModalVisible(true);
   };
 
@@ -141,18 +150,7 @@ export function SetupHeaderRightContent({
       <Row gutter={[16, 16]} align="middle" className="w-full">
         <Col xs={24} className="flex justify-end">
           <div className="flex items-center gap-2">
-            {enableModelEngine && (
-              <Button
-                size="small"
-                type="text"
-                onClick={openConfigModal}
-                className="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors flex items-center gap-2"
-                style={{ padding: "4px 8px", background: "transparent" }}
-              >
-                <Settings className="h-4 w-4" />
-                <span>{t("common.button.editConfig")}</span>
-              </Button>
-            )}
+            {/* ModelEngine config button removed: TopNavbar now provides the configuration modal */}
           </div>
         </Col>
       </Row>

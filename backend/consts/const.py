@@ -18,8 +18,7 @@ class VectorDatabaseType(str, Enum):
 MODEL_ENGINE_HOST = ""
 # ModelEngine Configuration
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED", "false").lower() == "true"
-if MODEL_ENGINE_ENABLED:
-    MODEL_ENGINE_HOST = os.getenv('MODEL_ENGINE_HOST')
+MODEL_ENGINE_HOST = os.getenv('MODEL_ENGINE_HOST') or ""
 MODEL_ENGINE_API_KEY = os.getenv("MODEL_ENGINE_API_KEY") or ""
 
 

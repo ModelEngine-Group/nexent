@@ -771,6 +771,21 @@ async def test_modelengine_get_models_no_env_config():
 
 
 @pytest.mark.asyncio
+async def test_modelengine_get_models_disabled_flag_logs_and_returns_empty():
+    """If MODEL_ENGINE_ENABLED is False, provider should log an info message and return empty list."""
+    from backend.services.model_provider_service import ModelEngineProvider
+
+    provider_config = {"model_type": "llm", "api_key": "test-key"}
+
+    with mock.patch("backend.services.model_provider_service.MODEL_ENGINE_ENABLED", False), \
+         mock.patch("backend.services.model_provider_service.logger") as mock_logger:
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        assert result == []
+        mock_logger.info.assert_called_once_with("ModelEngine integration is disabled via environment configuration")
+
+@pytest.mark.asyncio
 async def test_modelengine_get_models_llm_success():
     """ModelEngine provider should return LLM models with correct type mapping."""
     from backend.services.model_provider_service import ModelEngineProvider

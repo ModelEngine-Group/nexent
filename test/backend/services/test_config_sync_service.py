@@ -925,3 +925,85 @@ class TestLoadConfigImpl:
         service_mocks['logger'].warning.assert_called_with(
             "Failed to get config for EMBEDDING_ID: Database timeout"
         )
+
+
+@pytest.mark.asyncio
+async def test_save_config_impl_persist_model_engine_key_failure(service_mocks):
+    """When persisting MODEL_ENGINE_API_KEY fails, a warning should be logged but function should continue."""
+    config = MagicMock()
+    # Provide a simple config dict that includes modelengine apiKey
+    config.model_dump.return_value = {"app": {}, "models": {}, "modelengine": {"apiKey": "me-key"}}
+
+    tenant_id = "test_tenant_id"
+    user_id = "test_user_id"
+
+    # tenant_config_manager.load_config should return something reasonable
+    service_mocks['tenant_config_manager'].load_config.return_value = {}
+
+    # Make set_single_config raise when persisting MODEL_ENGINE_API_KEY
+    service_mocks['tenant_config_manager'].set_single_config.side_effect = Exception("persist failed")
+
+    # Execute
+    result = await save_config_impl(config, tenant_id, user_id)
+
+    # Function should not raise; it should log a warning
+    assert result is None
+    service_mocks['logger'].warning.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_save_config_impl_modelengine_deletion_paths(service_mocks):
+    """When MODEL_ENGINE_API_KEY is empty, deletion logic should attempt to remove records and handle failures."""
+    config = MagicMock()
+    # modelengine apiKey empty -> triggers deletion flow
+    config.model_dump.return_value = {"app": {}, "models": {}, "modelengine": {"apiKey": ""}}
+
+    tenant_id = "test_tenant_id"
+    user_id = "test_user_id"
+
+    # tenant config load
+    service_mocks['tenant_config_manager'].load_config.return_value = {}
+
+    # Case A: get_model_records returns models where one has no id (should be skipped) and one has id which delete_model_record will raise on
+    from backend.services import config_sync_service
+
+    async def _run_case_a():
+        with patch('backend.services.config_sync_service.get_model_records', return_value=[{"model_id": None}, {"model_id": "7"}]), \
+             patch('backend.services.config_sync_service.delete_model_record', side_effect=Exception("delete failed")):
+            res = await save_config_impl(config, tenant_id, user_id)
+            assert res is None
+            # A warning should be logged for the failed delete
+            service_mocks['logger'].warning.assert_called()
+
+    await _run_case_a()
+
+    # Case B: get_model_records itself raises -> should be caught and logged
+    async def _run_case_b():
+        with patch('backend.services.config_sync_service.get_model_records', side_effect=Exception("query failed")):
+            res = await save_config_impl(config, tenant_id, user_id)
+            assert res is None
+            service_mocks['logger'].warning.assert_called()
+
+    await _run_case_b()
+
+
+def test_build_model_config_embedding_direct(service_mocks):
+    """Direct test of build_model_config to ensure embedding dimension is included when model_type contains 'embedding'."""
+    from backend.services.config_sync_service import build_model_config
+
+    model_config = {
+        "display_name": "Emb",
+        "model_type": "embedding",
+        "max_tokens": 2048,
+        "base_url": "http://test",
+        "api_key": "k"
+    }
+
+    # get_model_name_from_config is patched by service_mocks fixture; ensure it returns a value
+    service_mocks['get_model_name'].return_value = "emb-name"
+
+    result = build_model_config(model_config)
+    assert result["displayName"] == "Emb"
+    assert result["name"] == "emb-name"
+    # dimension should be set when 'embedding' in model_type
+    assert result.get("dimension") == 2048

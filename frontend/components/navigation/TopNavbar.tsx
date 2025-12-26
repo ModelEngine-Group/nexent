@@ -4,14 +4,19 @@ import { Button } from "@/components/ui/button";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
-import { ChevronDown, Globe } from "lucide-react";
-import { Dropdown } from "antd";
+import { ChevronDown, Globe, Settings } from "lucide-react";
+import { Dropdown, Modal, Input, message } from "antd";
+import { configService } from "@/services/configService";
+import { configStore } from "@/lib/config";
 import Link from "next/link";
 import { HEADER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import { languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
 import React from "react";
 import { Flex, Layout } from 'antd';
+import {API_ENDPOINTS} from "@/services/api";
+import {getAuthHeaders} from "@/lib/auth";
+import log from "@/lib/logger";
 const { Header } = Layout;
 
 interface TopNavbarProps {
@@ -30,6 +35,100 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
   const { t } = useTranslation("common");
   const { user, isLoading: userLoading, isSpeedMode } = useAuth();
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
+  const [isSetupModalVisible, setIsSetupModalVisible] = React.useState(false);
+  const [meApiKey, setMeApiKey] = React.useState("");
+  const openSetupModal = async () => {
+    try{
+      const response = await fetch(API_ENDPOINTS.config.load, {
+          method: 'GET',
+          headers: getAuthHeaders(),
+        });
+      if (!response.ok) {
+        const errorData = await response.json();
+        log.error('Failed to load configuration:', errorData);
+        return false;
+      }
+      const result = await response.json();
+      const config = result.config;
+        setMeApiKey(config.modelengine.apiKey || "");
+    } catch (e) {
+      setMeApiKey("");
+    }
+    setIsSetupModalVisible(true);
+  };
+
+  const handleSaveMeConfig = async () => {
+    try {
+      // keep local embedding.apiConfig.apiKey in sync before saving
+      configStore.updateModelConfig({
+        embedding: {
+          ...(configStore.getConfig().models?.embedding || {}),
+          apiConfig: {
+            ...(configStore.getConfig().models?.embedding?.apiConfig || {}),
+            apiKey: meApiKey || "",
+          },
+        },
+      } as any);
+
+      const currentConfig = configStore.getConfig();
+      const payload = {
+        ...currentConfig,
+        modelengine: { apiKey: meApiKey || "" },
+      } as any;
+
+      // POST the full config to backend and expect the backend to return the saved config structure
+      const response = await fetch(API_ENDPOINTS.config.save, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        log.error("Failed to save configuration:", errData || response.statusText);
+        message.error(t("common.retryLater"));
+        return;
+      }
+
+      const result = await response.json();
+      const returnedConfig = result?.config;
+
+      if (returnedConfig) {
+        // Update stores with returned config structure so the API key and other fields match backend
+        try {
+          configStore.updateConfig(returnedConfig);
+          // ensure model embedding apiConfig is also updated (preserve existing shape)
+          configStore.updateModelConfig({
+            embedding: {
+              ...(returnedConfig.models?.embedding || {}),
+              apiConfig: {
+                ...(returnedConfig.models?.embedding?.apiConfig || {}),
+                apiKey: returnedConfig.modelengine?.apiKey || meApiKey || "",
+              },
+            },
+          } as any);
+        } catch (e) {
+          // ignore update errors
+        }
+
+        // Update local state and notify listeners
+        setMeApiKey(returnedConfig.modelengine?.apiKey || "");
+        window.dispatchEvent(new CustomEvent("configChanged", { detail: { config: configStore.getConfig() } }));
+        window.dispatchEvent(new CustomEvent("modelengineApiSaved", { detail: { apiKey: returnedConfig.modelengine?.apiKey || meApiKey || "" } }));
+        message.success(t("common.button.save") || t("common.save"));
+      } else {
+        message.error(t("common.retryLater"));
+      }
+    } catch (e) {
+      log.error("Exception saving configuration:", e);
+      message.error(t("common.retryLater"));
+    } finally {
+      setIsSetupModalVisible(false);
+    }
+  };
 
   // Left content - Logo + optional additional title (aligned with sidebar width)
   const leftContent = (
@@ -46,9 +145,9 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
             alt="ModelEngine"
             className="h-7"
           />
-          <span 
+          <span
             className="text-blue-600 dark:text-blue-500 font-bold"
-            style={{ 
+            style={{
               fontSize: '20px',
               lineHeight: '24px',
               height: '22px',
@@ -58,7 +157,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
           </span>
         </Flex>
       </Link>
-      
+
       {/* Additional title with separator - outside of sidebar width */}
       {additionalTitle && (
         <Flex align="center" gap={12}>
@@ -76,7 +175,20 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
     <Flex align="center" gap={16} className="hidden md:flex">
       {/* Additional right content (e.g., status badge) */}
       {additionalRightContent}
-      
+
+      {/* ModelEngine config modal trigger (matches GitHub link style and is i18n) */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={openSetupModal}
+        className="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors"
+      >
+        <Flex align="center" gap={4}>
+          <Settings className="h-3.5 w-3.5" />
+          {t("common.button.editConfig") || "ModelEngine 配置"}
+        </Flex>
+      </Button>
+
       {/* GitHub link */}
       <Link
         href="https://github.com/ModelEngine-Group/nexent"
@@ -98,6 +210,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
         </Flex>
       </Link>
 
+
       {/* ModelEngine link */}
       <Link
         href="http://modelengine-ai.net"
@@ -105,6 +218,30 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
       >
         ModelEngine
       </Link>
+
+      {/* Setup modal (inline, match existing SetupLayout modal style) */}
+      <Modal
+        title={t("common.button.editConfig")}
+        open={isSetupModalVisible}
+        onCancel={() => setIsSetupModalVisible(false)}
+        onOk={handleSaveMeConfig}
+        okText={t("common.button.save") || t("common.save")}
+        cancelText={t("common.cancel")}
+        destroyOnClose
+        width={680}
+      >
+        <div className="space-y-3">
+          <label className="block mb-1 text-sm font-medium text-gray-700">
+            {t("model.dialog.label.apiKey")}
+          </label>
+          <Input.Password
+            value={meApiKey}
+            onChange={(e) => setMeApiKey(e.target.value)}
+            placeholder={t("model.dialog.placeholder.apiKey")}
+            autoComplete="new-password"
+          />
+        </div>
+      </Modal>
 
       {/* Language switcher */}
       <Dropdown

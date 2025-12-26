@@ -721,7 +721,7 @@
   "modelConfig.error.missingApiKey": "请先在“修改配置”中填写 ModelEngine 的 API Key",
   "modelConfig.error.missingApiKeyFallback": "请先在“修改配置”中填写 ModelEngine 的 API Key",
   "modelConfig.error.verifyCustomModel": "校验自定义模型 {{model}} 失败:",
-  "modelConfig.message.syncStart": "开始同步...",
+  "modelConfig.message.syncing": "同步中...",
   "modelConfig.message.syncSuccess": "模型同步成功",
   "modelConfig.message.addSuccess": "添加模型成功",
   "modelConfig.button.syncModelEngine": "同步ModelEngine模型",

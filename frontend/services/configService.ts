@@ -77,22 +77,37 @@ export class ConfigService {
       const result = await response.json();
       const config = result.config;
       if (config) {
-        // Use the conversion function of configStore
+        // Use the conversion function of ConfigStore to adapt backend shape to frontend
         const frontendConfig = ConfigStore.transformBackend2Frontend(config);
 
-        // Write to localStorage separately
-        if (frontendConfig.app) {
-          localStorage.setItem('app', JSON.stringify(frontendConfig.app));
+        // Update in-memory ConfigStore with the converted frontend config so callers can read modelengine
+        try {
+          const cs = ConfigStore.getInstance();
+          cs.updateConfig(frontendConfig as any);
+        } catch (e) {
+          // fallback to writing to localStorage keys if updateConfig fails
+          if (frontendConfig.app) {
+            localStorage.setItem('app', JSON.stringify(frontendConfig.app));
+          }
+          if (frontendConfig.models) {
+            localStorage.setItem('model', JSON.stringify(frontendConfig.models));
+          }
         }
-        if (frontendConfig.models) {
-          localStorage.setItem('model', JSON.stringify(frontendConfig.models));
-        }
-        // Persist ModelEngine API key ONLY from backend load_config (may be empty)
+        // Persist ModelEngine API key ONLY from backend load_config (may be empty).
+        // IMPORTANT: do not overwrite a locally cached API key with an empty backend value.
         try {
           const backendKey = (config && config.modelengine && config.modelengine.apiKey) || "";
-          localStorage.setItem('model_engine_api_key', backendKey);
+          if (typeof window !== "undefined") {
+            // Only update localStorage if backend provides a non-empty key.
+            if (backendKey) {
+              localStorage.setItem("model_engine_api_key", backendKey);
+            } else {
+              // Preserve any existing local cached key when backend does not return one.
+              // This avoids clearing the user's locally-entered API key during frontend-only saves.
+            }
+          }
         } catch (e) {
-          log.error('Failed to persist ModelEngine API Key in loadConfigToFrontend:', e);
+          log.error("Failed to persist ModelEngine API Key in loadConfigToFrontend:", e);
         }
 
         // Trigger configuration reload and dispatch event

@@ -650,9 +650,7 @@ export const ModelConfigSection = forwardRef<
     let hide: any = undefined;
     try {
       isSyncingRef.current = true;
-      // Use i18n keys for sync start and syncing messages; fall back to common loading then to Chinese text.
-      message.info(
-        t("modelConfig.message.syncStart"));
+      // Show loading indicator only (no start-sync info popup)
       hide = message.loading(
         t("modelConfig.message.syncing") || t("common.loading") || "同步中...",
         0

@@ -264,19 +264,30 @@ class ConfigStoreClass {
     } : undefined;
 
     // Persist any ModelEngine API key returned from backend into localStorage (single string)
+    // IMPORTANT: only overwrite local cache when backend provides a non-empty apiKey.
+    const me = backendConfig?.modelengine;
     try {
-      const me = backendConfig?.modelengine;
       if (typeof window !== 'undefined' && me) {
         const apiKey = typeof me.apiKey === 'string' ? me.apiKey : "";
-        localStorage.setItem('model_engine_api_key', apiKey);
+        if (apiKey) {
+          // Only update stored key when backend returns a non-empty value.
+          localStorage.setItem('model_engine_api_key', apiKey);
+        }
+        // If backend returned empty string, preserve any existing cached key.
       }
     } catch (e) {
       log.error('Failed to persist modelengine api key to localStorage:', e);
     }
 
+    // Build modelengine part for frontend config so callers can read it via ConfigStore
+    const modelengine = {
+      apiKey: (me && typeof me.apiKey === 'string') ? me.apiKey : "",
+    };
+
     return {
       app,
       models,
+      modelengine,
     } as GlobalConfig;
   }
 
