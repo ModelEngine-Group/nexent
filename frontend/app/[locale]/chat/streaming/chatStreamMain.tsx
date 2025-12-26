@@ -40,6 +40,7 @@ export function ChatStreamMain({
   onAgentSelect,
   onCitationHover,
   onScroll,
+  cachedAgents,
 }: ChatStreamMainProps) {
   const { t } = useTranslation();
   // Animation variants for ChatInput
@@ -375,6 +376,7 @@ export function ChatStreamMain({
                         onImageUpload={onImageUpload}
                         selectedAgentId={selectedAgentId}
                         onAgentSelect={onAgentSelect}
+                        cachedAgents={cachedAgents}
                       />
                     </motion.div>
                   </AnimatePresence>
@@ -472,6 +474,7 @@ export function ChatStreamMain({
               onImageUpload={onImageUpload}
               selectedAgentId={selectedAgentId}
               onAgentSelect={onAgentSelect}
+              cachedAgents={cachedAgents}
             />
           </motion.div>
         </AnimatePresence>
