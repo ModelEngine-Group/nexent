@@ -10,15 +10,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdownMenu";
+import { Button, Dropdown } from "antd";
 import { Input } from "@/components/ui/input";
-import { App } from "antd";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { USER_ROLES } from "@/const/modelConfig";
@@ -234,26 +227,27 @@ export function ChatSidebar({
                     overlayStyle={{ maxWidth: "300px" }}
                   >
                     <Button
-                      variant="ghost"
-                      className="flex-1 justify-start text-left hover:bg-transparent min-w-0 max-w-[250px]"
-                      onClick={() => onDialogClick(dialog)}
-                    >
-                      <ConversationStatusIndicator
-                        isStreaming={streamingConversations.has(
-                          dialog.conversation_id
-                        )}
-                        isCompleted={completedConversations.has(
-                          dialog.conversation_id
-                        )}
-                      />
-                      <span className="truncate block text-base font-normal text-gray-800 tracking-wide font-sans">
-                        {dialog.conversation_title}
-                      </span>
-                    </Button>
+                        type="text"
+                        size="middle"
+                        className="flex-1 justify-start text-left min-w-0 max-w-[250px] px-3 py-2 h-auto border-0 shadow-none bg-transparent hover:!bg-transparent active:!bg-transparent"
+                        onClick={() => onDialogClick(dialog)}
+                      >
+                        <ConversationStatusIndicator
+                          isStreaming={streamingConversations.has(
+                            dialog.conversation_id
+                          )}
+                          isCompleted={completedConversations.has(
+                            dialog.conversation_id
+                          )}
+                        />
+                        <span className="truncate block text-base font-normal text-gray-800 tracking-wide font-sans">
+                          {dialog.conversation_title}
+                        </span>
+                      </Button>
                   </Tooltip>
                 </TooltipProvider>
 
-                <DropdownMenu
+                <Dropdown
                   open={openDropdownId === dialog.conversation_id.toString()}
                   onOpenChange={(open) =>
                     onDropdownOpenChange(
@@ -261,37 +255,49 @@ export function ChatSidebar({
                       dialog.conversation_id.toString()
                     )
                   }
-                >
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:bg-slate-100 hover:border hover:border-slate-200 mr-1 focus:outline-none focus:ring-0"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" side="bottom">
-                    <DropdownMenuItem
-                      onClick={() =>
+                  menu={{
+                    items: [
+                      {
+                        key: "rename",
+                        label: (
+                          <span className="flex items-center">
+                            <Pencil className="mr-2 h-5 w-5" />
+                            {t("chatLeftSidebar.rename")}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "delete",
+                        label: (
+                          <span className="flex items-center text-red-500">
+                            <Trash2 className="mr-2 h-5 w-5" />
+                            {t("chatLeftSidebar.delete")}
+                          </span>
+                        ),
+                      },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === "rename") {
                         handleStartEdit(
                           dialog.conversation_id,
                           dialog.conversation_title
-                        )
+                        );
+                      } else if (key === "delete") {
+                        handleDeleteClick(dialog.conversation_id);
                       }
-                    >
-                      <Pencil className="mr-2 h-5 w-5" />
-                      {t("chatLeftSidebar.rename")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                      onClick={() => handleDeleteClick(dialog.conversation_id)}
-                    >
-                      <Trash2 className="mr-2 h-5 w-5" />
-                      {t("chatLeftSidebar.delete")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    },
+                  }}
+                  placement="bottomRight"
+                  trigger={["click"]}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    className="h-6 w-6 min-w-[24px] p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:bg-slate-100 hover:border hover:border-slate-200 mr-1 focus:outline-none focus:ring-0 rounded-full transition-opacity duration-200 flex items-center justify-center"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </Dropdown>
               </>
             )}
           </div>
@@ -309,12 +315,12 @@ export function ChatSidebar({
           <TooltipProvider>
             <Tooltip title={t("chatLeftSidebar.expandSidebar")} placement="right">
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-full hover:bg-slate-100"
+                type="text"
+                size="middle"
+                className="h-10 w-10 min-w-[40px] p-0 flex-shrink-0 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center rounded-full transition-colors duration-200"
                 onClick={onToggleSidebar}
               >
-                <ChevronRight className="h-6 w-6" strokeWidth={2.5} />
+                <ChevronRight className="h-5 w-5" />
               </Button>
             </Tooltip>
           </TooltipProvider>
@@ -325,12 +331,12 @@ export function ChatSidebar({
           <TooltipProvider>
             <Tooltip title={t("chatLeftSidebar.newConversation")} placement="right">
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-full hover:bg-slate-100"
+                type="text"
+                size="middle"
+                className="h-10 w-10 min-w-[40px] p-0 flex-shrink-0 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center rounded-full transition-colors duration-200"
                 onClick={onNewConversation}
               >
-                <Plus className="h-6 w-6" strokeWidth={2.5} />
+                <Plus className="h-5 w-5" />
               </Button>
             </Tooltip>
           </TooltipProvider>
@@ -353,8 +359,9 @@ export function ChatSidebar({
             <div className="m-4 mt-3">
               <div className="flex items-center gap-2">
                 <Button
-                  variant="outline"
-                  className="flex-1 justify-start text-base overflow-hidden"
+                  type="default"
+                  size="middle"
+                  className="flex-1 justify-start text-base overflow-hidden h-10 border border-slate-300 hover:border-slate-400 hover:bg-white transition-colors duration-200"
                   onClick={onNewConversation}
                 >
                   <Plus
@@ -369,9 +376,9 @@ export function ChatSidebar({
                   <Tooltip>
                     <Tooltip title={t("chatLeftSidebar.collapseSidebar")}>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10 flex-shrink-0 hover:bg-slate-100"
+                        type="text"
+                        size="middle"
+                        className="h-10 w-10 min-w-[40px] p-0 flex-shrink-0 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center rounded-full transition-colors duration-200"
                         onClick={onToggleSidebar}
                       >
                         <ChevronLeft className="h-5 w-5" />
@@ -395,7 +402,11 @@ export function ChatSidebar({
                     <p className="px-2 text-sm font-medium text-muted-foreground">
                       {t("chatLeftSidebar.recentConversations")}
                     </p>
-                    <Button variant="ghost" className="w-full justify-start">
+                    <Button
+                      type="text"
+                      size="middle"
+                      className="w-full justify-start flex items-center px-3 py-2 h-auto hover:bg-slate-50 transition-colors duration-200"
+                    >
                       <Clock className="mr-2 h-5 w-5" />
                       {t("chatLeftSidebar.noHistory")}
                     </Button>
