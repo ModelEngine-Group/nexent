@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, App, Tabs, Collapse, Tooltip } from "antd";
+import { Button, App, Tabs, Collapse } from "antd";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { 
   LoaderCircle, 
   Settings, 
@@ -544,17 +545,19 @@ function ToolPool({
     return {
       key: group.key,
       label: (
-        <span
-          style={{
-            display: "block",
-            maxWidth: "70px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {displayLabel}
-        </span>
+        <Tooltip title={group.label}>
+          <span
+            style={{
+              display: "block",
+              maxWidth: "70px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {displayLabel}
+          </span>
+        </Tooltip>
       ),
       children: (
         <div
@@ -631,7 +634,8 @@ function ToolPool({
   });
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+    <TooltipProvider>
+      <div className="flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex justify-between items-center mb-2 flex-shrink-0">
         <div className="flex items-center">
           <h4 className="text-md font-medium text-gray-700">
@@ -749,7 +753,8 @@ function ToolPool({
         visible={isMcpModalOpen}
         onCancel={() => setIsMcpModalOpen(false)}
       />
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }
 

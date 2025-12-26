@@ -955,6 +955,7 @@
   "mcpService.message.updateToolListSuccess": "Tool list updated successfully",
   "mcpService.message.updateToolListFailed": "Failed to update tool list",
   "mcpService.message.addContainerSuccess": "Containerized MCP service added successfully",
+  "mcpService.message.deleteContainerSuccess": "Container deleted successfully",
   "mcpService.message.resourceNotFound": "Requested resource not found",
   "mcpService.message.serverInternalError": "Server internal error, please try again later",
   "mcpService.message.serviceUnavailable": "Service temporarily unavailable, please try again later",
