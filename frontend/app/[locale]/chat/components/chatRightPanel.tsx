@@ -93,10 +93,10 @@ export function ChatRightPanel({
     try {
       // Convert image URL to backend API URL
       const apiUrl = convertImageUrlToApiUrl(imageUrl);
-      
+
       // Use backend API to get the image
       const response = await fetch(apiUrl);
-      
+
       if (!response.ok) {
         throw new Error(`Failed to load image: ${response.statusText}`);
       }
@@ -104,12 +104,12 @@ export function ChatRightPanel({
       // Get image as blob and convert to base64
       const blob = await response.blob();
       const reader = new FileReader();
-      
+
       reader.onloadend = () => {
         const base64Data = reader.result as string;
         // Remove data URL prefix (e.g., "data:image/png;base64,")
         const base64 = base64Data.split(',')[1] || base64Data;
-        
+
         setImageData((prev) => ({
           ...prev,
           [imageUrl]: {
@@ -121,13 +121,13 @@ export function ChatRightPanel({
         }));
         loadingImages.current.delete(imageUrl);
       };
-      
+
       reader.onerror = () => {
         log.error("Failed to read image blob");
         handleImageLoadFail(imageUrl);
         loadingImages.current.delete(imageUrl);
       };
-      
+
       reader.readAsDataURL(blob);
     } catch (error) {
       log.error(t("chatRightPanel.imageProxyError"), error);
@@ -232,7 +232,7 @@ export function ChatRightPanel({
     const handleFileDownload = async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      
+
       if (!filename && !url) {
         message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
         return;
@@ -534,8 +534,9 @@ export function ChatRightPanel({
       <div className="flex-1 flex flex-col" style={{ maxWidth: "400px", height: "100%" }}>
         {/* Tab Headers */}
         <div className="flex border-b bg-gray-50">
-          <button
-            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+          <Button
+            type={activeTab === "sources" ? "primary" : "text"}
+            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors rounded-none border-none ${
               activeTab === "sources"
                 ? "bg-white text-gray-900 border-b-2 border-blue-500"
                 : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -550,9 +551,10 @@ export function ChatRightPanel({
                 </span>
               )}
             </span>
-          </button>
-          <button
-            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+          </Button>
+          <Button
+            type={activeTab === "images" ? "primary" : "text"}
+            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors rounded-none border-none ${
               activeTab === "images"
                 ? "bg-white text-gray-900 border-b-2 border-blue-500"
                 : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -567,7 +569,7 @@ export function ChatRightPanel({
                 </span>
               )}
             </span>
-          </button>
+          </Button>
         </div>
 
         {/* Tab Content */}
