@@ -32,14 +32,18 @@ export const useSiliconModelList = ({
   const getModelList = async () => {
     setShowModelList(true)
     setLoadingModelList(true)
-    const modelType = form.type === "embedding" && form.isMultimodal ? 
-        "multi_embedding" as ModelType : 
+    const modelType = form.type === "embedding" && form.isMultimodal ?
+        "multi_embedding" as ModelType :
         form.type
     try {
       const result = await modelService.addProviderModel({
         provider: form.provider,
         type: modelType,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey
+        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+        baseUrl:
+          form.provider === "modelengine" && form.apiKey.trim() !== ""
+            ? (form as any).modelEngineUrl || ""
+            : undefined,
       })
       // Ensure each model has a default max_tokens value
       const modelsWithDefaults = result.map((model: any) => ({
@@ -68,20 +72,29 @@ export const useSiliconModelList = ({
   }
 
   const getProviderSelectedModalList = async () => {
-    const modelType = form.type === "embedding" && form.isMultimodal ? 
-        "multi_embedding" as ModelType : 
+    const modelType = form.type === "embedding" && form.isMultimodal ?
+        "multi_embedding" as ModelType :
         form.type
     const result = await modelService.getProviderSelectedModalList({
       provider: form.provider,
       type: modelType,
-      api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey
+      api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+      baseUrl:
+        form.provider === "modelengine" && form.apiKey.trim() !== ""
+          ? (form as any).modelEngineUrl || ""
+          : undefined,
     })
     return result
   }
 
   // Auto-fetch model list when batch import is enabled and API key is provided
   useEffect(() => {
-    if (form.isBatchImport && form.apiKey.trim() !== "") {
+    const requiresUrl =
+      form.provider === "modelengine"
+        ? ((form as any).modelEngineUrl || "").toString().trim() !== ""
+        : true;
+
+    if (form.isBatchImport && form.apiKey.trim() !== "" && requiresUrl) {
       getModelList()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

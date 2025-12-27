@@ -195,14 +195,17 @@ async def verify_model_config_connectivity(model_config: dict):
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify
             )
-            
+            if not connectivity and ssl_verify:
+                connectivity = await _perform_connectivity_check(
+                    model_name, model_type, model_base_url, model_api_key, False
+                )
             if not connectivity:
                 return {
                     "connectivity": False,
                     "model_name": model_name,
                     "error": f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
                 }
-            
+
             return {
                 "connectivity": True,
                 "model_name": model_name,
