@@ -717,15 +717,20 @@ export default function McpConfigModal({
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
                 <Input
-                  type="number"
                   placeholder={t("mcpConfig.addContainer.portPlaceholder")}
-                  value={containerPort}
+                  value={containerPort || ""}
                   onChange={(e) => {
-                    const port = parseInt(e.target.value);
-                    setContainerPort(isNaN(port) ? undefined : port);
+                    const value = e.target.value;
+                    if (value === "") {
+                      setContainerPort(undefined);
+                      return;
+                    }
+                    const port = parseInt(value);
+                    if (!isNaN(port) && port >= 1 && port <= 65535) {
+                      setContainerPort(port);
+                    }
+                    // If invalid input, keep the previous valid value
                   }}
-                  min={1}
-                  max={65535}
                   style={{ width: 150 }}
                   disabled={actionsLocked}
                 />

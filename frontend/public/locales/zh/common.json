@@ -955,6 +955,7 @@
   "mcpService.message.updateToolListSuccess": "更新工具列表成功",
   "mcpService.message.updateToolListFailed": "更新工具列表失败",
   "mcpService.message.addContainerSuccess": "添加容器化MCP服务成功",
+  "mcpService.message.deleteContainerSuccess": "删除容器成功",
   "mcpService.message.resourceNotFound": "请求的资源未找到",
   "mcpService.message.serverInternalError": "服务器内部错误，请稍后重试",
   "mcpService.message.serviceUnavailable": "服务暂时不可用，请稍后重试",
