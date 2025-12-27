@@ -4,9 +4,8 @@ import { ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Button } from "@/components/ui/button";
+import { Button } from "antd";
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import { chatConfig } from "@/const/chatConfig";
 import { USER_ROLES } from "@/const/modelConfig";
 import { ChatMessageType, ProcessedMessages, ChatStreamMainProps } from "@/types/chat";
 
@@ -40,6 +39,7 @@ export function ChatStreamMain({
   onAgentSelect,
   onCitationHover,
   onScroll,
+  cachedAgents,
 }: ChatStreamMainProps) {
   const { t } = useTranslation();
   // Animation variants for ChatInput
@@ -100,7 +100,7 @@ export function ChatStreamMain({
   // Handle message classification
   useEffect(() => {
     const finalMsgs: ChatMessageType[] = [];
-    
+
     // Track the latest user message ID for scroll behavior
     messages.forEach((message) => {
       if (message.role === USER_ROLES.USER && message.id) {
@@ -328,7 +328,7 @@ export function ChatStreamMain({
             ) : conversationLoadError ? (
               // when conversation load error, show error message
               <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
-                <div className="text-center max-w-md">
+                  <div className="text-center max-w-md">
                   <div className="text-red-500 text-sm mb-4">
                     {t("chatStreamMain.loadError")}
                   </div>
@@ -336,8 +336,7 @@ export function ChatStreamMain({
                     {conversationLoadError}
                   </div>
                   <Button
-                    variant="outline"
-                    size="sm"
+                    size="small"
                     onClick={() => {
                       // Trigger a page refresh to retry loading
                       window.location.reload();
@@ -375,6 +374,7 @@ export function ChatStreamMain({
                         onImageUpload={onImageUpload}
                         selectedAgentId={selectedAgentId}
                         onAgentSelect={onAgentSelect}
+                        cachedAgents={cachedAgents}
                       />
                     </motion.div>
                   </AnimatePresence>
@@ -427,10 +427,10 @@ export function ChatStreamMain({
       )}
 
       {/* Scroll to bottom button - dynamically positioned based on ChatInput height */}
-      {showScrollButton && (
+        {showScrollButton && (
         <Button
-          variant="outline"
-          size="icon"
+          size="small"
+          shape="circle"
           className="absolute left-1/2 transform -translate-x-1/2 z-20 rounded-full shadow-md bg-background hover:bg-background/90 border border-border h-8 w-8"
           style={{
             // Position the button above the ChatInput with some margin
@@ -472,6 +472,7 @@ export function ChatStreamMain({
               onImageUpload={onImageUpload}
               selectedAgentId={selectedAgentId}
               onAgentSelect={onAgentSelect}
+              cachedAgents={cachedAgents}
             />
           </motion.div>
         </AnimatePresence>

@@ -192,6 +192,7 @@ def get_llm_model(tenant_id: str):
         model_id=get_model_name_from_config(main_model_config),
         api_base=main_model_config.get("base_url"),
         api_key=main_model_config.get("api_key"),
-        max_context_tokens=main_model_config.get("max_tokens")
+        max_context_tokens=main_model_config.get("max_tokens"),
+        ssl_verify=main_model_config.get("ssl_verify", True),
     )
     return long_text_to_text_model

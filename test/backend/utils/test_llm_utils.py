@@ -48,6 +48,29 @@ vector_db_pkg.elasticsearch_core = vector_db_es_module
 vector_db_es_module.ElasticSearchCore = MagicMock()
 vector_db_es_module.Elasticsearch = MagicMock()
 
+# Stub nexent.core.utils.observer MessageObserver used by llm_utils
+observer_mod = types.ModuleType("nexent.core.utils.observer")
+def _make_message_observer(*a, **k):
+    return types.SimpleNamespace(
+        add_model_new_token=lambda t: None,
+        add_model_reasoning_content=lambda r: None,
+        flush_remaining_tokens=lambda: None,
+    )
+observer_mod.MessageObserver = _make_message_observer
+observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
+sys.modules["nexent.core.utils.observer"] = observer_mod
+
+# Minimal nexent.core.models.OpenAIModel stub to satisfy imports (tests will patch behavior)
+models_mod = types.ModuleType("nexent.core.models")
+class _SimpleOpenAIModel:
+    def __init__(self, *a, **k):
+        self.client = MagicMock()
+        self.model_id = k.get("model_id", "")
+    def _prepare_completion_kwargs(self, *a, **k):
+        return {}
+models_mod.OpenAIModel = _SimpleOpenAIModel
+sys.modules["nexent.core.models"] = models_mod
+
 # Ensure backend.database.client modules exist before patching
 import backend.database.client  # noqa: E402,F401
 import database.client  # noqa: E402,F401
@@ -86,6 +109,7 @@ class TestCallLLMForSystemPrompt(unittest.TestCase):
         mock_model_config = {
             "base_url": "http://example.com",
             "api_key": "fake-key",
+            "model_factory": "qwen",
         }
         mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
@@ -113,9 +137,11 @@ class TestCallLLMForSystemPrompt(unittest.TestCase):
         mock_openai.assert_called_once_with(
             model_id="gpt-4",
             api_base="http://example.com",
+            model_factory="qwen",
             api_key="fake-key",
             temperature=0.3,
             top_p=0.95,
+            ssl_verify=True,
         )
 
     @patch('backend.utils.llm_utils.OpenAIModel')
@@ -570,7 +596,7 @@ class TestCallLLMForSystemPromptExtended(unittest.TestCase):
         )
 
         # chunk1: "Start " -> added to token_join
-        # chunk2: "<think>thinking</think>" -> 
+        # chunk2: "<think>thinking</think>" ->
         #   end tag clears token_join (since is_thinking=False), new_token becomes ""
         # chunk3: " End" -> added to token_join
         # Final result should be " End" (chunk1 content was cleared by chunk2's end tag)
@@ -692,8 +718,10 @@ class TestCallLLMForSystemPromptExtended(unittest.TestCase):
             model_id="",
             api_base="",
             api_key="",
+            model_factory=None,
             temperature=0.3,
             top_p=0.95,
+            ssl_verify=True,
         )
 
     @patch('backend.utils.llm_utils.OpenAIModel')

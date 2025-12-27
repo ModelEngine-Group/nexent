@@ -796,11 +796,11 @@ class TestConcurrencyAndFileTypes:
 
         with patch('backend.services.file_management_service.save_upload_file', AsyncMock(return_value=True)) as mock_save, \
              patch('backend.services.file_management_service.upload_semaphore') as mock_semaphore:
-            
+
             # Mock semaphore context manager
             mock_semaphore.__aenter__ = AsyncMock()
             mock_semaphore.__aexit__ = AsyncMock()
-            
+
             # Execute
             errors, uploaded_paths, uploaded_names = await upload_files_impl(
                 destination="local", file=[mock_file])
@@ -827,7 +827,7 @@ class TestConcurrencyAndFileTypes:
             {"success": True, "file_name": "test.txt", "object_name": "folder/test.txt"}
         ])) as mock_upload, \
              patch('backend.services.file_management_service.upload_semaphore') as mock_semaphore:
-            
+
             # Execute
             errors, uploaded_paths, uploaded_names = await upload_files_impl(
                 destination="minio", file=[mock_file], folder="folder")
@@ -934,7 +934,8 @@ class TestGetLlmModel:
             model_id="gpt-4",
             api_base="http://api.example.com",
             api_key="test_api_key",
-            max_context_tokens=4096
+            max_context_tokens=4096,
+            ssl_verify=True
         )
 
     @patch('backend.services.file_management_service.MODEL_CONFIG_MAPPING', {"llm": "llm_config_key"})

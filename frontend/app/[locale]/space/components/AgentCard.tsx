@@ -13,7 +13,7 @@ import {
   Edit,
 } from "lucide-react";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar } from "antd";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
 import AgentDetailModal from "./AgentDetailModal";
 import {
@@ -169,11 +169,10 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
       >
         {/* Avatar and Status badge */}
         <div className="flex items-start gap-3 mb-3">
-          <Avatar className="w-10 h-10">
-            <AvatarImage src={avatarUrl} alt={agent.display_name || agent.name} />
-            <AvatarFallback className="bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 text-lg font-bold text-blue-600 dark:text-blue-400">
+          <Avatar src={avatarUrl} size={40} className="w-10 h-10">
+            <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
               {agent.display_name?.charAt(0)?.toUpperCase() || "A"}
-            </AvatarFallback>
+            </span>
           </Avatar>
 
           {/* Status badge */}

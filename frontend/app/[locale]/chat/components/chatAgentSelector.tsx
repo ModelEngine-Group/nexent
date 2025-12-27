@@ -15,6 +15,7 @@ export function ChatAgentSelector({
   onAgentSelect,
   disabled = false,
   isInitialMode = false,
+  agents: propAgents,
 }: ChatAgentSelectorProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -94,8 +95,9 @@ export function ChatAgentSelector({
   };
 
   useEffect(() => {
-    loadAgents();
-  }, []);
+    // Only load agents if not provided via props or if props is explicitly empty
+      setAgents(propAgents || []);
+  }, [propAgents]);
 
   // Execute auto-selection logic when agents are loaded
   useEffect(() => {

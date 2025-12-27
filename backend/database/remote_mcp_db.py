@@ -46,6 +46,22 @@ def delete_mcp_record_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id:
         ).update({"delete_flag": "Y", "updated_by": user_id})
 
 
+def delete_mcp_record_by_container_id(container_id: str, tenant_id: str, user_id: str):
+    """
+    Soft delete MCP record by container ID
+
+    :param container_id: Docker container ID
+    :param tenant_id: Tenant ID
+    :param user_id: User ID
+    """
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.container_id == container_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update({"delete_flag": "Y", "updated_by": user_id})
+
+
 def update_mcp_status_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str, user_id: str, status: bool):
     """
     Update the status of MCP record by name and URL

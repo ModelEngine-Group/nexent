@@ -17,7 +17,8 @@ async def _embedding_dimension_check(
     model_name: str,
     model_type: str,
     model_base_url: str,
-    model_api_key: str
+    model_api_key: str,
+    ssl_verify: bool = True,
 ):
     # Test connectivity based on different model types
     if model_type == "embedding":
@@ -25,7 +26,8 @@ async def _embedding_dimension_check(
             model_name=model_name,
             base_url=model_base_url,
             api_key=model_api_key,
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=ssl_verify,
         ).dimension_check()
         if len(embedding) > 0:
             return len(embedding[0])
@@ -37,7 +39,8 @@ async def _embedding_dimension_check(
             model_name=model_name,
             base_url=model_base_url,
             api_key=model_api_key,
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=ssl_verify,
         ).dimension_check()
         if len(embedding) > 0:
             return len(embedding[0])
@@ -78,14 +81,16 @@ async def _perform_connectivity_check(
             model_name=model_name,
             base_url=model_base_url,
             api_key=model_api_key,
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=ssl_verify
         ).dimension_check()) > 0
     elif model_type == "multi_embedding":
         connectivity = len(await JinaEmbedding(
             model_name=model_name,
             base_url=model_base_url,
             api_key=model_api_key,
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=ssl_verify
         ).dimension_check()) > 0
     elif model_type == "llm":
         observer = MessageObserver()
@@ -104,7 +109,8 @@ async def _perform_connectivity_check(
             observer,
             model_id=model_name,
             api_base=model_base_url,
-            api_key=model_api_key
+            api_key=model_api_key,
+            ssl_verify=ssl_verify
         ).check_connectivity()
     elif model_type in ["tts", "stt"]:
         voice_service = get_voice_service()
@@ -227,8 +233,9 @@ async def embedding_dimension_check(model_config: dict):
     model_api_key = model_config["api_key"]
 
     try:
+        ssl_verify = model_config.get("ssl_verify", True)
         dimension = await _embedding_dimension_check(
-            model_name, model_type, model_base_url, model_api_key
+            model_name, model_type, model_base_url, model_api_key, ssl_verify
         )
         return dimension
     except ValueError as e:

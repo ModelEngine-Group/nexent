@@ -91,3 +91,8 @@ class VoiceConfigException(Exception):
 class ToolExecutionException(Exception):
     """Raised when mcp tool execution failed."""
     pass
+
+
+class MCPContainerError(Exception):
+    """Raised when MCP container operation fails."""
+    pass

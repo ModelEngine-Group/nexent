@@ -63,6 +63,7 @@ export interface ChatAgentSelectorProps {
   onAgentSelect: (agentId: number | null) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
+  agents?: Agent[]; // Optional pre-loaded agents to avoid repeated API calls
 }
 
 // Search result type
@@ -173,6 +174,7 @@ export interface ChatStreamMainProps {
   onAgentSelect?: (agentId: number | null) => void;
   onCitationHover?: () => void;
   onScroll?: () => void;
+  cachedAgents?: Agent[]; // Optional cached agents to avoid repeated API calls
 }
 
 // Card item type for task window

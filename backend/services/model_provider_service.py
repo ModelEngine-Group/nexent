@@ -77,10 +77,10 @@ class ModelEngineProvider(AbstractModelProvider):
     async def get_models(self, provider_config: Dict) -> List[Dict]:
         """
         Fetch models from ModelEngine API.
-        
+
         Args:
             provider_config: Configuration dict containing model_type
-            
+
         Returns:
             List of models with canonical fields
         """
@@ -111,7 +111,7 @@ class ModelEngineProvider(AbstractModelProvider):
                 "asr": "stt",
                 "tts": "tts",
                 "rerank": "rerank",
-                "vlm": "vlm",
+                "multimodal": "vlm",
             }
 
             # Filter models by type if specified
@@ -119,11 +119,11 @@ class ModelEngineProvider(AbstractModelProvider):
             for model in all_models:
                 me_type = model.get("type", "")
                 internal_type = type_map.get(me_type)
-                
+
                 # If model_type filter is provided, only include matching models
                 if model_type and internal_type != model_type:
                     continue
-                
+
                 if internal_type:
                     filtered_models.append({
                         "id": model.get("id", ""),

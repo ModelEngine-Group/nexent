@@ -11,17 +11,10 @@ import rehypeKatex from "rehype-katex";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 // @ts-ignore
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { visit } from "unist-util-visit";
-
 import { SearchResult } from "@/types/chat";
 import { resolveS3UrlToDataUrl } from "@/services/storageService";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { CopyButton } from "@/components/ui/copyButton";
 import { Diagram } from "@/components/ui/Diagram";
 
@@ -329,7 +322,7 @@ const rehypeUnwrapMedia = () => {
         if (mediaChildIndex !== -1) {
           // extract media elements (video/figure)
           const mediaChild = node.children.splice(mediaChildIndex, 1)[0];
-          
+
           // if <p> has other content after extraction, keep <p>; otherwise remove empty <p>
           if (node.children.length === 0) {
             // replace original <p> node with media element
@@ -495,30 +488,24 @@ const HoverableText = ({
 
     // Function to check if tooltip should be closed
     const checkShouldClose = () => {
-      const tooltipContent = document.querySelector(".z-\\[9999\\]");
       const linkElement = containerRef.current;
+      const { x: mouseX, y: mouseY } = mousePositionRef.current;
 
-      if (!tooltipContent || !linkElement) {
+      // Find any visible tooltip popups (antd uses role="tooltip")
+      const tooltipEls = Array.from(document.querySelectorAll('[role="tooltip"]')) as HTMLElement[];
+      const isMouseOverTooltip = tooltipEls.some((el) => {
+        const rect = el.getBoundingClientRect();
+        return mouseX >= rect.left && mouseX <= rect.right && mouseY >= rect.top && mouseY <= rect.bottom;
+      });
+
+      if (!linkElement && !isMouseOverTooltip) {
         setIsOpen(false);
         return;
       }
 
-      const tooltipRect = tooltipContent.getBoundingClientRect();
-      const linkRect = linkElement.getBoundingClientRect();
-      const { x: mouseX, y: mouseY } = mousePositionRef.current;
+      const linkRect = linkElement?.getBoundingClientRect();
 
-      // Check if mouse is over tooltip or link icon
-      const isMouseOverTooltip =
-        mouseX >= tooltipRect.left &&
-        mouseX <= tooltipRect.right &&
-        mouseY >= tooltipRect.top &&
-        mouseY <= tooltipRect.bottom;
-
-      const isMouseOverLink =
-        mouseX >= linkRect.left &&
-        mouseX <= linkRect.right &&
-        mouseY >= linkRect.top &&
-        mouseY <= linkRect.bottom;
+      const isMouseOverLink = !!linkRect && mouseX >= linkRect.left && mouseX <= linkRect.right && mouseY >= linkRect.top && mouseY <= linkRect.bottom;
 
       // Close tooltip if mouse is neither over tooltip nor link icon
       if (!isMouseOverTooltip && !isMouseOverLink) {
@@ -563,98 +550,104 @@ const HoverableText = ({
 
   return (
     <TooltipProvider>
-      <Tooltip open={isOpen}>
+      <Tooltip
+        styles={{ root: { padding: 0 }, body: { background: "transparent", boxShadow: "none" } }}
+        title={
+          <div
+            className="z-[9999] bg-white px-3 py-2 text-sm border border-gray-200 rounded-md shadow-md max-w-xl overflow-hidden"
+            style={
+              {
+                "--scrollbar-width": "8px",
+                "--scrollbar-height": "8px",
+                "--scrollbar-track-bg": "transparent",
+                "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
+                "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
+                "--scrollbar-thumb-radius": "9999px",
+                boxSizing: "border-box",
+                /* allow larger tooltip but constrain to viewport */
+                maxWidth: "min(720px, 50vw)",
+                width: "min(720px, 50vw)",
+              } as React.CSSProperties
+            }
+          >
+            <div
+              ref={tooltipRef}
+              className="whitespace-pre-wrap overflow-y-auto"
+              style={{
+                maxHeight: 240,
+                minWidth: 360,
+                width: "100%",
+                maxWidth: "min(680px, 95vw)",
+                scrollbarWidth: "thin",
+                scrollbarColor:
+                  "var(--scrollbar-thumb-bg) var(--scrollbar-track-bg)",
+                wordBreak: "break-word",
+                overflowWrap: "break-word",
+                overflowX: "auto",
+              }}
+            >
+              <style jsx>{`
+                div::-webkit-scrollbar {
+                  width: var(--scrollbar-width);
+                  height: var(--scrollbar-height);
+                }
+                div::-webkit-scrollbar-track {
+                  background: var(--scrollbar-track-bg);
+                }
+                div::-webkit-scrollbar-thumb {
+                  background: var(--scrollbar-thumb-bg);
+                  border-radius: var(--scrollbar-thumb-radius);
+                }
+                div::-webkit-scrollbar-thumb:hover {
+                  background: var(--scrollbar-thumb-hover-bg);
+                }
+                @media (prefers-color-scheme: dark) {
+                  div::-webkit-scrollbar-thumb {
+                    background: rgb(55, 65, 81);
+                  }
+                  div::-webkit-scrollbar-thumb:hover {
+                    background: rgb(75, 85, 99);
+                  }
+                }
+              `}</style>
+              {matchedResult ? (
+                <>
+                  {matchedResult.url &&
+                  matchedResult.source_type !== "file" &&
+                  !matchedResult.filename ? (
+                    <a
+                      href={matchedResult.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium mb-1 text-blue-600 hover:underline block"
+                      style={{ wordBreak: "break-all" }}
+                    >
+                      {handleConsecutiveNewlines(matchedResult.title)}
+                    </a>
+                  ) : (
+                    <p className="font-medium mb-1">
+                      {handleConsecutiveNewlines(matchedResult.title)}
+                    </p>
+                  )}
+                  <p className="text-gray-600">
+                    {handleConsecutiveNewlines(matchedResult.text)}
+                  </p>
+                </>
+              ) : null}
+            </div>
+          </div>
+        }
+        open={isOpen}
+        placement="top"
+      >
         <span
           ref={containerRef}
           className="inline-flex items-center relative"
           style={{ zIndex: isOpen ? 1000 : "auto" }}
         >
-          <TooltipTrigger asChild>
-            <span className="inline-flex items-center cursor-pointer transition-colors">
-              <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
-            </span>
-          </TooltipTrigger>
-          {/* Force Portal to body */}
-          <TooltipPrimitive.Portal>
-            <TooltipContent
-              side="top"
-              align="center"
-              sideOffset={5}
-              className="z-[9999] bg-white px-3 py-2 text-sm border shadow-md max-w-md"
-              style={
-                {
-                  "--scrollbar-width": "8px",
-                  "--scrollbar-height": "8px",
-                  "--scrollbar-track-bg": "transparent",
-                  "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
-                  "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
-                  "--scrollbar-thumb-radius": "9999px",
-                } as React.CSSProperties
-              }
-            >
-              <div
-                ref={tooltipRef}
-                className="whitespace-pre-wrap overflow-y-auto"
-                style={{
-                  maxHeight: 240,
-                  minWidth: 200,
-                  maxWidth: 400,
-                  scrollbarWidth: "thin",
-                  scrollbarColor:
-                    "var(--scrollbar-thumb-bg) var(--scrollbar-track-bg)",
-                }}
-              >
-                <style jsx>{`
-                  div::-webkit-scrollbar {
-                    width: var(--scrollbar-width);
-                    height: var(--scrollbar-height);
-                  }
-                  div::-webkit-scrollbar-track {
-                    background: var(--scrollbar-track-bg);
-                  }
-                  div::-webkit-scrollbar-thumb {
-                    background: var(--scrollbar-thumb-bg);
-                    border-radius: var(--scrollbar-thumb-radius);
-                  }
-                  div::-webkit-scrollbar-thumb:hover {
-                    background: var(--scrollbar-thumb-hover-bg);
-                  }
-                  @media (prefers-color-scheme: dark) {
-                    div::-webkit-scrollbar-thumb {
-                      background: rgb(55, 65, 81);
-                    }
-                    div::-webkit-scrollbar-thumb:hover {
-                      background: rgb(75, 85, 99);
-                    }
-                  }
-                `}</style>
-                {matchedResult ? (
-                  <>
-                    {matchedResult.url &&
-                    matchedResult.source_type !== "file" &&
-                    !matchedResult.filename ? (
-                      <a
-                        href={matchedResult.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium mb-1 text-blue-600 hover:underline block"
-                        style={{ wordBreak: "break-all" }}
-                      >
-                        {handleConsecutiveNewlines(matchedResult.title)}
-                      </a>
-                    ) : (
-                      <p className="font-medium mb-1">
-                        {handleConsecutiveNewlines(matchedResult.title)}
-                      </p>
-                    )}
-                    <p className="text-gray-600">
-                      {handleConsecutiveNewlines(matchedResult.text)}
-                    </p>
-                  </>
-                ) : null}
-              </div>
-            </TooltipContent>
-          </TooltipPrimitive.Portal>
+          <span className="inline-flex items-center cursor-pointer transition-colors">
+            <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
+          </span>
         </span>
       </Tooltip>
     </TooltipProvider>
@@ -732,7 +725,7 @@ const VideoWithErrorHandling: React.FC<VideoWithErrorHandlingProps> = React.memo
 }, (prevProps, nextProps) => {
   // Custom comparison function to prevent unnecessary re-renders
   // Only compare src and alt, props object reference may change but content is the same
-  return prevProps.src === nextProps.src && 
+  return prevProps.src === nextProps.src &&
          prevProps.alt === nextProps.alt;
 });
 
@@ -773,7 +766,7 @@ const ImageWithErrorHandling: React.FC<ImageWithErrorHandlingProps> = React.memo
   );
 }, (prevProps, nextProps) => {
   // Custom comparison function to prevent unnecessary re-renders
-  return prevProps.src === nextProps.src && 
+  return prevProps.src === nextProps.src &&
          prevProps.alt === nextProps.alt;
 });
 
@@ -788,7 +781,7 @@ export const CodeBlock: React.FC<{
   language?: string;
 }> = ({ codeContent, language = "python" }) => {
   const { t } = useTranslation("common");
-  
+
   const customStyle = {
     ...oneLight,
     'pre[class*="language-"]': {

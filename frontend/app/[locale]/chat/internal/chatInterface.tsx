@@ -15,6 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { conversationService } from "@/services/conversationService";
 import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
+import { fetchAllAgents } from "@/services/agentConfigService";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -30,12 +31,7 @@ import {
   createMessageAttachments,
   cleanupAttachmentUrls,
 } from "@/app/chat/internal/chatPreprocess";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 
 import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
@@ -70,7 +66,7 @@ export function ChatInterface() {
   const [isSwitchedConversation, setIsSwitchedConversation] = useState(false); // Add conversation switching tracking state
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
-  
+
   // Use conversation management hook
   const conversationManagement = useConversationManagement();
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
@@ -138,6 +134,11 @@ export function ChatInterface() {
   // Add agent selection state
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
 
+  // Add global cache states to avoid repeated API calls
+  const [cachedAgents, setCachedAgents] = useState<any[]>([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [deploymentVersionLoaded, setDeploymentVersionLoaded] = useState(false);
+
   // Reset scroll to bottom state
   useEffect(() => {
     if (shouldScrollToBottom) {
@@ -178,6 +179,24 @@ export function ChatInterface() {
     setSidebarOpen(!sidebarOpen);
   };
 
+  // Load agents only once and cache the result
+  const loadAgentsOnce = async () => {
+    if (agentsLoaded) return; // Already loaded, skip
+
+    try {
+      const result = await fetchAllAgents();
+      if (result.success) {
+        setCachedAgents(result.data);
+        setAgentsLoaded(true);
+        log.log("Agent list loaded and cached successfully");
+      } else {
+        log.error("Failed to load agent list:", result.message);
+      }
+    } catch (error) {
+      log.error("Failed to load agent list:", error);
+    }
+  };
+
   // Handle right panel toggle - keep it simple and clear
   const toggleRightPanel = () => {
     setShowRightPanel(!showRightPanel);
@@ -186,6 +205,11 @@ export function ChatInterface() {
   useEffect(() => {
     if (!conversationManagement.initialized.current) {
       conversationManagement.initialized.current = true;
+
+      // Load agent list only once when component initializes
+      if (!agentsLoaded) {
+        loadAgentsOnce();
+      }
 
       // Get conversation history list, but don't auto-select the latest conversation
       conversationManagement.fetchConversationList()
@@ -746,7 +770,7 @@ export function ChatInterface() {
     setInput("");
     setIsLoading(false);
     setIsSwitchedConversation(false);
-    
+
     // Use conversation management hook
     conversationManagement.handleNewConversation();
     setIsLoadingHistoricalConversation(false); // Ensure not loading historical conversation
@@ -893,13 +917,8 @@ export function ChatInterface() {
               setShouldScrollToBottom(false);
             }, 1000);
 
-            // Refresh history list
-            conversationManagement.fetchConversationList().catch((err) => {
-              log.error(
-                t("chatInterface.refreshDialogListFailedButContinue"),
-                err
-              );
-            });
+            // Note: Removed unnecessary conversation list refresh when loading historical messages
+            // Only refresh when creating, deleting, or renaming conversations
           } else {
             // No longer empty cache, only prompt no history messages
             conversationManagement.setConversationLoadErrorForId(
@@ -1025,13 +1044,8 @@ export function ChatInterface() {
             setShouldScrollToBottom(false);
           }, 1000);
 
-          // Refresh history list
-          conversationManagement.fetchConversationList().catch((err) => {
-            log.error(
-              t("chatInterface.refreshDialogListFailedButContinue"),
-              err
-            );
-          });
+          // Note: Removed unnecessary conversation list refresh when loading historical messages
+          // Only refresh when creating, deleting, or renaming conversations
         } else {
           // No longer empty cache, only prompt no history messages
           conversationManagement.setConversationLoadErrorForId(
@@ -1461,6 +1475,7 @@ export function ChatInterface() {
                 onAgentSelect={setSelectedAgentId}
                 onCitationHover={clearCompletedIndicator}
                 onScroll={clearCompletedIndicator}
+                cachedAgents={cachedAgents}
               />
             </div>
 
@@ -1476,17 +1491,12 @@ export function ChatInterface() {
         </div>
       </div>
       <TooltipProvider>
-        <Tooltip open={false}>
-          <TooltipTrigger asChild>
-            <div className="fixed inset-0 pointer-events-none" />
-          </TooltipTrigger>
-          <TooltipContent
-            side="top"
-            align="center"
-            className="absolute bottom-24 left-1/2 transform -translate-x-1/2"
-          >
-            {t("chatInterface.stopGenerating")}
-          </TooltipContent>
+        <Tooltip
+          title={t("chatInterface.stopGenerating")}
+          open={false}
+          placement="top"
+        >
+          <div className="fixed inset-0 pointer-events-none" />
         </Tooltip>
       </TooltipProvider>
     </>

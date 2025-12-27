@@ -41,7 +41,9 @@
 
 ### 🔄 同步ModelEngine模型
 
-Nexent即将支持与ModelEngine平台的无缝对接，届时可自动同步并使用您在ModelEngine上部署的所有模型，敬请期待！
+Nexent支持与ModelEngine平台的无缝对接
+
+👉 点击页面右上方 ***\*****ModelEngine配置*****\***，输入您的 API ，即可获取您在 ModelEgnine 上部署的所有模型
 
 ### 🛠️ 添加自定义模型
 
