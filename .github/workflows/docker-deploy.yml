@@ -70,9 +70,17 @@ jobs:
       - name: Build docs image
         run: docker build --progress=plain -t nexent/nexent-docs:${{ github.event.inputs.app_version }} -t nexent/nexent-docs -f make/docs/Dockerfile .
 
+  build-mcp:
+    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP service image
+        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-mcp:${{ github.event.inputs.app_version }} -t nexent/nexent-mcp -f make/mcp/Dockerfile .
+
   deploy:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
-    needs: [ build-main, build-data-process, build-web, build-docs ]
+    needs: [ build-main, build-data-process, build-web, build-docs, build-mcp ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
