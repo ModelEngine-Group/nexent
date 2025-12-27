@@ -85,11 +85,9 @@ class ModelEngineProvider(AbstractModelProvider):
             List of models with canonical fields
         """
         try:
-            # Allow overriding host and api key via provider_config (from frontend).
-            # Fall back to environment-configured values.
             model_type: str = provider_config.get("model_type", "")
-            host = provider_config.get("base_url") or MODEL_ENGINE_HOST
-            api_key = provider_config.get("api_key") or MODEL_ENGINE_APIKEY
+            host = provider_config.get("base_url")
+            api_key = provider_config.get("api_key")
 
             if not host or not api_key:
                 logger.warning("ModelEngine host or api key not configured")
@@ -135,7 +133,6 @@ class ModelEngineProvider(AbstractModelProvider):
                         "model_type": internal_type,
                         "model_tag": me_type,
                         "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
-                        # ModelEngine models will get base_url and api_key from provider_config (or env)
                         "base_url": host,
                         "api_key": api_key,
                     })
