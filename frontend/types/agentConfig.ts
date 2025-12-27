@@ -322,6 +322,15 @@ export interface McpTool {
   parameters?: any;
 }
 
+// MCP container interface definition
+export interface McpContainer {
+  container_id: string;
+  name?: string;
+  status?: string;
+  mcp_url?: string;
+  host_port?: number;
+}
+
 // ========== Prompt Service Interfaces ==========
 
 /**

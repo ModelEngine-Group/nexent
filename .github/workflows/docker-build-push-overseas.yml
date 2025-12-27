@@ -244,6 +244,58 @@ jobs:
         if: inputs.push_latest == 'true'
         run: docker push nexent/nexent-ubuntu-terminal:arm64
 
+  build-and-push-mcp-amd64:
+    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    steps:
+      - name: Set up Docker Buildx
+        run: |
+          if ! docker buildx inspect nexent_builder > /dev/null 2>&1; then
+            docker buildx create --name nexent_builder --use
+          else
+            docker buildx use nexent_builder
+          fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP image (amd64) and load locally
+        run: |
+          docker buildx build --platform linux/amd64 -t nexent/nexent-mcp:${{ inputs.version }}-amd64 --load -f make/mcp/Dockerfile .
+      - name: Login to DockerHub
+        run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
+      - name: Push MCP image (amd64) to DockerHub
+        run: docker push nexent/nexent-mcp:${{ inputs.version }}-amd64
+      - name: Tag MCP image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-mcp:${{ inputs.version }}-amd64 nexent/nexent-mcp:amd64
+      - name: Push latest MCP image (amd64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-mcp:amd64
+
+  build-and-push-mcp-arm64:
+    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    steps:
+      - name: Set up Docker Buildx
+        run: |
+          if ! docker buildx inspect nexent_builder > /dev/null 2>&1; then
+            docker buildx create --name nexent_builder --use
+          else
+            docker buildx use nexent_builder
+          fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP image (arm64) and load locally
+        run: |
+          docker buildx build --platform linux/arm64 -t nexent/nexent-mcp:${{ inputs.version }}-arm64 --load -f make/mcp/Dockerfile .
+      - name: Login to DockerHub
+        run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
+      - name: Push MCP image (arm64) to DockerHub
+        run: docker push nexent/nexent-mcp:${{ inputs.version }}-arm64
+      - name: Tag MCP image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag nexent/nexent-mcp:${{ inputs.version }}-arm64 nexent/nexent-mcp:arm64
+      - name: Push latest MCP image (arm64) to DockerHub
+        if: inputs.push_latest == 'true'
+        run: docker push nexent/nexent-mcp:arm64
+
   manifest-push-main:
     runs-on: ubuntu-latest
     needs:
@@ -331,3 +383,25 @@ jobs:
             nexent/nexent-ubuntu-terminal:amd64 \
             nexent/nexent-ubuntu-terminal:arm64
           docker manifest push nexent/nexent-ubuntu-terminal:latest
+
+  manifest-push-mcp:
+    runs-on: ubuntu-latest
+    needs:
+      - build-and-push-mcp-amd64
+      - build-and-push-mcp-arm64
+    steps:
+      - name: Login to DockerHub
+        run: echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u nexent --password-stdin
+      - name: Create and push manifest for mcp (DockerHub)
+        run: |
+          docker manifest create nexent/nexent-mcp:${{ inputs.version }} \
+            nexent/nexent-mcp:${{ inputs.version }}-amd64 \
+            nexent/nexent-mcp:${{ inputs.version }}-arm64
+          docker manifest push nexent/nexent-mcp:${{ inputs.version }}
+      - name: Create and push latest manifest for mcp (DockerHub)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create nexent/nexent-mcp:latest \
+            nexent/nexent-mcp:amd64 \
+            nexent/nexent-mcp:arm64
+          docker manifest push nexent/nexent-mcp:latest

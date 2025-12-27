@@ -26,7 +26,7 @@ with patch.dict("sys.modules", {
     "smolagents": mock_smolagents,
     "smolagents.models": mock_models_module,
 }):
-    from sdk.nexent.core.models.openai_long_context_model import OpenAILongContextModel
+    import sdk.nexent.core.models.openai_long_context_model as openai_long_context_model
     from sdk.nexent.core.utils.observer import MessageObserver
 
 
@@ -37,7 +37,7 @@ def mock_observer():
 
 @pytest.fixture
 def long_context_model(mock_observer):
-    model = OpenAILongContextModel(
+    model = openai_long_context_model.OpenAILongContextModel(
         observer=mock_observer,
         temperature=0.5,
         top_p=0.95,
@@ -57,21 +57,21 @@ def mock_tokenizer():
 
 
 def test_init_default_values(mock_observer):
-    model = OpenAILongContextModel(observer=mock_observer)
+    model = openai_long_context_model.OpenAILongContextModel(observer=mock_observer)
     assert model.max_context_tokens == 128000
     assert model.truncation_strategy == "start"
     assert model._tokenizer is None
 
 
 def test_init_custom_values(mock_observer):
-    model = OpenAILongContextModel(observer=mock_observer, max_context_tokens=64000, truncation_strategy="middle")
+    model = openai_long_context_model.OpenAILongContextModel(observer=mock_observer, max_context_tokens=64000, truncation_strategy="middle")
     assert model.max_context_tokens == 64000
     assert model.truncation_strategy == "middle"
 
 
 def test_init_invalid_truncation_strategy(mock_observer):
     with pytest.raises(ValueError, match="truncation_strategy must be 'start', 'middle' or 'end'"):
-        OpenAILongContextModel(observer=mock_observer, truncation_strategy="invalid")
+        openai_long_context_model.OpenAILongContextModel(observer=mock_observer, truncation_strategy="invalid")
 
 
 def test_get_tokenizer_success(long_context_model, mock_tokenizer):
@@ -109,7 +109,7 @@ def test_truncate_text_no_truncation_needed(long_context_model):
     assert long_context_model.truncate_text("short text", 20) == "short text"
 
 
-@patch("sdk.nexent.core.models.openai_long_context_model.logging.getLogger")
+@patch.object(openai_long_context_model.logging, "getLogger")
 def test_truncate_text_start_strategy_with_tiktoken(mock_logger, long_context_model, mock_tokenizer):
     with patch.object(long_context_model, '_get_tokenizer', return_value=mock_tokenizer):
         long_context_model.count_tokens = MagicMock(return_value=100)
@@ -117,7 +117,7 @@ def test_truncate_text_start_strategy_with_tiktoken(mock_logger, long_context_mo
         assert long_context_model.truncate_text("long text", 5) == "decoded text"
 
 
-@patch("sdk.nexent.core.models.openai_long_context_model.logging.getLogger")
+@patch.object(openai_long_context_model.logging, "getLogger")
 def test_truncate_text_middle_strategy_with_tiktoken(mock_logger, long_context_model, mock_tokenizer):
     with patch.object(long_context_model, '_get_tokenizer', return_value=mock_tokenizer):
         long_context_model.truncation_strategy = "middle"
@@ -127,7 +127,7 @@ def test_truncate_text_middle_strategy_with_tiktoken(mock_logger, long_context_m
         mock_tokenizer.decode.assert_called_once_with([1, 2, 3, 8, 9, 10])
 
 
-@patch("sdk.nexent.core.models.openai_long_context_model.logging.getLogger")
+@patch.object(openai_long_context_model.logging, "getLogger")
 def test_truncate_text_end_strategy_with_tiktoken(mock_logger, long_context_model, mock_tokenizer):
     with patch.object(long_context_model, '_get_tokenizer', return_value=mock_tokenizer):
         long_context_model.truncation_strategy = "end"
@@ -137,7 +137,7 @@ def test_truncate_text_end_strategy_with_tiktoken(mock_logger, long_context_mode
         mock_tokenizer.decode.assert_called_once_with([6, 7, 8, 9, 10])
 
 
-@patch("sdk.nexent.core.models.openai_long_context_model.logging.getLogger")
+@patch.object(openai_long_context_model.logging, "getLogger")
 def test_truncate_text_without_tiktoken_start_strategy(mock_logger, long_context_model):
     with patch.object(long_context_model, '_get_tokenizer', return_value=None):
         long_context_model.count_tokens = MagicMock(return_value=100)
@@ -145,7 +145,7 @@ def test_truncate_text_without_tiktoken_start_strategy(mock_logger, long_context
         assert result == "x" * 40
 
 
-@patch("sdk.nexent.core.models.openai_long_context_model.logging.getLogger")
+@patch.object(openai_long_context_model.logging, "getLogger")
 def test_truncate_text_without_tiktoken_middle_strategy(mock_logger, long_context_model):
     with patch.object(long_context_model, '_get_tokenizer', return_value=None):
         long_context_model.truncation_strategy = "middle"
@@ -154,7 +154,7 @@ def test_truncate_text_without_tiktoken_middle_strategy(mock_logger, long_contex
         assert "[Content truncated...]" in result
 
 
-@patch("sdk.nexent.core.models.openai_long_context_model.logging.getLogger")
+@patch.object(openai_long_context_model.logging, "getLogger")
 def test_truncate_text_without_tiktoken_end_strategy(mock_logger, long_context_model):
     with patch.object(long_context_model, '_get_tokenizer', return_value=None):
         long_context_model.count_tokens = MagicMock(return_value=100)

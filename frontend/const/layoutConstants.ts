@@ -48,7 +48,7 @@ export const SETUP_PAGE_CONTAINER = {
   MAX_WIDTH: "1920px",
   
   // Horizontal padding (corresponding to px-4)
-  HORIZONTAL_PADDING: "16px",
+  HORIZONTAL_PADDING: "26px",
   
   // Main content area height
   MAIN_CONTENT_HEIGHT: "83vh",

@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -80,8 +81,9 @@ async def test_check_connectivity_success(vl_model_instance):
         vl_model_instance,
         "_prepare_completion_kwargs",
         return_value={},
-    ) as mock_prepare_kwargs, patch(
-        "sdk.nexent.core.models.openai_llm.asyncio.to_thread",
+    ) as mock_prepare_kwargs, patch.object(
+        asyncio,
+        "to_thread",
         new_callable=AsyncMock,
         return_value=None,
     ) as mock_to_thread:
@@ -100,8 +102,9 @@ async def test_check_connectivity_failure(vl_model_instance):
         vl_model_instance,
         "_prepare_completion_kwargs",
         return_value={},
-    ), patch(
-        "sdk.nexent.core.models.openai_llm.asyncio.to_thread",
+    ), patch.object(
+        asyncio,
+        "to_thread",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ):
