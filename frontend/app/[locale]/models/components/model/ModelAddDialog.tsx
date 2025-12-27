@@ -37,6 +37,7 @@ interface ModelAddDialogProps {
   onClose: () => void;
   onSuccess: (model?: AddedModel) => Promise<void>;
   defaultProvider?: string; // Default provider to select when dialog opens
+  defaultIsBatchImport?: boolean;
 }
 
 // Connectivity status type comes from utils
@@ -131,6 +132,7 @@ export const ModelAddDialog = ({
   onClose,
   onSuccess,
   defaultProvider,
+  defaultIsBatchImport,
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -223,16 +225,18 @@ export const ModelAddDialog = ({
     setLoadingModelList,
   });
 
-  // Handle default provider when dialog opens
+  // When dialog opens, apply default provider and optional default batch mode
   useEffect(() => {
-    if (isOpen && defaultProvider) {
-      setForm((prev) => ({
-        ...prev,
-        provider: defaultProvider,
-        isBatchImport: true,
-      }));
-    }
-  }, [isOpen, defaultProvider]);
+    if (!isOpen) return;
+    setForm((prev) => ({
+      ...prev,
+      provider: defaultProvider || prev.provider,
+      isBatchImport:
+        typeof defaultIsBatchImport !== "undefined"
+          ? Boolean(defaultIsBatchImport)
+          : prev.isBatchImport,
+    }));
+  }, [isOpen, defaultProvider, defaultIsBatchImport]);
 
   const parseModelName = (name: string): string => {
     if (!name) return "";
