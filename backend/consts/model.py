@@ -66,6 +66,7 @@ class ProviderModelRequest(BaseModel):
     provider: str
     model_type: str
     api_key: Optional[str] = ''
+    base_url: Optional[str] = ''
 
 
 class BatchCreateModelsRequest(BaseModel):
