@@ -260,10 +260,6 @@
   "taskWindow.noTaskMessages": "No task messages yet",
   "taskWindow.taskDetails": "Task Details",
 
-  "setup.header.status.connected": "ModelEngine Connected",
-  "setup.header.status.disconnected": "ModelEngine Disconnected",
-  "setup.header.status.checking": "Checking",
-  "setup.header.status.unknown": "Unknown Status",
   "setup.header.button.back": "Back to Home",
   "setup.header.title": "Quick Setup",
   "setup.header.description": "Smartly build any assistant, accurately solve every challenge",

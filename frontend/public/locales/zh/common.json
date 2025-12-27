@@ -260,10 +260,6 @@
   "taskWindow.noTaskMessages": "暂无任务消息",
   "taskWindow.taskDetails": "任务详情",
 
-  "setup.header.status.connected": "ModelEngine 已连接",
-  "setup.header.status.disconnected": "ModelEngine 未连接",
-  "setup.header.status.checking": "检查中",
-  "setup.header.status.unknown": "未知状态",
   "setup.header.button.back": "返回首页",
   "setup.header.title": "快速配置",
   "setup.header.description": "智能生成每一种助手，精准解决每一个问题",
