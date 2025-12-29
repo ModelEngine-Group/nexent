@@ -429,3 +429,23 @@ class ToolValidateRequest(BaseModel):
         None, description="Tool inputs")
     params: Optional[Dict[str, Any]] = Field(
         None, description="Tool configuration parameters")
+
+
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server"""
+    command: str = Field(..., description="Command to run (e.g., 'npx')")
+    args: List[str] = Field(default_factory=list, description="Command arguments")
+    env: Optional[Dict[str, str]] = Field(
+        None, description="Environment variables for the MCP server")
+    port: Optional[int] = Field(
+        None, description="Host port to expose the MCP server on (e.g., 5020)")
+    image: Optional[str] = Field(
+        None,
+        description="Docker image for the MCP proxy container (optional, overrides MCP_DOCKER_IMAGE)",
+    )
+
+
+class MCPConfigRequest(BaseModel):
+    """Request model for adding MCP servers from configuration"""
+    mcpServers: Dict[str, MCPServerConfig] = Field(
+        ..., description="Dictionary of MCP server configurations")

@@ -41,7 +41,9 @@ Click the app icon to open the configuration panel. Nexent provides two options:
 
 ### 🔄 Sync ModelEngine Models
 
-Nexent will soon support seamless integration with the ModelEngine platform so you can automatically sync and reuse every model you deploy there. Stay tuned!
+Nexent supports seamless integration with the ModelEngine platform.
+
+👉 Click **Edit ModelEngine Configuration** in the upper right corner of the page, enter your API key, and you can retrieve all models deployed on ModelEngine.
 
 ### 🛠️ Add Custom Models
 
@@ -123,8 +125,16 @@ After adding models, assign the platform-level defaults. These models handle sys
 
 #### Embedding Model
 
-- Powers semantic search for text, images, and other knowledge-base content.
-- Select one of the added embedding models.
+Embedding models are primarily used for vectorization processing of text, images, and other data in knowledge bases, forming the foundation for efficient retrieval and semantic understanding. Configuring an appropriate embedding model can significantly improve knowledge base search accuracy and multimodal data processing capabilities.
+
+- Click the embedding model dropdown to select one from the added embedding models.
+- Embedding model configuration affects the stable operation of knowledge bases.
+
+Choose appropriate document chunk size and chunks per request based on model capabilities. Smaller chunks provide more stability, but may affect file parsing quality.
+
+<div style="display: flex; gap: 8px;">
+  <img src="./assets/model-management/vector-model.png" style="width: 50%; height: 50%;" />
+</div>
 
 #### Vision-Language Model
 
@@ -217,4 +227,4 @@ After closing the Model Management flow, continue with:
 1. **[Knowledge Base](./knowledge-base)** – Create and manage knowledge bases.
 2. **[Agent Development](./agent-development)** – Build and configure agents.
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

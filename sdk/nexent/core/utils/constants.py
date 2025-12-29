@@ -1,1 +1,1 @@
-THINK_TAG_PATTERN = r"<think>.*?</think>"
+THINK_TAG_PATTERN = r"(?:<think>)?.*?</think>"

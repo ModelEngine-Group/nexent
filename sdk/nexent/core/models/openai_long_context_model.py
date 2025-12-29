@@ -15,7 +15,7 @@ class OpenAILongContextModel(OpenAIModel):
     """
     
     def __init__(self, observer: MessageObserver, temperature=0.5, top_p=0.95,
-                 max_context_tokens=128000, truncation_strategy="start", *args, **kwargs):
+                 max_context_tokens=128000, truncation_strategy="start", ssl_verify: bool = True, *args, **kwargs):
         """
         Initialize the long context model
         
@@ -30,7 +30,7 @@ class OpenAILongContextModel(OpenAIModel):
                 - "end": Only keep the end part
             *args, **kwargs: Other parameters
         """
-        super().__init__(observer=observer, temperature=temperature, top_p=top_p, *args, **kwargs)
+        super().__init__(observer=observer, temperature=temperature, top_p=top_p, ssl_verify=ssl_verify, *args, **kwargs)
         self.max_context_tokens = max_context_tokens
         if truncation_strategy not in ["start", "middle", "end"]:
             raise ValueError("truncation_strategy must be 'start', 'middle' or 'end'")

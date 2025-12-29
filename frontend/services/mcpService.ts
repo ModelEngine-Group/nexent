@@ -317,3 +317,175 @@ export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string) 
     };
   }
 };
+
+/**
+ * Add MCP server from container configuration
+ */
+export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> }) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.mcp.addFromConfig, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(mcpConfig),
+    });
+
+    const data = await response.json();
+    
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.addFromConfigSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
+      
+      if (response.status === 400) {
+        errorMessage = data.detail || t('mcpService.message.invalidConfig');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+      
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.addFromConfigFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Get MCP container list
+ */
+export const getMcpContainers = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.mcp.containers, {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+    
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data.containers || [],
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getContainersFailed');
+      
+      if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+      
+      return {
+        success: false,
+        data: [],
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getContainersFailed'), error);
+    return {
+      success: false,
+      data: [],
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Get MCP container logs
+ */
+export const getMcpContainerLogs = async (containerId: string, tail: number = 100) => {
+  try {
+    const response = await fetch(
+      `${API_ENDPOINTS.mcp.containerLogs(containerId)}?tail=${tail}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    const data = await response.json();
+    
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data.logs || '',
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getContainerLogsFailed');
+      
+      if (response.status === 404) {
+        errorMessage = t('mcpService.message.containerNotFound');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+      
+      return {
+        success: false,
+        data: '',
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getContainerLogsFailed'), error);
+    return {
+      success: false,
+      data: '',
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Delete MCP container
+ */
+export const deleteMcpContainer = async (containerId: string) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.mcp.deleteContainer(containerId), {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+    
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.deleteContainerSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.deleteContainerFailed');
+      
+      if (response.status === 404) {
+        errorMessage = t('mcpService.message.containerNotFound');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+      
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.deleteContainerFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};

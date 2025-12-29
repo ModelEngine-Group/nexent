@@ -3,17 +3,17 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd";
-import {
-  UserOutlined,
-  LogoutOutlined,
-  LoginOutlined,
-  PoweroffOutlined,
-  CloseCircleFilled,
-  UserAddOutlined,
-} from "@ant-design/icons";
+import { 
+  UserRound, 
+  LogOut, 
+  LogIn, 
+  Power, 
+  UserRoundPlus,
+} from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 
 export function AvatarDropdown() {
@@ -22,6 +22,7 @@ export function AvatarDropdown() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
   const { modal } = App.useApp();
+  const { confirm } = useConfirmModal();
 
   if (isLoading) {
     return <Spin size="small" />;
@@ -49,7 +50,7 @@ export function AvatarDropdown() {
       },
       {
         key: "login",
-        icon: <LoginOutlined />,
+        icon: <LogIn size={16} />,
         label: t("auth.login"),
         onClick: () => {
           setDropdownOpen(false);
@@ -58,7 +59,7 @@ export function AvatarDropdown() {
       },
       {
         key: "register",
-        icon: <UserAddOutlined />,
+        icon: <UserRoundPlus size={16} />,
         label: t("auth.register"),
         onClick: () => {
           setDropdownOpen(false);
@@ -81,7 +82,7 @@ export function AvatarDropdown() {
           )}
           getPopupContainer={() => document.body}
         >
-          <Button type="text" icon={<UserOutlined />} shape="circle" />
+          <Button type="text" icon={<UserRound size={18} />} shape="circle" />
         </Dropdown>
       </ConfigProvider>
     );
@@ -112,14 +113,12 @@ export function AvatarDropdown() {
     },
     {
       key: "logout",
-      icon: <LogoutOutlined />,
+      icon: <LogOut size={16} />,
       label: t("auth.logout"),
       onClick: () => {
-        modal.confirm({
+        confirm({
           title: t("auth.confirmLogout"),
           content: t("auth.confirmLogoutPrompt"),
-          okText: t("auth.confirm"),
-          cancelText: t("auth.cancel"),
           onOk: () => {
             logout();
           },
@@ -128,7 +127,7 @@ export function AvatarDropdown() {
     },
     {
       key: "revoke",
-      icon: <PoweroffOutlined />,
+      icon: <Power size={16} />,
       label: t("auth.revoke"),
       // danger: true,
       className:
@@ -141,13 +140,10 @@ export function AvatarDropdown() {
             okText: t("auth.confirm"),
           });
         } else {
-          modal.confirm({
+          confirm({
             title: t("auth.confirmRevoke"),
             content: t("auth.confirmRevokePrompt"),
-            icon: <CloseCircleFilled style={{ color: "red" }} />,
             okText: t("auth.confirmRevokeOk"),
-            cancelText: t("auth.cancel"),
-            okButtonProps: { danger: true },
             onOk: () => {
               revoke();
             },
@@ -173,7 +169,7 @@ export function AvatarDropdown() {
           src={user.avatar_url}
           className="cursor-pointer"
           size="default"
-          icon={<UserOutlined />}
+          icon={<UserRound size={18} />}
         />
       </Dropdown>
     </ConfigProvider>

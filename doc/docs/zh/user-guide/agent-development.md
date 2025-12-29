@@ -19,6 +19,8 @@
 > - **直接导入**：保留重复名称，导入后的智能体会处于不可用状态，需手动修改 Agent 名称和变量名后才能使用
 > - **重新生成并导入**：系统将调用 LLM 对 Agent 进行重命名，会消耗一定的模型 token 数，可能耗时较长
 
+> 📌 **重要说明**：通过导入创建的智能体，如果其工具中包含 `knowledge_base_search` 等知识库检索工具，这些工具只会检索**当前登录用户在本环境中有权限访问的知识库**。导入文件中原有的知识库配置不会自动继承，因此实际检索结果和回答效果，可能与智能体原作者环境下的表现存在差异。
+
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
 </div>
@@ -62,19 +64,49 @@
 
 ### 🔌 添加 MCP 工具
 
-Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力。
+在"选择 Agent 的工具"页签右侧，点击"MCP 配置"，可在弹窗中进行 MCP 服务器的配置，查看已配置的 MCP 服务器
 
-1. 在"选择 Agent 的工具"页签右侧，点击"MCP 配置"，可在弹窗中进行 MCP 服务器的配置，查看已配置的 MCP 服务器
-2. 输入服务器名称和服务器 URL（目前仅支持 SSE 协议）
-   - ⚠️ **注意**：服务器名称只能包含英文字母和数字，不能包含空格、下划线等其他字符
-3. 点击"添加"按钮，即可完成添加
+您可以通过以下两种方式在 Nexent 中添加 MCP 服务
+
+**1️⃣ 通过 URL 添加 MCP 服务**
+
+🔔 该方法适用于已有独立部署的 MCP 服务（支持 SSE 与 Streamble HTTP 协议）：
+
+>1. 在界面上方的 **Add MCP Server** 区域填写 **Server name** 、 **Server URL** 
+>
+>⚠️ **注意**：服务器名称只能包含英文字母和数字，不能包含空格、下划线等其他字符
+>
+>2. 点击 右侧 **+ Add** 按钮，完成单个服务添加
+
+**2️⃣ 通过 JSON 配置添加容器化 MCP 服务**
+
+🔔 该方法适用于 npx 部署的容器化 MCP 服务
+
+>1. 在 **Add Containerized MCP Service** 输入框中，填写符合示例格式的 JSON 配置
+>
+>```json
+>{
+> "mcpServers": {
+>   "service-name": {
+>     "args": [
+>       "mcp-package-name@version",
+>       "additional-parameters"
+>     ],
+>     "command": "npx"
+>   }
+> }
+>}
+>```
+>
+>2. 在下方 **Port** 输入框中，填写容器化服务对应的端口号
+>3. 点击右侧 **+ Add** 按钮，完成容器化服务添加
 
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/mcp.png" style="width: 80%; height: auto;" />
 </div>
 
 有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
-您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 服务开发](../mcp-ecosystem/mcp-server-development.md)。
+您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../backend/tools/mcp)。
 
 ### ⚙️ 自定义工具
 
@@ -111,7 +143,7 @@ Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力�
 根据选择的协作 Agent 和工具，您现在可以用简洁的语言来描述，您希望这个 Agent 应该如何工作。Nexent 会根据您的配置和描述，自动为您生成 Agent 名称、描述以及提示词等信息。
 
 1. 在"描述 Agent 应该如何工作"下的编辑框中，输入简洁描述，如"你是一个专业的知识问答小助手，具备本地知识检索和联网检索能力，综合信息以回答用户问题"
-2. 点击"生成智能体"按钮，Nexent 会为您生成 Agent 详细内容，包括基础信息以及提示词（角色、使用要求、示例）
+2. 选择模型（生成提示词时选择更聪明的模型以优化回复逻辑），点击"生成智能体"按钮，Nexent 会为您生成 Agent 详细内容，包括基础信息以及提示词（角色、使用要求、示例）
 3. 您可在下方 Agent 详细内容中，针对自动生成的内容（特别是提示词）进行编辑微调
 
 <div style="display: flex; justify-content: left;">
@@ -128,7 +160,7 @@ Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力�
 
 调试成功后，可点击右下角"保存"按钮，此智能体将会被保存并出现在智能体列表中。
 
-## 📋 管理智能体
+## 🔧 管理智能体
 
 在左侧智能体列表中，您可对已有的智能体进行以下操作：
 
@@ -144,6 +176,11 @@ Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力�
 
 可将调试成功的智能体导出为 JSON 配置文件，在创建 Agent 时可以使用此 JSON 文件以导入的方式创建副本。
 
+
+### 📋 复制
+
+复制 Agent，便于智能体的实验、多版本调试与并行开发。
+
 ### 🗑️ 删除
 
 删除智能体（不可撤销，请谨慎操作）。
@@ -156,4 +193,4 @@ Nexent 支持您快速便捷地使用第三方 MCP 工具，丰富 Agent 能力�
 2. 在 **[开始问答](./start-chat)** 中与智能体进行交互
 3. 在 **[记忆管理](./memory-management)** 配置记忆以提升智能体的个性化能力
 
-如果您在智能体开发过程中遇到任何问题，请参考我们的 **[常见问题](../getting-started/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。
+如果您在使用程中遇到任何问题，请参考我们的 **[常见问题](../quick-start/faq)** 或在 [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions) 中进行提问获取支持。

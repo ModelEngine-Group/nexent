@@ -19,6 +19,8 @@ If you have an existing agent configuration, you can also import it:
 > - **Import anyway**: Keep the duplicate name; the imported agent will be in an unavailable state and requires manual modification of the Agent name and variable name before it can be used
 > - **Regenerate and import**: The system will call the LLM to rename the Agent, which will consume a certain amount of model tokens and may take longer
 
+> 📌 **Important:** For agents created via import, if their tools include `knowledge_base_search` or other knowledge base search tools, these tools will only search **knowledge bases that the currently logged-in user is allowed to access in this environment**. The original knowledge base configuration in the exported agent will *not* be automatically inherited, so actual search results and answer quality may differ from what the original author observed.
+
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
 </div>
@@ -40,7 +42,7 @@ You can configure other collaborative agents for your created agent, as well as 
 
 ### 🛠️ Select Agent Tools
 
-Agents can use various tools to complete tasks, such as knowledge base search, email sending, file management, and other local tools. They can also integrate third-party MCP tools or custom tools.
+Agents can use various tools to complete tasks, such as knowledge base search, file parsing, image parsing, email sending/receiving, file management, and other local tools. They can also integrate third-party MCP tools or custom tools.
 
 1. On the "Select Tools" tab, click "Refresh Tools" to update the available tool list
 2. Select the group containing the tool you want to add
@@ -62,19 +64,49 @@ Agents can use various tools to complete tasks, such as knowledge base search, e
 
 ### 🔌 Add MCP Tools
 
-Nexent allows you to quickly and easily use third-party MCP tools to enrich agent capabilities.
+On the "Select Agent Tools" tab, click "MCP Config" to configure MCP servers in the popup and view configured servers.
 
-1. On the "Select Agent Tools" tab, click "MCP Config" to configure MCP servers in the popup and view configured servers
-2. Enter the server name and URL (currently only SSE protocol is supported)
-   - ⚠️ **Note:** The server name must contain only English letters or digits; spaces, underscores, and other characters are not allowed.
-3. Click "Add" to complete the addition
+You can add MCP services to Nexent in the following two ways:
+
+**1️⃣ Add MCP Service via URL**
+
+🔔 This method is suitable for independently deployed MCP services (supports SSE and Streamable HTTP protocols):
+
+>1. In the **Add MCP Server** section at the top of the interface, fill in **Server name** and **Server URL**
+>
+>⚠️ **Note:** The server name must contain only English letters or digits; spaces, underscores, and other characters are not allowed.
+>
+>2. Click the **+ Add** button on the right to complete adding a single service
+
+**2️⃣ Add Containerized MCP Service via JSON Configuration**
+
+🔔 This method is suitable for containerized MCP services deployed via npx:
+
+>1. In the **Add Containerized MCP Service** input box, fill in a JSON configuration that matches the example format:
+>
+>```json
+>{
+> "mcpServers": {
+>   "service-name": {
+>     "args": [
+>       "mcp-package-name@version",
+>       "additional-parameters"
+>     ],
+>     "command": "npx"
+>   }
+> }
+>}
+>```
+>
+>2. In the **Port** input box below, enter the port number corresponding to the containerized service
+>3. Click the **+ Add** button on the right to complete adding the containerized service
 
 <div style="display: flex; justify-content: left;">
   <img src="./assets/agent-development/mcp.png" style="width: 80%; height: auto;" />
 </div>
 
 Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
-You can also develop your own MCP services and connect them to Nexent; see [MCP Server Development](../mcp-ecosystem/mcp-server-development.md).
+You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../backend/tools/mcp).
 
 ### ⚙️ Custom Tools
 
@@ -111,7 +143,7 @@ Nexent provides a "Tool Testing" capability for all types of tools—whether the
 Based on the selected collaborative agents and tools, you can now describe in simple language how you expect this agent to work. Nexent will automatically generate the agent name, description, and prompts based on your configuration and description.
 
 1. In the editor under "Describe how should this agent work", enter a brief description, such as "You are a professional knowledge Q&A assistant with local knowledge search and online search capabilities, synthesizing information to answer user questions"
-2. Click the "Generate" button, and Nexent will generate detailed agent content for you, including basic information and prompts (role, usage requirements, few shots)
+2. Select a model (choose a smarter model when generating prompts to optimize response logic), click the "Generate Agent" button, and Nexent will generate detailed agent content for you, including basic information and prompts (role, usage requirements, examples)
 3. You can edit and fine-tune the auto-generated content (especially the prompts) in the Agent Detail Content below
 
 <div style="display: flex; justify-content: left;">
@@ -144,6 +176,10 @@ View the collaborative agents/tools used by the agent, displayed in a tree diagr
 
 Export successfully debugged agents as JSON configuration files. You can use this JSON file to create a copy by importing it when creating an agent.
 
+### 📋 Copy
+
+Copy an agent to facilitate experimentation, multi-version debugging, and parallel development.
+
 ### 🗑️ Delete
 
 Delete an agent (this cannot be undone, please proceed with caution).
@@ -156,4 +192,4 @@ After completing agent development, you can:
 2. Interact with agents in **[Start Chat](./start-chat)**
 3. Configure **[Memory Management](./memory-management)** to enhance the agent's personalization capabilities
 
-If you encounter any issues during agent development, please refer to our **[FAQ](../getting-started/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues during agent development, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

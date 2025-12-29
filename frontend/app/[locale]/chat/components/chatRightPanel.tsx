@@ -2,14 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Database, X, Server } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { StaticScrollArea } from "@/components/ui/scrollArea";
 import { ImageItem, ChatRightPanelProps, SearchResult } from "@/types/chat";
-import { API_ENDPOINTS } from "@/services/api";
 import { formatDate, formatUrl } from "@/lib/utils";
 import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
-import { message } from "antd";
+import { message, Button } from "antd";
 import log from "@/lib/logger";
 
 
@@ -28,6 +24,7 @@ export function ChatRightPanel({
   const [processedImages, setProcessedImages] = useState<string[]>([]);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [imageData, setImageData] = useState<Record<string, ImageItem>>({});
+  const [activeTab, setActiveTab] = useState<string>("sources");
 
   // Reference to prevent duplicate loading
   const loadingImages = useRef<Set<string>>(new Set());
@@ -96,10 +93,10 @@ export function ChatRightPanel({
     try {
       // Convert image URL to backend API URL
       const apiUrl = convertImageUrlToApiUrl(imageUrl);
-      
+
       // Use backend API to get the image
       const response = await fetch(apiUrl);
-      
+
       if (!response.ok) {
         throw new Error(`Failed to load image: ${response.statusText}`);
       }
@@ -107,12 +104,12 @@ export function ChatRightPanel({
       // Get image as blob and convert to base64
       const blob = await response.blob();
       const reader = new FileReader();
-      
+
       reader.onloadend = () => {
         const base64Data = reader.result as string;
         // Remove data URL prefix (e.g., "data:image/png;base64,")
         const base64 = base64Data.split(',')[1] || base64Data;
-        
+
         setImageData((prev) => ({
           ...prev,
           [imageUrl]: {
@@ -124,13 +121,13 @@ export function ChatRightPanel({
         }));
         loadingImages.current.delete(imageUrl);
       };
-      
+
       reader.onerror = () => {
         log.error("Failed to read image blob");
         handleImageLoadFail(imageUrl);
         loadingImages.current.delete(imageUrl);
       };
-      
+
       reader.readAsDataURL(blob);
     } catch (error) {
       log.error(t("chatRightPanel.imageProxyError"), error);
@@ -235,7 +232,7 @@ export function ChatRightPanel({
     const handleFileDownload = async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      
+
       if (!filename && !url) {
         message.error(t("chatRightPanel.fileDownloadError", "File name or URL is missing"));
         return;
@@ -482,9 +479,9 @@ export function ChatRightPanel({
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
             <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-2 right-2 z-50 rounded-full bg-black/50 text-white hover:bg-black/70"
+              type="text"
+              size="middle"
+              className="absolute top-2 right-2 z-50 rounded-full bg-black/50 text-white hover:bg-black/70 h-8 w-8 p-0"
               onClick={(e: React.MouseEvent) => {
                 e.stopPropagation();
                 setViewingImage(null);
@@ -523,9 +520,9 @@ export function ChatRightPanel({
 
         {toggleRightPanel && (
           <Button
-            variant="ghost"
-            size="sm"
-            className="p-1 h-7 w-7 rounded hover:bg-gray-200"
+            type="text"
+            size="small"
+            className="p-0 h-7 w-7 min-w-[28px] rounded hover:bg-gray-200 active:bg-gray-300 flex items-center justify-center transition-colors duration-200"
             onClick={toggleRightPanel}
             title={t("chatRightPanel.closeSidebarTitle")}
           >
@@ -534,117 +531,122 @@ export function ChatRightPanel({
         )}
       </div>
 
-      <Tabs
-        defaultValue="sources"
-        className="flex-1 flex flex-col overflow-hidden"
-        style={{ maxWidth: "400px" }}
-      >
-        <TabsList className="w-full" style={{ maxWidth: "400px" }}>
-          <TabsTrigger value="sources" className="flex-1">
-            {t("chatRightPanel.sources")}
-            {searchResults.length > 0 && (
-              <span className="ml-1 bg-gray-200 inline-flex items-center justify-center rounded px-1 text-xs font-medium min-w-[20px] h-[18px]">
-                {searchResults.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="images" className="flex-1">
-            {t("chatRightPanel.images")}
-            {processedImages.length > 0 && (
-              <span className="ml-1 bg-gray-200 inline-flex items-center justify-center rounded px-1 text-xs font-medium min-w-[20px] h-[18px]">
-                {processedImages.length}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
-
-        <StaticScrollArea
-          className="flex-1"
-          style={{ maxWidth: "400px", overflow: "hidden" }}
-        >
-          <TabsContent
-            value="sources"
-            className="p-4"
-            style={{ maxWidth: "400px", overflow: "hidden" }}
+      <div className="flex-1 flex flex-col" style={{ maxWidth: "400px", height: "100%" }}>
+        {/* Tab Headers */}
+        <div className="flex border-b bg-gray-50">
+          <Button
+            type={activeTab === "sources" ? "primary" : "text"}
+            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors rounded-none border-none ${
+              activeTab === "sources"
+                ? "bg-white text-gray-900 border-b-2 border-blue-500"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}
+            onClick={() => setActiveTab("sources")}
           >
-            <div
-              className="space-y-2"
-              style={{ maxWidth: "100%", overflow: "hidden" }}
-            >
-              {searchResults.length > 0 ? (
-                <>
-                  <div
-                    className="space-y-3"
-                    style={{ maxWidth: "100%", overflow: "hidden" }}
-                  >
-                    {searchResults.map((result, index) => (
-                      <SearchResultItem
-                        key={`result-${index}`}
-                        result={result}
-                      />
-                    ))}
+            <span className="flex items-center justify-center">
+              {t("chatRightPanel.sources")}
+              {searchResults.length > 0 && (
+                <span className="ml-1 bg-gray-200 inline-flex items-center justify-center rounded px-1 text-xs font-medium min-w-[20px] h-[18px]">
+                  {searchResults.length}
+                </span>
+              )}
+            </span>
+          </Button>
+          <Button
+            type={activeTab === "images" ? "primary" : "text"}
+            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors rounded-none border-none ${
+              activeTab === "images"
+                ? "bg-white text-gray-900 border-b-2 border-blue-500"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}
+            onClick={() => setActiveTab("images")}
+          >
+            <span className="flex items-center justify-center">
+              {t("chatRightPanel.images")}
+              {processedImages.length > 0 && (
+                <span className="ml-1 bg-gray-200 inline-flex items-center justify-center rounded px-1 text-xs font-medium min-w-[20px] h-[18px]">
+                  {processedImages.length}
+                </span>
+              )}
+            </span>
+          </Button>
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto">
+          {activeTab === "sources" && (
+            <div className="p-4" style={{ maxWidth: "400px" }}>
+              <div className="space-y-2" style={{ maxWidth: "100%" }}>
+                {searchResults.length > 0 ? (
+                  <>
+                    <div className="space-y-3" style={{ maxWidth: "100%" }}>
+                      {searchResults.map((result, index) => (
+                        <SearchResultItem
+                          key={`result-${index}`}
+                          result={result}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center text-gray-500 py-4 text-base">
+                    {t("chatRightPanel.noSearchResults")}
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "images" && (
+            <div className="p-4" style={{ maxWidth: "400px" }}>
+              {processedImages.length > 0 ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    {processedImages
+                      .slice(0, expandedImages ? undefined : maxInitialImages)
+                      .map((imageUrl: string, index: number) => (
+                        <div
+                          key={`img-${index}`}
+                          className="relative border rounded-md overflow-hidden hover:border-blue-500 transition-colors cursor-pointer"
+                          onClick={() => handleImageClick(imageUrl)}
+                        >
+                          {renderImage(imageUrl, index)}
+                        </div>
+                      ))}
+                  </div>
+
+                  {processedImages.length > maxInitialImages && (
+                    <div className="mt-4 text-center">
+                      <Button
+                        type="default"
+                        size="small"
+                        onClick={() => setExpandedImages(!expandedImages)}
+                        className="w-full"
+                      >
+                        {expandedImages
+                          ? t("chatRightPanel.collapseImages")
+                          : t("chatRightPanel.expandImages", {
+                              count: processedImages.length,
+                            })}
+                      </Button>
+                    </div>
+                  )}
                 </>
               ) : (
-                <div className="text-center text-gray-500 py-4 text-base">
-                  {t("chatRightPanel.noSearchResults")}
+                <div className="flex flex-col items-center justify-center p-6 text-center min-h-[200px]">
+                  <Database className="h-12 w-12 text-muted-foreground/40 mb-4" />
+                  <p className="text-lg font-medium mb-2">
+                    {t("chatRightPanel.noImages")}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {t("chatRightPanel.noAssociatedImages")}
+                  </p>
                 </div>
               )}
             </div>
-          </TabsContent>
-
-          <TabsContent
-            value="images"
-            className="p-4"
-            style={{ maxWidth: "400px", overflow: "hidden" }}
-          >
-            {processedImages.length > 0 ? (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  {processedImages
-                    .slice(0, expandedImages ? undefined : maxInitialImages)
-                    .map((imageUrl: string, index: number) => (
-                      <div
-                        key={`img-${index}`}
-                        className="relative border rounded-md overflow-hidden hover:border-blue-500 transition-colors cursor-pointer"
-                        onClick={() => handleImageClick(imageUrl)}
-                      >
-                        {renderImage(imageUrl, index)}
-                      </div>
-                    ))}
-                </div>
-
-                {processedImages.length > maxInitialImages && (
-                  <div className="mt-4 text-center">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setExpandedImages(!expandedImages)}
-                      className="w-full"
-                    >
-                      {expandedImages
-                        ? t("chatRightPanel.collapseImages")
-                        : t("chatRightPanel.expandImages", {
-                            count: processedImages.length,
-                          })}
-                    </Button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center p-6 text-center min-h-[200px]">
-                <Database className="h-12 w-12 text-muted-foreground/40 mb-4" />
-                <p className="text-lg font-medium mb-2">
-                  {t("chatRightPanel.noImages")}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {t("chatRightPanel.noAssociatedImages")}
-                </p>
-              </div>
-            )}
-          </TabsContent>
-        </StaticScrollArea>
-      </Tabs>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

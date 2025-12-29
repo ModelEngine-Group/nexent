@@ -1,37 +1,63 @@
 # Agent Market
 
-Agent Market is an upcoming Nexent module that will provide a curated catalog of ready-to-use agents.
+🎁 Here you'll find high-quality agents created by **Nexent Official** and **community creators**
 
-## 🎯 Coming Features
+You can use them directly to complete specific tasks, or incorporate them as sub-agents into your own agents
 
-Agent Market will let you:
+![Agent Market](./assets/agent-market/agent-market.png)
 
-- **Browse agents** – Explore featured and community-built agents.
-- **Install instantly** – Add high-quality agents to your workspace with one click.
-- **Share your work** – Publish the agents you build.
-- **Rate & give feedback** – Help the community discover great agents.
+## 🔍 Explore and Discover
 
-## ⏳ Stay Tuned
+You can quickly find the best agents through the following methods:
 
-Agent Market is currently under development. We’re building an ecosystem where you can:
+1. Browse or search by use case category
+2. View agent feature descriptions to confirm if they meet your needs 🆗
+3. Check built-in tools to confirm if they are ready or available ✅
 
-- Quickly access verified agents.
-- Share your creations with the community.
-- Discover new use cases and inspiration.
+<div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
 
-## 📢 Follow Updates
 
-Want to know when Agent Market launches?
+  <img src="./assets/agent-market/agent-market-detail.png" 
+       style="width: auto; height: auto;" 
+       alt="Select Agent" />
 
-- Join the [Discord community](https://discord.gg/tb5H3S3wyv) for announcements.
-- Track project updates in the repository.
+  <img src="./assets/agent-market/agent-market-detail2.png" 
+       style="width: auto; height: auto;" 
+       alt="Dialog Box" />
+</div>
+
+## 🔧 Install Agents
+
+Select your preferred agent, download with one click, and add it to your agent space immediately
+
+### 1️⃣ Select Models
+
+🌟 Confirm model availability
+
+✍️ Configure the same model for all agents uniformly, or select appropriate models for the main agent and sub-agents separately
+
+![Agent Market Download](./assets/agent-market/agent-market-download.png)
+
+### 2️⃣ Configure Fields
+
+🔑 Fill in tool permissions as prompted
+
+![Agent Market Download 2](./assets/agent-market/agent-market-download2.png)
+
+After installation, your agent will be ready in **[Agent Space](./agent-space)**
+
+## 📢 Share Your Creations
+
+Created an excellent agent? 👍
+
+Welcome to share your work in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions), and we'll contact you as soon as possible to let more people see and use it!
 
 ## 🚀 Related Features
 
-While Agent Market is being built, you can:
+While waiting for the Agent Market to launch, you can:
 
-1. Manage your agents in **[Agent Space](./agent-space)**.
-2. Create new agents in **[Agent Development](./agent-development)**.
-3. Test agents in **[Start Chat](./start-chat)**.
+1. Manage your own agents in **[Agent Space](./agent-space)**
+2. Create custom agents through **[Agent Development](./agent-development)**
+3. Experience the powerful features of agents in **[Start Chat](./start-chat)**
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+If you encounter any issues during use, please refer to our **[FAQ](../quick-start/faq)** or ask for support in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).

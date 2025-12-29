@@ -17,7 +17,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useMemory } from "@/hooks/useMemory";
@@ -29,7 +29,7 @@ import {
   STANDARD_CARD,
 } from "@/const/layoutConstants";
 
-import MemoryDeleteConfirmation from "./components/MemoryDeleteConfirmation";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 interface MemoryContentProps {
   /** Custom navigation handler (optional) */
@@ -44,6 +44,7 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
   const { user, isSpeedMode } = useAuth();
+  const { confirm } = useConfirmModal();
 
   // Use custom hook for common setup flow logic
   const { canAccessProtectedData, pageVariants, pageTransition } = useSetupFlow({
@@ -66,29 +67,25 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
     message,
   });
 
-  // Clear memory confirmation state
-  const [clearConfirmVisible, setClearConfirmVisible] = useState(false);
-  const [clearTarget, setClearTarget] = useState<{
-    key: string;
-    title: string;
-  } | null>(null);
-
   const handleClearConfirm = (groupKey: string, groupTitle: string) => {
-    setClearTarget({ key: groupKey, title: groupTitle });
-    setClearConfirmVisible(true);
-  };
-
-  const handleClearConfirmOk = async () => {
-    if (clearTarget) {
-      await memory.handleClearMemory(clearTarget.key, clearTarget.title);
-      setClearConfirmVisible(false);
-      setClearTarget(null);
-    }
-  };
-
-  const handleClearConfirmCancel = () => {
-    setClearConfirmVisible(false);
-    setClearTarget(null);
+    confirm({
+      title: t("memoryDeleteModal.title"),
+      content: (
+        <div className="space-y-4 mt-4">
+          <p className="text-base">
+            <Trans
+              i18nKey="memoryDeleteModal.description"
+              values={{ title: groupTitle }}
+              components={{ strong: <strong className="font-semibold" /> }}
+            />
+          </p>
+          <p className="text-sm text-gray-500">
+            {t("memoryDeleteModal.prompt")}
+          </p>
+        </div>
+      ),
+      onOk: () => memory.handleClearMemory(groupKey, groupTitle),
+    });
   };
 
   // Render base settings in a horizontal control bar
@@ -379,13 +376,7 @@ export default function MemoryContent({ onNavigate }: MemoryContentProps) {
         ) : null}
       </motion.div>
 
-      {/* Clear memory confirmation */}
-      <MemoryDeleteConfirmation
-        visible={clearConfirmVisible}
-        targetTitle={clearTarget?.title ?? ""}
-        onOk={handleClearConfirmOk}
-        onCancel={handleClearConfirmCancel}
-      />
+
     </>
   );
 }

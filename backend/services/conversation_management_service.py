@@ -268,7 +268,9 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["Z
         api_base=model_config.get("base_url", ""),
         api_key=model_config.get("api_key", ""),
         temperature=0.7,
-        top_p=0.95
+        top_p=0.95,
+        model_factory=model_config.get("model_factory", None),
+        ssl_verify=model_config.get("ssl_verify", True)
     )
 
     # Build messages
@@ -279,6 +281,10 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["Z
                  "content": prompt_template["SYSTEM_PROMPT"]},
                 {"role": MESSAGE_ROLE["USER"],
                  "content": user_prompt}]
+
+    # ModelEngine 只接受 role/content 的简单结构，确保提前扁平化
+    if model_config.get("model_factory", "").lower() == "modelengine":
+        messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
 
     # Call the model
     response = llm.generate(messages)

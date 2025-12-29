@@ -33,7 +33,8 @@ from backend.services.remote_mcp_service import (
     add_remote_mcp_server_list,
     delete_remote_mcp_server_list,
     get_remote_mcp_server_list,
-    check_mcp_health_and_update_db
+    check_mcp_health_and_update_db,
+    delete_mcp_by_container_id,
 )
 # Patch exception classes to ensure tests use correct exceptions
 import backend.services.remote_mcp_service as remote_service
@@ -342,6 +343,39 @@ class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
             user_id='uid',
             status=False  # Should be False due to exception
         )
+
+
+class TestDeleteMcpByContainerId(unittest.IsolatedAsyncioTestCase):
+    """Test delete_mcp_by_container_id service helper"""
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
+    async def test_delete_by_container_id_success(self, mock_delete):
+        """Test successful soft delete by container ID"""
+        await delete_mcp_by_container_id(
+            tenant_id='tid',
+            user_id='uid',
+            container_id='container-123',
+        )
+
+        mock_delete.assert_called_once_with(
+            container_id='container-123',
+            tenant_id='tid',
+            user_id='uid',
+        )
+
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
+    async def test_delete_by_container_id_db_error(self, mock_delete):
+        """Test database error when deleting by container ID - should propagate"""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        mock_delete.side_effect = SQLAlchemyError("Database error")
+
+        with self.assertRaises(SQLAlchemyError):
+            await delete_mcp_by_container_id(
+                tenant_id='tid',
+                user_id='uid',
+                container_id='container-123',
+            )
 
 class TestIntegrationScenarios(unittest.IsolatedAsyncioTestCase):
     """Integration test scenarios"""

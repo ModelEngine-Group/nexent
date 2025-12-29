@@ -19,6 +19,10 @@ Create and manage knowledge bases, upload documents, and generate summaries. Kno
 
 ![File Upload](./assets/knowledge-base/create-knowledge-base.png)
 
+💡 Hover over the status to understand the progress and error reasons
+
+![File Upload](./assets/knowledge-base/tip.png)
+
 ### Supported File Formats
 
 Nexent supports multiple file formats, including:
@@ -75,4 +79,4 @@ After completing knowledge base configuration, we recommend you continue with:
 1. **[Agent Development](./agent-development)** – Create and configure agents
 2. **[Start Chat](./start-chat)** – Interact with your agent
 
-Need help? Check the **[FAQ](../getting-started/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
+Need help? Check the **[FAQ](../quick-start/faq)** or open a thread in [GitHub Discussions](https://github.com/ModelEngine-Group/nexent/discussions).
