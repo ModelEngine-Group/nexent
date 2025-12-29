@@ -37,6 +37,80 @@ class DataMateClient:
             return f"{self.base_url}{path}"
         return f"{self.base_url}/{path}"
     
+    def _build_headers(self, authorization: Optional[str] = None) -> Dict[str, str]:
+        """
+        Build request headers with optional authorization.
+        
+        Args:
+            authorization: Optional authorization header value
+            
+        Returns:
+            Dictionary of headers
+        """
+        headers = {}
+        if authorization:
+            headers["Authorization"] = authorization
+        return headers
+    
+    def _handle_error_response(self, response: httpx.Response, error_message: str) -> None:
+        """
+        Handle error response and raise appropriate exception.
+        
+        Args:
+            response: HTTP response object
+            error_message: Base error message to include in exception (e.g., "Failed to get knowledge base list")
+            
+        Raises:
+            Exception: With detailed error message
+        """
+        error_detail = (
+            response.json().get("detail", "unknown error")
+            if response.headers.get("content-type", "").startswith("application/json")
+            else response.text
+        )
+        raise Exception(f"{error_message} (status {response.status_code}): {error_detail}")
+    
+    def _make_request(
+        self,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        json: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        error_message: str = "Request failed"
+    ) -> httpx.Response:
+        """
+        Make HTTP request with error handling.
+        
+        Args:
+            method: HTTP method ("GET" or "POST")
+            url: Request URL
+            headers: Request headers
+            json: Optional JSON payload for POST requests
+            timeout: Optional timeout override
+            error_message: Error message to use if request fails
+            
+        Returns:
+            HTTP response object
+            
+        Raises:
+            Exception: If the request fails (with detailed error message)
+        """
+        request_timeout = timeout if timeout is not None else self.timeout
+        
+        with httpx.Client(timeout=request_timeout) as client:
+            if method.upper() == "GET":
+                response = client.get(url, headers=headers)
+            elif method.upper() == "POST":
+                response = client.post(url, json=json, headers=headers)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+            
+            if response.status_code != 200:
+                self._handle_error_response(response, error_message)
+            
+            return response
+    
     def list_knowledge_bases(
         self,
         page: int = 0,
@@ -60,25 +134,11 @@ class DataMateClient:
         try:
             url = self._build_url("/api/knowledge-base/list")
             payload = {"page": page, "size": size}
-            
-            headers = {}
-            if authorization:
-                headers["Authorization"] = authorization
+            headers = self._build_headers(authorization)
             
             logger.info(f"Fetching DataMate knowledge bases from: {url}, page={page}, size={size}")
             
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(url, json=payload, headers=headers)
-
-            if response.status_code != 200:
-                error_detail = (
-                    response.json().get("detail", "unknown error")
-                    if response.headers.get("content-type", "").startswith("application/json")
-                    else response.text
-                )
-                raise Exception(
-                    f"Failed to get knowledge base list (status {response.status_code}): {error_detail}")
-
+            response = self._make_request("POST", url, headers, json=payload, error_message="Failed to get knowledge base list")
             data = response.json()
             
             # Extract knowledge base list from response
@@ -118,23 +178,8 @@ class DataMateClient:
             url = self._build_url(f"/api/knowledge-base/{knowledge_base_id}/files")
             logger.info(f"Fetching files for DataMate knowledge base {knowledge_base_id} from: {url}")
 
-            headers = {}
-            if authorization:
-                headers["Authorization"] = authorization
-
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.get(url, headers=headers)
-
-
-            if response.status_code != 200:
-                error_detail = (
-                    response.json().get("detail", "unknown error")
-                    if response.headers.get("content-type", "").startswith("application/json")
-                    else response.text
-                )
-                raise Exception(f"Failed to get knowledge base files (status {response.status_code}): {error_detail}")
-
-            response.raise_for_status()
+            headers = self._build_headers(authorization)
+            response = self._make_request("GET", url, headers, error_message="Failed to get knowledge base files")
             data = response.json()
 
             # Extract file list from response
@@ -144,7 +189,7 @@ class DataMateClient:
 
             logger.info(f"Successfully fetched {len(files)} files for datamate knowledge base {knowledge_base_id}")
             return files
-
+            
         except httpx.HTTPError as e:
             logger.error(f"HTTP error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
             raise RuntimeError(f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
@@ -174,21 +219,8 @@ class DataMateClient:
             url = self._build_url(f"/api/knowledge-base/{knowledge_base_id}")
             logger.info(f"Fetching details for DataMate knowledge base {knowledge_base_id} from: {url}")
             
-            headers = {}
-            if authorization:
-                headers["Authorization"] = authorization
-            
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.get(url, headers=headers)
-
-            if response.status_code != 200:
-                error_detail = (
-                    response.json().get("detail", "unknown error")
-                    if response.headers.get("content-type", "").startswith("application/json")
-                    else response.text
-                )
-                raise Exception(f"Failed to get knowledge base details (status {response.status_code}): {error_detail}")
-
+            headers = self._build_headers(authorization)
+            response = self._make_request("GET", url, headers, error_message="Failed to get knowledge base details")
             data = response.json()
             
             # Extract knowledge base details from response
@@ -237,26 +269,19 @@ class DataMateClient:
                 "knowledgeBaseIds": knowledge_base_ids,
             }
             
-            headers = {}
-            if authorization:
-                headers["Authorization"] = authorization
+            headers = self._build_headers(authorization)
             
             logger.info(
                 f"Retrieving DataMate knowledge bases: query='{query}', "
                 f"knowledge_base_ids={knowledge_base_ids}, top_k={top_k}, threshold={threshold}"
             )
             
-            with httpx.Client(timeout=self.timeout * 2) as client:  # Longer timeout for retrieve
-                response = client.post(url, json=payload, headers=headers)
-                if response.status_code != 200:
-                    error_detail = (
-                        response.json().get("detail", "unknown error")
-                        if response.headers.get("content-type", "").startswith("application/json")
-                        else response.text
-                    )
-                    raise Exception(
-                        f"Failed to retrieve knowledge base content (status {response.status_code}): {error_detail}")
-
+            # Longer timeout for retrieve operation
+            response = self._make_request(
+                "POST", url, headers, json=payload, timeout=self.timeout * 2,
+                error_message="Failed to retrieve knowledge base content"
+            )
+            
             search_results = []
             data = response.json()
             # Extract search results from response

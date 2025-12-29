@@ -246,7 +246,7 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
                 "name_resolver": build_knowledge_name_mapping(tenant_id=tenant_id, user_id=user_id),
             }
-        elif tool_config.class_name == "AnalyzeDocumentTool":
+        elif tool_config.class_name == "AnalyzeTextFileTool":
             tool_config.metadata = {
                 "llm_model": get_llm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,

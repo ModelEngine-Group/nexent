@@ -29,7 +29,9 @@ def datamate_tool(mock_observer: MessageObserver, mock_datamate_client: DataMate
         server_port=8080,
         observer=mock_observer,
     )
-    tool.datamate_client = mock_datamate_client
+    # DataMateSearchTool stores a DataMateCore instance which exposes a `client` attribute.
+    # Set the client's mock on the tool's datamate_core to reflect current implementation.
+    tool.datamate_core.client = mock_datamate_client
     return tool
 
 
@@ -73,7 +75,8 @@ class TestDataMateSearchToolInit:
         assert tool.kb_page == 0
         assert tool.kb_page_size == 20
         assert tool.observer is mock_observer
-        assert isinstance(tool.datamate_client, DataMateClient)
+        # The tool exposes the DataMate client via datamate_core.client
+        assert isinstance(tool.datamate_core.client, DataMateClient)
 
     @pytest.mark.parametrize("server_ip", ["", None])
     def test_init_invalid_server_ip(self, server_ip):
@@ -133,12 +136,19 @@ class TestForward:
         assert datamate_tool.record_ops == 1 + len(results)
 
         mock_datamate_client.list_knowledge_bases.assert_called_once_with(page=0, size=20)
-        mock_datamate_client.retrieve_knowledge_base.assert_called_once_with(
-            query="test query",
-            knowledge_base_ids=["kb1"],
-            top_k=2,
-            threshold=0.5,
-        )
+        # Support both positional and keyword invocation styles from DataMate client wrapper.
+        mock_datamate_client.retrieve_knowledge_base.assert_called_once()
+        _args, _kwargs = mock_datamate_client.retrieve_knowledge_base.call_args
+        if _args:
+            assert _args[0] == "test query"
+            assert _args[1] == ["kb1"]
+            assert _args[2] == 2
+            assert _args[3] == 0.5
+        else:
+            assert _kwargs["query"] == "test query"
+            assert _kwargs["knowledge_base_ids"] == ["kb1"]
+            assert _kwargs["top_k"] == 2
+            assert _kwargs["threshold"] == 0.5
         mock_datamate_client.build_file_download_url.assert_any_call("kb1", "orig-0")
 
     def test_forward_success_with_observer_zh(self, datamate_tool: DataMateSearchTool, mock_datamate_client: DataMateClient):
@@ -153,7 +163,7 @@ class TestForward:
 
     def test_forward_no_observer(self, mock_datamate_client: DataMateClient):
         tool = DataMateSearchTool(server_ip="127.0.0.1", server_port=8080, observer=None)
-        tool.datamate_client = mock_datamate_client
+        tool.datamate_core.client = mock_datamate_client
         mock_datamate_client.list_knowledge_bases.return_value = _build_kb_list(["kb1"])
         mock_datamate_client.retrieve_knowledge_base.return_value = _build_search_results("kb1", count=1)
         mock_datamate_client.build_file_download_url.return_value = "http://dl/kb1/file-1"

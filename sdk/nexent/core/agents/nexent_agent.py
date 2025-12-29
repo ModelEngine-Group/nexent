@@ -89,7 +89,7 @@ class NexentAgent:
                 name_resolver = tool_config.metadata.get(
                     "name_resolver", None) if tool_config.metadata else None
                 tools_obj.name_resolver = {} if name_resolver is None else name_resolver
-            elif class_name == "AnalyzeDocumentTool":
+            elif class_name == "AnalyzeTextFileTool":
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),

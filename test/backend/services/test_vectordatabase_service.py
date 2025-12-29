@@ -441,8 +441,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.assert_called_once_with("*")
         mock_get_knowledge.assert_called_once_with(tenant_id="test_tenant")
 
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_with_stats(self, mock_get_knowledge):
+    def test_list_indices_with_stats(self, mock_get_knowledge, mock_update_model):
         """
         Test listing indices with statistics included.
 
@@ -453,9 +454,16 @@ class TestElasticSearchService(unittest.TestCase):
         """
         # Setup
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
+        # get_indices_detail returns Dict[str, Dict[str, Dict[str, Any]]], not IndexStatsSummary objects
         self.mock_vdb_core.get_indices_detail.return_value = {
-            "index1": IndexStatsSummary(base_info={"doc_count": 10, "embedding_model": "test-model"}),
-            "index2": IndexStatsSummary(base_info={"doc_count": 20, "embedding_model": "test-model"}),
+            "index1": {
+                "base_info": {"doc_count": 10, "embedding_model": "test-model"},
+                "search_performance": {}
+            },
+            "index2": {
+                "base_info": {"doc_count": 20, "embedding_model": "test-model"},
+                "search_performance": {}
+            },
         }
         mock_get_knowledge.return_value = [
             {"index_name": "index1", "embedding_model_name": "test-model"},
@@ -505,8 +513,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices"], [])
         self.assertEqual(result["count"], 0)
 
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_stats_defaults_when_missing(self, mock_get_info):
+    def test_list_indices_stats_defaults_when_missing(self, mock_get_info, mock_update_model):
         """
         Test list_indices include_stats path when Elasticsearch returns no stats for an index.
         """
@@ -539,7 +548,7 @@ class TestElasticSearchService(unittest.TestCase):
             {"index_name": "index1", "embedding_model_name": None}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
-            "index1": IndexStatsSummary(base_info={"embedding_model": "text-embedding-ada-002"})
+            "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
         }
 
         result = ElasticSearchService.list_indices(
@@ -580,8 +589,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertIn("503 Service Unavailable", str(context.exception))
 
+    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_stats_keeps_non_stat_fields(self, mock_get_info):
+    def test_list_indices_stats_keeps_non_stat_fields(self, mock_get_info, mock_update_model):
         """
         Test that list_indices preserves all stats fields returned by ElasticSearchCore.
         """
@@ -590,14 +600,14 @@ class TestElasticSearchService(unittest.TestCase):
             {"index_name": "index1", "embedding_model_name": "model-A"}
         ]
         detailed_stats = {
-            "index1": IndexStatsSummary(
-                base_info={
+            "index1": {
+                "base_info": {
                     "doc_count": 42,
                     "process_source": "Unstructured",
                     "embedding_model": "text-embedding-3-large"
                 },
-                extra={"search_performance": {"avg_time": 12.3}},
-            )
+                "search_performance": {"avg_time": 12.3}
+            }
         }
         self.mock_vdb_core.get_indices_detail.return_value = detailed_stats
 
@@ -610,7 +620,8 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         self.assertEqual(len(result["indices_info"]), 1)
-        self.assertEqual(result["indices_info"][0]["stats"], detailed_stats["index1"].to_dict())
+        # `detailed_stats` is already a dict; compare directly (models now return dicts).
+        self.assertEqual(result["indices_info"][0]["stats"], detailed_stats["index1"])
 
     def test_vectorize_documents_success(self):
         """
@@ -1556,9 +1567,11 @@ class TestElasticSearchService(unittest.TestCase):
             # Create a mock loop with run_in_executor that returns a coroutine
             mock_loop = MagicMock()
 
-            async def mock_run_in_executor(executor, func, *args):
-                # Execute the function synchronously and return its result
-                return func()
+            def mock_run_in_executor(executor, func, *args):
+                # run_in_executor returns a coroutine, so we need to create one
+                async def _execute():
+                    return func(*args)
+                return _execute()
 
             mock_loop.run_in_executor = mock_run_in_executor
 
@@ -2467,10 +2480,10 @@ class TestElasticSearchService(unittest.TestCase):
         1. The get_vdb_core function returns the correct elastic_core instance
         2. The function is properly imported and accessible
         """
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from backend.services.vectordatabase_service import get_vector_db_core, VectorDatabaseType
 
-        # Execute
-        result = get_vector_db_core()
+        # Execute - pass the enum value explicitly since it's a FastAPI Query parameter
+        result = get_vector_db_core(VectorDatabaseType.ELASTICSEARCH)
 
         # Assert
         self.assertIsNotNone(result)
@@ -2742,6 +2755,19 @@ class TestRethrowOrPlain(unittest.TestCase):
             get_vector_db_core(db_type="unsupported")
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
+
+    @patch('backend.services.vectordatabase_service.DataMateCore')
+    def test_get_vector_db_core_datamate(self, mock_datamate_class):
+        """get_vector_db_core returns DataMateCore when db_type is DATAMATE."""
+        from backend.services.vectordatabase_service import get_vector_db_core, VectorDatabaseType, DATAMATE_BASE_URL
+
+        mock_instance = MagicMock()
+        mock_datamate_class.return_value = mock_instance
+
+        result = get_vector_db_core(VectorDatabaseType.DATAMATE)
+
+        mock_datamate_class.assert_called_once_with(base_url=DATAMATE_BASE_URL)
+        self.assertIs(result, mock_instance)
 
     def test_rethrow_or_plain_parses_error_code(self):
         """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
