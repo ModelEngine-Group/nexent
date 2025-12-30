@@ -136,6 +136,7 @@ export const modelService = {
     provider: string;
     type: ModelType;
     apiKey: string;
+    baseUrl?: string;
   }): Promise<any[]> => {
     try {
       const response = await fetch(
@@ -147,6 +148,7 @@ export const modelService = {
             provider: model.provider,
             model_type: model.type,
             api_key: model.apiKey,
+            ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
         }
       );
@@ -202,6 +204,7 @@ export const modelService = {
     provider: string;
     type: ModelType;
     api_key: string;
+    baseUrl?: string;
   }): Promise<any[]> => {
     try {
       const response = await fetch(
@@ -213,6 +216,7 @@ export const modelService = {
             provider: model.provider,
             model_type: model.type,
             api_key: model.api_key,
+            ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
         }
       );
