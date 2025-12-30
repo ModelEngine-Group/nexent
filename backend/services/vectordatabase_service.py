@@ -24,7 +24,6 @@ from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEm
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
-from nexent.vector_database.models import IndexStatsSummary
 
 from consts.const import DATAMATE_BASE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
@@ -87,10 +86,7 @@ logger = logging.getLogger("vectordatabase_service")
 
 
 def get_vector_db_core(
-    db_type: VectorDatabaseType = Query(
-        VectorDatabaseType.ELASTICSEARCH,
-        description="Vector database provider: elasticsearch or datamate",
-    ),
+    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH,
 ) -> VectorDatabaseCore:
     """
     Return a VectorDatabaseCore implementation based on the requested type.
@@ -104,10 +100,6 @@ def get_vector_db_core(
     Raises:
         ValueError: If the requested database type is not supported.
     """
-    # When called directly (outside FastAPI), the default may be a Query object.
-    if not isinstance(db_type, VectorDatabaseType):
-        db_type = VectorDatabaseType.ELASTICSEARCH
-
     if db_type == VectorDatabaseType.ELASTICSEARCH:
         return ElasticSearchCore(
             host=ES_HOST,
@@ -541,24 +533,19 @@ class ElasticSearchService:
             if filtered_indices_list:
                 indice_stats = vdb_core.get_indices_detail(filtered_indices_list)
                 for index_name in filtered_indices_list:
-                    stats_entry = indice_stats.get(index_name)
-                    stats_payload = (
-                        stats_entry.to_dict()
-                        if isinstance(stats_entry, IndexStatsSummary)
-                        else (stats_entry or {})
-                    )
+                    index_stats = indice_stats.get(index_name, {})
                     stats_info.append({
+                        # Internal index name (used as ID)
                         "name": index_name,
+                        # User-facing knowledge base name from PostgreSQL (fallback to index_name)
                         "display_name": index_to_display_name.get(index_name, index_name),
-                        "stats": stats_payload,
+                        "stats": index_stats,
                     })
                     if index_name in model_name_is_none_list:
-                        update_model_name_by_index_name(
-                            index_name,
-                            stats_payload.get("base_info", {}).get("embedding_model", ""),
-                            tenant_id,
-                            user_id,
-                        )
+                        update_model_name_by_index_name(index_name,
+                                                        index_stats.get("base_info", {}).get(
+                                                            "embedding_model", ""),
+                                                        tenant_id, user_id)
             response["indices_info"] = stats_info
 
         return response

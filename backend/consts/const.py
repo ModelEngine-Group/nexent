@@ -271,9 +271,6 @@ THINK_START_PATTERN = "<think>"
 THINK_END_PATTERN = "</think>"
 
 
-# DataMate Configuration
-DATAMATE_BASE_URL = os.getenv("DATAMATE_BASE_URL", "http://localhost:30000")
-
 # Telemetry and Monitoring Configuration
 ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
 SERVICE_NAME = os.getenv("SERVICE_NAME", "nexent-backend")

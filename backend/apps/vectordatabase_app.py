@@ -16,7 +16,6 @@ from services.vectordatabase_service import (
     check_knowledge_base_exist_impl,
 )
 from services.redis_service import get_redis_service
-from services.datamate_service import sync_datamate_knowledge_bases
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name
@@ -453,32 +452,4 @@ async def hybrid_search(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error executing hybrid search: {str(exc)}",
-        )
-
-
-@router.post("/sync/datamate")
-async def sync_datamate_knowledge_bases_endpoint(
-        authorization: Optional[str] = Header(None)
-):
-    """
-    Sync knowledge bases and files from DataMate.
-    
-    This endpoint:
-    1. Fetches the list of knowledge bases from DataMate
-    2. For each knowledge base, fetches its file list with metadata
-       (name, status, size, upload_date)
-    
-    Returns:
-        Dictionary containing knowledge bases with their file lists.
-    """
-    try:
-        # No need to check user_id/tenant_id for DataMate sync
-        # as it's a read-only operation from external service
-        result = await sync_datamate_knowledge_bases()
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
-    except Exception as exc:
-        logger.error(f"Failed to sync DataMate knowledge bases: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error syncing DataMate knowledge bases: {str(exc)}",
         )
