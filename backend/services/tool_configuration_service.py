@@ -502,7 +502,7 @@ def _validate_local_tool(
         user_id: User ID for knowledge base tools (optional)
 
     Returns:
-        Dict[str, Any]: The actual result returned by the tool's forward method, 
+        Dict[str, Any]: The actual result returned by the tool's forward method,
                        serving as proof that the tool works correctly
 
     Raises:
