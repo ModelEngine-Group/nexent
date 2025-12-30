@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { Upload, Progress } from "antd";
-import { InboxOutlined, WarningFilled } from "@ant-design/icons";
+import { WarningFilled } from "@ant-design/icons";
+import { Inbox } from "lucide-react";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 
 const { Dragger } = Upload;
@@ -171,7 +172,7 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                 >
                   <div className="flex flex-col items-center justify-center h-full">
                     <p className="ant-upload-drag-icon !mb-4">
-                      <InboxOutlined className="text-[48px] text-blue-600" />
+                      <Inbox size={48} className="text-blue-600" />
                     </p>
                     <p className="ant-upload-text !mb-2 text-base">
                       {t("knowledgeBase.upload.dragHint")}

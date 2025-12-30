@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons' 
+import { CircleCheck, XCircle, LoaderCircle } from "lucide-react"
 import { DOCUMENT_STATUS } from "@/const/knowledgeBase"
 import React from 'react'
 import log from "@/lib/logger";
@@ -165,11 +165,11 @@ export type ConnectivityStatusType = "checking" | "available" | "unavailable" | 
 export const getConnectivityIcon = (status: ConnectivityStatusType): React.ReactNode => {
   switch (status) {
     case "checking":
-      return React.createElement(LoadingOutlined, { style: { color: '#1890ff' } })
+      return React.createElement(LoaderCircle, { className: 'animate-spin', color: '#1890ff', size: 16 })
     case "available":
-      return React.createElement(CheckCircleOutlined, { style: { color: '#52c41a' } })
+      return React.createElement(CircleCheck, { color: '#52c41a', size: 16 })
     case "unavailable":
-      return React.createElement(CloseCircleOutlined, { style: { color: '#ff4d4f' } })
+      return React.createElement(XCircle, { color: '#ff4d4f', size: 16 })
     default:
       return null
   }
@@ -198,17 +198,17 @@ export const getConnectivityMeta = (status: ConnectivityStatusType): Connectivit
   switch (status) {
     case "checking":
       return {
-        icon: React.createElement(LoadingOutlined, { style: { color: '#1890ff' } }),
+        icon: React.createElement(LoaderCircle, { className: 'animate-spin', color: '#1890ff', size: 16 }),
         color: '#1890ff'
       }
     case "available":
       return {
-        icon: React.createElement(CheckCircleOutlined, { style: { color: '#52c41a' } }),
+        icon: React.createElement(CircleCheck, { color: '#52c41a', size: 16 }),
         color: '#52c41a'
       }
     case "unavailable":
       return {
-        icon: React.createElement(CloseCircleOutlined, { style: { color: '#ff4d4f' } }),
+        icon: React.createElement(XCircle, { color: '#ff4d4f', size: 16 }),
         color: '#ff4d4f'
       }
     default:

@@ -1,0 +1,43 @@
+name: Docker Build MCP Images
+
+concurrency:
+  group: docker-build-mcp-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'make/mcp/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop]
+    paths:
+      - 'backend/**'
+      - 'sdk/**'
+      - 'make/mcp/**'
+      - '.github/workflows/**'
+
+jobs:
+  build-mcp-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP image (amd64) and load locally
+        run: |
+          docker build --platform linux/amd64 -t nexent/nexent-mcp:dev-amd64 -f make/mcp/Dockerfile .
+
+  build-mcp-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP image (arm64) and load locally
+        run: |
+          docker build --platform linux/arm64 -t nexent/nexent-mcp:dev-arm64 -f make/mcp/Dockerfile .
+
+

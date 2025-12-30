@@ -143,7 +143,8 @@ async def test_perform_connectivity_check_embedding():
             model_name="text-embedding-ada-002",
             base_url="https://api.openai.com",
             api_key="test-key",
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=True
         )
         mock_embedding_instance.dimension_check.assert_called_once()
 
@@ -171,7 +172,8 @@ async def test_perform_connectivity_check_multi_embedding():
             model_name="jina-embeddings-v2",
             base_url="https://api.jina.ai",
             api_key="test-key",
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=True
         )
         mock_embedding_instance.dimension_check.assert_called_once()
 
@@ -236,7 +238,8 @@ async def test_perform_connectivity_check_vlm():
             mock_observer_instance,
             model_id="gpt-4-vision",
             api_base="https://api.openai.com",
-            api_key="test-key"
+            api_key="test-key",
+            ssl_verify=True
         )
         mock_model_instance.check_connectivity.assert_called_once()
 
@@ -645,7 +648,8 @@ async def test_embedding_dimension_check_embedding_success():
             model_name="test-embedding",
             base_url="http://test.com",
             api_key="test-key",
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=True
         )
 
 
@@ -665,7 +669,8 @@ async def test_embedding_dimension_check_multi_embedding_success():
             model_name="test-multi-embedding",
             base_url="http://test.com",
             api_key="test-key",
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=True
         )
 
 
@@ -708,7 +713,7 @@ async def test_embedding_dimension_check_wrapper_success():
         assert dimension == 1536
         mock_get_name.assert_called_once_with(model_config)
         mock_internal_check.assert_called_once_with(
-            "openai/text-embedding-ada-002", "embedding", "https://api.openai.com", "test-key"
+            "openai/text-embedding-ada-002", "embedding", "https://api.openai.com", "test-key", True
         )
 
 
@@ -751,7 +756,8 @@ async def test_embedding_dimension_check_multi_embedding_empty_response():
             model_name="test-multi-embedding",
             base_url="http://test.com",
             api_key="test-key",
-            embedding_dim=0
+            embedding_dim=0,
+            ssl_verify=True
         )
         # Verify warning was logged
         mock_logging.warning.assert_called_once_with(
@@ -780,7 +786,7 @@ async def test_embedding_dimension_check_wrapper_value_error():
         assert dimension == 0
         mock_get_name.assert_called_once_with(model_config)
         mock_internal_check.assert_called_once_with(
-            "test-model", "unsupported", "https://api.test.com", "test-key"
+            "test-model", "unsupported", "https://api.test.com", "test-key", True
         )
         # Verify error was logged with the specific ValueError message
         mock_logger.error.assert_called_once_with(

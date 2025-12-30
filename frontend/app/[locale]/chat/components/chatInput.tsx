@@ -1,35 +1,29 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, Mic, MicOff, Square, X, AlertCircle } from "lucide-react";
+import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
 import {
-  AiFillFileImage,
-  AiFillFilePdf,
-  AiFillFileWord,
-  AiFillFileExcel,
-  AiFillFilePpt,
-  AiFillFileText,
-  AiFillFileMarkdown,
-  AiFillHtml5,
-  AiFillCode,
-  AiFillFileUnknown,
-  AiOutlineUpload,
-} from "react-icons/ai";
+  FileImageFilled,
+  FilePdfFilled,
+  FileWordFilled,
+  FileExcelFilled,
+  FilePptFilled,
+  FileTextFilled,
+  FileMarkdownFilled,
+  Html5Filled,
+  CodeFilled,
+  FileUnknownFilled,
+} from "@ant-design/icons";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Button } from "antd";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { conversationService } from "@/services/conversationService";
 import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
 import log from "@/lib/logger";
 import { chatConfig } from "@/const/chatConfig";
-import { FilePreview } from "@/types/chat";
+import { FilePreview, Agent } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
 
@@ -245,48 +239,48 @@ const getFileIcon = (file: File) => {
 
   // Image file
   if (fileType.startsWith("image/")) {
-    return <AiFillFileImage size={iconSize} color="#8e44ad" />;
+    return <FileImageFilled size={iconSize} color="#8e44ad" />;
   }
 
   // Check each file type category using config
   if (chatConfig.fileIcons.pdf.includes(extension)) {
-    return <AiFillFilePdf size={iconSize} color="#e74c3c" />;
+    return <FilePdfFilled size={iconSize} color="#e74c3c" />;
   }
-  
+
   if (chatConfig.fileIcons.word.includes(extension)) {
-    return <AiFillFileWord size={iconSize} color="#3498db" />;
+    return <FileWordFilled size={iconSize} color="#3498db" />;
   }
-  
+
   if (chatConfig.fileIcons.text.includes(extension)) {
-    return <AiFillFileText size={iconSize} color="#7f8c8d" />;
+    return <FileTextFilled size={iconSize} color="#7f8c8d" />;
   }
-  
+
   if (chatConfig.fileIcons.markdown.includes(extension)) {
-    return <AiFillFileMarkdown size={iconSize} color="#34495e" />;
+    return <FileMarkdownFilled size={iconSize} color="#34495e" />;
   }
-  
+
   if (chatConfig.fileIcons.excel.includes(extension)) {
-    return <AiFillFileExcel size={iconSize} color="#27ae60" />;
+    return <FileExcelFilled size={iconSize} color="#27ae60" />;
   }
-  
+
   if (chatConfig.fileIcons.powerpoint.includes(extension)) {
-    return <AiFillFilePpt size={iconSize} color="#e67e22" />;
+    return <FilePptFilled size={iconSize} color="#e67e22" />;
   }
-  
+
   if (chatConfig.fileIcons.html.includes(extension)) {
-    return <AiFillHtml5 size={iconSize} color="#e67e22" />;
+    return <Html5Filled size={iconSize} color="#e67e22" />;
   }
-  
+
   if (chatConfig.fileIcons.code.includes(extension)) {
-    return <AiFillCode size={iconSize} color="#f39c12" />;
+    return <CodeFilled size={iconSize} color="#f39c12" />;
   }
-  
+
   if (chatConfig.fileIcons.json.includes(extension)) {
-    return <AiFillCode size={iconSize} color="#f1c40f" />;
+    return <CodeFilled size={iconSize} color="#f1c40f" />;
   }
 
   // Default file icon
-  return <AiFillFileUnknown size={iconSize} color="#95a5a6" />;
+  return <FileUnknownFilled size={iconSize} color="#95a5a6" />;
 };
 
 // File limit constants from config
@@ -311,6 +305,7 @@ interface ChatInputProps {
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
   selectedAgentId?: number | null;
   onAgentSelect?: (agentId: number | null) => void;
+  cachedAgents?: Agent[]; // Optional cached agents to avoid repeated API calls
 }
 
 export function ChatInput({
@@ -323,6 +318,7 @@ export function ChatInput({
   onStop,
   onKeyDown,
   onRecordingStatusChange,
+  cachedAgents,
   onFileUpload,
   onImageUpload,
   attachments = [],
@@ -965,7 +961,7 @@ export function ChatInput({
         <div className="p-4 max-w-md text-center">
           <div className="flex justify-center mb-2">
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <AiOutlineUpload className="h-5 w-5 text-blue-500" />
+              <Upload className="h-5 w-5 text-blue-500" />
             </div>
           </div>
           <h3 className="text-base font-medium mb-1 text-blue-700">
@@ -1027,83 +1023,81 @@ export function ChatInput({
             onAgentSelect={onAgentSelect || (() => {})}
             disabled={isLoading || isStreaming}
             isInitialMode={isInitialMode}
+            agents={cachedAgents}
           />
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
           {/* Voice to text button */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
+          <Tooltip
+            title={
+              isRecording
+                ? t("chatInput.stopRecording")
+                : t("chatInput.startRecording")
+            }
+          >
+            <Button
+                  type="default"
+                  shape="circle"
+                  size="middle"
                   className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
                   onClick={toggleRecording}
                   disabled={recordingStatus === "connecting" || isStreaming}
-                >
-                  {isRecording ? (
-                    <MicOff className="h-5 w-5" />
-                  ) : (
-                    <Mic className="h-5 w-5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {isRecording
-                  ? t("chatInput.stopRecording")
-                  : t("chatInput.startRecording")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+            >
+              {isRecording ? (
+                <MicOff className="h-5 w-5" />
+              ) : (
+                <Mic className="h-5 w-5" />
+              )}
+            </Button>
+          </Tooltip>
 
           {/* Upload file button */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
-                  onClick={() =>
-                    document.getElementById("file-upload-regular")?.click()
-                  }
-                >
-                  <Paperclip className="h-5 w-5" />
-                  <Input
-                    type="file"
-                    id="file-upload-regular"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                    accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
-                    multiple
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("chatInput.uploadFiles")}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip title={t("chatInput.uploadFiles")}>
+            <Button
+              type="default"
+              shape="circle"
+              size="middle"
+              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+              onClick={() =>
+                document.getElementById("file-upload-regular")?.click()
+              }
+            >
+              <Paperclip className="h-5 w-5" />
+              <Input
+                type="file"
+                id="file-upload-regular"
+                className="hidden"
+                onChange={handleFileUpload}
+                accept={`image/*,${Object.values(chatConfig.fileIcons).flat().map(ext => `.${ext}`).join(',')}`}
+                multiple
+              />
+            </Button>
+          </Tooltip>
 
           {isStreaming ? (
-            <TooltipProvider>
-              <Tooltip open={showStopTooltip} onOpenChange={setShowStopTooltip}>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={onStop}
-                    size="icon"
-                    className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
-                  >
-                    <Square className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("chatInput.stopGenerating")}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip
+              title={t("chatInput.stopGenerating")}
+              open={showStopTooltip}
+              onOpenChange={setShowStopTooltip}
+            >
+              <Button
+                onClick={onStop}
+                type="primary"
+                shape="circle"
+                size="middle"
+                className="h-10 w-10 bg-red-500 hover:bg-red-600 text-white rounded-full"
+              >
+                <Square className="h-5 w-5" />
+              </Button>
+            </Tooltip>
           ) : (
             <Button
               onClick={handleSend}
               disabled={!input.trim() || isLoading || !selectedAgentId}
-              size="icon"
+              type="primary"
+              shape="circle"
+              size="middle"
               className={`h-10 w-10 ${
                 hasUnsupportedFiles || !selectedAgentId
                   ? "bg-gray-400 cursor-not-allowed"

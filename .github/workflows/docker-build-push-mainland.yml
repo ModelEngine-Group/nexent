@@ -244,6 +244,58 @@ jobs:
         if: inputs.push_latest == 'true'
         run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
 
+  build-and-push-mcp-amd64:
+    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    steps:
+      - name: Set up Docker Buildx
+        run: |
+          if ! docker buildx inspect nexent_builder > /dev/null 2>&1; then
+            docker buildx create --name nexent_builder --use
+          else
+            docker buildx use nexent_builder
+          fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP image (amd64) and load locally
+        run: |
+          docker buildx build --platform linux/amd64 --load -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-amd64 -f make/mcp/Dockerfile --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua .
+      - name: Login to Tencent Cloud
+        run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
+      - name: Push MCP image (amd64) to Tencent Cloud
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-amd64
+      - name: Tag MCP image (amd64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-amd64 ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:amd64
+      - name: Push latest MCP image (amd64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:amd64
+
+  build-and-push-mcp-arm64:
+    runs-on: ${{ fromJson(inputs.runner_label_json) }}
+    steps:
+      - name: Set up Docker Buildx
+        run: |
+          if ! docker buildx inspect nexent_builder > /dev/null 2>&1; then
+            docker buildx create --name nexent_builder --use
+          else
+            docker buildx use nexent_builder
+          fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build MCP image (arm64) and load locally
+        run: |
+          docker buildx build --platform linux/arm64 --load -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-arm64 -f make/mcp/Dockerfile --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua .
+      - name: Login to Tencent Cloud
+        run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
+      - name: Push MCP image (arm64) to Tencent Cloud
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-arm64
+      - name: Tag MCP image (arm64) as latest
+        if: inputs.push_latest == 'true'
+        run: docker tag ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-arm64 ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:arm64
+      - name: Push latest MCP image (arm64) to Tencent Cloud
+        if: inputs.push_latest == 'true'
+        run: docker push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:arm64
+
   manifest-push-main:
     runs-on: ubuntu-latest
     needs:
@@ -331,3 +383,25 @@ jobs:
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:amd64 \
             ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:arm64
           docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal:latest
+
+  manifest-push-mcp:
+    runs-on: ubuntu-latest
+    needs:
+      - build-and-push-mcp-amd64
+      - build-and-push-mcp-arm64
+    steps:
+      - name: Login to Tencent Cloud
+        run: echo ${{ secrets.TCR_PASSWORD }} | docker login ccr.ccs.tencentyun.com --username=${{ secrets.TCR_USERNAME }} --password-stdin
+      - name: Create and push manifest for mcp (Tencent Cloud)
+        run: |
+          docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }} \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-amd64 \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}-arm64
+          docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:${{ inputs.version }}
+      - name: Create and push latest manifest for mcp (Tencent Cloud)
+        if: inputs.push_latest == 'true'
+        run: |
+          docker manifest create ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:latest \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:amd64 \
+            ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:arm64
+          docker manifest push ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp:latest

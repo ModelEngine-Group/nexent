@@ -216,9 +216,21 @@ def get_embedding_model(tenant_id: str):
 
     if model_type == "embedding":
         # Get the es core
-        return OpenAICompatibleEmbedding(api_key=model_config.get("api_key", ""), base_url=model_config.get("base_url", ""), model_name=get_model_name_from_config(model_config) or "", embedding_dim=model_config.get("max_tokens", 1024))
+        return OpenAICompatibleEmbedding(
+            api_key=model_config.get("api_key", ""),
+            base_url=model_config.get("base_url", ""),
+            model_name=get_model_name_from_config(model_config) or "",
+            embedding_dim=model_config.get("max_tokens", 1024),
+            ssl_verify=model_config.get("ssl_verify", True),
+        )
     elif model_type == "multi_embedding":
-        return JinaEmbedding(api_key=model_config.get("api_key", ""), base_url=model_config.get("base_url", ""), model_name=get_model_name_from_config(model_config) or "", embedding_dim=model_config.get("max_tokens", 1024))
+        return JinaEmbedding(
+            api_key=model_config.get("api_key", ""),
+            base_url=model_config.get("base_url", ""),
+            model_name=get_model_name_from_config(model_config) or "",
+            embedding_dim=model_config.get("max_tokens", 1024),
+            ssl_verify=model_config.get("ssl_verify", True),
+        )
     else:
         return None
 
@@ -1014,7 +1026,7 @@ class ElasticSearchService:
                                  ):
         """
         Generate a summary for the specified index using advanced Map-Reduce approach
-        
+
         New implementation:
         1. Get documents and cluster them by semantic similarity
         2. Map: Summarize each document individually
@@ -1036,17 +1048,17 @@ class ElasticSearchService:
         try:
             if not tenant_id:
                 raise Exception("Tenant ID is required for summary generation.")
-            
+
             from utils.document_vector_utils import (
                 process_documents_for_clustering,
                 kmeans_cluster_documents,
                 summarize_clusters_map_reduce,
                 merge_cluster_summaries
             )
-            
+
             # Use new Map-Reduce approach
             sample_count = min(batch_size // 5, 200)  # Sample reasonable number of documents
-            
+
             # Define a helper function to run all blocking operations in a thread pool
             def _generate_summary_sync():
                 """Synchronous function that performs all blocking operations"""
@@ -1056,13 +1068,13 @@ class ElasticSearchService:
                     vdb_core=vdb_core,
                     sample_doc_count=sample_count
                 )
-                
+
                 if not document_samples:
                     raise Exception("No documents found in index.")
-                
+
                 # Step 2: Cluster documents (CPU-intensive operation)
                 clusters = kmeans_cluster_documents(doc_embeddings, k=None)
-                
+
                 # Step 3: Map-Reduce summarization (contains blocking LLM calls)
                 cluster_summaries = summarize_clusters_map_reduce(
                     document_samples=document_samples,
@@ -1073,11 +1085,11 @@ class ElasticSearchService:
                     model_id=model_id,
                     tenant_id=tenant_id
                 )
-                
+
                 # Step 4: Merge into final summary
                 final_summary = merge_cluster_summaries(cluster_summaries)
                 return final_summary
-            
+
             # Run blocking operations in a thread pool to avoid blocking the event loop
             # Use get_running_loop() for better compatibility with modern asyncio
             try:
@@ -1086,7 +1098,7 @@ class ElasticSearchService:
                 # Fallback for edge cases
                 loop = asyncio.get_event_loop()
             final_summary = await loop.run_in_executor(None, _generate_summary_sync)
-            
+
             # Stream the result
             async def generate_summary():
                 try:
@@ -1097,12 +1109,12 @@ class ElasticSearchService:
                     yield "data: {\"status\": \"completed\"}\n\n"
                 except Exception as e:
                     yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
-            
+
             return StreamingResponse(
                 generate_summary(),
                 media_type="text/event-stream"
             )
-            
+
         except Exception as e:
             logger.error(f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate summary: {str(e)}")

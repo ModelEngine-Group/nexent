@@ -10,7 +10,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "antd";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { useAuth } from "@/hooks/useAuth";
@@ -72,7 +72,7 @@ export function HomepageContent({
         >
           {/* Start Chat Button */}
           {isSpeedMode || user ? (
-            <Button 
+            <Button
               onClick={onChatNavigate}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
             >
@@ -80,7 +80,7 @@ export function HomepageContent({
                 {t("page.startChat")}
               </Button>
           ) : (
-            <Button 
+            <Button
               onClick={onAuthRequired}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
             >
@@ -91,7 +91,7 @@ export function HomepageContent({
 
           {/* Quick Config Button */}
           {isSpeedMode || user?.role === "admin" ? (
-            <Button 
+            <Button
               onClick={onSetupNavigate}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
             >
@@ -99,7 +99,7 @@ export function HomepageContent({
                 {t("page.quickConfig")}
               </Button>
           ) : (
-            <Button 
+            <Button
               onClick={onAdminRequired}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
             >
@@ -110,7 +110,7 @@ export function HomepageContent({
 
           {/* Agent Space Button */}
           {isSpeedMode || user ? (
-            <Button 
+            <Button
               onClick={onSpaceNavigate}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
             >
@@ -118,7 +118,7 @@ export function HomepageContent({
                 {t("page.agentSpace")}
               </Button>
           ) : (
-            <Button 
+            <Button
               onClick={onAuthRequired}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
             >

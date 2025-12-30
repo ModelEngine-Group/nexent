@@ -24,8 +24,7 @@ with patch.dict('sys.modules', module_mocks):
     # Import all required modules
     from sdk.nexent.core.utils.observer import MessageObserver
     from sdk.nexent.core.utils.tools_common_message import ToolSign
-    # Import target module
-    from sdk.nexent.core.tools.terminal_tool import TerminalTool
+    import sdk.nexent.core.tools.terminal_tool as terminal_tool_module
 
 
 @pytest.fixture
@@ -68,12 +67,12 @@ def mock_ssh_session():
 @pytest.fixture
 def terminal_tool(mock_observer):
     """Create a TerminalTool instance for testing"""
-    with patch('paramiko.SSHClient') as mock_client_class, \
+    with patch.object(terminal_tool_module.paramiko, 'SSHClient') as mock_client_class, \
          patch('time.sleep'):
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
         
-        tool = TerminalTool(
+        tool = terminal_tool_module.TerminalTool(
             init_path="/test/path",
             observer=mock_observer,
             ssh_host="test-host",
@@ -87,12 +86,12 @@ def terminal_tool(mock_observer):
 @pytest.fixture
 def terminal_tool_no_observer():
     """Create a TerminalTool instance without observer for testing"""
-    with patch('paramiko.SSHClient') as mock_client_class, \
+    with patch.object(terminal_tool_module.paramiko, 'SSHClient') as mock_client_class, \
          patch('time.sleep'):
         mock_client = MagicMock()
         mock_client_class.return_value = mock_client
         
-        tool = TerminalTool(
+        tool = terminal_tool_module.TerminalTool(
             init_path="~",
             observer=None,
             ssh_host="localhost",
@@ -108,8 +107,8 @@ class TestTerminalToolInitialization:
     
     def test_init_with_custom_path(self, mock_observer):
         """Test initialization with custom path"""
-        with patch('paramiko.SSHClient'):
-            tool = TerminalTool(
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient'):
+            tool = terminal_tool_module.TerminalTool(
                 init_path="/custom/path",
                 observer=mock_observer,
                 ssh_host="test-host",
@@ -128,8 +127,8 @@ class TestTerminalToolInitialization:
     
     def test_init_with_home_directory(self, mock_observer):
         """Test initialization with home directory"""
-        with patch('paramiko.SSHClient'):
-            tool = TerminalTool(
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient'):
+            tool = terminal_tool_module.TerminalTool(
                 init_path="~",
                 observer=mock_observer,
                 ssh_host="test-host",
@@ -141,9 +140,9 @@ class TestTerminalToolInitialization:
     
     def test_init_with_absolute_path(self, mock_observer):
         """Test initialization with absolute path"""
-        with patch('paramiko.SSHClient'):
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient'):
             test_path = "/absolute/test/path"
-            tool = TerminalTool(
+            tool = terminal_tool_module.TerminalTool(
                 init_path=test_path,
                 observer=mock_observer,
                 ssh_host="test-host",
@@ -155,8 +154,8 @@ class TestTerminalToolInitialization:
     
     def test_init_without_observer(self):
         """Test initialization without observer"""
-        with patch('paramiko.SSHClient'):
-            tool = TerminalTool(
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient'):
+            tool = terminal_tool_module.TerminalTool(
                 init_path="~",
                 observer=None,
                 ssh_host="test-host",
@@ -171,11 +170,11 @@ class TestTerminalToolInitialization:
     
     def test_tool_properties(self, terminal_tool):
         """Test tool class properties"""
-        assert TerminalTool.name == "terminal"
-        assert "Execute shell commands" in TerminalTool.description
-        assert TerminalTool.tool_sign == ToolSign.TERMINAL_OPERATION.value
-        assert "command" in TerminalTool.inputs
-        assert TerminalTool.output_type == "string"
+        assert terminal_tool_module.TerminalTool.name == "terminal"
+        assert "Execute shell commands" in terminal_tool_module.TerminalTool.description
+        assert terminal_tool_module.TerminalTool.tool_sign == ToolSign.TERMINAL_OPERATION.value
+        assert "command" in terminal_tool_module.TerminalTool.inputs
+        assert terminal_tool_module.TerminalTool.output_type == "string"
 
 
 class TestSessionManagement:
@@ -183,7 +182,7 @@ class TestSessionManagement:
     
     def test_create_session_success(self, mock_observer, mock_ssh_session):
         """Test successful session creation"""
-        with patch('paramiko.SSHClient') as mock_client_class, \
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient') as mock_client_class, \
              patch('time.sleep') as mock_sleep:  # Mock time.sleep to avoid delays
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -200,7 +199,7 @@ class TestSessionManagement:
             mock_channel.send.return_value = None
             
             # Create tool instance within the patch context
-            tool = TerminalTool(
+            tool = terminal_tool_module.TerminalTool(
                 init_path="/test/path",
                 observer=mock_observer,
                 ssh_host="test-host",
@@ -217,7 +216,7 @@ class TestSessionManagement:
     
     def test_create_session_no_init_path(self, mock_observer, mock_ssh_session):
         """Test session creation without init_path (no cd command)"""
-        with patch('paramiko.SSHClient') as mock_client_class, \
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient') as mock_client_class, \
              patch('time.sleep') as mock_sleep:  # Mock time.sleep to avoid delays
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
@@ -232,7 +231,7 @@ class TestSessionManagement:
             mock_channel.send.return_value = None
             
             # Create tool instance without init_path
-            tool = TerminalTool(
+            tool = terminal_tool_module.TerminalTool(
                 init_path=None,  # No init path
                 observer=mock_observer,
                 ssh_host="test-host",
@@ -252,8 +251,8 @@ class TestSessionManagement:
     
     def test_create_session_no_password(self, mock_observer):
         """Test session creation without password"""
-        with patch('paramiko.SSHClient'):
-            tool = TerminalTool(
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient'):
+            tool = terminal_tool_module.TerminalTool(
                 init_path="~",
                 observer=mock_observer,
                 ssh_host="test-host",
@@ -424,8 +423,8 @@ class TestCommandExecution:
         mock_channel.recv.return_value = b"test output\n$ "
         
         with patch.object(terminal_tool, '_clean_output') as mock_clean, \
-             patch('sdk.nexent.core.tools.terminal_tool.time.sleep'), \
-             patch('sdk.nexent.core.tools.terminal_tool.time.time') as mock_time:
+             patch.object(terminal_tool_module.time, 'sleep'), \
+             patch.object(terminal_tool_module.time, 'time') as mock_time:
             mock_clean.return_value = "cleaned output"
             # Mock time progression to avoid infinite loop
             mock_time.side_effect = [0, 0, 0, 31]  # Simulate timeout after a few iterations
@@ -627,9 +626,9 @@ class TestIntegration:
     
     def test_full_workflow(self, terminal_tool, mock_ssh_session):
         """Test complete workflow from initialization to command execution"""
-        with patch('paramiko.SSHClient') as mock_client_class, \
-             patch('sdk.nexent.core.tools.terminal_tool.time.sleep'), \
-             patch('sdk.nexent.core.tools.terminal_tool.time.time') as mock_time:
+        with patch.object(terminal_tool_module.paramiko, 'SSHClient') as mock_client_class, \
+             patch.object(terminal_tool_module.time, 'sleep'), \
+             patch.object(terminal_tool_module.time, 'time') as mock_time:
             mock_client = MagicMock()
             mock_client_class.return_value = mock_client
             mock_client.connect.return_value = None

@@ -15,6 +15,11 @@ on:
         description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: true
         default: '[]'
+      app_version:
+        description: 'Docker image tag to build and deploy (e.g. v1.7.1)'
+        required: true
+        default: 'latest'
+        type: string
 
 jobs:
   build-main:
@@ -23,7 +28,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Build main application image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent -f make/main/Dockerfile .
+        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent:${{ github.event.inputs.app_version }} -t nexent/nexent -f make/main/Dockerfile .
 
   build-data-process:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -47,7 +52,7 @@ jobs:
           GIT_TRACE=1 GIT_CURL_VERBOSE=1 GIT_LFS_LOG=debug git lfs pull
           rm -rf .git .gitattributes
       - name: Build data process image
-        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-data-process -f make/data_process/Dockerfile .
+        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-data-process:${{ github.event.inputs.app_version }} -t nexent/nexent-data-process -f make/data_process/Dockerfile .
 
   build-web:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -55,7 +60,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Build web frontend image
-        run: docker build --build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua -t nexent/nexent-web -f make/web/Dockerfile .
+        run: docker build --build-arg MIRROR=https://registry.npmmirror.com --build-arg APK_MIRROR=tsinghua -t nexent/nexent-web:${{ github.event.inputs.app_version }} -t nexent/nexent-web -f make/web/Dockerfile .
 
   build-docs:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -63,7 +68,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Build docs image
-        run: docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+        run: docker build --progress=plain -t nexent/nexent-docs:${{ github.event.inputs.app_version }} -t nexent/nexent-docs -f make/docs/Dockerfile .
 
   deploy:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}
@@ -76,6 +81,9 @@ jobs:
           rm -rf $HOME/nexent
           mkdir -p $HOME/nexent
           cp -r $GITHUB_WORKSPACE/* $HOME/nexent/
+      - name: Force APP_VERSION to latest in deploy.sh (CI only)
+        run: |
+          sed -i 's/APP_VERSION="$(get_app_version)"/APP_VERSION="${{ github.event.inputs.app_version }}"/' $HOME/nexent/docker/deploy.sh
       - name: Start docs container
         run: |
           docker stop nexent-docs 2>/dev/null || true

@@ -22,6 +22,8 @@ const nextConfig = {
     parallelServerCompiles: true,
   },
   compress: true,
+  // Fix workspace root detection for multiple lockfiles
+  outputFileTracingRoot: process.cwd(),
 }
 
 mergeConfig(nextConfig, userConfig)

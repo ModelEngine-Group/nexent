@@ -116,13 +116,9 @@ export default function AgentSetupOrchestrator({
   const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
   // Use generation state passed from parent component, not local state
 
-  // Delete confirmation popup status
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
 
-  // Embedding auto-unselect notice modal
-  const [isEmbeddingAutoUnsetOpen, setIsEmbeddingAutoUnsetOpen] =
-    useState(false);
+
+
   const lastProcessedAgentIdForEmbedding = useRef<number | null>(null);
 
   // Flag to track if we need to refresh enabledToolIds after tools update
@@ -674,7 +670,12 @@ export default function AgentSetupOrchestrator({
       } catch (error) {
         // Even if API fails, still inform user and prevent usage in UI
       } finally {
-        setIsEmbeddingAutoUnsetOpen(true);
+        confirm({
+          title: t("embedding.agentToolAutoDeselectModal.title"),
+          content: t("embedding.agentToolAutoDeselectModal.content"),
+          okText: t("common.confirm"),
+          onOk: () => {},
+        });
         lastProcessedAgentIdForEmbedding.current = currentAgentId;
       }
     };
@@ -1770,19 +1771,17 @@ export default function AgentSetupOrchestrator({
   }, [pendingImportData, runAgentImport, t]);
 
   // Handle confirmed deletion
-  const handleConfirmDelete = async (t: TFunction) => {
-    if (!agentToDelete) return;
-
+  const handleConfirmDelete = async (agent: Agent) => {
     try {
-      const result = await deleteAgent(Number(agentToDelete.id));
+      const result = await deleteAgent(Number(agent.id));
       if (result.success) {
         message.success(
           t("businessLogic.config.error.agentDeleteSuccess", {
-            name: agentToDelete.name,
+            name: agent.name,
           })
         );
         // If currently editing the deleted agent, reset to initial clean state and avoid confirm modal on next switch
-        const deletedId = Number(agentToDelete.id);
+        const deletedId = Number(agent.id);
         const currentEditingId =
           (isEditingAgent && editingAgent ? Number(editingAgent.id) : null) ??
           null;
@@ -1815,7 +1814,7 @@ export default function AgentSetupOrchestrator({
         } else {
           // If deleting another agent that is in enabledAgentIds, remove it and update baseline
           // to avoid triggering false unsaved changes indicator
-          const deletedId = Number(agentToDelete.id);
+          const deletedId = Number(agent.id);
           if (enabledAgentIds.includes(deletedId)) {
             const updatedEnabledAgentIds = enabledAgentIds.filter(
               (id) => id !== deletedId
@@ -1840,9 +1839,6 @@ export default function AgentSetupOrchestrator({
     } catch (error) {
       log.error(t("agentConfig.agents.deleteFailed"), error);
       message.error(t("businessLogic.config.error.agentDeleteFailed"));
-    } finally {
-      setIsDeleteConfirmOpen(false);
-      setAgentToDelete(null);
     }
   };
 
@@ -2003,40 +1999,19 @@ export default function AgentSetupOrchestrator({
       content: t("agentConfig.agents.copyConfirmContent", {
         name: agent?.display_name || agent?.name || "",
       }),
-      onConfirm: () => handleCopyAgentFromList(agent),
+      onOk: () => handleCopyAgentFromList(agent),
     });
   };
 
   // Handle delete agent from list
   const handleDeleteAgentFromList = (agent: Agent) => {
-    setAgentToDelete(agent);
-    setIsDeleteConfirmOpen(true);
-  };
-
-  // Handle exit edit mode
-  const handleExitEdit = () => {
-    setIsEditingAgent(false);
-    setEditingAgent(null);
-    // Use the parent's exit creation handler to properly clear cache
-    if (isCreatingNewAgent && onExitCreation) {
-      onExitCreation();
-    } else {
-      setIsCreatingNewAgent(false);
-    }
-    setBusinessLogic("");
-    setDutyContent("");
-    setConstraintContent("");
-    setFewShotsContent("");
-    setAgentName?.("");
-    setAgentDescription?.("");
-    // Reset mainAgentId and enabledAgentIds
-    setMainAgentId(null);
-    setEnabledAgentIds([]);
-    // Reset selected tools
-    setSelectedTools([]);
-    setEnabledToolIds([]);
-    // Notify parent component about editing state change
-    onEditingStateChange?.(false, null);
+    confirm({
+      title: t("businessLogic.config.modal.deleteTitle"),
+      content: t("businessLogic.config.modal.deleteContent", {
+        name: agent.name,
+      }),
+      onOk: () => handleConfirmDelete(agent),
+    });
   };
 
   // Refresh tool list
@@ -2297,49 +2272,13 @@ export default function AgentSetupOrchestrator({
               isCreatingNewAgent={isCreatingNewAgent}
               canSaveAgent={localCanSaveAgent}
               getButtonTitle={getLocalButtonTitle}
-              onDeleteAgent={onDeleteAgent || (() => {})}
-              onDeleteSuccess={handleExitEdit}
               editingAgent={editingAgentFromParent || editingAgent}
               onViewCallRelationship={handleViewCallRelationship}
             />
           </Col>
         </Row>
 
-        {/* Delete confirmation popup */}
-        <Modal
-          title={t("businessLogic.config.modal.deleteTitle")}
-          open={isDeleteConfirmOpen}
-          onCancel={() => setIsDeleteConfirmOpen(false)}
-          centered
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button
-                type="primary"
-                danger
-                onClick={() => handleConfirmDelete(t)}
-              >
-                {t("common.confirm")}
-              </Button>
-            </div>
-          }
-          width={520}
-        >
-          <div className="py-2">
-            <div className="flex items-center">
-              <WarningFilled
-                className="text-yellow-500 mt-1 mr-2"
-                style={{ fontSize: "48px" }}
-              />
-              <div className="ml-3 mt-2">
-                <div className="text-sm leading-6">
-                  {t("businessLogic.config.modal.deleteContent", {
-                    name: agentToDelete?.name,
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
+
         {/* Save confirmation modal for unsaved changes (debug/navigation hooks) */}
         <SaveConfirmModal
           open={isSaveConfirmOpen}
@@ -2479,37 +2418,7 @@ export default function AgentSetupOrchestrator({
           }
         />
         {/* Auto unselect knowledge_base_search notice when embedding not configured */}
-        <Modal
-          title={t("embedding.agentToolAutoDeselectModal.title")}
-          open={isEmbeddingAutoUnsetOpen}
-          onCancel={() => setIsEmbeddingAutoUnsetOpen(false)}
-          centered
-          footer={
-            <div className="flex justify-end mt-6 gap-4">
-              <Button
-                type="primary"
-                onClick={() => setIsEmbeddingAutoUnsetOpen(false)}
-              >
-                {t("common.confirm")}
-              </Button>
-            </div>
-          }
-          width={520}
-        >
-          <div className="py-2">
-            <div className="flex items-center">
-              <WarningFilled
-                className="text-yellow-500 mt-1 mr-2"
-                style={{ fontSize: "48px" }}
-              />
-              <div className="ml-3 mt-2">
-                <div className="text-sm leading-6">
-                  {t("embedding.agentToolAutoDeselectModal.content")}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Modal>
+
         {/* Agent call relationship modal */}
         <AgentCallRelationshipModal
           visible={callRelationshipModalVisible}

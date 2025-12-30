@@ -24,6 +24,10 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
 
+# 🔗 为多个架构构建 MCP Server
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f make/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f make/mcp/Dockerfile . --push
+
 # 💻 为多个架构构建 Ubuntu Terminal
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
@@ -43,6 +47,9 @@ docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
 
 # 📚 构建文档镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+
+# 🔗 构建 MCP Server 镜像（仅当前架构）
+docker build --progress=plain -t nexent/nexent-mcp -f make/mcp/Dockerfile .
 
 # 💻 构建 OpenSSH Server 镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
@@ -70,6 +77,18 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/
 - 基于 `make/docs/Dockerfile` 构建
 - 提供项目文档和 API 参考
 
+### MCP Server 镜像 (nexent/nexent-mcp)
+- 包含 MCP (Model Context Protocol) 代理服务
+- 基于 `make/mcp/Dockerfile` 构建
+- 为 AI 模型集成提供 MCP 服务器功能
+
+#### 预装工具和特性
+- **Python 环境**: Python 3.10 + pip
+- **MCP Proxy**: mcp-proxy 包用于协议处理
+- **Node.js**: Node.js 20.17.0 包含 npm
+- **架构支持**: linux/amd64, linux/arm64
+- **基础镜像**: python:3.10-slim
+
 ### OpenSSH Server 镜像 (nexent/nexent-ubuntu-terminal)
 - 基于 Ubuntu 24.04 的 SSH 服务器容器
 - 基于 `make/terminal/Dockerfile` 构建
@@ -95,9 +114,10 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/
 
 所有镜像包括：
 - `nexent/nexent` - 主应用后端服务
-- `nexent/nexent-data-process` - 数据处理服务  
+- `nexent/nexent-data-process` - 数据处理服务
 - `nexent/nexent-web` - Next.js 前端应用
 - `nexent/nexent-docs` - Vitepress 文档站点
+- `nexent/nexent-mcp` - MCP 服务器代理服务
 - `nexent/nexent-ubuntu-terminal` - OpenSSH 开发服务器容器
 
 ## 📚 文档镜像独立部署

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Button } from "@/components/ui/button";
+import { Button } from "antd";
 import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType, CardItem, MessageHandler } from "@/types/chat";
@@ -101,7 +101,7 @@ const extractCodeInfo = (content: string): { codeContent: string; language: stri
       processed = processed.replace(/\n?```$/, "");
       return { codeContent: processed.trim(), language };
     }
-    
+
     if (processed.includes("<RUN>")) {
       // Remove all variations of the RUN marker
       processed = processed.replace(/```\s*<RUN>\s*\n?/g, "");
@@ -132,7 +132,7 @@ const extractCodeInfo = (content: string): { codeContent: string; language: stri
     } else {
         processed = processed.replace(/^```\s*/, "");
     }
-    
+
     // Clean tails
     processed = processed.replace(/\n?```$/, "");
     return { codeContent: processed.trim(), language: lang };
@@ -951,7 +951,7 @@ const messageHandlers: MessageHandler[] = [
     render: (message, _t) => {
       // Extract code content and language from the message
       const { codeContent, language } = extractCodeInfo(message.content);
-      
+
       return (
         <div
           style={{
@@ -1007,7 +1007,7 @@ const messageHandlers: MessageHandler[] = [
     canHandle: (message) => message.type === "memory_search",
     render: (message, t) => {
       let memoryData: any = {};
-      
+
       try {
         // Parse the memory search content
         memoryData = JSON.parse(message.content);
@@ -1015,7 +1015,7 @@ const messageHandlers: MessageHandler[] = [
         log.error('Failed to parse memory search content:', error);
         return null;
       }
-      
+
       let messageText = memoryData.message || '';
       // Map backend placeholders to translated text
       switch (messageText) {
@@ -1031,7 +1031,7 @@ const messageHandlers: MessageHandler[] = [
         default:
           break;
       }
-      
+
       return (
         <div style={{
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
@@ -1400,9 +1400,9 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
         <div className="px-1 py-2">
           <div className="flex items-center">
             <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 hover:bg-gray-100 rounded-full mr-2"
+              type="text"
+              size="small"
+              className="h-6 w-6 p-0 rounded-full mr-2 text-gray-500 hover:bg-transparent"
               onClick={() => setIsExpanded(!isExpanded)}
             >
               <ChevronRight

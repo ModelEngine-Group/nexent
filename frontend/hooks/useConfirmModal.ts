@@ -1,7 +1,18 @@
+import { App } from "antd";
+import { ExclamationCircleFilled } from "@ant-design/icons";
+
+import React from "react";
 import i18next from "i18next";
 
-import { App } from "antd";
-import { StaticConfirmProps } from "@/types/setupConfig";
+interface ConfirmProps {
+  title: string;
+  content: React.ReactNode;
+  okText?: string;
+  cancelText?: string;
+  danger?: boolean; // 默认为 true，使用 danger 样式
+  onOk?: () => void;
+  onCancel?: () => void;
+}
 
 export const useConfirmModal = () => {
   const { modal } = App.useApp();
@@ -11,17 +22,22 @@ export const useConfirmModal = () => {
     content,
     okText,
     cancelText,
-    danger = false,
-    onConfirm,
+    danger = true,
+    onOk,
     onCancel,
-  }: StaticConfirmProps) => {
+  }: ConfirmProps) => {
     return modal.confirm({
       title,
       content,
+      centered: true,
+      icon: React.createElement(ExclamationCircleFilled),
       okText: okText || i18next.t("common.confirm"),
       cancelText: cancelText || i18next.t("common.cancel"),
-      okButtonProps: { danger },
-      onOk: onConfirm,
+      okButtonProps: { 
+        danger, 
+        type: "primary"
+      },
+      onOk: onOk,
       onCancel,
     });
   };

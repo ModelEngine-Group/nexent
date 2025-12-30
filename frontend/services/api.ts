@@ -165,6 +165,10 @@ export const API_ENDPOINTS = {
     delete: `${API_BASE_URL}/mcp`,
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
+    addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
+    containers: `${API_BASE_URL}/mcp/containers`,
+    containerLogs: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}/logs`,
+    deleteContainer: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

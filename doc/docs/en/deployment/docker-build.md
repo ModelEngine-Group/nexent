@@ -20,6 +20,10 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-docs -f make/docs/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-docs -f make/docs/Dockerfile . --push
 
+# 🔗 build MCP Server for multiple architectures
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-mcp -f make/mcp/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f make/mcp/Dockerfile . --push
+
 # 💻 build Ubuntu Terminal for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f make/terminal/Dockerfile . --push
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f make/terminal/Dockerfile . --push
@@ -39,6 +43,9 @@ docker build --progress=plain -t nexent/nexent-web -f make/web/Dockerfile .
 
 # 📚 Build documentation image (current architecture only)
 docker build --progress=plain -t nexent/nexent-docs -f make/docs/Dockerfile .
+
+# 🔗 Build MCP Server image (current architecture only)
+docker build --progress=plain -t nexent/nexent-mcp -f make/mcp/Dockerfile .
 
 # 💻 Build OpenSSH Server image (current architecture only)
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f make/terminal/Dockerfile .
@@ -73,6 +80,18 @@ docker builder prune -f && docker system prune -f
 - Built from `make/docs/Dockerfile`
 - Provides project documentation and API reference
 
+#### MCP Server Image (nexent/nexent-mcp)
+- Contains MCP (Model Context Protocol) proxy service
+- Built from `make/mcp/Dockerfile`
+- Provides MCP server functionality for AI model integration
+
+##### Pre-installed Tools and Features
+- **Python Environment**: Python 3.10 + pip
+- **MCP Proxy**: mcp-proxy package for protocol handling
+- **Node.js**: Node.js 20.17.0 with npm
+- **Architecture Support**: linux/amd64, linux/arm64
+- **Base Image**: python:3.10-slim
+
 #### OpenSSH Server Image (nexent/nexent-ubuntu-terminal)
 - Ubuntu 24.04-based SSH server container
 - Built from `make/terminal/Dockerfile`
@@ -101,6 +120,7 @@ All images include:
 - `nexent/nexent-data-process` - Data processing service
 - `nexent/nexent-web` - Next.js frontend application
 - `nexent/nexent-docs` - Vitepress documentation site
+- `nexent/nexent-mcp` - MCP server proxy service
 - `nexent/nexent-ubuntu-terminal` - OpenSSH development server container
 
 ## 📚 Documentation Image Standalone Deployment

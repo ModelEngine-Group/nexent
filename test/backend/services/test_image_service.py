@@ -336,7 +336,8 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
         temperature=0.7,
         top_p=0.7,
         frequency_penalty=0.5,
-        max_tokens=512
+        max_tokens=512,
+        ssl_verify=True
     )
     assert result == mock_model_instance
 
@@ -363,6 +364,7 @@ def test_get_vlm_model_with_empty_config(mock_tenant_config_manager, mock_get_mo
         temperature=0.7,
         top_p=0.7,
         frequency_penalty=0.5,
-        max_tokens=512
+        max_tokens=512,
+        ssl_verify=True
     )
     assert result == mock_model_instance

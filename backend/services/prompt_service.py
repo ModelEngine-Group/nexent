@@ -84,7 +84,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
     # 1. Real-time streaming push
     final_results = {"duty": "", "constraint": "", "few_shots": "", "agent_var_name": "", "agent_display_name": "",
                      "agent_description": ""}
-    
+
     # Get all existing agent names and display names for duplicate checking (only if not in create mode)
     all_agents = query_all_agent_info_by_tenant_id(tenant_id)
     existing_names = [
@@ -97,13 +97,13 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         for agent in all_agents
         if agent.get("display_name") and agent.get("agent_id") != agent_id
     ]
-    
+
     # Collect results and yield non-name fields immediately, but hold name fields for duplicate checking
     for result_data in generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id,
                                               model_id, language):
         result_type = result_data["type"]
         final_results[result_type] = result_data["content"]
-        
+
         # Yield non-name fields immediately
         if result_type not in ["agent_var_name", "agent_display_name"]:
             yield result_data
@@ -325,7 +325,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads):
 
             result_data = {
                 "type": tag,
-                "content": latest[tag],
+                "content": latest[tag].strip(),
                 "is_complete": True
             }
             yield result_data

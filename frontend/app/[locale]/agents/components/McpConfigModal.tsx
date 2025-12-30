@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -15,14 +15,16 @@ import {
   App,
 } from "antd";
 import {
-  DeleteOutlined,
-  EyeOutlined,
-  PlusOutlined,
-  LoadingOutlined,
-  ExpandAltOutlined,
-  CompressOutlined,
-  RedoOutlined,
-} from "@ant-design/icons";
+  Trash,
+  Eye,
+  Plus,
+  LoaderCircle,
+  Maximize,
+  Minimize,
+  RefreshCw,
+  FileText,
+  Container,
+} from "lucide-react";
 
 import { McpConfigModalProps, AgentRefreshEvent } from "@/types/agentConfig";
 import {
@@ -32,8 +34,13 @@ import {
   getMcpTools,
   updateToolList,
   checkMcpServerHealth,
+  addMcpFromConfig,
+  getMcpContainers,
+  getMcpContainerLogs,
+  deleteMcpContainer,
 } from "@/services/mcpService";
-import { McpServer, McpTool } from "@/types/agentConfig";
+import { McpServer, McpTool, McpContainer } from "@/types/agentConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 
 const { Text, Title } = Typography;
@@ -43,7 +50,8 @@ export default function McpConfigModal({
   onCancel,
 }: McpConfigModalProps) {
   const { t } = useTranslation("common");
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
+  const { confirm } = useConfirmModal();
   const [serverList, setServerList] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
@@ -61,6 +69,20 @@ export default function McpConfigModal({
     [key: string]: boolean;
   }>({});
 
+  // Container-related state
+  const [containerList, setContainerList] = useState<McpContainer[]>([]);
+  const [loadingContainers, setLoadingContainers] = useState(false);
+  const [addingContainer, setAddingContainer] = useState(false);
+  const [containerConfigJson, setContainerConfigJson] = useState("");
+  const [containerPort, setContainerPort] = useState<number | undefined>(undefined);
+  const [logsModalVisible, setLogsModalVisible] = useState(false);
+  const [currentContainerLogs, setCurrentContainerLogs] = useState("");
+  const [currentContainerId, setCurrentContainerId] = useState("");
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const delayedContainerRefreshRef = useRef<number | undefined>(undefined);
+
+  const actionsLocked = updatingTools || addingContainer;
+
   // Helper function to refresh tools and agents asynchronously
   const refreshToolsAndAgents = async () => {
     setUpdatingTools(true);
@@ -71,7 +93,7 @@ export default function McpConfigModal({
         // Notify parent component to update tool list
         window.dispatchEvent(new CustomEvent("toolsUpdated"));
       }
-      
+
       // Refresh agent list to update agent availability status
       window.dispatchEvent(
         new CustomEvent("refreshAgentList") as AgentRefreshEvent
@@ -144,7 +166,7 @@ export default function McpConfigModal({
         // Refresh tools and agents asynchronously after adding server
         // This will update MCP tool availability and agent availability status
         await refreshToolsAndAgents();
-        
+
         // Show success message after refresh completes to avoid message overlap
         message.success(t("mcpService.message.addServerSuccess"));
       } else {
@@ -159,16 +181,12 @@ export default function McpConfigModal({
 
   // Delete MCP server
   const handleDeleteServer = async (server: McpServer) => {
-    modal.confirm({
+    confirm({
       title: t("mcpConfig.delete.confirmTitle"),
       content: t("mcpConfig.delete.confirmContent", {
         name: server.service_name,
       }),
       okText: t("common.delete", "Delete"),
-      cancelText: t("common.cancel", "Cancel"),
-      okType: "danger",
-      cancelButtonProps: { disabled: updatingTools },
-      okButtonProps: { disabled: updatingTools, loading: updatingTools },
       onOk: async () => {
         try {
           const result = await deleteMcpServer(
@@ -248,7 +266,7 @@ export default function McpConfigModal({
       if (result.success) {
         message.success(t("mcpConfig.message.healthCheckSuccess"));
         await loadServerList();
-        
+
         // Refresh tools and agents asynchronously after health check
         // This will update MCP tool availability and agent availability status
         refreshToolsAndAgents();
@@ -257,7 +275,7 @@ export default function McpConfigModal({
           result.message || t("mcpConfig.message.healthCheckFailed")
         );
         await loadServerList();
-        
+
         // Refresh tools and agents even if health check failed
         // This will update MCP tool availability and agent availability status
         refreshToolsAndAgents();
@@ -265,7 +283,7 @@ export default function McpConfigModal({
     } catch (error) {
       message.error(t("mcpConfig.message.healthCheckFailed"));
       await loadServerList();
-      
+
       // Refresh tools and agents even if health check failed
       // This will update MCP tool availability and agent availability status
       refreshToolsAndAgents();
@@ -301,8 +319,9 @@ export default function McpConfigModal({
               }}
             >
               {healthCheckLoading[key] ? (
-                <LoadingOutlined
-                  style={{ color: record.status ? "#52c41a" : "#ff4d4f" }}
+                <LoaderCircle
+                  className="animate-spin"
+                  style={{ color: record.status ? "#52c41a" : "#ff4d4f", width: 16, height: 16 }}
                 />
               ) : null}
             </div>
@@ -330,21 +349,21 @@ export default function McpConfigModal({
           <Space size="small">
             <Button
               type="link"
-              icon={<RedoOutlined />}
+              icon={<RefreshCw size={16} className={healthCheckLoading[key] ? "animate-spin" : ""} />}
               onClick={() => handleCheckHealth(record)}
               size="small"
               loading={healthCheckLoading[key]}
-              disabled={updatingTools}
+                disabled={actionsLocked}
             >
               {t("mcpConfig.serverList.button.healthCheck")}
             </Button>
             {record.status ? (
               <Button
                 type="link"
-                icon={<EyeOutlined />}
+                icon={<Eye size={16} />}
                 onClick={() => handleViewTools(record)}
                 size="small"
-                disabled={updatingTools}
+                  disabled={actionsLocked}
               >
                 {t("mcpConfig.serverList.button.viewTools")}
               </Button>
@@ -355,7 +374,7 @@ export default function McpConfigModal({
               >
                 <Button
                   type="link"
-                  icon={<EyeOutlined />}
+                  icon={<Eye size={16} />}
                   size="small"
                   disabled
                 >
@@ -366,10 +385,10 @@ export default function McpConfigModal({
             <Button
               type="link"
               danger
-              icon={<DeleteOutlined />}
+              icon={<Trash size={16} />}
               onClick={() => handleDeleteServer(record)}
               size="small"
-              disabled={updatingTools}
+                  disabled={actionsLocked}
             >
               {t("mcpConfig.serverList.button.delete")}
             </Button>
@@ -408,7 +427,7 @@ export default function McpConfigModal({
               <Button
                 type="link"
                 size="small"
-                icon={isExpanded ? <CompressOutlined /> : <ExpandAltOutlined />}
+                icon={isExpanded ? <Minimize size={16} /> : <Maximize size={16} />}
                 onClick={() => toggleDescription(record.name)}
                 style={{ padding: 0, height: "auto" }}
               >
@@ -423,25 +442,182 @@ export default function McpConfigModal({
     },
   ];
 
+  // Load container list
+  const loadContainerList = async () => {
+    setLoadingContainers(true);
+    try {
+      const result = await getMcpContainers();
+      if (result.success) {
+        setContainerList(result.data);
+      } else {
+        message.error(result.message);
+      }
+    } catch (error) {
+      message.error(t("mcpConfig.message.loadContainerListFailed"));
+    } finally {
+      setLoadingContainers(false);
+    }
+  };
+
+  // Add containerized MCP server
+  const handleAddContainer = async () => {
+    if (!containerConfigJson.trim()) {
+      message.error(t("mcpConfig.message.containerConfigRequired"));
+      return;
+    }
+
+    if (!containerPort || containerPort < 1 || containerPort > 65535) {
+      message.error(t("mcpConfig.message.validPortRequired"));
+      return;
+    }
+
+    let config;
+    try {
+      config = JSON.parse(containerConfigJson);
+    } catch (error) {
+      message.error(t("mcpConfig.message.invalidJsonConfig"));
+      return;
+    }
+
+    // Validate config structure
+    if (!config.mcpServers || typeof config.mcpServers !== "object") {
+      message.error(t("mcpConfig.message.invalidConfigStructure"));
+      return;
+    }
+
+    // Add port to each server config
+    const configWithPorts = {
+      mcpServers: Object.fromEntries(
+        Object.entries(config.mcpServers).map(([key, value]: [string, any]) => [
+          key,
+          { ...value, port: containerPort },
+        ])
+      ),
+    };
+
+    // Schedule a delayed container refresh without waiting for creation to finish
+    if (delayedContainerRefreshRef.current) {
+      window.clearTimeout(delayedContainerRefreshRef.current);
+    }
+    delayedContainerRefreshRef.current = window.setTimeout(() => {
+      loadContainerList().catch((error) => {
+        log.error("Failed to refresh containers after add trigger:", error);
+      });
+    }, 3000);
+
+    setAddingContainer(true);
+    try {
+      const result = await addMcpFromConfig(configWithPorts);
+      if (result.success) {
+        setContainerConfigJson("");
+        setContainerPort(undefined);
+        await loadContainerList();
+        await loadServerList(); // Reload server list as containers are registered as servers
+
+        // Refresh tools and agents
+        await refreshToolsAndAgents();
+
+        message.success(t("mcpService.message.addContainerSuccess"));
+      } else {
+        message.error(result.message);
+      }
+    } catch (error) {
+      message.error(t("mcpConfig.message.addContainerFailed"));
+    } finally {
+      setAddingContainer(false);
+    }
+  };
+
+  // View container logs
+  const handleViewLogs = async (containerId: string) => {
+    setCurrentContainerId(containerId);
+    setLoadingLogs(true);
+    setLogsModalVisible(true);
+    setCurrentContainerLogs("");
+
+    try {
+      const result = await getMcpContainerLogs(containerId, 500);
+      if (result.success) {
+        setCurrentContainerLogs(result.data);
+      } else {
+        message.error(result.message);
+        setCurrentContainerLogs(result.message);
+      }
+    } catch (error) {
+      message.error(t("mcpConfig.message.getContainerLogsFailed"));
+      setCurrentContainerLogs(t("mcpConfig.message.getContainerLogsFailed"));
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  // Delete container
+  const handleDeleteContainer = async (container: McpContainer) => {
+    confirm({
+      title: t("mcpConfig.deleteContainer.confirmTitle"),
+      content: t("mcpConfig.deleteContainer.confirmContent", {
+        name: container.name || container.container_id,
+      }),
+      okText: t("common.delete", "Delete"),
+      onOk: async () => {
+        try {
+          const result = await deleteMcpContainer(container.container_id);
+          if (result.success) {
+            await loadContainerList();
+            await loadServerList(); // Reload server list as container is removed
+
+            message.success(t("mcpService.message.deleteContainerSuccess"));
+
+            // Refresh tools and agents
+            refreshToolsAndAgents().catch((error) => {
+              log.error(
+                "Failed to refresh tools and agents after container deletion:",
+                error
+              );
+            });
+          } else {
+            message.error(result.message);
+            // Throw error to prevent modal from closing
+            throw new Error(result.message);
+          }
+        } catch (error) {
+          message.error(t("mcpConfig.message.deleteContainerFailed"));
+          // Throw error to prevent modal from closing
+          throw error;
+        }
+      },
+    });
+  };
+
   // Load data when modal opens
   useEffect(() => {
     if (visible) {
       loadServerList();
+      loadContainerList();
     }
   }, [visible]);
+
+  // Clear delayed refresh timer on unmount
+  useEffect(() => {
+    return () => {
+      if (delayedContainerRefreshRef.current) {
+        window.clearTimeout(delayedContainerRefreshRef.current);
+      }
+    };
+  }, []);
 
   return (
     <>
       <Modal
         title={t("mcpConfig.modal.title")}
         open={visible}
-        onCancel={updatingTools ? undefined : onCancel}
+        onCancel={actionsLocked ? undefined : onCancel}
         width={1000}
-        closable={!updatingTools}
-        maskClosable={!updatingTools}
+        closable={!actionsLocked}
+        maskClosable={!actionsLocked}
         footer={[
-          <Button key="cancel" onClick={onCancel} disabled={updatingTools}>
-            {updatingTools
+          <Button key="cancel" onClick={onCancel} disabled={actionsLocked}>
+            {actionsLocked
               ? t("mcpConfig.modal.updatingTools")
               : t("mcpConfig.modal.close")}
           </Button>,
@@ -461,7 +637,7 @@ export default function McpConfigModal({
                 alignItems: "center",
               }}
             >
-              <LoadingOutlined style={{ marginRight: 8, color: "#52c41a" }} />
+              <LoaderCircle className="animate-spin" style={{ marginRight: 8, color: "#52c41a", width: 16, height: 16 }} />
               <Text style={{ color: "#52c41a" }}>
                 {t("mcpConfig.status.updatingToolsHint")}
               </Text>
@@ -470,25 +646,24 @@ export default function McpConfigModal({
           {/* Add server section */}
           <Card size="small" style={{ marginBottom: 16 }}>
             <Title level={5} style={{ margin: "0 0 12px 0" }}>
-              <PlusOutlined style={{ marginRight: 8 }} />
               {t("mcpConfig.addServer.title")}
             </Title>
             <Space direction="vertical" style={{ width: "100%" }}>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <Input
                   placeholder={t("mcpConfig.addServer.namePlaceholder")}
                   value={newServerName}
                   onChange={(e) => setNewServerName(e.target.value)}
                   style={{ flex: 1 }}
                   maxLength={20}
-                  disabled={updatingTools || addingServer}
+                  disabled={actionsLocked || addingServer}
                 />
                 <Input
                   placeholder={t("mcpConfig.addServer.urlPlaceholder")}
                   value={newServerUrl}
                   onChange={(e) => setNewServerUrl(e.target.value)}
                   style={{ flex: 2 }}
-                  disabled={updatingTools || addingServer}
+                  disabled={actionsLocked || addingServer}
                 />
                 <Button
                   type="primary"
@@ -496,16 +671,86 @@ export default function McpConfigModal({
                   loading={addingServer || updatingTools}
                   icon={
                     addingServer || updatingTools ? (
-                      <LoadingOutlined />
+                      <LoaderCircle className="animate-spin" style={{ width: 16, height: 16 }} />
                     ) : (
-                      <PlusOutlined />
+                      <Plus style={{ width: 16, height: 16 }} />
                     )
                   }
-                  disabled={updatingTools}
+                  disabled={actionsLocked}
                 >
                   {updatingTools
                     ? t("mcpConfig.addServer.button.updating")
                     : t("mcpConfig.addServer.button.add")}
+                </Button>
+              </div>
+            </Space>
+          </Card>
+
+          {/* Add containerized MCP server section */}
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <Title level={5} style={{ margin: "0 0 12px 0" }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Container style={{ width: 16, height: 16 }} />
+                {t("mcpConfig.addContainer.title")}
+              </span>
+            </Title>
+            <Space direction="vertical" style={{ width: "100%" }} size="middle">
+              <div>
+                <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+                  {t("mcpConfig.addContainer.configHint")}
+                </Text>
+                <Input.TextArea
+                  placeholder={t("mcpConfig.addContainer.configPlaceholder")}
+                  value={containerConfigJson}
+                  onChange={(e) => setContainerConfigJson(e.target.value)}
+                  rows={6}
+                  disabled={actionsLocked}
+                  style={{ fontFamily: "monospace", fontSize: 12 }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
+                <Input
+                  placeholder={t("mcpConfig.addContainer.portPlaceholder")}
+                  value={containerPort || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === "") {
+                      setContainerPort(undefined);
+                      return;
+                    }
+                    const port = parseInt(value);
+                    if (!isNaN(port) && port >= 1 && port <= 65535) {
+                      setContainerPort(port);
+                    }
+                    // If invalid input, keep the previous valid value
+                  }}
+                  style={{ width: 150 }}
+                  disabled={actionsLocked}
+                />
+                <div style={{ flex: 1 }} />
+                <Button
+                  type="primary"
+                  onClick={handleAddContainer}
+                  loading={addingContainer || updatingTools}
+                  icon={
+                    addingContainer || updatingTools ? (
+                      <LoaderCircle className="animate-spin" size={16} />
+                    ) : (
+                      <Plus className="size-4" />
+                    )
+                  }
+                  disabled={actionsLocked}
+                >
+                  {updatingTools
+                    ? t("mcpConfig.addContainer.button.updating")
+                    : t("mcpConfig.addContainer.button.add")}
                 </Button>
               </div>
             </Space>
@@ -539,6 +784,96 @@ export default function McpConfigModal({
               style={{ width: "100%" }}
             />
           </div>
+
+          {/* Container list */}
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <Title level={5} style={{ margin: 0 }}>
+                {t("mcpConfig.containerList.title")}
+              </Title>
+            </div>
+            <Table
+              columns={[
+                {
+                  title: t("mcpConfig.containerList.column.name"),
+                  dataIndex: "name",
+                  key: "name",
+                  width: "25%",
+                  ellipsis: true,
+                  render: (text: string, record: any) => text || record.container_id?.substring(0, 12),
+                },
+                {
+                  title: t("mcpConfig.containerList.column.containerId"),
+                  dataIndex: "container_id",
+                  key: "container_id",
+                  width: "20%",
+                  ellipsis: true,
+                  render: (text: string) => text || "-",
+                },
+                {
+                  title: t("mcpConfig.containerList.column.port"),
+                  dataIndex: "host_port",
+                  key: "host_port",
+                  width: "15%",
+                  render: (port: number) => port || "-",
+                },
+                {
+                  title: t("mcpConfig.containerList.column.status"),
+                  dataIndex: "status",
+                  key: "status",
+                  width: "15%",
+                  render: (status: string) => (
+                    <span style={{ color: status === "running" ? "#52c41a" : "#ff4d4f" }}>
+                      {status || "unknown"}
+                    </span>
+                  ),
+                },
+                {
+                  title: t("mcpConfig.containerList.column.action"),
+                  key: "action",
+                  width: "25%",
+                  render: (_: any, record: any) => (
+                    <Space size="small">
+                      <Button
+                        type="link"
+                        icon={<FileText className="size-4" />}
+                        onClick={() => handleViewLogs(record.container_id)}
+                        size="small"
+                        disabled={updatingTools}
+                      >
+                        {t("mcpConfig.containerList.button.viewLogs")}
+                      </Button>
+                      <Button
+                        type="link"
+                        danger
+                        icon={<Trash className="size-4" />}
+                        onClick={() => handleDeleteContainer(record)}
+                        size="small"
+                        disabled={actionsLocked}
+                      >
+                        {t("mcpConfig.containerList.button.delete")}
+                      </Button>
+                    </Space>
+                  ),
+                },
+              ]}
+              dataSource={containerList}
+              rowKey="container_id"
+              loading={loadingContainers}
+              size="small"
+              pagination={false}
+              locale={{ emptyText: t("mcpConfig.containerList.empty") }}
+              scroll={{ y: 300 }}
+              style={{ width: "100%" }}
+            />
+          </div>
         </div>
       </Modal>
 
@@ -557,7 +892,7 @@ export default function McpConfigModal({
         <div style={{ padding: "0 0 16px 0" }}>
           {loadingTools ? (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <LoadingOutlined style={{ fontSize: 24, marginRight: 8 }} />
+              <LoaderCircle className="animate-spin" style={{ width: 16, height: 16, marginRight: 8, display: "inline-block" }} />
               <Text>{t("mcpConfig.toolsList.loading")}</Text>
             </div>
           ) : (
@@ -571,6 +906,44 @@ export default function McpConfigModal({
               scroll={{ y: 500 }}
               style={{ width: "100%" }}
             />
+          )}
+        </div>
+      </Modal>
+
+      {/* Container logs modal */}
+      <Modal
+        title={`${t("mcpConfig.containerLogs.title")} - ${currentContainerId?.substring(0, 12)}`}
+        open={logsModalVisible}
+        onCancel={() => setLogsModalVisible(false)}
+        width={1000}
+        footer={[
+          <Button key="close" onClick={() => setLogsModalVisible(false)}>
+            {t("mcpConfig.modal.close")}
+          </Button>,
+        ]}
+      >
+        <div style={{ padding: "0 0 16px 0" }}>
+          {loadingLogs ? (
+            <div style={{ textAlign: "center", padding: "40px 0" }}>
+              <LoaderCircle className="animate-spin" size={16} />
+              <Text>{t("mcpConfig.containerLogs.loading")}</Text>
+            </div>
+          ) : (
+            <pre
+              style={{
+                backgroundColor: "#f5f5f5",
+                padding: 16,
+                borderRadius: 4,
+                maxHeight: 500,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontSize: 12,
+                fontFamily: "monospace",
+              }}
+            >
+              {currentContainerLogs || t("mcpConfig.containerLogs.empty")}
+            </pre>
           )}
         </div>
       </Modal>

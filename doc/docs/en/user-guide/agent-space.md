@@ -46,6 +46,11 @@ Click a card to open its details:
 1. Click **Export** on the card.
 2. Nexent downloads a JSON configuration file you can import later.
 
+### Copy an Agent
+
+1. Click **Copy** on the card to duplicate the agent.
+2. This facilitates experimentation, multi-version debugging, and parallel development.
+
 ### View Relationships
 
 1. Click **View Relationships** to see how the agent interacts with tools and other agents.

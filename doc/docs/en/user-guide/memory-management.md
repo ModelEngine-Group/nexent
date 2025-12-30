@@ -84,9 +84,9 @@ When an agent retrieves memory it follows this order (high ➝ low):
 
 The system takes care of most work for you:
 
-- **Smart extraction:** Detects important facts in conversations and stores them automatically.
-- **Context injection:** Retrieves the most relevant memories and adds them to prompts silently.
-- **Incremental updates:** Refreshes or removes outdated memories so the store stays clean.
+- **Smart extraction:** Detects key facts in conversations, creates memory entries automatically, and stores them at the right level—no manual input needed.
+- **Automatic context embedding:** Retrieves the most relevant memories and implicitly injects them into the conversation context so agents respond with better accuracy.
+- **Incremental updates:** Gradually refreshes or removes outdated memories to keep the store clean, timely, and reliable.
 
 ## ✋ Manual Memory Operations
 

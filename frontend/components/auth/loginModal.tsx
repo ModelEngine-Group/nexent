@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, Typography, Space } from "antd";
-import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { UserRound, LockKeyhole } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthForm } from "@/hooks/useAuthForm";
@@ -187,7 +187,7 @@ export function LoginModal() {
           rules={[{ required: true, message: t("auth.emailRequired") }]}
         >
           <Input
-            prefix={<UserOutlined className="text-gray-400" />}
+            prefix={<UserRound className="text-gray-400" size={16} />}
             placeholder={t("auth.emailPlaceholder")}
             onChange={handleEmailChange}
             size="large"
@@ -209,7 +209,7 @@ export function LoginModal() {
           rules={[{ required: true, message: t("auth.passwordRequired") }]}
         >
           <Input.Password
-            prefix={<LockOutlined className="text-gray-400" />}
+            prefix={<LockKeyhole className="text-gray-400" size={16} />}
             placeholder={t("auth.passwordRequired")}
             onChange={handlePasswordChange}
             size="large"

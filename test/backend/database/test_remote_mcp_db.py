@@ -67,10 +67,11 @@ sys.modules['backend.consts.exceptions'] = exceptions_mock
 from backend.database.remote_mcp_db import (
     create_mcp_record,
     delete_mcp_record_by_name_and_url,
+    delete_mcp_record_by_container_id,
     update_mcp_status_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
-    check_mcp_name_exists
+    check_mcp_name_exists,
 )
 
 class MockMcpRecord:
@@ -81,6 +82,7 @@ class MockMcpRecord:
         self.user_id = "user1"
         self.status = True
         self.delete_flag = "N"
+        self.container_id = "container-1"
         self.create_time = "2024-01-01 00:00:00"
         self.__dict__ = {
             "mcp_name": "test_mcp",
@@ -89,6 +91,7 @@ class MockMcpRecord:
             "user_id": "user1",
             "status": True,
             "delete_flag": "N",
+            "container_id": "container-1",
             "create_time": "2024-01-01 00:00:00"
         }
 
@@ -180,6 +183,42 @@ def test_delete_mcp_record_by_name_and_url_failure(monkeypatch, mock_session):
     # Should raise SQLAlchemyError
     with pytest.raises(SQLAlchemyError):
         delete_mcp_record_by_name_and_url("test_mcp", "http://test.server.com", "tenant1", "user1")
+
+
+def test_delete_mcp_record_by_container_id_success(monkeypatch, mock_session):
+    """Test successful deletion of MCP record by container ID"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    # Should not raise any exception
+    delete_mcp_record_by_container_id("container-1", "tenant1", "user1")
+
+    mock_update.assert_called_once_with({"delete_flag": "Y", "updated_by": "user1"})
+
+
+def test_delete_mcp_record_by_container_id_failure(monkeypatch, mock_session):
+    """Test failure of MCP record deletion by container ID - exception should propagate"""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    session, query = mock_session
+    query.filter.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    # Should raise SQLAlchemyError
+    with pytest.raises(SQLAlchemyError):
+        delete_mcp_record_by_container_id("container-1", "tenant1", "user1")
 
 def test_update_mcp_status_by_name_and_url_success(monkeypatch, mock_session):
     """Test successful update of MCP status"""
@@ -373,6 +412,7 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
     mock_mcp_record_class.tenant_id = MagicMock()
     mock_mcp_record_class.delete_flag = MagicMock()
     mock_mcp_record_class.mcp_server = MagicMock()
+    mock_mcp_record_class.container_id = MagicMock()
     
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -385,7 +425,8 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
     mcp_data = {
         "mcp_name": "test_mcp",
         "mcp_server": "http://test.server.com",
-        "status": True
+        "status": True,
+        "container_id": "container-1",
     }
     create_mcp_record(mcp_data, "tenant1", "user1")
     
@@ -400,5 +441,8 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
     # 4. Update MCP status - should not raise exception
     update_mcp_status_by_name_and_url("test_mcp", "http://test.server.com", "tenant1", "user1", False)
     
-    # 5. Delete MCP record - should not raise exception
-    delete_mcp_record_by_name_and_url("test_mcp", "http://test.server.com", "tenant1", "user1") 
+    # 5. Delete MCP record by name/url - should not raise exception
+    delete_mcp_record_by_name_and_url("test_mcp", "http://test.server.com", "tenant1", "user1")
+
+    # 6. Delete MCP record by container_id - should not raise exception
+    delete_mcp_record_by_container_id("container-1", "tenant1", "user1")

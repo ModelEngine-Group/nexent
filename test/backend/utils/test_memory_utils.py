@@ -318,6 +318,36 @@ class TestMemoryUtils(unittest.TestCase):
             self.assertEqual(result["vector_store"]["config"]
                              ["collection_name"], "mem0_openai_test-embed_1536")
 
+    def test_build_memory_config_sanitizes_slashes_in_repo_and_name(self):
+        """Slash characters in repo/name are replaced with underscores in collection name"""
+        mock_tenant_config_manager = MagicMock()
+        mock_tenant_config_manager.get_model_config.side_effect = [
+            {"model_name": "gpt-4", "model_repo": "azure/openai", "base_url": "https://api.example.com/v1", "api_key": "llm-key"},
+            {"model_name": "text-embed/ada-002", "model_repo": "azure/openai", "base_url": "https://api.example.com/v1", "api_key": "embed-key", "max_tokens": 1536}
+        ]
+
+        mock_const = MagicMock()
+        mock_const.ES_HOST = "http://localhost:9200"
+        mock_const.ES_API_KEY = "test-es-key"
+        mock_const.ES_USERNAME = "elastic"
+        mock_const.ES_PASSWORD = "test-password"
+
+        model_mapping = {"llm": "llm", "embedding": "embedding"}
+        mock_get_model_name = MagicMock()
+        mock_get_model_name.side_effect = ["azure/openai/gpt-4", "azure/openai/text-embed/ada-002"]
+
+        with patch('backend.utils.memory_utils.tenant_config_manager', mock_tenant_config_manager), \
+            patch('backend.utils.memory_utils._c', mock_const), \
+                patch('backend.utils.memory_utils.get_model_name_from_config', mock_get_model_name), \
+                patch('backend.utils.memory_utils.MODEL_CONFIG_MAPPING', model_mapping):
+
+            result = self.build_memory_config("tenant-with-slash")
+
+            self.assertEqual(
+                result["vector_store"]["config"]["collection_name"],
+                "mem0_azure_openai_text-embed_ada-002_1536",
+            )
+
     def test_build_memory_config_with_empty_model_repo(self):
         """Empty model_repo yields collection name without repo segment"""
         mock_tenant_config_manager = MagicMock()

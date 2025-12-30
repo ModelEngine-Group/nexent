@@ -172,6 +172,19 @@ update_env_file() {
     echo "REDIS_BACKEND_URL=redis://localhost:6379/1" >> ../.env
   fi
 
+  # DOCKER_HOST (set default per platform)
+  local docker_host_value="unix:///var/run/docker.sock"
+  case "$(uname -s)" in
+    MINGW*|CYGWIN*|MSYS*|Windows_NT)
+      docker_host_value="npipe:////./pipe/docker_engine"
+      ;;
+  esac
+  if grep -q "^DOCKER_HOST=" ../.env; then
+    sed -i.bak "s~^DOCKER_HOST=.*~DOCKER_HOST=$docker_host_value~" ../.env
+  else
+    echo "DOCKER_HOST=$docker_host_value" >> ../.env
+  fi
+
   # POSTGRES_HOST
   if grep -q "^POSTGRES_HOST=" ../.env; then
     sed -i.bak "s~^POSTGRES_HOST=.*~POSTGRES_HOST=localhost~" ../.env

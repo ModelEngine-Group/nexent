@@ -19,6 +19,10 @@ Create and manage knowledge bases, upload documents, and generate summaries. Kno
 
 ![File Upload](./assets/knowledge-base/create-knowledge-base.png)
 
+💡 Hover over the status to understand the progress and error reasons
+
+![File Upload](./assets/knowledge-base/tip.png)
+
 ### Supported File Formats
 
 Nexent supports multiple file formats, including:

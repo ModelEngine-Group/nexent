@@ -7,6 +7,7 @@ import { App, Modal } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { authService } from "@/services/authService";
 import { sessionService } from "@/services/sessionService";
 import { getSessionFromStorage } from "@/lib/auth";
@@ -29,6 +30,7 @@ export function SessionListeners() {
   const { openLoginModal, setIsFromSessionExpired, clearLocalSession, isSpeedMode } =
     useAuth();
   const { modal } = App.useApp();
+  const { confirm } = useConfirmModal();
   const modalShownRef = useRef<boolean>(false);
 
   const isLocaleHomePath = (path?: string | null) => {
@@ -52,7 +54,11 @@ export function SessionListeners() {
       content: t("login.expired.content"),
       okText: t("login.expired.okText"),
       cancelText: t("login.expired.cancelText"),
+      centered: true,
       closable: false,
+      okButtonProps: { 
+        type: "primary"
+      },
       onOk() {
         // Clear local session state (session already expired on backend)
         clearLocalSession();

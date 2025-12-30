@@ -1,14 +1,19 @@
 "use client";
 
-import { Layout } from "antd";
+import { Layout, Button } from "antd";
 import { TopNavbar } from "./TopNavbar";
 import { SideNavigation } from "./SideNavigation";
-import { Footer } from "./Footer";
-import { HEADER_CONFIG, FOOTER_CONFIG } from "@/const/layoutConstants";
+import { FooterLayout } from "./FooterLayout";
+import { HEADER_CONFIG, FOOTER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import React from "react";
+import { useState, useEffect } from "react";
 
-const { Content } = Layout;
+import {
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 
+const { Header, Sider, Content, Footer } = Layout;
 interface NavigationLayoutProps {
   children: React.ReactNode;
   onAuthRequired?: () => void;
@@ -49,78 +54,141 @@ export function NavigationLayout({
   // Use RESERVED_HEIGHT for layout calculations (actual space occupied)
   const headerReservedHeight = parseInt(HEADER_CONFIG.RESERVED_HEIGHT);
   const footerReservedHeight = parseInt(FOOTER_CONFIG.RESERVED_HEIGHT);
-  
   const contentMinHeight = showFooter
     ? `calc(100vh - ${headerReservedHeight}px - ${footerReservedHeight}px)`
     : `calc(100vh - ${headerReservedHeight}px)`;
+  
+  const [collapsed, setCollapsed] = useState(false);
+
+  const layoutStyle: React.CSSProperties = {
+    height: "100vh", // Key: fill the viewport height
+    width: "100vw", // Key: fill the viewport width
+    overflow: "hidden", // Key: prevent the outermost scrollbar
+    backgroundColor: "#fff"
+  };
+
+  const siderStyle: React.CSSProperties = {
+    textAlign: "start",
+    display: "flex", // use column layout to allow inner scrollable area
+    flexDirection: "column",
+    alignItems: "stretch",
+    justifyContent: "flex-start",
+    position: "fixed",
+    top: headerReservedHeight,
+    bottom: showFooter? footerReservedHeight: 0,
+    left: 0,
+    backgroundColor: "#fff",
+    overflow: "visible",
+    // Ensure the sider (and its toggle) sits above main content
+    zIndex: 998,
+  };
+
+  const siderInnerStyle: React.CSSProperties = {
+    height: "100%",
+    overflowY: "auto",
+    overflowX: "hidden",
+    WebkitOverflowScrolling: "touch",
+    display: "flex",
+    flexDirection: "column",
+  };
+
+  const headerStyle: React.CSSProperties = {
+    textAlign: "center",
+    height: headerReservedHeight, // Fixed height 64px
+    backgroundColor: "#fff",
+    lineHeight: "64px",
+    paddingInline: 0,
+    flexShrink: 0, // Prevent shrinking
+  };
+
+  const footerStyle: React.CSSProperties = {
+    textAlign: "center",
+    height: showFooter? footerReservedHeight: 0, // Fixed height 64px
+    lineHeight: showFooter? footerReservedHeight: 0,
+    padding: 0,
+    flexShrink: 0, // 防止被挤压
+    backgroundColor: "#fff",
+  };
+
+  const contentStyle: React.CSSProperties = {
+    // Key settings:
+    overflowY: "auto", // If content overflows vertically, scroll inside Content only
+    overflowX: "hidden", // Hide horizontal scrollbar (optional)
+    display: "flex", // (optional) used to center content for demo
+    alignItems: "center", // (optional)
+    justifyContent: "center", // (optional)
+    position: "relative", // Allow absolute-positioned children
+    marginLeft: collapsed
+    ? `${SIDER_CONFIG.COLLAPSED_WIDTH}px`
+    : `${SIDER_CONFIG.EXPANDED_WIDTH}px`,
+    backgroundColor: "#fff"
+  };
 
   return (
-    <div className={`${contentMode === "fullscreen" ? "h-screen" : "min-h-screen"} flex flex-col ${contentMode === "fullscreen" ? "bg-white dark:bg-slate-900" : "bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800"} overflow-hidden`}>
-      {/* Top navigation bar */}
-      <TopNavbar 
-        additionalTitle={topNavbarAdditionalTitle}
-        additionalRightContent={topNavbarAdditionalRightContent}
-      />
+      <Layout style={layoutStyle}>
+        <Header style={headerStyle}>      
+          <TopNavbar 
+            additionalTitle={topNavbarAdditionalTitle}
+            additionalRightContent={topNavbarAdditionalRightContent}
+          />
+        </Header>
 
-      {/* Layout with sidebar and content */}
-      <Layout
-        className="flex-1 bg-transparent"
-        style={{
-          marginTop: 0,
-          marginBottom: 0,
-          ...(contentMode === "fullscreen" 
-            ? { height: contentMinHeight } 
-            : { minHeight: contentMinHeight }
-          ),
-        }}
-      >
-        {/* Side navigation */}
-        <SideNavigation
-          onAuthRequired={onAuthRequired}
-          onAdminRequired={onAdminRequired}
-          onViewChange={onViewChange}
-          currentView={currentView}
-        />
-
-        {/* Main content area */}
-        <Content 
-          className={
-            contentMode === "centered"
-              ? "flex-1 flex items-center justify-center overflow-hidden"
-              : contentMode === "fullscreen"
-              ? "flex-1 overflow-hidden"
-              : "flex-1 overflow-auto"
-          }
-          style={{
-                  paddingTop: contentMode === "fullscreen" ? `${headerReservedHeight}px` : `${headerReservedHeight}px`,
-                  paddingBottom: contentMode === "fullscreen" ? (showFooter ? `${footerReservedHeight}px` : 0) : (showFooter ? `${footerReservedHeight}px` : 0)
-          }}
-        >
-          {contentMode === "centered" ? (
-            <div className="w-full h-full flex items-center justify-center p-4">
-              {children}
+        <Layout >
+          <Sider
+            style={siderStyle}
+            width={SIDER_CONFIG.EXPANDED_WIDTH}
+            collapsed={collapsed}
+            trigger={null}
+            breakpoint="lg"
+            collapsedWidth={SIDER_CONFIG.COLLAPSED_WIDTH}
+            className="dark:bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
+          >
+            {/* Side navigation - wrapped to allow internal vertical scrolling when needed */}
+            <div style={siderInnerStyle}>
+              <SideNavigation
+                onAuthRequired={onAuthRequired}
+                onAdminRequired={onAdminRequired}
+                onViewChange={onViewChange}
+                currentView={currentView}
+                collapsed={collapsed}
+              />
             </div>
-          ) : (
-            children
-          )}
-        </Content>
-      </Layout>
+            <Button
+              type="primary"
+              shape="circle"
+              size="small"
+              onClick={() => setCollapsed(!collapsed)}
+              style={{
+                position: "absolute",
+                top: "50%",
+                transform: "translateY(-50%)",
+                right: "-12px",
+                transition: "right 0.2s ease, left 0.2s ease",
+                // Place toggle above most content; Sider already has high z-index
+                zIndex: 999,
+              }}
+              icon={collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
+            />
+          </Sider>
+          {/* Main content area */}
+          <Content style={contentStyle}
+          >
+            {contentMode === "centered" ? (
+              <div className="w-full h-full flex items-center justify-center">
+                {children}
+              </div>
+            ) : (
+              children
+            )}
+          </Content>
+        </Layout>
 
-      {/* Fixed footer at bottom */}
-      {showFooter && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 10,
-          }}
-        >
-          <Footer />
-        </div>
-      )}
-    </div>
+        { showFooter && 
+            <Footer style={footerStyle}>
+              <FooterLayout />
+            </Footer> 
+        }
+      </Layout>
   );
 }
 

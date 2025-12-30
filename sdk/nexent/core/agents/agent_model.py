@@ -16,6 +16,10 @@ class ModelConfig(BaseModel):
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
     ssl_verify: Optional[bool] = Field(description="Whether to verify SSL certificates", default=True)
+    model_factory: Optional[str] = Field(
+        description="Model provider identifier (e.g., openai, modelengine)",
+        default=None
+    )
 
 
 class ToolConfig(BaseModel):

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, Spin, message, Typography } from "antd";
-import { RobotOutlined, ToolOutlined } from "@ant-design/icons";
+import { Bot, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Tree from "react-d3-tree";
 
@@ -71,7 +71,7 @@ const CustomNode = ({ nodeDatum }: any) => {
     nodeDatum.type === AGENT_CALL_RELATIONSHIP_NODE_TYPES.MAIN ||
     nodeDatum.type === AGENT_CALL_RELATIONSHIP_NODE_TYPES.SUB;
   const color = getNodeColor(nodeDatum.type, nodeDatum.depth);
-  const icon = isAgent ? <RobotOutlined /> : <ToolOutlined />;
+  const icon = isAgent ? <Bot size={16} /> : <Wrench size={16} />;
 
   // Truncate tool names by maximum character count (avoid too long)
   const rawName: string = nodeDatum.name || "";

@@ -300,8 +300,15 @@ class McpRecord(TableBase):
     user_id = Column(String(100), doc="User ID")
     mcp_name = Column(String(100), doc="MCP name")
     mcp_server = Column(String(500), doc="MCP server address")
-    status = Column(Boolean, default=None,
-                    doc="MCP server connection status, True=connected, False=disconnected, None=unknown")
+    status = Column(
+        Boolean,
+        default=None,
+        doc="MCP server connection status, True=connected, False=disconnected, None=unknown",
+    )
+    container_id = Column(
+        String(200),
+        doc="Docker container ID for MCP service, None for non-containerized MCP",
+    )
 
 
 class UserTenant(TableBase):

@@ -127,7 +127,7 @@ def test_auto_summary_success(test_data):
     # Setup mock responses
     mock_vdb_core_instance = MagicMock()
     mock_user_info = ("test_user_id", "test_tenant_id", "en")
-    
+
     # Setup service mock
     mock_service_instance = MagicMock()
     mock_service_instance.summary_index_name = AsyncMock()
@@ -138,7 +138,7 @@ def test_auto_summary_success(test_data):
     with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
             patch('backend.apps.knowledge_summary_app.get_vector_db_core', return_value=mock_vdb_core_instance), \
             patch('backend.apps.knowledge_summary_app.get_current_user_info', return_value=mock_user_info):
-        
+
         # Execute test with model_id parameter
         response = client.post(
             f"/summary/{test_data['index_name']}/auto_summary?batch_size=500&model_id=1",
@@ -149,7 +149,7 @@ def test_auto_summary_success(test_data):
 
         # Assertions - verify the function was called exactly once
         assert mock_service_instance.summary_index_name.call_count == 1
-        
+
         # Extract the call arguments to verify expected values without comparing object identity
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
@@ -163,7 +163,7 @@ def test_auto_summary_without_model_id(test_data):
     # Setup mock responses
     mock_vdb_core_instance = MagicMock()
     mock_user_info = ("test_user_id", "test_tenant_id", "en")
-    
+
     # Setup service mock
     mock_service_instance = MagicMock()
     mock_service_instance.summary_index_name = AsyncMock()
@@ -174,7 +174,7 @@ def test_auto_summary_without_model_id(test_data):
     with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
             patch('backend.apps.knowledge_summary_app.get_vector_db_core', return_value=mock_vdb_core_instance), \
             patch('backend.apps.knowledge_summary_app.get_current_user_info', return_value=mock_user_info):
-        
+
         # Execute test without model_id parameter
         response = client.post(
             f"/summary/{test_data['index_name']}/auto_summary?batch_size=500",
@@ -185,7 +185,7 @@ def test_auto_summary_without_model_id(test_data):
 
         # Assertions - verify the function was called exactly once
         assert mock_service_instance.summary_index_name.call_count == 1
-        
+
         # Extract the call arguments to verify expected values without comparing object identity
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['index_name'] == test_data['index_name']
@@ -199,7 +199,7 @@ def test_auto_summary_exception(test_data):
     # Setup mock to raise exception
     mock_vdb_core_instance = MagicMock()
     mock_user_info = ("test_user_id", "test_tenant_id", "en")
-    
+
     # Setup service mock to raise exception
     mock_service_instance = MagicMock()
     mock_service_instance.summary_index_name = AsyncMock(
@@ -210,7 +210,7 @@ def test_auto_summary_exception(test_data):
     with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
             patch('backend.apps.knowledge_summary_app.get_vector_db_core', return_value=mock_vdb_core_instance), \
             patch('backend.apps.knowledge_summary_app.get_current_user_info', return_value=mock_user_info):
-        
+
         # Execute test
         response = client.post(
             f"/summary/{test_data['index_name']}/auto_summary",
@@ -243,7 +243,7 @@ def test_change_summary_success(test_data):
     # Execute test with direct patching of route handler function
     with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
             patch('backend.apps.knowledge_summary_app.get_current_user_id', return_value=test_data["user_id"]):
-        
+
         response = client.post(
             f"/summary/{test_data['index_name']}/summary",
             json=request_data,
@@ -278,7 +278,7 @@ def test_change_summary_exception(test_data):
     # Execute test
     with patch('backend.apps.knowledge_summary_app.ElasticSearchService', return_value=mock_service_instance), \
             patch('backend.apps.knowledge_summary_app.get_current_user_id', return_value=test_data["user_id"]):
-        
+
         response = client.post(
             f"/summary/{test_data['index_name']}/summary",
             json=request_data,

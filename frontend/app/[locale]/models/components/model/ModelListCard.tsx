@@ -228,11 +228,15 @@ export const ModelListCard = ({
         }}
         placeholder={t("model.select.placeholder")}
         value={selectedModel || undefined}
-        onChange={onModelChange}
+        onChange={(value) => {
+          // Prevent duplicate onChange calls by checking if value actually changed
+          if (value !== selectedModel) {
+            onModelChange(value || "");
+          }
+        }}
         allowClear={{
           clearIcon: <CloseOutlined />,
         }}
-        onClear={() => onModelChange("")}
         size="middle"
         onClick={(e) => e.stopPropagation()}
         getPopupContainer={(triggerNode) =>

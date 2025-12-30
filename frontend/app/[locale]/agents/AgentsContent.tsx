@@ -9,7 +9,6 @@ import {
 } from "@/const/modelConfig";
 
 import AgentConfig, {AgentConfigHandle} from "./AgentConfiguration";
-import SaveConfirmModal from "./components/SaveConfirmModal";
 
 interface AgentsContentProps {
   /** Whether currently saving */
@@ -39,8 +38,6 @@ export default forwardRef<AgentConfigHandle, AgentsContentProps>(function Agents
   onSavingStateChange,
 }: AgentsContentProps, ref) {
   const agentConfigRef = useRef<AgentConfigHandle | null>(null);
-  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
-  const pendingNavRef = useRef<null | (() => void)>(null);
   
   // Use custom hook for common setup flow logic
   const {
@@ -95,32 +92,6 @@ export default forwardRef<AgentConfigHandle, AgentsContentProps>(function Agents
           ) : null}
         </div>
       </motion.div>
-
-      <SaveConfirmModal
-        open={showSaveConfirm}
-        onCancel={async () => {
-          // Reload data from backend to discard changes
-          await agentConfigRef.current?.reloadCurrentAgentData?.();
-          setShowSaveConfirm(false);
-          const go = pendingNavRef.current;
-          pendingNavRef.current = null;
-          if (go) go();
-        }}
-        onSave={async () => {
-          try {
-            setInternalIsSaving(true);
-            await agentConfigRef.current?.saveAllChanges?.();
-            setShowSaveConfirm(false);
-            const go = pendingNavRef.current;
-            pendingNavRef.current = null;
-            if (go) go();
-          } catch (e) {
-            // errors are surfaced by underlying save
-          } finally {
-            setInternalIsSaving(false);
-          }
-        }}
-      />
     </>
   );
 });

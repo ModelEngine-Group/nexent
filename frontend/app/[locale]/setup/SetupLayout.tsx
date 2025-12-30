@@ -1,12 +1,14 @@
 "use client";
 
-import React, {ReactNode} from "react";
+import {ReactNode} from "react";
 import {useTranslation} from "react-i18next";
 
 import {Badge, Button, Dropdown} from "antd";
-import {DownOutlined} from "@ant-design/icons";
-import {FiRefreshCw} from "react-icons/fi";
-import {Globe} from "lucide-react";
+import {
+  ChevronDown,
+  Globe,
+  RefreshCw,
+} from "lucide-react";
 import {languageOptions} from "@/const/constants";
 import {useLanguageSwitch} from "@/lib/language";
 import {CONNECTION_STATUS, ConnectionStatus,} from "@/const/modelConfig";
@@ -57,7 +59,7 @@ export function SetupHeaderRightContent({
             <Globe className="h-4 w-4" />
             {languageOptions.find((o) => o.value === currentLanguage)?.label ||
               currentLanguage}
-            <DownOutlined className="text-[10px]" />
+            <ChevronDown className="text-[10px]" />
           </a>
         </Dropdown>
         {/* ModelEngine connectivity status */}
@@ -69,7 +71,7 @@ export function SetupHeaderRightContent({
           />
           <Button
             icon={
-              <FiRefreshCw
+              <RefreshCw
                 className={isCheckingConnection ? "animate-spin" : ""}
               />
             }
@@ -131,7 +133,7 @@ function Navigation({
   };
 
   return (
-    <div className="mt-3 flex justify-between" style={{ padding: "0 16px" }}> 
+    <div className="mt-3 flex justify-between" style={{ padding: "0 16px" }}>
       <div className="flex gap-2">
         {showBack && onBack && (
           <button
@@ -179,7 +181,6 @@ interface SetupLayoutProps {
 /**
  * SetupLayout - Content wrapper for setup pages
  * This component should be wrapped by NavigationLayout
- * Use SetupHeaderRightContent for customizing the top navbar
  */
 export default function SetupLayout({
   children,

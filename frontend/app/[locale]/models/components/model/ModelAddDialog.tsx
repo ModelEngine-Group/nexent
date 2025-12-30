@@ -2,13 +2,13 @@ import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
+import { InfoCircleFilled } from "@ant-design/icons";
 import {
-  InfoCircleFilled,
-  LoadingOutlined,
-  RightOutlined,
-  DownOutlined,
-  SettingOutlined,
-} from "@ant-design/icons";
+  LoaderCircle, 
+  ChevronRight, 
+  ChevronDown, 
+  Settings 
+} from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
 import { configService } from "@/services/configService";
@@ -924,9 +924,9 @@ export const ModelAddDialog = ({
                 className="flex items-center focus:outline-none"
               >
                 {showModelList ? (
-                  <DownOutlined className="text-sm text-gray-700 mr-1" />
+                  <ChevronDown className="text-sm text-gray-700 mr-1" size={14} />
                 ) : (
-                  <RightOutlined className="text-sm text-gray-700 mr-1" />
+                  <ChevronRight className="text-sm text-gray-700 mr-1" size={14} />
                 )}
                 <span className="text-sm font-medium text-gray-700">
                   {t("model.dialog.modelList.title")}
@@ -962,8 +962,8 @@ export const ModelAddDialog = ({
                 )}
                 {loadingModelList ? (
                   <div className="flex flex-col items-center justify-center py-4 text-xs text-gray-500">
-                    <LoadingOutlined
-                      spin
+                    <LoaderCircle
+                      className="animate-spin"
                       style={{
                         fontSize: 18,
                         color: "#1890ff",
@@ -1018,7 +1018,7 @@ export const ModelAddDialog = ({
                             >
                               <Button
                                 type="text"
-                                icon={<SettingOutlined />}
+                                icon={<Settings size={14} />}
                                 size="small"
                                 onClick={(e) => {
                                   e.stopPropagation(); // Prevent switch toggle
