@@ -42,12 +42,11 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
-    @patch('services.mcp_container_service.DOCKER_HOST', None)
     def test_init_success(self, mock_config_class, mock_create_client):
         """Test successful initialization"""
         mock_config = MagicMock()
         mock_config_class.return_value = mock_config
-        
+
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
 
@@ -55,8 +54,7 @@ class TestMCPContainerManagerInit:
 
         assert manager.client == mock_client
         mock_config_class.assert_called_once_with(
-            docker_socket_path="/var/run/docker.sock",
-            docker_host=None  # Will be set from consts.const.DOCKER_HOST
+            docker_socket_path="/var/run/docker.sock"
         )
         mock_create_client.assert_called_once_with(mock_config)
 
@@ -74,20 +72,18 @@ class TestMCPContainerManagerInit:
 
     @patch('services.mcp_container_service.create_container_client_from_config')
     @patch('services.mcp_container_service.DockerContainerConfig')
-    @patch('services.mcp_container_service.DOCKER_HOST', None)
     def test_init_default_socket_path(self, mock_config_class, mock_create_client):
         """Test initialization with default socket path"""
         mock_config = MagicMock()
         mock_config_class.return_value = mock_config
-        
+
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
 
         manager = MCPContainerManager()
 
         mock_config_class.assert_called_once_with(
-            docker_socket_path="/var/run/docker.sock",
-            docker_host=None
+            docker_socket_path=None
         )
 
 

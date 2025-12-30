@@ -16,48 +16,18 @@ class TestDockerContainerConfig:
     def test_init_with_no_parameters(self):
         """Test initialization with no parameters"""
         config = DockerContainerConfig()
-        
-        assert config._docker_host is None or config._docker_host == os.getenv("DOCKER_HOST")
+
         assert config._docker_socket_path is None
         assert config._base_url is None
 
     def test_init_with_docker_socket_path(self):
         """Test initialization with docker_socket_path"""
         config = DockerContainerConfig(docker_socket_path="/custom/socket/path")
-        
-        assert config._docker_socket_path == "/custom/socket/path"
-        assert config._docker_host is None or config._docker_host == os.getenv("DOCKER_HOST")
 
-    def test_init_with_docker_host(self):
-        """Test initialization with docker_host"""
-        config = DockerContainerConfig(docker_host="tcp://localhost:2375")
-        
-        assert config._docker_host == "tcp://localhost:2375"
-        assert config._docker_socket_path is None
-
-    def test_init_with_both_parameters(self):
-        """Test initialization with both parameters (docker_host should override)"""
-        config = DockerContainerConfig(
-            docker_socket_path="/custom/socket/path",
-            docker_host="tcp://localhost:2375"
-        )
-        
-        assert config._docker_host == "tcp://localhost:2375"
         assert config._docker_socket_path == "/custom/socket/path"
 
-    @patch.dict(os.environ, {"DOCKER_HOST": "tcp://env-host:2375"})
-    def test_init_uses_env_docker_host(self):
-        """Test initialization uses DOCKER_HOST environment variable"""
-        config = DockerContainerConfig()
-        
-        assert config._docker_host == "tcp://env-host:2375"
 
-    @patch.dict(os.environ, {"DOCKER_HOST": "tcp://env-host:2375"}, clear=True)
-    def test_init_docker_host_overrides_env(self):
-        """Test that explicit docker_host overrides environment variable"""
-        config = DockerContainerConfig(docker_host="tcp://explicit-host:2375")
-        
-        assert config._docker_host == "tcp://explicit-host:2375"
+
 
     def test_container_type_property(self):
         """Test container_type property returns 'docker'"""
@@ -67,25 +37,15 @@ class TestDockerContainerConfig:
 
     def test_base_url_property_cached(self):
         """Test that base_url property is cached"""
-        config = DockerContainerConfig(docker_host="tcp://localhost:2375")
-        
+        config = DockerContainerConfig()
+
         url1 = config.base_url
         url2 = config.base_url
-        
+
         assert url1 == url2
         assert config._base_url is not None
 
-    def test_base_url_with_docker_host(self):
-        """Test base_url with docker_host"""
-        config = DockerContainerConfig(docker_host="tcp://localhost:2375")
-        
-        assert config.base_url == "tcp://localhost:2375"
 
-    def test_base_url_with_docker_host_stripped(self):
-        """Test base_url strips whitespace from docker_host"""
-        config = DockerContainerConfig(docker_host="  tcp://localhost:2375  ")
-        
-        assert config.base_url == "tcp://localhost:2375"
 
     @patch('sys.platform', 'win32')
     def test_base_url_windows_default_socket(self):
@@ -122,11 +82,6 @@ class TestDockerContainerConfig:
         
         assert config.base_url == "unix:///custom/socket/path"
 
-    def test_base_url_with_scheme_already_present(self):
-        """Test base_url when scheme is already present"""
-        config = DockerContainerConfig(docker_host="unix:///var/run/docker.sock")
-        
-        assert config.base_url == "unix:///var/run/docker.sock"
 
     @patch('sys.platform', 'win32')
     def test_normalize_base_url_windows_empty(self):
@@ -231,31 +186,21 @@ class TestDockerContainerConfig:
         # Should not raise any exception
         config.validate()
 
-    def test_validate_with_custom_config(self):
-        """Test validate method with custom configuration"""
-        config = DockerContainerConfig(
-            docker_host="tcp://localhost:2375",
-            docker_socket_path="/custom/path"
-        )
-        
-        # Should not raise any exception
-        config.validate()
 
     def test_base_url_multiple_access(self):
         """Test that base_url can be accessed multiple times"""
-        config = DockerContainerConfig(docker_host="tcp://localhost:2375")
-        
+        config = DockerContainerConfig()
+
         url1 = config.base_url
         url2 = config.base_url
         url3 = config.base_url
-        
-        assert url1 == url2 == url3 == "tcp://localhost:2375"
 
-    def test_base_url_with_none_docker_host(self):
-        """Test base_url when docker_host is None"""
-        with patch.dict(os.environ, {}, clear=True):
-            config = DockerContainerConfig()
-            # Should use default socket path based on platform
-            url = config.base_url
-            assert url is not None
+        assert url1 == url2 == url3
+
+    def test_base_url_uses_default_socket_path(self):
+        """Test base_url uses default socket path"""
+        config = DockerContainerConfig()
+        # Should use default socket path based on platform
+        url = config.base_url
+        assert url is not None
 

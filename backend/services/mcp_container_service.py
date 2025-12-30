@@ -8,7 +8,6 @@ interface while using the standardized SDK container management module.
 import logging
 from typing import Dict, List, Optional
 
-from consts.const import DOCKER_HOST
 from consts.exceptions import MCPConnectionError, MCPContainerError
 from nexent.container import (
     DockerContainerConfig,
@@ -28,18 +27,18 @@ class MCPContainerManager:
     while delegating to the SDK's standardized container management module.
     """
 
-    def __init__(self, docker_socket_path: str = "/var/run/docker.sock"):
+    def __init__(self, docker_socket_path: Optional[str] = None):
         """
         Initialize container manager using SDK
 
         Args:
-            docker_socket_path: Path to Docker socket
+            docker_socket_path: Path to Docker socket. If None, uses platform default.
                 For container access, mount docker socket: -v /var/run/docker.sock:/var/run/docker.sock
         """
         try:
             # Create Docker configuration
             config = DockerContainerConfig(
-                docker_socket_path=docker_socket_path, docker_host=DOCKER_HOST
+                docker_socket_path=docker_socket_path
             )
             # Create container client from config
             self.client = create_container_client_from_config(config)

@@ -28,7 +28,7 @@ from nexent.container.docker_config import DockerContainerConfig
 @pytest.fixture
 def mock_docker_config():
     """Create a mock Docker configuration"""
-    config = DockerContainerConfig(docker_host="tcp://localhost:2375")
+    config = DockerContainerConfig(docker_socket_path="tcp://localhost:2375")
     return config
 
 

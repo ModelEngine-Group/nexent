@@ -141,7 +141,7 @@ class TestCreateContainerClientFromConfig:
 
     def test_create_container_client_with_docker_config(self):
         """Test creating container client with Docker config"""
-        config = DockerContainerConfig(docker_host="tcp://localhost:2375")
+        config = DockerContainerConfig(docker_socket_path="tcp://localhost:2375")
 
         with patch("nexent.container.docker_client.docker.DockerClient") as mock_docker_class:
             mock_docker_client = MagicMock()

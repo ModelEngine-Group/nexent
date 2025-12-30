@@ -430,6 +430,33 @@ disable_dashboard() {
   update_env_var "DISABLE_CELERY_FLOWER" "true"
 }
 
+pull_mcp_image() {
+  echo "🔄 Checking MCP Docker image..."
+
+  # Get MCP image name from environment or use default
+  MCP_IMAGE_NAME=${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:latest}
+  echo "   📦 Image: ${MCP_IMAGE_NAME}"
+
+  # Check if image already exists locally
+  if docker image inspect "${MCP_IMAGE_NAME}" >/dev/null 2>&1; then
+    echo "   ✅ MCP image already exists locally"
+    echo "   💡 Skipping pull, using existing image"
+  else
+    echo "   📥 MCP image not found locally, pulling..."
+    if docker pull "${MCP_IMAGE_NAME}"; then
+      echo "   ✅ MCP image pulled successfully"
+      echo "   💡 The image will be available when you need to start MCP services"
+    else
+      echo "   ⚠️  Failed to pull MCP image, but deployment continues"
+      echo "   💡 You can manually pull the image later: docker pull ${MCP_IMAGE_NAME}"
+    fi
+  fi
+
+  echo ""
+  echo "--------------------------------"
+  echo ""
+}
+
 select_deployment_mode() {
   echo "🎛️  Please select deployment mode:"
   echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
@@ -905,6 +932,14 @@ main_deploy() {
   select_terminal_tool || { echo "❌ Terminal tool container configuration failed"; exit 1; }
   choose_image_env || { echo "❌ Image environment setup failed"; exit 1; }
 
+  # Set NEXENT_MCP_DOCKER_IMAGE in .env file
+  if [ -n "${NEXENT_MCP_DOCKER_IMAGE:-}" ]; then
+    update_env_var "NEXENT_MCP_DOCKER_IMAGE" "${NEXENT_MCP_DOCKER_IMAGE}"
+    echo "🔧 NEXENT_MCP_DOCKER_IMAGE set to: ${NEXENT_MCP_DOCKER_IMAGE}"
+  else
+    echo "⚠️  NEXENT_MCP_DOCKER_IMAGE not found in environment, will use default from code"
+  fi
+
   # Add permission
   prepare_directory_and_data || { echo "❌ Permission setup failed"; exit 1; }
   generate_minio_ak_sk || { echo "❌ MinIO key generation failed"; exit 1; }
@@ -930,6 +965,10 @@ main_deploy() {
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
     echo "💡 Use 'source .env' to load environment variables in your development shell"
+
+    # Pull MCP image for later use
+    pull_mcp_image
+
     persist_deploy_options
     return 0
   fi
@@ -948,6 +987,10 @@ main_deploy() {
   fi
 
   persist_deploy_options
+
+  # Pull MCP image for later use
+  pull_mcp_image
+
   echo "🎉  Deployment completed successfully!"
   echo "🌐  You can now access the application at http://localhost:3000"
 }

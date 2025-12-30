@@ -15,16 +15,13 @@ class DockerContainerConfig(ContainerConfig):
     def __init__(
         self,
         docker_socket_path: Optional[str] = None,
-        docker_host: Optional[str] = None,
     ):
         """
         Initialize Docker configuration
 
         Args:
             docker_socket_path: Path to Docker socket (Unix) or named pipe (Windows)
-            docker_host: Docker host URL (overrides docker_socket_path)
         """
-        self._docker_host = docker_host or os.getenv("DOCKER_HOST")
         self._docker_socket_path = docker_socket_path
         self._base_url = None
 
@@ -37,10 +34,6 @@ class DockerContainerConfig(ContainerConfig):
     def base_url(self) -> str:
         """Get Docker base URL"""
         if self._base_url:
-            return self._base_url
-
-        if self._docker_host:
-            self._base_url = self._normalize_base_url(self._docker_host.strip())
             return self._base_url
 
         socket_path = self._docker_socket_path or self._get_default_socket_path()
