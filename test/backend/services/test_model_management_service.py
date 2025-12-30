@@ -459,7 +459,7 @@ async def test_create_model_for_tenant_multi_embedding_sets_default_chunk_batch(
         mock_dim.assert_awaited_once()
         # Should create two records: multi_embedding and its embedding variant
         assert mock_create.call_count == 2
-        
+
         # Verify chunk_batch was set to 10 for both records
         create_calls = mock_create.call_args_list
         # First call is for multi_embedding
@@ -519,7 +519,7 @@ async def test_batch_create_models_for_tenant_other_provider():
     if not hasattr(svc.ProviderEnum, 'MODELENGINE'):
         modelengine_item = _EnumItem("modelengine")
         svc.ProviderEnum.MODELENGINE = modelengine_item
-    
+
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
             mock.patch.object(svc, "delete_model_record"), \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "gpt-4")), \
@@ -529,7 +529,7 @@ async def test_batch_create_models_for_tenant_other_provider():
             mock.patch.object(svc, "create_model_record", return_value=True):
 
         await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
-        
+
         # Verify prepare_model_dict was called with empty model_url for non-Silicon/ModelEngine provider
         call_args = svc.prepare_model_dict.call_args
         assert call_args[1]["model_url"] == ""  # Should be empty for other providers
@@ -618,7 +618,7 @@ async def test_batch_create_models_max_tokens_update():
         update_calls = [call for call in mock_update.call_args_list if call[0][0] == "id1"]
         if update_calls:
             assert update_calls[0][0][1] == {"max_tokens": 8192}
-        
+
         # Should NOT update model2 (max_tokens same) or model3 (new max_tokens is None)
         # Verify model2 and model3 were not updated
         model2_calls = [call for call in mock_update.call_args_list if call[0][0] == "id2"]
