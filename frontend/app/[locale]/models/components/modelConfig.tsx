@@ -103,6 +103,7 @@ export const ModelConfigSection = forwardRef<
   // State management
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] = useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -595,6 +596,7 @@ export const ModelConfigSection = forwardRef<
 
   // Open batch add dialog with ModelEngine provider pre-selected
   const handleSyncModels = () => {
+    setAddModalDefaultIsBatch(true);
     setIsAddModalOpen(true);
   };
 
@@ -864,7 +866,10 @@ export const ModelConfigSection = forwardRef<
                 type="primary"
                 size="middle"
                 icon={<Plus size={16} />}
-                onClick={() => setIsAddModalOpen(true)}
+                onClick={() => {
+                  setAddModalDefaultIsBatch(false);
+                  setIsAddModalOpen(true);
+                }}
                 style={{ width: "100%" }}
                 block
               >
@@ -1036,6 +1041,7 @@ export const ModelConfigSection = forwardRef<
             }
           }}
           defaultProvider="modelengine"
+          defaultIsBatchImport={addModalDefaultIsBatch}
         />
 
         <ModelDeleteDialog

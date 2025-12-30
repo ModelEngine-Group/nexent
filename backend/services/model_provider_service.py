@@ -21,6 +21,7 @@ from utils.model_name_utils import split_repo_name, add_repo_to_name
 
 logger = logging.getLogger("model_provider_service")
 
+MODEL_ENGINE_NORTH_PREFIX = "open/router/v1"
 
 class AbstractModelProvider(ABC):
     """Common interface that all model provider integrations must implement."""
@@ -85,19 +86,22 @@ class ModelEngineProvider(AbstractModelProvider):
             List of models with canonical fields
         """
         try:
-            if not MODEL_ENGINE_HOST or not MODEL_ENGINE_APIKEY:
-                logger.warning("ModelEngine environment variables not configured")
+            model_type: str = provider_config.get("model_type", "")
+            host = provider_config.get("base_url")
+            api_key = provider_config.get("api_key")
+            model_engine_url = get_model_engine_raw_url(host)
+            if not host or not api_key:
+                logger.warning("ModelEngine host or api key not configured")
                 return []
 
-            model_type: str = provider_config.get("model_type", "")
-            headers = {"Authorization": f"Bearer {MODEL_ENGINE_APIKEY}"}
+            headers = {"Authorization": f"Bearer {api_key}"}
 
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
                 connector=aiohttp.TCPConnector(ssl=False)
             ) as session:
                 async with session.get(
-                    f"{MODEL_ENGINE_HOST}/open/router/v1/models",
+                    f"{model_engine_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/models",
                     headers=headers
                 ) as response:
                     response.raise_for_status()
@@ -130,9 +134,8 @@ class ModelEngineProvider(AbstractModelProvider):
                         "model_type": internal_type,
                         "model_tag": me_type,
                         "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
-                        # ModelEngine models will get base_url and api_key from environment
-                        "base_url": MODEL_ENGINE_HOST,
-                        "api_key": MODEL_ENGINE_APIKEY,
+                        "base_url": host,
+                        "api_key": api_key,
                     })
 
             return filtered_models
@@ -178,12 +181,7 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     if provider == ProviderEnum.MODELENGINE.value:
         # Get the raw host URL from model (e.g., "https://120.253.225.102:50001")
         raw_model_url = model.get("base_url", "")
-        # Strip any existing path to get just the host
-        if raw_model_url:
-            # Remove any trailing /open/router/v1 or similar paths to get base host
-            raw_model_url = raw_model_url.split("/open/")[0] if "/open/" in raw_model_url else raw_model_url
-        model_url = raw_model_url
-        model_api_key = model.get("api_key", model_api_key)
+        model_url = get_model_engine_raw_url(raw_model_url)
 
     # Build the canonical representation using the existing Pydantic schema for
     # consistency of validation and default handling.
@@ -216,14 +214,14 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
             model_dict["base_url"] = f"{model_url}embeddings"
         else:
             # For ModelEngine embedding models, append the embeddings path
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/open/router/v1/embeddings"
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
         # The embedding dimension might differ from the provided max_tokens.
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
     else:
         # For non-embedding models
         if provider == ProviderEnum.MODELENGINE.value:
             # Ensure ModelEngine models have the full API path
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/open/router/v1"
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}"
         else:
             model_dict["base_url"] = model_url
 
@@ -295,3 +293,11 @@ async def get_provider_models(model_data: dict) -> List[dict]:
         model_list = await provider.get_models(model_data)
 
     return model_list
+
+def get_model_engine_raw_url(model_engine_url: str) -> str:
+    # Strip any existing path to get just the host
+    model_engine_raw_url = model_engine_url
+    if model_engine_url:
+        # Remove any trailing /open/router/v1 or similar paths to get base host
+        model_engine_raw_url = model_engine_url.split("/open/")[0] if "/open/" in model_engine_url else model_engine_url
+    return model_engine_raw_url
