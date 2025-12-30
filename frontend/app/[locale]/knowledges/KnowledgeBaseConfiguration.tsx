@@ -533,6 +533,35 @@ function DataConfig({ isActive }: DataConfigProps) {
       });
   };
 
+  // Handle DataMate knowledge base sync
+  const handleSyncDataMate = async () => {
+    try {
+      const response = await fetch(`${API_ENDPOINTS.datamate.sync}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      message.success(t("knowledgeBase.message.syncDataMateSuccess"));
+
+      // Refresh knowledge base data to show any new DataMate knowledge bases
+      await refreshKnowledgeBaseData(true);
+    } catch (error) {
+      message.error(
+        t("knowledgeBase.message.syncDataMateError", {
+          error: error.message || t("common.unknownError"),
+        })
+      );
+    }
+  };
+
   // Handle new knowledge base creation
   const handleCreateNew = () => {
     hasUserInteractedRef.current = true; // Mark user interaction
@@ -874,6 +903,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               onClick={handleKnowledgeBaseClick}
               onDelete={handleDelete}
               onSync={handleSync}
+              onSyncDataMate={handleSyncDataMate}
               onCreateNew={handleCreateNew}
               isSelectable={isKnowledgeBaseSelectable}
               getModelDisplayName={(modelId) => modelId}

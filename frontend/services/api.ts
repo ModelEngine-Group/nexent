@@ -150,6 +150,9 @@ export const API_ENDPOINTS = {
         pathOrUrl
       )}/error-info`,
   },
+  datamate: {
+    sync: `${API_BASE_URL}/datamate/sync`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,

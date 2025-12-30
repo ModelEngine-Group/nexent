@@ -114,11 +114,10 @@ async def sync_datamate_knowledge_bases() -> Dict[str, Any]:
             if kb_id in details:
                 kb_detail = details[kb_id]
                 knowledge_base_name = knowledge_base_names[i] if i < len(knowledge_base_names) else kb_id
-                base_info = kb_detail.get("base_info", {})
                 indices_info.append({
                     "name": kb_id,  # Internal index name (used as ID)
                     "display_name": knowledge_base_name,  # User-facing knowledge base name
-                    "stats": base_info,
+                    "stats": kb_detail,
                 })
         response["indices_info"] = indices_info
 

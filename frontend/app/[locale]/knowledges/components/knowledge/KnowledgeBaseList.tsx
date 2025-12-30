@@ -2,7 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Checkbox, ConfigProvider } from 'antd'
-import { SyncOutlined, PlusOutlined } from '@ant-design/icons'
+import { SyncOutlined, PlusOutlined, CloudSyncOutlined } from '@ant-design/icons'
 
 import { KnowledgeBase } from '@/types/knowledgeBase'
 
@@ -47,6 +47,7 @@ interface KnowledgeBaseListProps {
   onClick: (kb: KnowledgeBase) => void
   onDelete: (id: string) => void
   onSync: () => void
+  onSyncDataMate: () => void
   onCreateNew: () => void
   isSelectable: (kb: KnowledgeBase) => boolean
   getModelDisplayName: (modelId: string) => string
@@ -64,6 +65,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   onClick,
   onDelete,
   onSync,
+  onSyncDataMate,
   onCreateNew,
   isSelectable,
   getModelDisplayName,
@@ -165,6 +167,34 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 <SyncOutlined spin={isLoading} style={{ color: "white" }} />
               </span>
               <span>{t("knowledgeBase.button.sync")}</span>
+            </Button>
+            <Button
+              style={{
+                padding: "4px 15px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                backgroundColor: "#1677ff",
+                color: "white",
+                border: "none",
+              }}
+              className="hover:!bg-blue-600"
+              type="primary"
+              onClick={onSyncDataMate}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "14px",
+                  height: "14px",
+                }}
+              >
+                <CloudSyncOutlined spin={isLoading} style={{ color: "white" }} />
+              </span>
+              <span>{t("knowledgeBase.button.syncDataMate")}</span>
             </Button>
           </div>
         </div>
