@@ -16,7 +16,7 @@ import log from "@/lib/logger";
 // Import content components
 import MemoryContent from "./memory/MemoryContent";
 import ModelsContent from "./models/ModelsContent";
-import AgentSetupOrchestrator from "./agents/components/AgentSetupOrchestrator";
+import AgentSetupOrchestrator from "./agents/AgentSetupOrchestrator";
 import KnowledgesContent from "./knowledges/KnowledgesContent";
 import { SpaceContent } from "./space/components/SpaceContent";
 import { fetchAgentList } from "@/services/agentConfigService";

@@ -2,9 +2,9 @@
 
 import { Card, Row, Col } from "antd";
 
-import AgentManageComp from "./agent//AgentManageComp";
-import AgentConfigComp from "./agent/AgentConfigComp";
-import AgentInfoComp from "./agent/AgentInfoComp";
+import AgentManageComp from "./components/AgentManageComp";
+import AgentConfigComp from "./components/AgentConfigComp";
+import AgentInfoComp from "./components/AgentInfoComp";
 
 export default function AgentSetupOrchestrator() {
   return (
