@@ -910,7 +910,7 @@
   "mcpConfig.addContainer.configHint": "Please enter MCP server configuration JSON (format: {\"mcpServers\": {\"server-name\": {...}}})",
   "mcpConfig.addContainer.configPlaceholder": "Please enter MCP server configuration JSON",
   "mcpConfig.addContainer.port": "Port",
-  "mcpConfig.addContainer.portPlaceholder": "Please enter port number (1-65535)",
+  "mcpConfig.addContainer.portPlaceholder": "Please enter port number",
   "mcpConfig.addContainer.button.add": "Add",
   "mcpConfig.addContainer.button.updating": "Adding...",
   "mcpConfig.containerList.title": "Running Containerized MCP Services",
