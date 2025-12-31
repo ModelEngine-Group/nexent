@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { updateAgent } from "@/services/agentConfigService";
-import { Agent, AgentConfig } from "@/types/agentConfig";
+import { Agent } from "@/types/agentConfig";
 
 /**
  * Hook for handling agent save guard logic
