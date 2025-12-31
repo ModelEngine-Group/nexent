@@ -2,7 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Checkbox, ConfigProvider } from 'antd'
-import { SyncOutlined, PlusOutlined, CloudSyncOutlined } from '@ant-design/icons'
+import { SyncOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons'
 
 import { KnowledgeBase } from '@/types/knowledgeBase'
 
@@ -43,12 +43,13 @@ interface KnowledgeBaseListProps {
   activeKnowledgeBase: KnowledgeBase | null
   currentEmbeddingModel: string | null
   isLoading?: boolean
+  syncLoading?: boolean
   onSelect: (id: string) => void
   onClick: (kb: KnowledgeBase) => void
   onDelete: (id: string) => void
   onSync: () => void
-  onSyncDataMate: () => void
   onCreateNew: () => void
+  onDataMateConfig?: () => void
   isSelectable: (kb: KnowledgeBase) => boolean
   getModelDisplayName: (modelId: string) => string
   containerHeight?: string // Container total height, consistent with DocumentList
@@ -61,12 +62,13 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   activeKnowledgeBase,
   currentEmbeddingModel,
   isLoading = false,
+  syncLoading = false,
   onSelect,
   onClick,
   onDelete,
   onSync,
-  onSyncDataMate,
   onCreateNew,
+  onDataMateConfig,
   isSelectable,
   getModelDisplayName,
   containerHeight = '70vh', // Default container height consistent with DocumentList
@@ -164,7 +166,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   height: "14px",
                 }}
               >
-                <SyncOutlined spin={isLoading} style={{ color: "white" }} />
+                <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
               </span>
               <span>{t("knowledgeBase.button.sync")}</span>
             </Button>
@@ -175,26 +177,16 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "8px",
-                backgroundColor: "#1677ff",
+                backgroundColor: "#52c41a",
                 color: "white",
                 border: "none",
               }}
-              className="hover:!bg-blue-600"
+              className="hover:!bg-green-600"
               type="primary"
-              onClick={onSyncDataMate}
+              onClick={onDataMateConfig}
+              icon={<SettingOutlined />}
             >
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "14px",
-                  height: "14px",
-                }}
-              >
-                <CloudSyncOutlined spin={isLoading} style={{ color: "white" }} />
-              </span>
-              <span>{t("knowledgeBase.button.syncDataMate")}</span>
+              {t("knowledgeBase.button.dataMateConfig")}
             </Button>
           </div>
         </div>

@@ -30,7 +30,8 @@ ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 
 # DataMate Configuration
-DATAMATE_BASE_URL = os.getenv("DATAMATE_BASE_URL", "http://localhost:30000")
+#todo
+DATAMATE_BASE_URL = os.getenv("DATAMATE_BASE_URL", "http://1.94.5.242:30000/")
 
 
 # Data Processing Service Configuration

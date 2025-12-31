@@ -58,6 +58,11 @@ const knowledgeBaseReducer = (state: KnowledgeBaseState, action: KnowledgeBaseAc
         ...state,
         isLoading: action.payload
       };
+    case KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING:
+      return {
+        ...state,
+        syncLoading: action.payload
+      };
     case KNOWLEDGE_BASE_ACTION_TYPES.ERROR:
       return {
         ...state,
@@ -88,6 +93,7 @@ export const KnowledgeBaseContext = createContext<{
     activeKnowledgeBase: null,
     currentEmbeddingModel: null,
     isLoading: false,
+    syncLoading: false,
     error: null
   },
   dispatch: () => {},
@@ -118,6 +124,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     activeKnowledgeBase: null,
     currentEmbeddingModel: null,
     isLoading: false,
+    syncLoading: false,
     error: null
   });
   
@@ -237,16 +244,24 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
   const loadUserSelectedKnowledgeBases = useCallback(async () => {
     try {
       const userConfig = await userConfigService.loadKnowledgeList();
-      if (userConfig && userConfig.selectedKbNames.length > 0) {
-        // Find matching knowledge base IDs based on index names
-        const selectedIds = state.knowledgeBases
-          .filter((kb) => userConfig.selectedKbNames.includes(kb.id))
-          .map((kb) => kb.id);
+      if (userConfig) {
+        // Combine knowledge bases from all sources
+        const allSelectedNames = [
+          ...(userConfig.nexent || []),
+          ...(userConfig.datamate || [])
+        ];
 
-        dispatch({
-          type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
-          payload: selectedIds,
-        });
+        if (allSelectedNames.length > 0) {
+          // Find matching knowledge base IDs based on index names
+          const selectedIds = state.knowledgeBases
+            .filter((kb) => allSelectedNames.includes(kb.id))
+            .map((kb) => kb.id);
+
+          dispatch({
+            type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
+            payload: selectedIds,
+          });
+        }
       }
     } catch (error) {
       log.error(t("knowledgeBase.error.loadSelected"), error);
@@ -260,21 +275,29 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
   // Save user selected knowledge bases to backend
   const saveUserSelectedKnowledgeBases = useCallback(async () => {
     try {
-      // Get selected knowledge base index names (globally unique identifiers)
-      const selectedKbNames = state.knowledgeBases
-        .filter((kb) => state.selectedIds.includes(kb.id))
-        .map((kb) => kb.id);
+      // Get selected knowledge bases grouped by source
+      const selectedKnowledgeBases = state.knowledgeBases
+        .filter((kb) => state.selectedIds.includes(kb.id));
 
-      const success = await userConfigService.updateKnowledgeList(
-        selectedKbNames
-      );
-      if (!success) {
+      // Group knowledge bases by source
+      const knowledgeBySource: { nexent?: string[]; datamate?: string[] } = {};
+      selectedKnowledgeBases.forEach((kb) => {
+        const source = kb.source as keyof typeof knowledgeBySource;
+        if (!knowledgeBySource[source]) {
+          knowledgeBySource[source] = [];
+        }
+        knowledgeBySource[source]!.push(kb.id);
+      });
+
+      const result = await userConfigService.updateKnowledgeList(knowledgeBySource);
+      if (!result) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.saveSelected"),
         });
+        return false;
       }
-      return success;
+      return true;
     } catch (error) {
       log.error(t("knowledgeBase.error.saveSelected"), error);
       dispatch({
@@ -295,7 +318,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
       if (state.activeKnowledgeBase) {
         // Publish document update event to notify document list component to refresh document data
         try {
-          const documents = await knowledgeBaseService.getAllFiles(state.activeKnowledgeBase.id);
+          const documents = await knowledgeBaseService.getAllFiles(state.activeKnowledgeBase.id, state.activeKnowledgeBase.source);
           log.log("documents", documents);
           window.dispatchEvent(new CustomEvent('documentsUpdated', {
             detail: {

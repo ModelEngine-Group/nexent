@@ -66,6 +66,36 @@ async def fetch_datamate_knowledge_base_files(knowledge_base_id: str) -> List[Di
         raise RuntimeError(f"Failed to fetch files for knowledge base {knowledge_base_id}: {str(e)}")
 
 
+async def fetch_datamate_knowledge_base_file_list(knowledge_base_id: str) -> Dict[str, Any]:
+    """
+    Fetch file list for a specific DataMate knowledge base.
+
+    Args:
+        knowledge_base_id: The ID of the knowledge base.
+
+    Returns:
+        Dictionary containing file list with status, files array, etc.
+    """
+    try:
+        core = _get_datamate_core()
+        # Run synchronous SDK call in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        files = await loop.run_in_executor(
+            None,
+            core.get_documents_detail,
+            knowledge_base_id
+        )
+
+        # Transform to match vectordatabase files endpoint format
+        return {
+            "status": "success",
+            "files": files
+        }
+    except Exception as e:
+        logger.error(f"Error fetching file list for knowledge base {knowledge_base_id}: {str(e)}")
+        raise RuntimeError(f"Failed to fetch file list for knowledge base {knowledge_base_id}: {str(e)}")
+
+
 async def sync_datamate_knowledge_bases() -> Dict[str, Any]:
     """
     Sync all DataMate knowledge bases and their files.
