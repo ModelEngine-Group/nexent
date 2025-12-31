@@ -29,10 +29,14 @@ sys.modules['consts.const'] = consts_mock.const
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
+utils_mock.str_utils = MagicMock()
+utils_mock.str_utils.convert_list_to_string = MagicMock(
+    side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.str_utils'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -75,6 +79,8 @@ class MockUserTenant:
     def __init__(self):
         self.user_id = "test_user_id"
         self.tenant_id = "test_tenant_id"
+        self.group_ids = "1,2,3"  # New field
+        self.user_role = "USER"  # New field with correct role value
         self.delete_flag = "N"
         self.created_by = "test_user_id"
         self.updated_by = "test_user_id"
@@ -83,6 +89,8 @@ class MockUserTenant:
         self.__dict__ = {
             "user_id": "test_user_id",
             "tenant_id": "test_tenant_id",
+            "group_ids": "1,2,3",
+            "user_role": "USER",
             "delete_flag": "N",
             "created_by": "test_user_id",
             "updated_by": "test_user_id",
@@ -102,24 +110,26 @@ def test_get_user_tenant_by_user_id_success(monkeypatch, mock_session):
     """Test successful retrieval of user tenant relationship by user ID"""
     session, query = mock_session
     mock_user_tenant = MockUserTenant()
-    
+
     mock_first = MagicMock()
     mock_first.return_value = mock_user_tenant
     mock_filter = MagicMock()
     mock_filter.first = mock_first
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
-    
+
     result = get_user_tenant_by_user_id("test_user_id")
-    
+
     assert result is not None
     assert result["user_id"] == "test_user_id"
     assert result["tenant_id"] == "test_tenant_id"
+    assert result["group_ids"] == "1,2,3"
+    assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
 
 def test_get_user_tenant_by_user_id_not_found(monkeypatch, mock_session):
@@ -194,26 +204,61 @@ def test_insert_user_tenant_with_empty_user_id(monkeypatch, mock_session):
     """Test insertion of user tenant relationship with empty user ID"""
     session, _ = mock_session
     session.add = MagicMock()
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     # Mock UserTenant constructor to capture the arguments
     mock_user_tenant_instance = MagicMock()
     mock_user_tenant_constructor = MagicMock(return_value=mock_user_tenant_instance)
     monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_constructor)
-    
+
     # Should not raise any exception
     insert_user_tenant("", "test_tenant_id")
-    
+
     # Verify UserTenant was called with correct parameters
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="",
         tenant_id="test_tenant_id",
+        group_ids="",
+        user_role="USER",
         created_by="",
         updated_by=""
+    )
+    session.add.assert_called_once_with(mock_user_tenant_instance)
+
+
+def test_insert_user_tenant_with_group_ids(monkeypatch, mock_session):
+    """Test insertion of user tenant relationship with group IDs list"""
+    session, _ = mock_session
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    # Mock UserTenant constructor to capture the arguments
+    mock_user_tenant_instance = MagicMock()
+    mock_user_tenant_constructor = MagicMock(
+        return_value=mock_user_tenant_instance)
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.UserTenant", mock_user_tenant_constructor)
+
+    # Test with group IDs list
+    insert_user_tenant("test_user_id", "test_tenant_id", group_ids=[1, 2, 3])
+
+    # Verify UserTenant was called with correct parameters - group_ids should be converted to string
+    mock_user_tenant_constructor.assert_called_once_with(
+        user_id="test_user_id",
+        tenant_id="test_tenant_id",
+        group_ids="1,2,3",  # Should be converted to comma-separated string
+        user_role="USER",
+        created_by="test_user_id",
+        updated_by="test_user_id"
     )
     session.add.assert_called_once_with(mock_user_tenant_instance)
 
@@ -239,6 +284,8 @@ def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="test_user_id",
         tenant_id="",
+        group_ids="",
+        user_role="USER",
         created_by="test_user_id",
         updated_by="test_user_id"
     )
@@ -281,6 +328,8 @@ def test_user_tenant_lifecycle(monkeypatch, mock_session):
     assert result is not None
     assert result["user_id"] == "test_user_id"
     assert result["tenant_id"] == "test_tenant_id"
+    assert result["group_ids"] == "1,2,3"
+    assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
 
 def test_get_user_tenant_by_user_id_with_deleted_record(monkeypatch, mock_session):
