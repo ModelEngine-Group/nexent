@@ -910,7 +910,7 @@
   "mcpConfig.addContainer.configHint": "请输入MCP服务器配置JSON（格式：{\"mcpServers\": {\"server-name\": {...}}}）",
   "mcpConfig.addContainer.configPlaceholder": "请输入MCP服务器配置JSON",
   "mcpConfig.addContainer.port": "端口",
-  "mcpConfig.addContainer.portPlaceholder": "请输入端口号 (1-65535)",
+  "mcpConfig.addContainer.portPlaceholder": "请输入端口号",
   "mcpConfig.addContainer.button.add": "添加",
   "mcpConfig.addContainer.button.updating": "添加中...",
   "mcpConfig.containerList.title": "已启动的容器化MCP服务",
