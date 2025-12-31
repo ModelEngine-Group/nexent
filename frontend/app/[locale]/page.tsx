@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { NavigationLayout } from "@/components/navigation/NavigationLayout";
 import { HomepageContent } from "@/components/homepage/HomepageContent";
@@ -16,9 +16,8 @@ import log from "@/lib/logger";
 // Import content components
 import MemoryContent from "./memory/MemoryContent";
 import ModelsContent from "./models/ModelsContent";
-import AgentsContent from "./agents/AgentsContent";
+import AgentSetupOrchestrator from "./agents/components/AgentSetupOrchestrator";
 import KnowledgesContent from "./knowledges/KnowledgesContent";
-import SaveConfirmModal from "./agents/components/SaveConfirmModal";
 import { SpaceContent } from "./space/components/SpaceContent";
 import { fetchAgentList } from "@/services/agentConfigService";
 import { useAgentImport, ImportAgentData } from "@/hooks/useAgentImport";
@@ -26,7 +25,7 @@ import SetupLayout from "./setup/SetupLayout";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ChatContent } from "./chat/internal/ChatContent";
 import { ChatTopNavContent } from "./chat/internal/ChatTopNavContent";
-import { Badge, Button as AntButton } from "antd";
+import { Badge, Button as AntButton, Flex } from "antd";
 import { RefreshCw } from "lucide-react";
 import { USER_ROLES } from "@/const/modelConfig";
 import MarketContent from "./market/MarketContent";
@@ -34,6 +33,7 @@ import UsersContent from "./users/UsersContent";
 import McpToolsContent from "./mcp-tools/McpToolsContent";
 import MonitoringContent from "./monitoring/MonitoringContent";
 import { getSavedView, saveView } from "@/lib/viewPersistence";
+import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 
 // View type definition
 type ViewType =
@@ -82,33 +82,30 @@ export default function Home() {
     const [loginPromptOpen, setLoginPromptOpen] = useState(false);
     const [adminRequiredPromptOpen, setAdminRequiredPromptOpen] =
       useState(false);
-    
+
     // View state management with localStorage persistence
     const [currentView, setCurrentView] = useState<ViewType>(getSavedView);
-    
+
     // Connection status for model-dependent views
     const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
       CONNECTION_STATUS.PROCESSING
     );
     const [isCheckingConnection, setIsCheckingConnection] = useState(false);
-    
+
     // Space-specific states
     const [agents, setAgents] = useState<any[]>([]);
     const [isLoadingAgents, setIsLoadingAgents] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
-    
+
     // Agent import wizard states
     const [importWizardVisible, setImportWizardVisible] = useState(false);
-    const [importWizardData, setImportWizardData] = useState<ImportAgentData | null>(null);
-    
+    const [importWizardData, setImportWizardData] =
+      useState<ImportAgentData | null>(null);
+
     // Setup-specific states
-    const [currentSetupStep, setCurrentSetupStep] = useState<SetupStep>("models");
+    const [currentSetupStep, setCurrentSetupStep] =
+      useState<SetupStep>("models");
     const [isSaving, setIsSaving] = useState(false);
-    
-    // Agent save confirmation states
-    const [showAgentSaveConfirm, setShowAgentSaveConfirm] = useState(false);
-    const [pendingCompleteAction, setPendingCompleteAction] = useState<(() => void) | null>(null);
-    const agentConfigRef = useRef<any>(null);
 
     // Handle operations that require login
     const handleAuthRequired = () => {
@@ -133,25 +130,28 @@ export default function Home() {
     const handleCloseAdminPrompt = () => {
       setAdminRequiredPromptOpen(false);
     };
-    
+
     // Determine if user is admin
     const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
-    
+
+    // Unsaved changes guard for setup completion
+    const checkUnsavedChangesForSetup = useSaveGuard();
+
     // Load data for the saved view on initial mount
     useEffect(() => {
       if (currentView === "space" && agents.length === 0) {
         loadAgents();
       }
     }, []); // Only run on mount
-    
+
     // Handle view change from navigation
     const handleViewChange = (view: string) => {
       const viewType = view as ViewType;
       setCurrentView(viewType);
-      
+
       // Save current view to localStorage for persistence across page refreshes
       saveView(viewType);
-      
+
       // Initialize setup step based on user role
       if (viewType === "setup") {
         if (isAdmin) {
@@ -160,13 +160,13 @@ export default function Home() {
           setCurrentSetupStep("knowledges");
         }
       }
-      
+
       // Load data for specific views
       if (viewType === "space") {
         loadAgents(); // Always refresh agents when entering space
       }
     };
-    
+
     // Check ModelEngine connection status
     const checkModelEngineConnection = async () => {
       setIsCheckingConnection(true);
@@ -180,7 +180,7 @@ export default function Home() {
         setIsCheckingConnection(false);
       }
     };
-    
+
     // Load agents for space view
     const loadAgents = async () => {
       setIsLoadingAgents(true);
@@ -198,7 +198,7 @@ export default function Home() {
         setIsLoadingAgents(false);
       }
     };
-    
+
     // Use unified import hook for space view
     const { importFromData } = useAgentImport({
       onSuccess: () => {
@@ -233,7 +233,7 @@ export default function Home() {
           // Read and parse file
           const fileContent = await file.text();
           let agentData: ImportAgentData;
-          
+
           try {
             agentData = JSON.parse(fileContent);
           } catch (parseError) {
@@ -267,7 +267,7 @@ export default function Home() {
       setImportWizardVisible(false);
       setImportWizardData(null);
     };
-    
+
     // Setup navigation handlers
     const handleSetupNext = () => {
       if (currentSetupStep === "models") {
@@ -289,25 +289,20 @@ export default function Home() {
       }
     };
 
-    const handleSetupComplete = () => {
+    const handleSetupComplete = async () => {
       // Check if we're on the agents step and if there are unsaved changes
-      if (currentSetupStep === "agents" && isAdmin && agentConfigRef.current) {
-        if (agentConfigRef.current.hasUnsavedChanges?.()) {
-          // Show save confirmation modal
-          setShowAgentSaveConfirm(true);
-          setPendingCompleteAction(() => () => {
-            setCurrentView("chat");
-            saveView("chat");
-          });
-          return;
+      if (currentSetupStep === "agents" && isAdmin) {
+        const canProceed = await checkUnsavedChangesForSetup();
+        if (!canProceed) {
+          return; // Save failed or user cancelled
         }
       }
-      
-      // No unsaved changes, proceed directly
+
+      // Proceed to chat
       setCurrentView("chat");
       saveView("chat");
     };
-    
+
     // Determine setup button visibility based on current step and user role
     const getSetupNavigationProps = () => {
       if (!isAdmin) {
@@ -370,14 +365,14 @@ export default function Home() {
               />
             </div>
           );
-        
+
         case "memory":
           return (
-            <div className="w-full h-full p-1">
+            <div className="w-full h-full">
               <MemoryContent />
             </div>
           );
-        
+
         case "models":
           return (
             <div className="w-full h-full p-8">
@@ -388,18 +383,18 @@ export default function Home() {
               />
             </div>
           );
-        
+
         case "agents":
           return (
-            <div className="w-full h-full p-8">
-              <AgentsContent
-                connectionStatus={connectionStatus}
-                isCheckingConnection={isCheckingConnection}
-                onCheckConnection={checkModelEngineConnection}
-              />
-            </div>
+            <Flex
+              justify="center"
+              align="center"
+              className="py-8 px-16 h-full w-full"
+            >
+              <AgentSetupOrchestrator />
+            </Flex>
           );
-        
+
         case "knowledges":
           return (
             <div className="w-full h-full p-8">
@@ -411,7 +406,7 @@ export default function Home() {
               />
             </div>
           );
-        
+
         case "space":
           return (
             <>
@@ -427,7 +422,7 @@ export default function Home() {
                   const url = new URL(window.location.href);
                   url.searchParams.set("agent_id", agentId);
                   window.history.replaceState({}, "", url.toString());
-                
+
                   setCurrentView("chat");
                   saveView("chat");
                 }}
@@ -455,10 +450,10 @@ export default function Home() {
             />
           </>
           );
-        
+
         case "chat":
           return <ChatContent />;
-        
+
         case "market":
           return (
             <div className="w-full h-full">
@@ -469,7 +464,7 @@ export default function Home() {
               />
             </div>
           );
-        
+
         case "users":
           return (
             <div className="w-full h-full">
@@ -502,7 +497,7 @@ export default function Home() {
               />
             </div>
           );
-        
+
         case "setup":
           const setupNavProps = getSetupNavigationProps();
           return (
@@ -537,18 +532,11 @@ export default function Home() {
               )}
 
               {currentSetupStep === "agents" && isAdmin && (
-                <AgentsContent
-                  ref={agentConfigRef}
-                  isSaving={isSaving}
-                  connectionStatus={connectionStatus}
-                  isCheckingConnection={isCheckingConnection}
-                  onCheckConnection={checkModelEngineConnection}
-                  onSavingStateChange={setIsSaving}
-                />
+                <AgentSetupOrchestrator />
               )}
             </SetupLayout>
           );
-        
+
         default:
           return null;
       }
@@ -567,7 +555,7 @@ export default function Home() {
           return t("setup.header.status.unknown");
       }
     };
-    
+
     // Render status badge for setup view
     const renderStatusBadge = () => (
       <div className="flex items-center px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
@@ -598,18 +586,7 @@ export default function Home() {
         onViewChange={handleViewChange}
         currentView={currentView}
         showFooter={true}
-        contentMode={
-          currentView === "home"
-            ? "centered"
-            : currentView === "memory" ||
-              currentView === "models" ||
-              currentView === "knowledges" ||
-              currentView === "setup"
-            ? "centered"
-            : currentView === "chat"
-            ? "fullscreen"
-            : "scrollable"
-        }
+        contentMode={"centered"}
         topNavbarAdditionalTitle={
           currentView === "chat" ? <ChatTopNavContent /> : undefined
         }
@@ -642,37 +619,6 @@ export default function Home() {
             <RegisterModal />
           </>
         )}
-
-        {/* Agent save confirmation modal for setup completion */}
-        <SaveConfirmModal
-          open={showAgentSaveConfirm}
-          onCancel={async () => {
-            // Reload data from backend to discard changes
-            await agentConfigRef.current?.reloadCurrentAgentData?.();
-            setShowAgentSaveConfirm(false);
-            const action = pendingCompleteAction;
-            setPendingCompleteAction(null);
-            if (action) action();
-          }}
-          onSave={async () => {
-            try {
-              setIsSaving(true);
-              await agentConfigRef.current?.saveAllChanges?.();
-              setShowAgentSaveConfirm(false);
-              const action = pendingCompleteAction;
-              setPendingCompleteAction(null);
-              if (action) action();
-            } catch (e) {
-              // errors are surfaced by underlying save
-            } finally {
-              setIsSaving(false);
-            }
-          }}
-          onClose={() => {
-            setShowAgentSaveConfirm(false);
-            setPendingCompleteAction(null);
-          }}
-        />
       </NavigationLayout>
     );
   }
