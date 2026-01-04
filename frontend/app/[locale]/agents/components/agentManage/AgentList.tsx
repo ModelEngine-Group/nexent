@@ -276,14 +276,11 @@ export default function AgentList({
               }`;
             }}
             onRow={(agent: any) => ({
-              onClick:
-                agent.is_available === false
-                  ? undefined
-                  : (e: any) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onSelectAgent(agent);
-                    },
+              onClick: (e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSelectAgent(agent);
+              },
             })}
             columns={[
               {
@@ -440,7 +437,6 @@ export default function AgentList({
                             e.stopPropagation();
                             handleDeleteAgentWithConfirm(agent);
                           }}
-                          disabled={agent.is_available === false}
                           className="agent-action-button agent-action-button-red"
                         />
                       </span>
