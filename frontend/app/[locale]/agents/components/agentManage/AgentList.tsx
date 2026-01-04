@@ -374,6 +374,7 @@ export default function AgentList({
                             e.stopPropagation();
                             handleCopyAgentWithConfirm(agent);
                           }}
+                          disabled={agent.is_available === false}
                           className="agent-action-button agent-action-button-blue"
                         />
                       </span>
@@ -395,6 +396,7 @@ export default function AgentList({
                             e.stopPropagation();
                             handleViewCallRelationship(agent);
                           }}
+                          disabled={agent.is_available === false}
                           className="agent-action-button agent-action-button-blue"
                         />
                       </span>
@@ -416,6 +418,7 @@ export default function AgentList({
                             e.stopPropagation();
                             handleExportAgent(agent);
                           }}
+                          disabled={agent.is_available === false}
                           className="agent-action-button agent-action-button-green"
                         />
                       </span>
@@ -437,6 +440,7 @@ export default function AgentList({
                             e.stopPropagation();
                             handleDeleteAgentWithConfirm(agent);
                           }}
+                          disabled={agent.is_available === false}
                           className="agent-action-button agent-action-button-red"
                         />
                       </span>
