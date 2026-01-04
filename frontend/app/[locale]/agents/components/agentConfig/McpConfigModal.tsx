@@ -648,7 +648,7 @@ export default function McpConfigModal({
             <Title level={5} style={{ margin: "0 0 12px 0" }}>
               {t("mcpConfig.addServer.title")}
             </Title>
-            <Space direction="vertical" style={{ width: "100%" }}>
+            <Space orientation="vertical" style={{ width: "100%" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <Input
                   placeholder={t("mcpConfig.addServer.namePlaceholder")}
@@ -700,7 +700,7 @@ export default function McpConfigModal({
                 {t("mcpConfig.addContainer.title")}
               </span>
             </Title>
-            <Space direction="vertical" style={{ width: "100%" }} size="middle">
+            <Space orientation="vertical" style={{ width: "100%" }} size="middle">
               <div>
                 <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
                   {t("mcpConfig.addContainer.configHint")}

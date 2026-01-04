@@ -740,7 +740,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         </div>
 
         <Tabs
-          tabPosition="left"
+          tabPlacement="left"
           activeKey={activeDocumentKey}
           onChange={handleTabChange}
           items={tabItems}
