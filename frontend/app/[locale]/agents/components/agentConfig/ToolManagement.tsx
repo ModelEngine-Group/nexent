@@ -236,7 +236,7 @@ export default function ToolManagement({
         </div>
       ) : (
         <Tabs
-          tabPlacement="left"
+          tabPosition="left"
           activeKey={activeTabKey}
           onChange={setActiveTabKey}
           items={tabItems}

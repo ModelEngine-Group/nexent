@@ -111,7 +111,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 }
                 color="#ffffff"
                 styles={{
-                  body: {
+                  root: {
                     backgroundColor: "#ffffff",
                     color: "#374151",
                     border: "1px solid #e5e7eb",

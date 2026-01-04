@@ -17,7 +17,6 @@ import {
 } from "antd";
 import type { TabsProps } from "antd";
 import { Zap } from "lucide-react";
-import { Scrollbars } from "react-custom-scrollbars-2";
 
 import log from "@/lib/logger";
 import { ModelOption } from "@/types/modelConfig";
