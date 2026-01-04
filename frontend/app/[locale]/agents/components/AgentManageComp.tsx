@@ -257,7 +257,7 @@ export default function AgentManageComp({}: AgentManageCompProps) {
           </Col>
         </Row>
 
-        <Row className="flex:1 min-h-0">
+        <div className="flex-1 min-h-0">
           <AgentList
             agentList={agentList}
             currentAgentId={currentAgentId}
@@ -269,7 +269,7 @@ export default function AgentManageComp({}: AgentManageCompProps) {
               }
             }}
           />
-        </Row>
+        </div>
       </Flex>
     </>
   );

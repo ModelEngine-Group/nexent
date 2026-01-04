@@ -256,7 +256,7 @@ export default function AgentList({
           {t("subAgentPool.section.agentList")} ({agentList.length})
         </div>
         <Divider style={{ margin: "6px 0 0 0" }} />
-        <div className="flex:1 min-h-0 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <Table
             dataSource={agentList}
             size="middle"
