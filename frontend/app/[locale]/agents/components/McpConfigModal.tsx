@@ -714,8 +714,8 @@ export default function McpConfigModal({
                   style={{ fontFamily: "monospace", fontSize: 12 }}
                 />
               </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <Text style={{ marginRight: 8 }}>{t("mcpConfig.addContainer.port")}:</Text>
                 <Input
                   placeholder={t("mcpConfig.addContainer.portPlaceholder")}
                   value={containerPort || ""}
@@ -731,7 +731,7 @@ export default function McpConfigModal({
                     }
                     // If invalid input, keep the previous valid value
                   }}
-                  style={{ width: 150 }}
+                  style={{ width: 200 }}
                   disabled={actionsLocked}
                 />
                 <div style={{ flex: 1 }} />
