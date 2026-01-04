@@ -6,7 +6,13 @@ import AgentManageComp from "./components/AgentManageComp";
 import AgentConfigComp from "./components/AgentConfigComp";
 import AgentInfoComp from "./components/AgentInfoComp";
 
-export default function AgentSetupOrchestrator() {
+interface AgentSetupOrchestratorProps {
+  onImportAgent?: () => void;
+}
+
+export default function AgentSetupOrchestrator({
+  onImportAgent,
+}: AgentSetupOrchestratorProps) {
   return (
     <Card
       className="h-full min-h-0 w-full min-w-0"
@@ -32,7 +38,7 @@ export default function AgentSetupOrchestrator() {
           xl={8}
           className="flex flex-col h-full w-full"
         >
-          <AgentManageComp />
+          <AgentManageComp onImportAgent={onImportAgent} />
         </Col>
 
         {/* Middle column: Agent Config */}

@@ -27,10 +27,12 @@ import log from "@/lib/logger";
 import { useState, useEffect } from "react";
 
 interface AgentManageCompProps {
-  // No props needed - uses hook internally
+  onImportAgent?: () => void;
 }
 
-export default function AgentManageComp({}: AgentManageCompProps) {
+export default function AgentManageComp({
+  onImportAgent,
+}: AgentManageCompProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
@@ -119,33 +121,6 @@ export default function AgentManageComp({}: AgentManageCompProps) {
     setSelectedAgentId(Number(agent.id));
   };
 
-  // Handle import via Ant Design Upload's `beforeUpload`.
-  // Read the selected JSON file, parse and call the `importAgent` service,
-  // then refresh the agent list. Return false to prevent default upload.
-  const handleBeforeUpload = async (file: File) => {
-    try {
-      const fileContent = await file.text();
-      const agentData = JSON.parse(fileContent);
-
-      importAgentMutation.mutate(agentData, {
-        onSuccess: () => {
-          message.success(
-            t("agent.import.success") || "Agent imported successfully"
-          );
-        },
-        onError: () => {
-          message.error(t("agent.import.failed") || "Failed to import agent");
-        },
-      });
-    } catch (error) {
-      log.error("Failed to import agent:", error);
-      message.error(t("agent.import.failed") || "Failed to import agent");
-    }
-
-    // Prevent Upload from performing a network request / showing list
-    return false;
-  };
-
   return (
     <>
       {/* Import handled by Ant Design Upload (no hidden input required) */}
@@ -225,33 +200,30 @@ export default function AgentManageComp({}: AgentManageCompProps) {
 
           <Col xs={24} sm={12}>
             <Tooltip title={t("subAgentPool.description.importAgent")}>
-              <div className="rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-green-50 hover:shadow-sm">
-                <Upload
-                  accept=".json"
-                  showUploadList={false}
-                  beforeUpload={handleBeforeUpload}
-                >
-                  <Flex align="center" gap={12} className="text-green-600">
-                    <Flex
-                      align="center"
-                      justify="center"
-                      className="w-8 h-8 rounded-full bg-green-100 flex-shrink-0"
-                    >
-                      <FileInput
-                        className="w-4 h-4 text-green-600"
-                        aria-hidden="true"
-                      />
-                    </Flex>
-                    <Flex vertical style={{ flex: 1 }}>
-                      <div className="font-medium text-sm">
-                        {t("subAgentPool.button.import")}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        {t("subAgentPool.description.importAgent")}
-                      </div>
-                    </Flex>
+              <div
+                className="rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-green-50 hover:shadow-sm"
+                onClick={onImportAgent}
+              >
+                <Flex align="center" gap={12} className="text-green-600">
+                  <Flex
+                    align="center"
+                    justify="center"
+                    className="w-8 h-8 rounded-full bg-green-100 flex-shrink-0"
+                  >
+                    <FileInput
+                      className="w-4 h-4 text-green-600"
+                      aria-hidden="true"
+                    />
                   </Flex>
-                </Upload>
+                  <Flex vertical style={{ flex: 1 }}>
+                    <div className="font-medium text-sm">
+                      {t("subAgentPool.button.import")}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {t("subAgentPool.description.importAgent")}
+                    </div>
+                  </Flex>
+                </Flex>
               </div>
             </Tooltip>
           </Col>

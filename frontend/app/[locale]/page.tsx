@@ -391,7 +391,7 @@ export default function Home() {
               align="center"
               className="py-8 px-16 h-full w-full"
             >
-              <AgentSetupOrchestrator />
+              <AgentSetupOrchestrator onImportAgent={handleImportAgent} />
             </Flex>
           );
 
@@ -426,29 +426,13 @@ export default function Home() {
                   setCurrentView("chat");
                   saveView("chat");
                 }}
-              onEditNavigate={() => {
-                // Navigate to agents development view
-                setCurrentView("agents");
-                saveView("agents");
-              }}
-            />
-            <AgentImportWizard
-              visible={importWizardVisible}
-              onCancel={() => {
-                setImportWizardVisible(false);
-                setImportWizardData(null);
-              }}
-              initialData={importWizardData}
-              onImportComplete={handleImportComplete}
-              title={undefined} // Use default title
-              agentDisplayName={
-                importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.display_name
-              }
-              agentDescription={
-                importWizardData?.agent_info?.[String(importWizardData.agent_id)]?.description
-              }
-            />
-          </>
+                onEditNavigate={() => {
+                  // Navigate to agents development view
+                  setCurrentView("agents");
+                  saveView("agents");
+                }}
+              />
+            </>
           );
 
         case "chat":
@@ -532,7 +516,7 @@ export default function Home() {
               )}
 
               {currentSetupStep === "agents" && isAdmin && (
-                <AgentSetupOrchestrator />
+                <AgentSetupOrchestrator onImportAgent={handleImportAgent} />
               )}
             </SetupLayout>
           );
@@ -595,6 +579,25 @@ export default function Home() {
         }
       >
         {renderContent()}
+
+        <AgentImportWizard
+          visible={importWizardVisible}
+          onCancel={() => {
+            setImportWizardVisible(false);
+            setImportWizardData(null);
+          }}
+          initialData={importWizardData}
+          onImportComplete={handleImportComplete}
+          title={undefined} // Use default title
+          agentDisplayName={
+            importWizardData?.agent_info?.[String(importWizardData.agent_id)]
+              ?.display_name
+          }
+          agentDescription={
+            importWizardData?.agent_info?.[String(importWizardData.agent_id)]
+              ?.description
+          }
+        />
 
         {/* Auth dialogs - only shown in full version */}
         {!isSpeedMode && (
