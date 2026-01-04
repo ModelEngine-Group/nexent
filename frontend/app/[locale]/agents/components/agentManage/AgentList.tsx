@@ -82,7 +82,7 @@ export default function AgentList({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        message.success(t("businessLogic.config.error.agentImportSuccess"));
+        message.success(t("businessLogic.config.message.agentExportSuccess"));
       } else {
         message.error(
           result.message || t("businessLogic.config.error.agentImportFailed")

@@ -154,7 +154,9 @@ export default function AgentGenerateDetail({
       }
       return Promise.resolve();
     } catch (error) {
-      return Promise.reject(new Error(t("agent.error.checkNameFail")));
+      return Promise.reject(
+        new Error(t("agent.error.displayNameExists", value))
+      );
     }
   };
 
@@ -174,7 +176,9 @@ export default function AgentGenerateDetail({
       }
       return Promise.resolve();
     } catch (error) {
-      return Promise.reject(new Error(t("agent.error.checkNameFail")));
+      return Promise.reject(
+        new Error(t("agent.error.displayNameExists", value))
+      );
     }
   };
 
@@ -307,11 +311,11 @@ export default function AgentGenerateDetail({
                   rules={[
                     {
                       required: true,
-                      message: t("agent.info.displayName.error.empty"),
+                      message: t("agent.info.name.error.empty"),
                     },
                     {
                       max: 50,
-                      message: t("agent.info.displayName.error.length"),
+                      message: t("agent.info.name.error.length"),
                     },
                     { validator: validateAgentDisplayNameUnique },
                   ]}

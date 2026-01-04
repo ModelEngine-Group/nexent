@@ -94,7 +94,7 @@ export default function AgentManageComp({
     } else if (selectedAgentId && agentInfoError && !agentInfoLoading) {
       // Handle error
       log.error("Failed to load agent detail:", agentInfoError);
-      message.error(t("agentConfig.agents.loadFailed"));
+      message.error(t("agentConfig.agents.detailsLoadFailed"));
       setSelectedAgentId(null);
     }
   }, [
