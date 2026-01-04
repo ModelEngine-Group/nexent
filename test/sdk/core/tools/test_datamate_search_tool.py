@@ -196,3 +196,46 @@ class TestForward:
         msg = str(excinfo.value)
         assert "Error during DataMate knowledge base search" in msg
         assert "low level error" in msg
+
+    def test_forward_with_index_name_provided(self, datamate_tool: DataMateSearchTool, mock_datamate_client: DataMateClient):
+        # Mock the hybrid_search method on datamate_core
+        mock_hybrid_search = MagicMock(return_value=_build_search_results("custom_kb", count=2))
+        datamate_tool.datamate_core.hybrid_search = mock_hybrid_search
+        mock_datamate_client.build_file_download_url.side_effect = lambda ds, fid: f"http://dl/{ds}/{fid}"
+
+        result_json = datamate_tool.forward("test query", index_name=["custom_kb1", "custom_kb2"])
+        results = json.loads(result_json)
+
+        assert len(results) == 4  # 2 results per kb
+        # Should not call list_knowledge_bases when index_name is provided
+        mock_datamate_client.list_knowledge_bases.assert_not_called()
+        # Should call hybrid_search twice, once for each index
+        assert mock_hybrid_search.call_count == 2
+        mock_hybrid_search.assert_any_call(
+            query_text="test query",
+            index_names=["custom_kb1"],
+            top_k=10,
+            weight_accurate=0.2
+        )
+        mock_hybrid_search.assert_any_call(
+            query_text="test query",
+            index_names=["custom_kb2"],
+            top_k=10,
+            weight_accurate=0.2
+        )
+
+    def test_forward_with_empty_index_name_list(self, datamate_tool: DataMateSearchTool, mock_datamate_client: DataMateClient):
+        mock_datamate_client.list_knowledge_bases.return_value = _build_kb_list(["kb1"])
+        # Mock the hybrid_search method on datamate_core
+        mock_hybrid_search = MagicMock(return_value=_build_search_results("kb1", count=1))
+        datamate_tool.datamate_core.hybrid_search = mock_hybrid_search
+        mock_datamate_client.build_file_download_url.return_value = "http://dl/kb1/file-1"
+
+        result_json = datamate_tool.forward("test query", index_name=[])
+        results = json.loads(result_json)
+
+        assert len(results) == 1
+        # Should not call list_knowledge_bases when empty index_name is provided
+        mock_datamate_client.list_knowledge_bases.assert_not_called()
+        # Should not call hybrid_search since index_name list is empty
+        mock_hybrid_search.assert_not_called()

@@ -41,55 +41,32 @@ class KnowledgeBaseService {
     }
   }
 
-  // Get DataMate knowledge bases
-  async getDataMateKnowledgeBases(): Promise<KnowledgeBase[]> {
+  // Sync DataMate knowledge bases and create local records
+  async syncDataMateAndCreateRecords(): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+    created_records: any[];
+  }> {
     try {
-      const response = await fetch(API_ENDPOINTS.datamate.sync, {
+      const response = await fetch(API_ENDPOINTS.datamate.syncAndCreateRecords, {
         method: "POST",
         headers: getAuthHeaders(),
       });
 
       const data = await response.json();
 
-      if (!data.indices_info) {
-        return [];
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to sync DataMate knowledge bases and create records");
       }
 
-      // Convert DataMate indices to knowledge base format
-      const knowledgeBases: KnowledgeBase[] = data.indices_info.map((indexInfo: any) => {
-        const stats = indexInfo.stats?.base_info || {};
-        // Backend now returns:
-        // - name: internal index_name
-        // - display_name: user-facing knowledge_name (fallback to index_name)
-        const kbId = indexInfo.name;
-        const kbName = indexInfo.display_name || indexInfo.name;
-
-        return {
-          id: kbId,
-          name: kbName,
-          description: "DataMate knowledge base",
-          documentCount: stats.doc_count || 0,
-          chunkCount: stats.chunk_count || 0,
-          createdAt: stats.creation_date || null,
-          updatedAt: stats.update_date || stats.creation_date || null,
-          embeddingModel: stats.embedding_model || "unknown",
-          avatar: "",
-          chunkNum: 0,
-          language: "",
-          nickname: "",
-          parserId: "",
-          permission: "",
-          tokenNum: 0,
-          source: "datamate",
-        };
-      });
-
-      return knowledgeBases;
+      return data;
     } catch (error) {
-      log.error("Failed to get DataMate knowledge bases:", error);
-      return [];
+      log.error("Failed to sync DataMate knowledge bases and create records:", error);
+      throw error;
     }
   }
+
 
   // Get knowledge bases with stats from all sources (very slow, don't use it)
   async getKnowledgeBasesInfo(
@@ -151,12 +128,39 @@ class KnowledgeBaseService {
         log.error("Failed to get Elasticsearch indices:", error);
       }
 
-      // Get knowledge bases from DataMate
+      // Sync DataMate knowledge bases and get the synced data
       try {
-        const datamateKnowledgeBases = await this.getDataMateKnowledgeBases();
-        knowledgeBases.push(...datamateKnowledgeBases);
+        const syncResult = await this.syncDataMateAndCreateRecords();
+        if (syncResult.indices_info) {
+          // Convert synced DataMate indices to knowledge base format
+          const datamateKnowledgeBases: KnowledgeBase[] = syncResult.indices_info.map((indexInfo: any) => {
+            const stats = indexInfo.stats?.base_info || {};
+            const kbId = indexInfo.name;
+            const kbName = indexInfo.display_name || indexInfo.name;
+
+            return {
+              id: kbId,
+              name: kbName,
+              description: "DataMate knowledge base",
+              documentCount: stats.doc_count || 0,
+              chunkCount: stats.chunk_count || 0,
+              createdAt: stats.creation_date || null,
+              updatedAt: stats.update_date || stats.creation_date || null,
+              embeddingModel: stats.embedding_model || "unknown",
+              avatar: "",
+              chunkNum: 0,
+              language: "",
+              nickname: "",
+              parserId: "",
+              permission: "",
+              tokenNum: 0,
+              source: "datamate",
+            };
+          });
+          knowledgeBases.push(...datamateKnowledgeBases);
+        }
       } catch (error) {
-        log.error("Failed to get DataMate knowledge bases:", error);
+        log.error("Failed to sync DataMate knowledge bases:", error);
       }
 
       return knowledgeBases;

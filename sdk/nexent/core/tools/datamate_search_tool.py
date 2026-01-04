@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional
+from typing import Optional, List, Union
 
 from pydantic import Field
 from smolagents.tools import Tool
@@ -40,6 +40,11 @@ class DataMateSearchTool(Tool):
             "default": 0.2,
             "nullable": True,
         },
+        "index_names": {
+            "type": "array",
+            "description": "The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.",
+            "nullable": True,
+        },
         "kb_page": {
             "type": "integer",
             "description": "Page index when listing knowledge bases from DataMate.",
@@ -63,6 +68,7 @@ class DataMateSearchTool(Tool):
         self,
         server_ip: str = Field(description="DataMate server IP or hostname"),
         server_port: int = Field(description="DataMate server port"),
+        index_names: List[str] = Field(description="The list of index names to search", default=None, exclude=True),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
     ):
         """Initialize the DataMateSearchTool.
@@ -83,6 +89,7 @@ class DataMateSearchTool(Tool):
         # Store raw host and port
         self.server_ip = server_ip.strip()
         self.server_port = server_port
+        self.index_names = [] if index_names is None else index_names
 
         # Build base URL: http://host:port
         self.server_base_url = f"http://{self.server_ip}:{self.server_port}".rstrip("/")
@@ -98,11 +105,20 @@ class DataMateSearchTool(Tool):
         self.running_prompt_zh = "DataMate知识库检索中..."
         self.running_prompt_en = "Searching the DataMate knowledge base..."
 
+    def _normalize_index_names(self, index_names: Optional[Union[str, List[str]]]) -> List[str]:
+        """Normalize index_names to list; accept single string and keep None as empty list."""
+        if index_names is None:
+            return []
+        if isinstance(index_names, str):
+            return [index_names]
+        return list(index_names)
+
     def forward(
         self,
         query: str,
         top_k: int = 10,
         threshold: float = 0.2,
+        index_names: Union[str, List[str], None] = None,
         kb_page: int = 0,
         kb_page_size: int = 20,
     ) -> str:
@@ -112,6 +128,7 @@ class DataMateSearchTool(Tool):
             query: Search query text.
             top_k: Optional override for maximum number of search results.
             threshold: Optional override for similarity threshold.
+            index_names: Optional list of index names to search in. If not provided, all available indexes will be queried.
             kb_page: Optional override for knowledge base list page index.
             kb_page_size: Optional override for knowledge base list page size.
         """
@@ -128,27 +145,43 @@ class DataMateSearchTool(Tool):
 
         logger.info(
             f"DataMateSearchTool called with query: '{query}', base_url: '{self.server_base_url}', "
-            f"top_k: {top_k}, threshold: {threshold}"
+            f"top_k: {top_k}, threshold: {threshold}, index_names: {index_names}"
         )
 
-        try:
-            # Step 1: Get knowledge base list using SDK
-            knowledge_bases = self.datamate_core.client.list_knowledge_bases(
-                page=self.kb_page,
-                size=self.kb_page_size
-            )
+        knowledge_base_ids = []
 
-            # Extract knowledge base IDs
-            knowledge_base_ids = []
-            for kb in knowledge_bases:
-                kb_id = kb.get("id")
-                chunk_count = kb.get("chunkCount")
-                if kb_id and chunk_count:
-                    knowledge_base_ids.append(str(kb_id))
+        # Use provided index_names if available, otherwise use default
+        knowledge_base_ids = self._normalize_index_names(
+            index_names if index_names is not None else self.index_names)
+        # todo 名字匹配
+        # search_index_names = self._resolve_names(search_index_names)
+
+
+
+
+        try:
+            # Step 1: Determine knowledge base IDs to search
+            # if index_names:
+            #     # Use provided index names
+            #     knowledge_base_ids = [str(index) for index in index_names]
+            # else:
+            #     # Get knowledge base list using SDK
+            #     knowledge_bases = self.datamate_core.client.list_knowledge_bases(
+            #         page=self.kb_page,
+            #         size=self.kb_page_size
+            #     )
+            #
+            #     # Extract knowledge base IDs
+            #     knowledge_base_ids = []
+            #     for kb in knowledge_bases:
+            #         kb_id = kb.get("id")
+            #         chunk_count = kb.get("chunkCount")
+            #         if kb_id and chunk_count:
+            #             knowledge_base_ids.append(str(kb_id))
 
             if not knowledge_base_ids:
                 return json.dumps("No knowledge base found. No relevant information found.", ensure_ascii=False)
-
+            # knowledge_base_ids = [str(index) for index in index_names]
             # Step 2: Retrieve knowledge base content using DataMateCore hybrid search
             kb_search_results = []
             for knowledge_base_id in knowledge_base_ids:
@@ -188,7 +221,7 @@ class DataMateSearchTool(Tool):
                     url=download_url,
                     filename=metadata.get("file_name", ""),
                     published_date=entity_data.get("createTime", ""),
-                    score=entity_data.get("score", "0"),
+                    score=single_search_result.get("score", "0"),
                     score_details=score_details,
                     cite_index=self.record_ops + index,
                     search_type=self.name,

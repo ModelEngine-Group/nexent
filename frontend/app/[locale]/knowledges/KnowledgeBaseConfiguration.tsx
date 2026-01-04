@@ -134,6 +134,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     setActiveKnowledgeBase,
     isKnowledgeBaseSelectable,
     refreshKnowledgeBaseData,
+    refreshKnowledgeBaseDataWithDataMate,
     loadUserSelectedKnowledgeBases,
     saveUserSelectedKnowledgeBases,
     dispatch: kbDispatch,
@@ -380,7 +381,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   }, [
     isActive,
     kbState.isLoading,
-    kbState.selectedIds,
     kbState.knowledgeBases,
     modelConfig?.embedding?.modelName,
     modelConfig?.multiEmbedding?.modelName,
@@ -456,8 +456,8 @@ function DataConfig({ isActive }: DataConfigProps) {
       // Background update knowledge base statistics, but don't duplicate document fetching
       setTimeout(async () => {
         try {
-          // Directly call fetchKnowledgeBases to update knowledge base list data
-          await fetchKnowledgeBases(false, true);
+          // Directly call fetchKnowledgeBases to update knowledge base list data, but don't reload user selections
+          await fetchKnowledgeBases(false, false);
         } catch (error) {
           log.error("获取知识库最新数据失败:", error);
         }
@@ -526,19 +526,19 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   };
 
-  // Handle knowledge base sync (includes both indices and DataMate sync)
+  // Handle knowledge base sync (includes both indices and DataMate sync and create records)
   const handleSync = async () => {
     // Set sync loading state
     kbDispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING, payload: true });
 
     try {
-      // refreshKnowledgeBaseData calls fetchKnowledgeBases which internally calls both indices and DataMate sync
-      await refreshKnowledgeBaseData(true);
-      message.success(t("knowledgeBase.message.syncSuccess"));
+      // refreshKnowledgeBaseDataWithDataMate calls syncDataMateAndCreateRecords which syncs DataMate and creates local records
+      await refreshKnowledgeBaseDataWithDataMate();
+      message.success(t("knowledgeBase.message.syncDataMateSuccess"));
     } catch (error) {
       message.error(
-        t("knowledgeBase.message.syncError", {
-          error: error.message || t("common.unknownError"),
+        t("knowledgeBase.message.syncDataMateError", {
+          error: (error as Error)?.message || t("common.unknownError"),
         })
       );
     } finally {

@@ -17,24 +17,6 @@ class FakeClient:
         return {"success": True, "knowledge_bases": [{"id": "kb1"}], "total_count": 1}
 
 
-@pytest.mark.asyncio
-async def test_fetch_datamate_knowledge_bases_success(monkeypatch):
-    monkeypatch.setattr(datamate_service, "_get_datamate_client", lambda: FakeClient())
-    res = await datamate_service.fetch_datamate_knowledge_bases()
-    assert isinstance(res, list)
-    assert res[0]["id"] == "kb1"
-
-
-@pytest.mark.asyncio
-async def test_fetch_datamate_knowledge_bases_failure(monkeypatch):
-    class BadClient(FakeClient):
-        def list_knowledge_bases(self):
-            raise Exception("boom")
-
-    monkeypatch.setattr(datamate_service, "_get_datamate_client", lambda: BadClient())
-    with pytest.raises(RuntimeError) as excinfo:
-        await datamate_service.fetch_datamate_knowledge_bases()
-    assert "Failed to fetch DataMate knowledge bases" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -57,23 +39,5 @@ async def test_fetch_datamate_knowledge_base_files_failure(monkeypatch):
     assert "Failed to fetch files for knowledge base kb1" in str(excinfo.value)
 
 
-@pytest.mark.asyncio
-async def test_sync_datamate_knowledge_bases_success(monkeypatch):
-    monkeypatch.setattr(datamate_service, "_get_datamate_client", lambda: FakeClient())
-    res = await datamate_service.sync_datamate_knowledge_bases()
-    assert res.get("success") is True
-    assert res.get("total_count") == 1
-
-
-@pytest.mark.asyncio
-async def test_sync_datamate_knowledge_bases_failure(monkeypatch):
-    class BadClient(FakeClient):
-        def sync_all_knowledge_bases(self):
-            raise Exception("boom")
-
-    monkeypatch.setattr(datamate_service, "_get_datamate_client", lambda: BadClient())
-    res = await datamate_service.sync_datamate_knowledge_bases()
-    assert res["success"] is False
-    assert "error" in res
 
 

@@ -125,6 +125,10 @@ export interface AbortableError extends Error {
 
 // User selected knowledge base configuration type
 export interface UserKnowledgeConfig {
+  selectedKbNames?: string[];
+  selectedKbModels?: string[];
+  selectedKbSources?: string[];
+  // Legacy support for grouped format
   nexent?: string[];
   datamate?: string[];
 }

@@ -151,8 +151,7 @@ export const API_ENDPOINTS = {
       )}/error-info`,
   },
   datamate: {
-    sync: `${API_BASE_URL}/datamate/sync`,
-    knowledgeBases: `${API_BASE_URL}/datamate/knowledge_bases`,
+    syncAndCreateRecords: `${API_BASE_URL}/datamate/sync_and_create_records`,
     files: (knowledgeBaseId: string) => `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
   },
   config: {
