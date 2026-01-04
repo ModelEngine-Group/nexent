@@ -52,7 +52,7 @@ export default function AgentManageComp({
   // Handle unsaved changes check and agent switching
   const handleAgentSwitch = useCallback(
     async (agentDetail: any) => {
-      const canSwitch = await checkUnsavedChanges();
+      const canSwitch = await checkUnsavedChanges.saveWithModal();
       if (canSwitch) {
         setCurrentAgent(agentDetail);
       }

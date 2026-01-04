@@ -292,7 +292,7 @@ export default function Home() {
     const handleSetupComplete = async () => {
       // Check if we're on the agents step and if there are unsaved changes
       if (currentSetupStep === "agents" && isAdmin) {
-        const canProceed = await checkUnsavedChangesForSetup();
+        const canProceed = await checkUnsavedChangesForSetup.saveWithModal;
         if (!canProceed) {
           return; // Save failed or user cancelled
         }

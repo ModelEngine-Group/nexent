@@ -94,7 +94,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
                 type="primary"
                 className="responsive-button bg-green-500 hover:bg-green-600 border-green-500 hover:border-green-600"
                 icon={<Save size={16} />}
-                onClick={saveGuard}
+                onClick={saveGuard.save}
                 size="middle"
                 title={t("common.save")}
               >
@@ -132,9 +132,10 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
         placement="right"
         onClose={() => setIsDebugDrawerOpen(false)}
         open={isDebugDrawerOpen}
-        width={AGENT_SETUP_LAYOUT_DEFAULT.DRAWER_WIDTH}
-        destroyOnClose={true}
         styles={{
+          wrapper: {
+            width: AGENT_SETUP_LAYOUT_DEFAULT.DRAWER_WIDTH,
+          },
           body: {
             padding: 0,
             height: "100%",
