@@ -1,10 +1,3 @@
-import apps.remote_mcp_app as remote_app
-from fastapi import FastAPI
-from apps.remote_mcp_app import router
-from http import HTTPStatus
-from fastapi.testclient import TestClient
-import pytest
-from consts.exceptions import MCPConnectionError, MCPNameIllegal
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
@@ -33,12 +26,19 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
+from consts.exceptions import MCPConnectionError, MCPNameIllegal
 
 # Import the modules we need
+import pytest
+from fastapi.testclient import TestClient
+from http import HTTPStatus
 
 # Create a test client with a fresh FastAPI app
+from apps.remote_mcp_app import router
+from fastapi import FastAPI
 
 # Patch exception classes to ensure tests use correct exceptions
+import apps.remote_mcp_app as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
 remote_app.MCPNameIllegal = MCPNameIllegal
 

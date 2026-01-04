@@ -20,8 +20,10 @@ storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
+      return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+      lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
@@ -50,7 +52,8 @@ class TestMCPContainerManagerInit:
         mock_client = MagicMock()
         mock_create_client.return_value = mock_client
 
-        manager = MCPContainerManager(docker_socket_path="/var/run/docker.sock")
+        manager = MCPContainerManager(
+            docker_socket_path="/var/run/docker.sock")
 
         assert manager.client == mock_client
         mock_config_class.assert_called_once_with(
@@ -64,8 +67,9 @@ class TestMCPContainerManagerInit:
         """Test initialization failure when container client creation fails"""
         mock_config = MagicMock()
         mock_config_class.return_value = mock_config
-        
-        mock_create_client.side_effect = ContainerError("Cannot connect to Docker")
+
+        mock_create_client.side_effect = ContainerError(
+            "Cannot connect to Docker")
 
         with pytest.raises(MCPContainerError, match="Cannot connect to Docker"):
             MCPContainerManager(docker_socket_path="/var/run/docker.sock")
@@ -99,7 +103,7 @@ class TestStartMCPContainer:
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
         with patch('services.mcp_container_service.create_container_client_from_config'), \
-             patch('services.mcp_container_service.DockerContainerConfig'):
+                patch('services.mcp_container_service.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -130,7 +134,7 @@ class TestStartMCPContainer:
         assert result["host_port"] == "5020"
         assert result["status"] == "started"
         assert result["container_name"] == "test-service-user1234"
-        
+
         mock_manager.client.start_container.assert_called_once_with(
             service_name="test-service",
             tenant_id="tenant123",
@@ -142,20 +146,10 @@ class TestStartMCPContainer:
         )
 
     @pytest.mark.asyncio
-    async def test_start_mcp_container_missing_full_command(self, mock_manager):
-        """Test starting container without full_command"""
-        with pytest.raises(MCPContainerError, match="full_command is required"):
-            await mock_manager.start_mcp_container(
-                service_name="test-service",
-                tenant_id="tenant123",
-                user_id="user12345",
-                full_command=None
-            )
-
-    @pytest.mark.asyncio
     async def test_start_mcp_container_container_error(self, mock_manager):
         """Test starting container when ContainerError occurs"""
-        mock_manager.client.start_container = AsyncMock(side_effect=ContainerError("Container startup failed"))
+        mock_manager.client.start_container = AsyncMock(
+            side_effect=ContainerError("Container startup failed"))
 
         with pytest.raises(MCPContainerError, match="Container startup failed"):
             await mock_manager.start_mcp_container(
@@ -168,7 +162,8 @@ class TestStartMCPContainer:
     @pytest.mark.asyncio
     async def test_start_mcp_container_connection_error(self, mock_manager):
         """Test starting container when ContainerConnectionError occurs"""
-        mock_manager.client.start_container = AsyncMock(side_effect=ContainerConnectionError("Connection failed"))
+        mock_manager.client.start_container = AsyncMock(
+            side_effect=ContainerConnectionError("Connection failed"))
 
         with pytest.raises(MCPConnectionError, match="MCP connection failed"):
             await mock_manager.start_mcp_container(
@@ -207,6 +202,36 @@ class TestStartMCPContainer:
             image=None
         )
 
+    @pytest.mark.asyncio
+    async def test_start_mcp_container_without_full_command(self, mock_manager):
+        """Test starting container without full_command (should work as per SDK design)"""
+        mock_manager.client.start_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "service_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+
+        result = await mock_manager.start_mcp_container(
+            service_name="test-service",
+            tenant_id="tenant123",
+            user_id="user12345",
+            full_command=None
+        )
+
+        assert result["container_id"] == "container-123"
+        assert result["mcp_url"] == "http://localhost:5020/mcp"
+        mock_manager.client.start_container.assert_called_once_with(
+            service_name="test-service",
+            tenant_id="tenant123",
+            user_id="user12345",
+            full_command=None,
+            env_vars=None,
+            host_port=None,
+            image=None
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test stop_mcp_container
@@ -220,7 +245,7 @@ class TestStopMCPContainer:
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
         with patch('services.mcp_container_service.create_container_client_from_config'), \
-             patch('services.mcp_container_service.DockerContainerConfig'):
+                patch('services.mcp_container_service.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -234,8 +259,10 @@ class TestStopMCPContainer:
         result = await mock_manager.stop_mcp_container("container-123")
 
         assert result is True
-        mock_manager.client.stop_container.assert_called_once_with("container-123")
-        mock_manager.client.remove_container.assert_called_once_with("container-123")
+        mock_manager.client.stop_container.assert_called_once_with(
+            "container-123")
+        mock_manager.client.remove_container.assert_called_once_with(
+            "container-123")
 
     @pytest.mark.asyncio
     async def test_stop_mcp_container_stop_not_found(self, mock_manager):
@@ -245,7 +272,8 @@ class TestStopMCPContainer:
         result = await mock_manager.stop_mcp_container("non-existent")
 
         assert result is False
-        mock_manager.client.stop_container.assert_called_once_with("non-existent")
+        mock_manager.client.stop_container.assert_called_once_with(
+            "non-existent")
         mock_manager.client.remove_container.assert_not_called()
 
     @pytest.mark.asyncio
@@ -257,31 +285,38 @@ class TestStopMCPContainer:
         result = await mock_manager.stop_mcp_container("container-123")
 
         assert result is False
-        mock_manager.client.stop_container.assert_called_once_with("container-123")
-        mock_manager.client.remove_container.assert_called_once_with("container-123")
+        mock_manager.client.stop_container.assert_called_once_with(
+            "container-123")
+        mock_manager.client.remove_container.assert_called_once_with(
+            "container-123")
 
     @pytest.mark.asyncio
     async def test_stop_mcp_container_stop_error(self, mock_manager):
         """Test stopping container when ContainerError occurs during stop"""
-        mock_manager.client.stop_container = AsyncMock(side_effect=ContainerError("Stop failed"))
+        mock_manager.client.stop_container = AsyncMock(
+            side_effect=ContainerError("Stop failed"))
 
         with pytest.raises(MCPContainerError, match="Failed to stop container"):
             await mock_manager.stop_mcp_container("container-123")
 
-        mock_manager.client.stop_container.assert_called_once_with("container-123")
+        mock_manager.client.stop_container.assert_called_once_with(
+            "container-123")
         mock_manager.client.remove_container.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stop_mcp_container_remove_error(self, mock_manager):
         """Test removing container when ContainerError occurs during remove"""
         mock_manager.client.stop_container = AsyncMock(return_value=True)
-        mock_manager.client.remove_container = AsyncMock(side_effect=ContainerError("Remove failed"))
+        mock_manager.client.remove_container = AsyncMock(
+            side_effect=ContainerError("Remove failed"))
 
         with pytest.raises(MCPContainerError, match="Failed to stop container"):
             await mock_manager.stop_mcp_container("container-123")
 
-        mock_manager.client.stop_container.assert_called_once_with("container-123")
-        mock_manager.client.remove_container.assert_called_once_with("container-123")
+        mock_manager.client.stop_container.assert_called_once_with(
+            "container-123")
+        mock_manager.client.remove_container.assert_called_once_with(
+            "container-123")
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +331,7 @@ class TestListMCPContainers:
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
         with patch('services.mcp_container_service.create_container_client_from_config'), \
-             patch('services.mcp_container_service.DockerContainerConfig'):
+                patch('services.mcp_container_service.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -327,7 +362,8 @@ class TestListMCPContainers:
         assert result[0]["mcp_url"] == "http://localhost:5020/mcp"
         assert result[1]["container_id"] == "container-2"
         assert result[1]["mcp_url"] == "http://localhost:5021/mcp"
-        mock_manager.client.list_containers.assert_called_once_with(tenant_id="tenant123")
+        mock_manager.client.list_containers.assert_called_once_with(
+            tenant_id="tenant123")
 
     def test_list_mcp_containers_no_tenant_filter(self, mock_manager):
         """Test listing containers without tenant filter"""
@@ -344,7 +380,8 @@ class TestListMCPContainers:
         result = mock_manager.list_mcp_containers()
 
         assert len(result) == 1
-        mock_manager.client.list_containers.assert_called_once_with(tenant_id=None)
+        mock_manager.client.list_containers.assert_called_once_with(
+            tenant_id=None)
 
     def test_list_mcp_containers_empty(self, mock_manager):
         """Test listing containers when none exist"""
@@ -356,7 +393,8 @@ class TestListMCPContainers:
 
     def test_list_mcp_containers_exception(self, mock_manager):
         """Test listing containers when exception occurs"""
-        mock_manager.client.list_containers.side_effect = Exception("Connection error")
+        mock_manager.client.list_containers.side_effect = Exception(
+            "Connection error")
 
         result = mock_manager.list_mcp_containers(tenant_id="tenant123")
 
@@ -392,7 +430,7 @@ class TestGetContainerLogs:
     def mock_manager(self):
         """Create MCPContainerManager instance with mocked client"""
         with patch('services.mcp_container_service.create_container_client_from_config'), \
-             patch('services.mcp_container_service.DockerContainerConfig'):
+                patch('services.mcp_container_service.DockerContainerConfig'):
             manager = MCPContainerManager()
             manager.client = MagicMock()
             return manager
@@ -404,7 +442,8 @@ class TestGetContainerLogs:
         logs = mock_manager.get_container_logs("container-123", tail=100)
 
         assert logs == "Log line 1\nLog line 2\nLog line 3"
-        mock_manager.client.get_container_logs.assert_called_once_with("container-123", tail=100)
+        mock_manager.client.get_container_logs.assert_called_once_with(
+            "container-123", tail=100)
 
     def test_get_container_logs_custom_tail(self, mock_manager):
         """Test getting container logs with custom tail"""
@@ -412,7 +451,8 @@ class TestGetContainerLogs:
 
         logs = mock_manager.get_container_logs("container-123", tail=50)
 
-        mock_manager.client.get_container_logs.assert_called_once_with("container-123", tail=50)
+        mock_manager.client.get_container_logs.assert_called_once_with(
+            "container-123", tail=50)
 
     def test_get_container_logs_default_tail(self, mock_manager):
         """Test getting container logs with default tail"""
@@ -420,11 +460,13 @@ class TestGetContainerLogs:
 
         logs = mock_manager.get_container_logs("container-123")
 
-        mock_manager.client.get_container_logs.assert_called_once_with("container-123", tail=100)
+        mock_manager.client.get_container_logs.assert_called_once_with(
+            "container-123", tail=100)
 
     def test_get_container_logs_exception(self, mock_manager):
         """Test getting container logs when exception occurs"""
-        mock_manager.client.get_container_logs.side_effect = Exception("Connection error")
+        mock_manager.client.get_container_logs.side_effect = Exception(
+            "Connection error")
 
         logs = mock_manager.get_container_logs("container-123")
 
@@ -433,4 +475,3 @@ class TestGetContainerLogs:
 
 if __name__ == "__main__":
     pytest.main([__file__])
-
