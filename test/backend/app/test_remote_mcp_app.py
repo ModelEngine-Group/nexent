@@ -25,6 +25,10 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
+# Patch container service dependencies to avoid Docker connections
+patch('services.mcp_container_service.create_container_client_from_config').start()
+patch('services.mcp_container_service.DockerContainerConfig').start()
+
 # Import exception classes
 from consts.exceptions import MCPConnectionError, MCPNameIllegal
 
@@ -509,7 +513,8 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_success(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_success(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test successful addition of MCP server from config"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -551,7 +556,8 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_multiple_servers(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_multiple_servers(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test adding multiple MCP servers from config"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -602,7 +608,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_missing_command(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_missing_command(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with missing command"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -628,7 +635,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_empty_command(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_empty_command(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with empty command string (covers line 189-191)"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -656,7 +664,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_missing_port(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_missing_port(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with missing port"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -748,7 +757,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_container_error(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_container_error(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when container startup fails"""
         from consts.exceptions import MCPContainerError
 
@@ -780,7 +790,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when unexpected exception occurs in loop (covers line 253-255)"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -811,7 +822,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_all_fail(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_all_fail(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP servers when all fail"""
         from consts.exceptions import MCPContainerError
 
@@ -842,7 +854,8 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_docker_unavailable(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when Docker is unavailable"""
         from consts.exceptions import MCPContainerError
 
@@ -871,7 +884,8 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_with_custom_image(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_with_custom_image(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with custom Docker image"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -909,7 +923,8 @@ class TestAddMCPFromConfig:
         assert call_kwargs["image"] == "custom-image:latest"
 
     @patch('apps.remote_mcp_app.get_current_user_id')
-    def test_add_mcp_from_config_outer_exception(self, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_outer_exception(self, mock_check_name, mock_get_user_id):
         """Test adding MCP server when exception occurs outside loop (covers line 275-277)"""
         # Make get_current_user_id raise an exception to trigger outer exception handler
         mock_get_user_id.side_effect = RuntimeError("Failed to get user ID")
@@ -1041,7 +1056,8 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_success(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_success(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test successful listing of MCP containers"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1078,7 +1094,8 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_empty(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_empty(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when none exist"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1098,7 +1115,8 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_docker_unavailable(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when Docker is unavailable"""
         from consts.exceptions import MCPContainerError
 
@@ -1117,7 +1135,8 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_exception(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', side_effect=Exception("Unexpected error"))
+    def test_list_mcp_containers_exception(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when exception occurs"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1147,7 +1166,8 @@ class TestUploadMCPImageValidation:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_upload_mcp_image_success(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_success(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test successful upload and start of MCP image"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1228,7 +1248,8 @@ class TestUploadMCPImageValidation:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_upload_mcp_image_auto_service_name(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_auto_service_name(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test upload with auto-generated service name"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1261,7 +1282,8 @@ class TestUploadMCPImageValidation:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_upload_mcp_image_invalid_env_vars_json(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_invalid_env_vars_json(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test upload with invalid JSON in env_vars"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1315,7 +1337,8 @@ class TestUploadMCPImageValidation:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_upload_mcp_image_container_error(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_container_error(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test upload when container startup fails"""
         from consts.exceptions import MCPContainerError
 
@@ -1342,7 +1365,8 @@ class TestUploadMCPImageValidation:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_upload_mcp_image_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_docker_unavailable(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test upload when Docker service is unavailable"""
         from consts.exceptions import MCPContainerError
 
