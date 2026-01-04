@@ -15,7 +15,9 @@ import {
   Card,
   App,
 } from "antd";
+import type { TabsProps } from "antd";
 import { Zap } from "lucide-react";
+import { Scrollbars } from "react-custom-scrollbars-2";
 
 import log from "@/lib/logger";
 import { ModelOption } from "@/types/modelConfig";
@@ -64,6 +66,26 @@ export default function AgentGenerateDetail({
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const stylesObject: TabsProps["styles"] = {
+    root: {},
+    header: {},
+    item: {
+      fontWeight: "500",
+      color: "#000",
+      padding: `6px 10px`,
+      textAlign: "center",
+      backgroundColor: "#fff",
+    },
+    indicator: { height: 4 },
+    content: {
+      backgroundColor: "#fff",
+      borderWidth: 1,
+      padding: "8px ",
+      borderRadius: "0 0 8px 8px",
+      height: "100%",
+    },
+  };
+
   // Local state for business info to avoid frequent updates
   const [businessInfo, setBusinessInfo] = useState({
     businessDescription: "",
@@ -96,7 +118,7 @@ export default function AgentGenerateDetail({
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
-  }, [currentAgentId, editedAgent]);
+  }, [currentAgentId, editedAgent, availableLlmModels]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -275,7 +297,7 @@ export default function AgentGenerateDetail({
       key: "agent-info",
       label: t("agent.info.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full px-3">
           <Row gutter={[16, 16]}>
             <Col span={24}>
               <Form form={form} layout="vertical" disabled={!editable}>
@@ -431,7 +453,11 @@ export default function AgentGenerateDetail({
       label: t("systemPrompt.card.duty.title"),
       children: (
         <div className="overflow-y-auto overflow-x-hidden h-full">
-          <Form form={form} layout="vertical" className="h-full">
+          <Form
+            form={form}
+            layout="vertical"
+            className="h-full agent-config-form"
+          >
             <Form.Item name="dutyPrompt" className="mb-0 h-full">
               <TextArea
                 placeholder={t("systemPrompt.card.duty.title")}
@@ -439,6 +465,12 @@ export default function AgentGenerateDetail({
                   width: "100%",
                   height: "100%",
                   resize: "none",
+                  border: "none",
+                  outline: "none",
+                  boxShadow: "none",
+                  display: "block",
+                  flex: 1,
+                  minHeight: 0,
                 }}
                 onBlur={(e) => onUpdateProfile({ duty_prompt: e.target.value })}
               />
@@ -452,7 +484,11 @@ export default function AgentGenerateDetail({
       label: t("systemPrompt.card.constraint.title"),
       children: (
         <div className="overflow-y-auto overflow-x-hidden h-full">
-          <Form form={form} layout="vertical" className="h-full">
+          <Form
+            form={form}
+            layout="vertical"
+            className="h-full agent-config-form"
+          >
             <Form.Item name="constraintPrompt" className="mb-0 h-full">
               <TextArea
                 placeholder={t("systemPrompt.card.constraint.title")}
@@ -460,6 +496,12 @@ export default function AgentGenerateDetail({
                   width: "100%",
                   height: "100%",
                   resize: "none",
+                  border: "none",
+                  outline: "none",
+                  boxShadow: "none",
+                  display: "block",
+                  flex: 1,
+                  minHeight: 0,
                 }}
                 onBlur={(e) =>
                   onUpdateProfile({ constraint_prompt: e.target.value })
@@ -475,7 +517,11 @@ export default function AgentGenerateDetail({
       label: t("systemPrompt.card.fewShots.title"),
       children: (
         <div className="overflow-y-auto overflow-x-hidden h-full">
-          <Form form={form} layout="vertical" className="h-full">
+          <Form
+            form={form}
+            layout="vertical"
+            className="h-full agent-config-form"
+          >
             <Form.Item name="fewShotsPrompt" className="mb-0 h-full">
               <TextArea
                 placeholder={t("systemPrompt.card.fewShots.title")}
@@ -483,6 +529,12 @@ export default function AgentGenerateDetail({
                   width: "100%",
                   height: "100%",
                   resize: "none",
+                  border: "none",
+                  outline: "none",
+                  boxShadow: "none",
+                  display: "block",
+                  flex: 1,
+                  minHeight: 0,
                 }}
                 onBlur={(e) =>
                   onUpdateProfile({ few_shots_prompt: e.target.value })
@@ -587,76 +639,79 @@ export default function AgentGenerateDetail({
       <Row className="flex:1 min-h-0 h-full">
         <Col className="w-full h-full">
           <Tabs
+            centered
             activeKey={activeTab}
             onChange={setActiveTab}
             items={tabItems}
             size="middle"
             type="card"
-            tabBarStyle={{ marginBottom: 16 }}
-            style={{ height: "100%" }}
-            className="agent-config-tabs"
+            tabBarStyle={{}}
+            tabBarGutter={0}
+            styles={stylesObject}
+            className="agent-config-tabs h-full"
           />
         </Col>
       </Row>
 
+      {/* style={{ height: "100%" }}
+      className="agent-config-tabs" */}
+
       {/* Fix tabs not adapting to height and make tabs evenly distributed (overriding Ant Design's default styles) */}
       <style jsx global>{`
-        .agent-config-tabs .ant-tabs-content-holder {
-          overflow: hidden;
-          height: calc(100% - 60px); /* Subtract tab nav height */
+        .agent-config-tabs .ant-tabs-nav-list {
+          width: 100% !important;
+          display: flex !important;
+          transform: none !important; /* 禁用 JS 动态平移（注意会影响滚动行为） */
+          transition: none !important;
+          justify-content: center !important;
         }
-        .agent-config-tabs .ant-tabs-content,
-        .agent-config-tabs .ant-tabs-content-top {
-          height: 100%;
+
+        /* 每个 tab 固定为父宽度的 1/4 */
+        .agent-config-tabs .ant-tabs-tab {
+          flex: 0 0 25% !important;
+          max-width: 25% !important;
+          box-sizing: border-box;
         }
-        .agent-config-tabs .ant-tabs-tabpane {
-          height: 100%;
-          overflow: hidden;
-        }
-        .agent-config-tabs .ant-tabs-nav {
-          position: sticky;
-          top: 0;
-          z-index: 10;
-          background: white;
-        }
-        .agent-config-tabs .ant-tabs-nav .ant-tabs-nav-wrap .ant-tabs-nav-list {
+
+        /* 保证 tab 内文字水平居中并在超出时展示省略号 */
+        .agent-config-tabs .ant-tabs-tab-btn {
+          display: block;
           width: 100%;
-          display: flex;
-        }
-        .agent-config-tabs
-          .ant-tabs-nav
-          .ant-tabs-nav-wrap
-          .ant-tabs-nav-list
-          .ant-tabs-tab {
-          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
           text-align: center;
-          justify-content: center;
-        }
-        .agent-config-tabs .ant-tabs-tab.ant-tabs-tab-active {
-          background: #1890ff !important;
-          color: white !important;
-        }
-        .agent-config-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
-          color: white !important;
         }
 
-        /* Ensure green buttons stay green on hover */
-        .bg-green-500.ant-btn-primary:hover:not(:disabled) {
-          background-color: #16a34a !important; /* green-600 */
-          border-color: #16a34a !important; /* green-600 */
+        /* 选中状态样式：背景蓝色，文字白色 */
+        .agent-config-tabs .ant-tabs-tab-active {
+          background-color: #1890ff !important;
         }
 
-        /* Force Form.Item row to take full height for textarea tabs */
-        .agent-config-tabs .ant-form-item-row {
+        .agent-config-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+          color: #fff !important;
+        }
+        .agent-config-tabs .ant-tabs-content {
           height: 100% !important;
         }
-        .agent-config-tabs .ant-form-item-control {
-          height: 100% !important;
-        }
-        .agent-config-tabs .ant-form-item-control-input {
-          height: 100% !important;
-        }
-        .agent-config-tabs .ant-form-item-control-input-content {
+
+        /* Ensure the form and its nested Ant components use a flex layout so textarea can grow */
+        .agent-config-form,
+        .agent-config-form .ant-form-item,
+        .agent-config-form .ant-form-item .ant-row,
+        .agent-config-form .ant-form-item .ant-row .ant-col,
+        .agent-config-form
+          .ant-form-item
+          .ant-row
+          .ant-col
+          .ant-form-item-control-input,
+        .agent-config-form
+          .ant-form-item
+          .ant-row
+          .ant-col
+          .ant-form-item-control-input
+          .ant-form-item-control-input-content,
+        .agent-config-form .ant-form-item-control-input-content {
           height: 100% !important;
         }
       `}</style>
