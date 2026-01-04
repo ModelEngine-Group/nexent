@@ -185,7 +185,7 @@ class DockerContainerClient(ContainerClient):
         service_name: str,
         tenant_id: str,
         user_id: str,
-        full_command: List[str],
+        full_command: Optional[List[str]] = None,
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         image: Optional[str] = None,
@@ -197,7 +197,8 @@ class DockerContainerClient(ContainerClient):
             service_name: Name of the service
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
-            full_command: Complete command list to run inside container (must start an HTTP endpoint)
+            full_command: Optional complete command list to run inside container (must start an HTTP endpoint).
+                         If None, uses the image's default CMD/ENTRYPOINT.
             env_vars: Optional environment variables
 
         Returns:
@@ -271,9 +272,7 @@ class DockerContainerClient(ContainerClient):
         if env_vars:
             container_env.update(env_vars)
 
-        if not full_command:
-            raise ContainerError("full_command is required to start container")
-
+        # Determine image name
         command0 = full_command[0] if full_command else ""
         if image is not None:
             image_name = image
@@ -287,7 +286,6 @@ class DockerContainerClient(ContainerClient):
         container_config = {
             "image": image_name,
             "name": container_name,
-            "command": full_command_to_run,
             "environment": container_env,
             "network": self.DEFAULT_NETWORK_NAME,
             "restart_policy": {"Name": "unless-stopped"},
@@ -297,12 +295,19 @@ class DockerContainerClient(ContainerClient):
             "tty": False,
         }
 
+        # Only set command if full_command is provided
+        if full_command_to_run:
+            container_config["command"] = full_command_to_run
+
         # Only publish ports when running locally; inside Docker network DNS is used.
         if not DockerContainerClient._is_running_in_docker():
             container_config["ports"] = {f"{host_port}/tcp": host_port}
 
         try:
-            logger.info(f"Starting container {container_name} with command: {full_command_to_run}")
+            if full_command_to_run:
+                logger.info(f"Starting container {container_name} with command: {full_command_to_run}")
+            else:
+                logger.info(f"Starting container {container_name} with default image CMD/ENTRYPOINT")
             container = self.client.containers.run(**container_config)
 
             # Wait a bit for container to start
@@ -313,7 +318,7 @@ class DockerContainerClient(ContainerClient):
             service_url = f"http://{host}:{host_port}/mcp"
             try:
                 await self._wait_for_service_ready(service_url, max_retries=30)
-            except ContainerConnectionError:
+            except ContainerConnectionError: 
                 # If health check fails, log but don't fail immediately
                 logger.warning(
                     f"Service health check failed for {service_url}, but container is running"
