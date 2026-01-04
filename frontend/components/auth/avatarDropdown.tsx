@@ -3,13 +3,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd";
-import { 
-  UserRound, 
-  LogOut, 
-  LogIn, 
-  Power, 
-  UserRoundPlus,
-} from "lucide-react";
+import { UserRound, LogOut, LogIn, Power, UserRoundPlus } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -77,7 +71,7 @@ export function AvatarDropdown() {
           trigger={["click"]}
           open={dropdownOpen}
           onOpenChange={setDropdownOpen}
-          dropdownRender={(menu: React.ReactNode) => (
+          popupRender={(menu: React.ReactNode) => (
             <div style={{ minWidth: "120px" }}>{menu}</div>
           )}
           getPopupContainer={() => document.body}
@@ -130,8 +124,7 @@ export function AvatarDropdown() {
       icon: <Power size={16} />,
       label: t("auth.revoke"),
       // danger: true,
-      className:
-        "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
+      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
       onClick: () => {
         if (user.role === "admin") {
           modal.error({
@@ -161,7 +154,7 @@ export function AvatarDropdown() {
         arrow
         trigger={["click"]}
         getPopupContainer={() => document.body}
-        dropdownRender={(menu: React.ReactNode) => (
+        popupRender={(menu: React.ReactNode) => (
           <div style={{ minWidth: "180px" }}>{menu}</div>
         )}
       >

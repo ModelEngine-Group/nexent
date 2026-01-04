@@ -7,6 +7,37 @@ import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 
 // ========== Core Interfaces ==========
 
+/**
+ * Business info fields for agent configuration.
+ * Used by agentConfigStore for business info updates.
+ * Supports partial updates like AgentProfileInfo.
+ */
+export type AgentBusinessInfo = Partial<Pick<
+  Agent,
+  "business_description" | "business_logic_model_id" | "business_logic_model_name"
+>>;
+
+/**
+ * Profile info fields for agent configuration.
+ */
+export type AgentProfileInfo = Partial<
+  Pick<
+    Agent,
+    | "name"
+    | "display_name"
+    | "author"
+    | "model"
+    | "model_id"
+    | "max_step"
+    | "description"
+    | "duty_prompt"
+    | "constraint_prompt"
+    | "few_shots_prompt"
+  >
+>;
+
+// ========== Core Interfaces ==========
+
 export interface Agent {
   id: string;
   name: string;
