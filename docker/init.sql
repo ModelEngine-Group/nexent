@@ -465,6 +465,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     mcp_name VARCHAR(100),
     mcp_server VARCHAR(500),
     status BOOLEAN DEFAULT NULL,
+    container_id VARCHAR(200) DEFAULT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -482,6 +483,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.user_id IS 'User ID';
 COMMENT ON COLUMN nexent.mcp_record_t.mcp_name IS 'MCP name';
 COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
+COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
