@@ -102,6 +102,9 @@ export default function AgentGenerateDetail({
         editedAgent.model || availableLlmModels[0]?.displayName || "",
       mainAgentMaxStep: editedAgent.max_step || 5,
       agentDescription: editedAgent.description || "",
+      dutyPrompt: editedAgent.duty_prompt || "",
+      constraintPrompt: editedAgent.constraint_prompt || "",
+      fewShotsPrompt: editedAgent.few_shots_prompt || "",
     };
 
     const initialBusinessInfo = {
