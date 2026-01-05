@@ -511,6 +511,8 @@ class ElasticSearchService:
         filtered_indices_list = []
         model_name_is_none_list = []
         for record in db_record:
+            if record['knowledge_sources'] != 'elasticsearch':
+                continue
             # async PG database to sync ES, remove the data that is not in ES
             if record["index_name"] not in all_indices_list:
                 delete_knowledge_record(

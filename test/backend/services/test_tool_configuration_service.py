@@ -196,17 +196,21 @@ class MockElasticSearchCore(MockVectorDatabaseCore):
 
 
 # Provide a mock DataMateCore to satisfy imports in vectordatabase_service
-vector_database_datamate_module = types.ModuleType('nexent.vector_database.datamate_core')
+vector_database_datamate_module = types.ModuleType(
+    'nexent.vector_database.datamate_core')
 
 
 class MockDataMateCore(MockVectorDatabaseCore):
     def __init__(self, *args, **kwargs):
         pass
 
+
 vector_database_datamate_module.DataMateCore = MockDataMateCore
 sys.modules['nexent.vector_database.datamate_core'] = vector_database_datamate_module
-setattr(sys.modules['nexent.vector_database'], 'datamate_core', vector_database_datamate_module)
-setattr(sys.modules['nexent.vector_database'], 'DataMateCore', MockDataMateCore)
+setattr(sys.modules['nexent.vector_database'],
+        'datamate_core', vector_database_datamate_module)
+setattr(sys.modules['nexent.vector_database'],
+        'DataMateCore', MockDataMateCore)
 
 vector_database_base_module.VectorDatabaseCore = MockVectorDatabaseCore
 vector_database_elasticsearch_module.ElasticSearchCore = MockElasticSearchCore
@@ -1878,8 +1882,10 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         # Mock knowledge base dependencies
         mock_knowledge_list = [
-            {"index_name": "index1", "knowledge_id": "kb1"},
-            {"index_name": "index2", "knowledge_id": "kb2"}
+            {"index_name": "index1", "knowledge_id": "kb1",
+                "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "knowledge_id": "kb2",
+                "knowledge_sources": "elasticsearch"}
         ]
         mock_get_knowledge_list.return_value = mock_knowledge_list
         mock_get_embedding_model.return_value = "mock_embedding_model"
@@ -2152,6 +2158,224 @@ class TestValidateLocalToolKnowledgeBaseSearch:
                 "tenant1",
                 "user1"
             )
+
+
+class TestValidateLocalToolDataMateSearch:
+    """Test cases for _validate_local_tool function with datamate_search_tool"""
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
+    def test_validate_local_tool_datamate_search_success(self, mock_get_knowledge_list, mock_signature, mock_get_class):
+        """Test successful datamate_search_tool validation with proper dependencies"""
+        # Mock tool class
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "datamate search result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature for datamate_search_tool
+        mock_sig = Mock()
+        mock_sig.parameters = {
+            'self': Mock(),
+            'server_ip': Mock(),
+            'server_port': Mock(),
+            'index_names': Mock(),
+            'observer': Mock()
+        }
+        # Set default value for observer parameter to match actual behavior
+        mock_sig.parameters['observer'].default = None
+        mock_signature.return_value = mock_sig
+
+        # Mock knowledge base dependencies
+        mock_knowledge_list = [
+            {"index_name": "datamate_kb1", "knowledge_sources": "datamate"},
+            {"index_name": "datamate_kb2", "knowledge_sources": "datamate"},
+            # Should be filtered out
+            {"index_name": "es_kb1", "knowledge_sources": "elasticsearch"}
+        ]
+        mock_get_knowledge_list.return_value = mock_knowledge_list
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "datamate_search_tool",
+            {"query": "test query"},
+            {"server_ip": "192.168.1.100", "server_port": 8080},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "datamate search result"
+        mock_get_class.assert_called_once_with("datamate_search_tool")
+
+        # Verify datamate knowledge base specific parameters were passed
+        expected_params = {
+            "server_ip": "192.168.1.100",
+            "server_port": 8080,
+            # Only datamate sources
+            "index_names": ["datamate_kb1", "datamate_kb2"],
+            "observer": None,  # Default value for observer parameter
+        }
+        mock_tool_class.assert_called_once_with(**expected_params)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    def test_validate_local_tool_datamate_search_missing_tenant_id(self, mock_get_class):
+        """Test datamate_search_tool validation fails without tenant_id"""
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException) as excinfo:
+            _validate_local_tool(
+                "datamate_search_tool",
+                {"query": "test query"},
+                {"server_ip": "192.168.1.100", "server_port": 8080},
+                None,
+                "user1"
+            )
+        assert "Tenant ID and User ID are required for datamate_search_tool validation" in str(
+            excinfo.value)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    def test_validate_local_tool_datamate_search_missing_user_id(self, mock_get_class):
+        """Test datamate_search_tool validation fails without user_id"""
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException) as excinfo:
+            _validate_local_tool(
+                "datamate_search_tool",
+                {"query": "test query"},
+                {"server_ip": "192.168.1.100", "server_port": 8080},
+                "tenant1",
+                None
+            )
+        assert "Tenant ID and User ID are required for datamate_search_tool validation" in str(
+            excinfo.value)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    def test_validate_local_tool_datamate_search_missing_both_ids(self, mock_get_class):
+        """Test datamate_search_tool validation fails without both tenant_id and user_id"""
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        with pytest.raises(ToolExecutionException) as excinfo:
+            _validate_local_tool(
+                "datamate_search_tool",
+                {"query": "test query"},
+                {"server_ip": "192.168.1.100", "server_port": 8080},
+                None,
+                None
+            )
+        assert "Tenant ID and User ID are required for datamate_search_tool validation" in str(
+            excinfo.value)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
+    def test_validate_local_tool_datamate_search_empty_knowledge_list(self, mock_get_knowledge_list, mock_signature, mock_get_class):
+        """Test datamate_search_tool validation with empty knowledge list"""
+        # Mock tool class
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "datamate search result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature for datamate_search_tool
+        mock_sig = Mock()
+        mock_sig.parameters = {
+            'self': Mock(),
+            'server_ip': Mock(),
+            'server_port': Mock(),
+            'index_names': Mock(),
+            'observer': Mock()
+        }
+        # Set default value for observer parameter to match actual behavior
+        mock_sig.parameters['observer'].default = None
+        mock_signature.return_value = mock_sig
+
+        # Mock empty knowledge base list
+        mock_get_knowledge_list.return_value = []
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "datamate_search_tool",
+            {"query": "test query"},
+            {"server_ip": "192.168.1.100", "server_port": 8080},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "datamate search result"
+
+        # Verify tool was created with empty index_names
+        expected_params = {
+            "server_ip": "192.168.1.100",
+            "server_port": 8080,
+            "index_names": [],  # Empty list
+            "observer": None,  # Default value for observer parameter
+        }
+        mock_tool_class.assert_called_once_with(**expected_params)
+
+    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
+    @patch('backend.services.tool_configuration_service.inspect.signature')
+    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
+    def test_validate_local_tool_datamate_search_filters_knowledge_sources(self, mock_get_knowledge_list, mock_signature, mock_get_class):
+        """Test datamate_search_tool validation correctly filters by knowledge_sources='datamate'"""
+        # Mock tool class
+        mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "datamate search result"
+        mock_tool_class.return_value = mock_tool_instance
+
+        mock_get_class.return_value = mock_tool_class
+
+        # Mock signature for datamate_search_tool
+        mock_sig = Mock()
+        mock_sig.parameters = {
+            'self': Mock(),
+            'server_ip': Mock(),
+            'server_port': Mock(),
+            'index_names': Mock(),
+            'observer': Mock()
+        }
+        # Set default value for observer parameter to match actual behavior
+        mock_sig.parameters['observer'].default = None
+        mock_signature.return_value = mock_sig
+
+        # Mock knowledge base list with mixed sources
+        mock_knowledge_list = [
+            {"index_name": "datamate_kb1", "knowledge_sources": "datamate"},
+            {"index_name": "datamate_kb2", "knowledge_sources": "datamate"},
+            {"index_name": "es_kb1", "knowledge_sources": "elasticsearch"},
+            {"index_name": "es_kb2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "other_kb", "knowledge_sources": "other"}
+        ]
+        mock_get_knowledge_list.return_value = mock_knowledge_list
+
+        from backend.services.tool_configuration_service import _validate_local_tool
+
+        result = _validate_local_tool(
+            "datamate_search_tool",
+            {"query": "test query"},
+            {"server_ip": "192.168.1.100", "server_port": 8080},
+            "tenant1",
+            "user1"
+        )
+
+        assert result == "datamate search result"
+
+        # Verify only datamate sources were included
+        expected_params = {
+            "server_ip": "192.168.1.100",
+            "server_port": 8080,
+            # Only datamate sources
+            "index_names": ["datamate_kb1", "datamate_kb2"],
+            "observer": None,  # Default value for observer parameter
+        }
+        mock_tool_class.assert_called_once_with(**expected_params)
 
 
 class TestValidateLocalToolAnalyzeImage:

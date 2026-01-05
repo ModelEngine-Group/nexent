@@ -1850,6 +1850,17 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
             usage=None
         ),
         ToolConfig(
+            class_name="DataMateSearchTool",
+            name="DataMate Search",
+            source="datamate",
+            params={"server_ip": "192.168.1.100", "server_port": 8080},
+            metadata={"connection": "data", "config": "settings"},
+            description="DataMate knowledge base search tool",
+            inputs="search query",
+            output_type="search results",
+            usage=None
+        ),
+        ToolConfig(
             class_name="MCPTool",
             name="MCP Tool",
             source="mcp",
@@ -1878,7 +1889,7 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     assert result.agent_id == 123
     assert result.name == "Test Agent"
     assert result.business_description == "For testing purposes"
-    assert len(result.tools) == 5
+    assert len(result.tools) == 6
     assert result.managed_agents == mock_sub_agent_ids
 
     # Verify KnowledgeBaseSearchTool metadata is empty
@@ -1893,6 +1904,10 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     analyze_image_tool = next(
         tool for tool in result.tools if tool.class_name == "AnalyzeImageTool")
     assert analyze_image_tool.metadata == {}
+
+    datamate_tool = next(
+        tool for tool in result.tools if tool.class_name == "DataMateSearchTool")
+    assert datamate_tool.metadata == {}
 
     # Verify MCP tool has usage field
     mcp_tool = next(

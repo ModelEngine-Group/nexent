@@ -79,6 +79,59 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
         raise e
 
 
+def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create or update a knowledge base record (upsert operation).
+    If a record with the same index_name and tenant_id exists, update it.
+    Otherwise, create a new record.
+
+    Args:
+        query: Dictionary containing knowledge base data, must include:
+            - index_name: Knowledge base name (used as unique identifier)
+            - tenant_id: Tenant ID
+            - knowledge_name: User-facing knowledge base name
+            - knowledge_describe: Knowledge base description
+            - knowledge_sources: Knowledge base sources (optional, default 'elasticsearch')
+            - embedding_model_name: Embedding model name
+            - user_id: User ID for created_by and updated_by fields
+
+    Returns:
+        Dict[str, Any]: Dictionary with 'knowledge_id' and 'index_name'
+    """
+    try:
+        with get_db_session() as session:
+            # Check if record exists
+            existing_record = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.index_name == query['index_name'],
+                KnowledgeRecord.tenant_id == query['tenant_id'],
+                KnowledgeRecord.delete_flag != 'Y'
+            ).first()
+
+            if existing_record:
+                # Update existing record
+                existing_record.knowledge_name = query.get('knowledge_name') or query.get('index_name')
+                existing_record.knowledge_describe = query.get('knowledge_describe', '')
+                existing_record.knowledge_sources = query.get('knowledge_sources', 'datamate')
+                existing_record.embedding_model_name = query.get('embedding_model_name', '')
+                existing_record.updated_by = query.get('user_id')
+                existing_record.update_time = func.current_timestamp()
+
+                session.flush()
+                session.commit()
+                return {
+                    "knowledge_id": existing_record.knowledge_id,
+                    "index_name": existing_record.index_name,
+                    "knowledge_name": existing_record.knowledge_name,
+                }
+            else:
+                # Create new record
+                return create_knowledge_record(query)
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise e
+
+
 def update_knowledge_record(query: Dict[str, Any]) -> bool:
     """
     Update a knowledge base record
@@ -223,6 +276,29 @@ def get_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
         with get_db_session() as session:
             result = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.delete_flag != 'Y'
+            ).all()
+            return [as_dict(item) for item in result]
+    except SQLAlchemyError as e:
+        raise e
+
+
+def get_knowledge_info_by_tenant_and_source(tenant_id: str, knowledge_sources: str) -> List[Dict[str, Any]]:
+    """
+    Get knowledge base records by tenant ID and knowledge sources.
+
+    Args:
+        tenant_id: Tenant ID to filter by
+        knowledge_sources: Knowledge sources to filter by (e.g., 'datamate')
+
+    Returns:
+        List[Dict[str, Any]]: List of knowledge base record dictionaries
+    """
+    try:
+        with get_db_session() as session:
+            result = session.query(KnowledgeRecord).filter(
+                KnowledgeRecord.tenant_id == tenant_id,
+                KnowledgeRecord.knowledge_sources == knowledge_sources,
                 KnowledgeRecord.delete_flag != 'Y'
             ).all()
             return [as_dict(item) for item in result]

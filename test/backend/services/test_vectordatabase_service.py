@@ -422,8 +422,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Setup
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
-            {"index_name": "index1", "embedding_model_name": "test-model"},
-            {"index_name": "index2", "embedding_model_name": "test-model"}
+            {"index_name": "index1", "embedding_model_name": "test-model", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model", "knowledge_sources": "elasticsearch"}
         ]
 
         # Execute
@@ -466,8 +466,8 @@ class TestElasticSearchService(unittest.TestCase):
             },
         }
         mock_get_knowledge.return_value = [
-            {"index_name": "index1", "embedding_model_name": "test-model"},
-            {"index_name": "index2", "embedding_model_name": "test-model"}
+            {"index_name": "index1", "embedding_model_name": "test-model", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model", "knowledge_sources": "elasticsearch"}
         ]
 
         # Execute
@@ -496,7 +496,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["es_index"]
         mock_get_info.return_value = [
-            {"index_name": "dangling_index", "embedding_model_name": "model-A"}
+            {"index_name": "dangling_index", "embedding_model_name": "model-A", "knowledge_sources": "elasticsearch"},
+            {"index_name": "es_index", "embedding_model_name": "model-B", "knowledge_sources": "elasticsearch"}
         ]
 
         result = ElasticSearchService.list_indices(
@@ -510,8 +511,8 @@ class TestElasticSearchService(unittest.TestCase):
         mock_delete_knowledge.assert_called_once_with(
             {"index_name": "dangling_index", "user_id": "user-1"}
         )
-        self.assertEqual(result["indices"], [])
-        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["indices"], ["es_index"])
+        self.assertEqual(result["count"], 1)
 
     @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
@@ -521,7 +522,7 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A"}
+            {"index_name": "index1", "embedding_model_name": "model-A", "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {}
 
@@ -545,7 +546,7 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": None}
+            {"index_name": "index1", "embedding_model_name": None, "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
             "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
@@ -572,7 +573,7 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A"}
+            {"index_name": "index1", "embedding_model_name": "model-A", "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.side_effect = Exception(
             "503 Service Unavailable"
@@ -597,7 +598,7 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A"}
+            {"index_name": "index1", "embedding_model_name": "model-A", "knowledge_sources": "elasticsearch"}
         ]
         detailed_stats = {
             "index1": {
@@ -2052,8 +2053,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_response.status_code = 200
         mock_get_knowledge.return_value = [
-            {"index_name": "index1", "embedding_model_name": "test-model"},
-            {"index_name": "index2", "embedding_model_name": "test-model"}
+            {"index_name": "index1", "embedding_model_name": "test-model", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model", "knowledge_sources": "elasticsearch"}
         ]
 
         # Execute
