@@ -109,11 +109,15 @@ export default function AgentManageComp({
 
   // Handle select agent
   const handleSelectAgent = async (agent: Agent) => {
-    // Don't switch if already selected
+    // If already selected, deselect it
     if (
       currentAgentId !== null &&
       String(currentAgentId) === String(agent.id)
     ) {
+      const canDeselect = await checkUnsavedChanges.saveWithModal();
+      if (canDeselect) {
+        setCurrentAgent(null);
+      }
       return;
     }
 
