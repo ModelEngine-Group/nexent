@@ -162,7 +162,7 @@ To contribute：
 Stuck or have questions? We're here to help! Reach out to us via：
 - **GitHub Issues**: Open an issue for discussion.
 - **Discord**: Join our [Nexent Community](https://discord.gg/YXH5C8SQ) for real-time chat.
-- **Email**: Drop us a line at [chenshuangrui@huawei.com](mailto:chenshuangrui@huawei.com).
+- **Email**: Drop us a line at [zhenggaoqi@huawei.com](mailto:zhenggaoqi@huawei.com).
 
 ## 🎉 Celebrate Your Contribution!
 
