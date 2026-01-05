@@ -5,6 +5,7 @@ Tests the MCPContainerManager class with comprehensive coverage
 
 import sys
 import os
+import tempfile
 from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 
@@ -471,6 +472,209 @@ class TestGetContainerLogs:
         logs = mock_manager.get_container_logs("container-123")
 
         assert "Error retrieving logs" in logs
+
+
+# ---------------------------------------------------------------------------
+# Test load_image_from_tar_file
+# ---------------------------------------------------------------------------
+
+
+class TestLoadImageFromTarFile:
+    """Test load_image_from_tar_file method"""
+
+    @pytest.fixture
+    def mock_manager(self):
+        """Create MCPContainerManager instance with mocked client"""
+        with patch('services.mcp_container_service.create_container_client_from_config'), \
+                patch('services.mcp_container_service.DockerContainerConfig'):
+            manager = MCPContainerManager()
+            manager.client = MagicMock()
+            return manager
+
+    @pytest.mark.asyncio
+    async def test_load_image_from_tar_file_success_with_tags(self, mock_manager):
+        """Test successful loading of image with tags"""
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as temp_file:
+            temp_file.write(b"fake tar content")
+            temp_file_path = temp_file.name
+
+        try:
+            mock_image = MagicMock()
+            mock_image.tags = ["test-image:latest", "test-image:v1.0"]
+            mock_image.id = "sha256:1234567890abcdef"
+
+            mock_manager.client.client.images.load.return_value = [mock_image]
+
+            result = await mock_manager.load_image_from_tar_file(temp_file_path)
+
+            assert result == "test-image:latest"
+            mock_manager.client.client.images.load.assert_called_once()
+        finally:
+            # Clean up
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_load_image_from_tar_file_success_without_tags(self, mock_manager):
+        """Test successful loading of image without tags"""
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as temp_file:
+            temp_file.write(b"fake tar content")
+            temp_file_path = temp_file.name
+
+        try:
+            mock_image = MagicMock()
+            mock_image.tags = []
+            mock_image.id = "sha256:1234567890abcdef"
+
+            mock_manager.client.client.images.load.return_value = [mock_image]
+
+            result = await mock_manager.load_image_from_tar_file(temp_file_path)
+
+            assert result == "sha256:1234567890abcdef"
+            mock_manager.client.client.images.load.assert_called_once()
+        finally:
+            # Clean up
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_load_image_from_tar_file_empty_images(self, mock_manager):
+        """Test loading when no images are found in tar file (covers lines 69-70)"""
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as temp_file:
+            temp_file.write(b"fake tar content")
+            temp_file_path = temp_file.name
+
+        try:
+            mock_manager.client.client.images.load.return_value = []
+
+            with pytest.raises(MCPContainerError, match="No images found in tar file"):
+                await mock_manager.load_image_from_tar_file(temp_file_path)
+        finally:
+            # Clean up
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_load_image_from_tar_file_exception(self, mock_manager):
+        """Test loading when exception occurs (covers lines 80-82)"""
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as temp_file:
+            temp_file.write(b"fake tar content")
+            temp_file_path = temp_file.name
+
+        try:
+            mock_manager.client.client.images.load.side_effect = Exception(
+                "File not found")
+
+            with pytest.raises(MCPContainerError, match="Failed to load image from tar file: File not found"):
+                await mock_manager.load_image_from_tar_file(temp_file_path)
+        finally:
+            # Clean up
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# Test start_mcp_container_from_tar
+# ---------------------------------------------------------------------------
+
+
+class TestStartMCPContainerFromTar:
+    """Test start_mcp_container_from_tar method"""
+
+    @pytest.fixture
+    def mock_manager(self):
+        """Create MCPContainerManager instance with mocked client"""
+        with patch('services.mcp_container_service.create_container_client_from_config'), \
+                patch('services.mcp_container_service.DockerContainerConfig'):
+            manager = MCPContainerManager()
+            manager.client = MagicMock()
+            return manager
+
+    @pytest.mark.asyncio
+    async def test_start_mcp_container_from_tar_success(self, mock_manager):
+        """Test successful starting of MCP container from tar file"""
+        # Mock load_image_from_tar_file
+        mock_manager.load_image_from_tar_file = AsyncMock(
+            return_value="loaded-image:latest")
+
+        # Mock start_mcp_container
+        mock_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+
+        result = await mock_manager.start_mcp_container_from_tar(
+            tar_file_path="/path/to/image.tar",
+            service_name="test-service",
+            tenant_id="tenant123",
+            user_id="user12345",
+            env_vars={"NODE_ENV": "production"},
+            host_port=5020,
+            full_command=["npx", "-y", "test-mcp"]
+        )
+
+        assert result["container_id"] == "container-123"
+        assert result["mcp_url"] == "http://localhost:5020/mcp"
+        mock_manager.load_image_from_tar_file.assert_called_once_with(
+            "/path/to/image.tar")
+        mock_manager.start_mcp_container.assert_called_once_with(
+            service_name="test-service",
+            tenant_id="tenant123",
+            user_id="user12345",
+            env_vars={"NODE_ENV": "production"},
+            host_port=5020,
+            image="loaded-image:latest",
+            full_command=["npx", "-y", "test-mcp"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_mcp_container_from_tar_load_image_error(self, mock_manager):
+        """Test starting container when load_image_from_tar_file fails (covers lines 178-181)"""
+        # Mock load_image_from_tar_file to raise error
+        mock_manager.load_image_from_tar_file = AsyncMock(
+            side_effect=MCPContainerError("Failed to load image"))
+
+        with pytest.raises(MCPContainerError, match="Failed to start container from tar file: Failed to load image"):
+            await mock_manager.start_mcp_container_from_tar(
+                tar_file_path="/path/to/image.tar",
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345"
+            )
+
+    @pytest.mark.asyncio
+    async def test_start_mcp_container_from_tar_start_container_error(self, mock_manager):
+        """Test starting container when start_mcp_container fails (covers lines 178-181)"""
+        # Mock load_image_from_tar_file to succeed
+        mock_manager.load_image_from_tar_file = AsyncMock(
+            return_value="loaded-image:latest")
+
+        # Mock start_mcp_container to raise error
+        mock_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed"))
+
+        with pytest.raises(MCPContainerError, match="Failed to start container from tar file: Container startup failed"):
+            await mock_manager.start_mcp_container_from_tar(
+                tar_file_path="/path/to/image.tar",
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345"
+            )
 
 
 if __name__ == "__main__":

@@ -1478,5 +1478,122 @@ class TestGetContainerLogs:
         assert "Failed to get container logs" in data["detail"]
 
 
+# ---------------------------------------------------------------------------
+# Additional test cases for upload_mcp_image validation
+# ---------------------------------------------------------------------------
+
+
+class TestUploadMCPImageValidationAdditional:
+    """Additional test cases for upload_mcp_image endpoint validation"""
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_invalid_port_range(self, mock_get_user_id):
+        """Test upload with invalid port range (covers lines 429-430)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Test port <= 0
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 0},  # Invalid port
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Port must be between 1 and 65535" in data["detail"]
+
+        # Test port > 65535
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 70000},  # Invalid port
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Port must be between 1 and 65535" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_env_vars_not_dict(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
+        """Test upload with environment variables that are not a JSON object (covers lines 459-460)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+
+        file_content = b"fake tar content"
+
+        # Test with array instead of object
+        response = client.post(
+            "/mcp/upload-image",
+            data={
+                "port": 5020,
+                "env_vars": '["VAR1", "VAR2"]'  # Array instead of object
+            },
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Invalid environment variables format" in data["detail"]
+        assert "Environment variables must be a JSON object" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    @patch('tempfile.NamedTemporaryFile')
+    @patch('os.unlink', side_effect=OSError("Permission denied"))
+    @patch('apps.remote_mcp_app.logger')
+    def test_upload_mcp_image_temp_file_cleanup_warning(self, mock_logger, mock_unlink, mock_temp_file, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
+        """Test upload with temporary file cleanup failure (covers lines 536-537)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Mock tempfile.NamedTemporaryFile
+        mock_temp_file_obj = MagicMock()
+        mock_temp_file_obj.__enter__.return_value = mock_temp_file_obj
+        mock_temp_file_obj.__exit__.return_value = None
+        mock_temp_file_obj.name = "/tmp/test.tar"
+        mock_temp_file.return_value = mock_temp_file_obj
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container_from_tar = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-image-user1234"
+        })
+
+        mock_add_server.return_value = None
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        # Should still succeed despite cleanup failure
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once()
+        warning_call_args = mock_logger.warning.call_args[0][0]
+        assert "Failed to clean up temporary file /tmp/test.tar" in warning_call_args
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
