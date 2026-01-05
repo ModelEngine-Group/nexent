@@ -45,7 +45,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
 
   return (
     <>
-      {editable && (
+      {
         <Flex vertical className="h-full overflow-hidden">
           <Row>
             <Col>
@@ -103,7 +103,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
             </Col>
           </Row>
         </Flex>
-      )}
+      }
 
       {!editable && (
         <Flex>
