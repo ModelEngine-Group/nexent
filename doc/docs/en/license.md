@@ -16,7 +16,7 @@ Nexent is permitted to be used commercially, including as a backend service for 
 a. Multi-tenant SaaS service: Unless explicitly authorized by Nexent in writing, you may not use the Nexent source code to operate a multi-tenant SaaS service.
 b. LOGO and copyright information: In the process of using Nexent's frontend, you may not remove or modify the LOGO or copyright information in the Nexent console or applications. This restriction is inapplicable to uses of Nexent that do not involve its frontend.
 
-Please contact chenshuangrui@huawei.com by email to inquire about licensing matters.
+Please contact zhenggaoqi@huawei.com by email to inquire about licensing matters.
 
 As a contributor, you should agree that:
 
@@ -32,7 +32,7 @@ Copyright © 2025 Huawei Technologies Co., Ltd.
 ## Contact Information
 
 For licensing inquiries:
-- **Email**: chenshuangrui@huawei.com
+- **Email**: zhenggaoqi@huawei.com
 - **MIT License Details**: https://opensource.org/licenses/MIT
 
 Please ensure you understand and comply with all license terms before using Nexent in your projects.
