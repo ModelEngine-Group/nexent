@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
-from consts.const import MCP_DOCKER_IMAGE
+from consts.const import NEXENT_MCP_DOCKER_IMAGE
 from consts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError
 from consts.model import MCPConfigRequest
 from services.remote_mcp_service import (
@@ -153,7 +153,7 @@ async def add_mcp_from_config(
     """
     Add MCP server by starting a container with command+args config.
     Similar to Cursor's MCP server configuration format.
-    
+
     Example request:
     {
         "mcpServers": {
@@ -167,7 +167,7 @@ async def add_mcp_from_config(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         # Initialize container manager
         try:
             container_manager = MCPContainerManager()
@@ -177,21 +177,21 @@ async def add_mcp_from_config(
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 detail="Docker service unavailable. Please ensure Docker socket is mounted."
             )
-        
+
         results = []
         errors = []
-        
+
         for service_name, config in mcp_config.mcpServers.items():
             try:
                 command = config.command
                 args = config.args or []
                 env_vars = config.env or {}
                 port = config.port
-                
+
                 if not command:
                     errors.append(f"{service_name}: command is required")
                     continue
-                
+
                 if port is None:
                     errors.append(f"{service_name}: port is required")
                     continue
@@ -219,10 +219,10 @@ async def add_mcp_from_config(
                     user_id=user_id,
                     env_vars=env_vars,
                     host_port=port,
-                    image=config.image or MCP_DOCKER_IMAGE,
+                    image=config.image or NEXENT_MCP_DOCKER_IMAGE,
                     full_command=full_command,
                 )
-                
+
                 # Register to remote MCP server list
                 try:
                     await add_remote_mcp_server_list(
@@ -240,7 +240,7 @@ async def add_mcp_from_config(
                         pass
                     errors.append(f"{service_name}: MCP name already exists")
                     continue
-                
+
                 results.append({
                     "service_name": service_name,
                     "status": "success",
@@ -249,20 +249,20 @@ async def add_mcp_from_config(
                     "container_name": container_info.get("container_name"),
                     "host_port": container_info.get("host_port")
                 })
-                
+
             except MCPContainerError as e:
                 logger.error(f"Failed to start MCP container {service_name}: {e}")
                 errors.append(f"{service_name}: {str(e)}")
             except Exception as e:
                 logger.error(f"Unexpected error adding MCP {service_name}: {e}")
                 errors.append(f"{service_name}: {str(e)}")
-        
+
         if errors and not results:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"All MCP servers failed: {errors}"
             )
-        
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -272,7 +272,7 @@ async def add_mcp_from_config(
                 "status": "success"
             }
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -291,7 +291,7 @@ async def stop_mcp_container(
     """ Stop and remove MCP container """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         try:
             container_manager = MCPContainerManager()
         except MCPContainerError as e:
@@ -339,7 +339,7 @@ async def list_mcp_containers(
     """ List all MCP containers for the current tenant """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         try:
             container_manager = MCPContainerManager()
         except MCPContainerError as e:
@@ -348,9 +348,9 @@ async def list_mcp_containers(
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 detail="Docker service unavailable"
             )
-        
+
         containers = container_manager.list_mcp_containers(tenant_id=tenant_id)
-        
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -377,7 +377,7 @@ async def get_container_logs(
     """ Get logs from MCP container """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        
+
         try:
             container_manager = MCPContainerManager()
         except MCPContainerError as e:
@@ -386,9 +386,9 @@ async def get_container_logs(
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 detail="Docker service unavailable"
             )
-        
+
         logs = container_manager.get_container_logs(container_id, tail=tail)
-        
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
