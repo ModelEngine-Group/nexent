@@ -260,10 +260,6 @@
   "taskWindow.noTaskMessages": "No task messages yet",
   "taskWindow.taskDetails": "Task Details",
 
-  "setup.header.status.connected": "ModelEngine Connected",
-  "setup.header.status.disconnected": "ModelEngine Disconnected",
-  "setup.header.status.checking": "Checking",
-  "setup.header.status.unknown": "Unknown Status",
   "setup.header.button.back": "Back to Home",
   "setup.header.title": "Quick Setup",
   "setup.header.description": "Smartly build any assistant, accurately solve every challenge",
@@ -600,6 +596,7 @@
   "model.dialog.placeholder.name": "Enter model name as in request body",
   "model.dialog.placeholder.displayName": "Enter display name for the model",
   "model.dialog.placeholder.url": "Enter model URL, e.g. https://api.openai.com/v1",
+  "model.dialog.placeholder.modelEngineUrl": "Enter ModelEngine host URL, e.g. https://120.253.225.102:50001",
   "model.dialog.placeholder.url.embedding": "Enter model URL, e.g. https://api.openai.com/v1/embeddings",
   "model.dialog.placeholder.apiKey": "Enter API Key",
   "model.dialog.placeholder.maxTokens": "Enter maximum tokens",

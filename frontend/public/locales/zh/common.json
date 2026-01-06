@@ -260,10 +260,6 @@
   "taskWindow.noTaskMessages": "暂无任务消息",
   "taskWindow.taskDetails": "任务详情",
 
-  "setup.header.status.connected": "ModelEngine 已连接",
-  "setup.header.status.disconnected": "ModelEngine 未连接",
-  "setup.header.status.checking": "检查中",
-  "setup.header.status.unknown": "未知状态",
   "setup.header.button.back": "返回首页",
   "setup.header.title": "快速配置",
   "setup.header.description": "智能生成每一种助手，精准解决每一个问题",
@@ -601,6 +597,7 @@
   "model.dialog.placeholder.name": "请输入请求体中的模型名称",
   "model.dialog.placeholder.displayName": "请输入模型的展示名称",
   "model.dialog.placeholder.url": "请输入模型URL, 例如: https://api.openai.com/v1",
+  "model.dialog.placeholder.modelEngineUrl": "请输入 ModelEngine 主机地址，例如：https://120.253.225.102:50001",
   "model.dialog.placeholder.url.embedding": "请输入模型URL, 例如: https://api.openai.com/v1/embeddings",
   "model.dialog.placeholder.apiKey": "请输入API Key",
   "model.dialog.placeholder.maxTokens": "请输入最大Token数",

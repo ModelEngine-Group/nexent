@@ -455,6 +455,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             <div className="flex h-full flex-col px-8">
               <DocumentChunk
                 knowledgeBaseName={knowledgeBaseName}
+                knowledgeBaseId={knowledgeBaseId}
                 documents={documents}
                 getFileIcon={getFileIcon}
                 currentEmbeddingModel={currentModel}
