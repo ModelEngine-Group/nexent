@@ -74,12 +74,11 @@ class MCPContainerManager:
             image_name = loaded_image.tags[0] if loaded_image.tags else str(
                 loaded_image.id)
 
-            logger.info(f"Successfully loaded image: {image_name}")
-            return image_name
-
         except Exception as e:
             logger.error(f"Failed to load image from tar file: {e}")
             raise MCPContainerError(f"Failed to load image from tar file: {e}")
+        logger.info(f"Successfully loaded image: {image_name}")
+        return image_name
 
     async def start_mcp_container(
         self,

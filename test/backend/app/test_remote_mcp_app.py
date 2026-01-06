@@ -30,7 +30,7 @@ patch('services.mcp_container_service.create_container_client_from_config').star
 patch('services.mcp_container_service.DockerContainerConfig').start()
 
 # Import exception classes
-from consts.exceptions import MCPConnectionError, MCPNameIllegal
+from consts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError
 
 # Import the modules we need
 import pytest
@@ -45,6 +45,7 @@ from fastapi import FastAPI
 import apps.remote_mcp_app as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
 remote_app.MCPNameIllegal = MCPNameIllegal
+remote_app.MCPContainerError = MCPContainerError
 
 app = FastAPI()
 app.include_router(router)
@@ -1163,25 +1164,21 @@ class TestListMCPContainers:
 class TestUploadMCPImageValidation:
     """Test endpoint for uploading MCP image and starting container"""
 
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
     @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
-    def test_upload_mcp_image_success(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    def test_upload_mcp_image_success(self, mock_get_user_id, mock_upload_service):
         """Test successful upload and start of MCP image"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
-        mock_container_manager = MagicMock()
-        mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container_from_tar = AsyncMock(return_value={
-            "container_id": "container-123",
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "test-service",
             "mcp_url": "http://localhost:5020/mcp",
-            "host_port": "5020",
-            "status": "started",
-            "container_name": "test-image-user1234"
-        })
-
-        mock_add_server.return_value = None
+            "container_id": "container-123",
+            "container_name": "test-image-user1234",
+            "host_port": "5020"
+        }
 
         # Use actual file content
         file_content = b"fake tar content"
@@ -1207,7 +1204,15 @@ class TestUploadMCPImageValidation:
         assert data["container_id"] == "container-123"
 
         mock_get_user_id.assert_called_once_with("Bearer test_token")
-        mock_container_manager.start_mcp_container_from_tar.assert_called_once()
+        mock_upload_service.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            file_content=file_content,
+            filename="test-image.tar",
+            port=5020,
+            service_name="test-service",
+            env_vars='{"NODE_ENV": "production"}'
+        )
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     def test_upload_mcp_image_invalid_file_type(self, mock_get_user_id):
@@ -1245,25 +1250,21 @@ class TestUploadMCPImageValidation:
         data = response.json()
         assert "File size exceeds 1GB limit" in data["detail"]
 
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
     @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
-    def test_upload_mcp_image_auto_service_name(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    def test_upload_mcp_image_auto_service_name(self, mock_get_user_id, mock_upload_service):
         """Test upload with auto-generated service name"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
-        mock_container_manager = MagicMock()
-        mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container_from_tar = AsyncMock(return_value={
-            "container_id": "container-123",
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "my-image",  # Auto-generated from filename
             "mcp_url": "http://localhost:5020/mcp",
-            "host_port": "5020",
-            "status": "started",
-            "container_name": "my-image-user1234"
-        })
-
-        mock_add_server.return_value = None
+            "container_id": "container-123",
+            "container_name": "my-image-user1234",
+            "host_port": "5020"
+        }
 
         file_content = b"fake tar content"
 
@@ -1307,17 +1308,14 @@ class TestUploadMCPImageValidation:
         data = response.json()
         assert "Invalid environment variables format" in data["detail"]
 
-    @patch('apps.remote_mcp_app.check_mcp_name_exists')
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
     @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_upload_mcp_image_name_conflict(self, mock_add_server, mock_container_manager_class, mock_get_user_id, mock_check_name):
+    def test_upload_mcp_image_name_conflict(self, mock_get_user_id, mock_upload_service):
         """Test upload when MCP service name already exists"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_check_name.return_value = True  # Name already exists
 
-        mock_container_manager = MagicMock()
-        mock_container_manager_class.return_value = mock_container_manager
+        # Service layer raises MCPNameIllegal for name conflict
+        mock_upload_service.side_effect = MCPNameIllegal("MCP service name already exists")
 
         file_content = b"fake tar content"
 
@@ -1332,47 +1330,15 @@ class TestUploadMCPImageValidation:
         assert response.status_code == HTTPStatus.CONFLICT
         data = response.json()
         assert "MCP service name already exists" in data["detail"]
-        # Container should not be started when name already exists
-        mock_container_manager.start_mcp_container_from_tar.assert_not_called()
 
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
     @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
-    def test_upload_mcp_image_container_error(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
+    def test_upload_mcp_image_container_error(self, mock_get_user_id, mock_upload_service):
         """Test upload when container startup fails"""
-        from consts.exceptions import MCPContainerError
-
         mock_get_user_id.return_value = ("user123", "tenant456")
 
-        mock_container_manager = MagicMock()
-        mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container_from_tar = AsyncMock(
-            side_effect=MCPContainerError("Container failed"))
-
-        file_content = b"fake tar content"
-
-        response = client.post(
-            "/mcp/upload-image",
-            data={"port": 5020},
-            files={"file": ("test.tar", file_content,
-                            "application/octet-stream")},
-            headers={"Authorization": "Bearer test_token"}
-        )
-
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        data = response.json()
-        assert "Failed to upload and start MCP container" in data["detail"]
-
-    @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
-    def test_upload_mcp_image_docker_unavailable(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
-        """Test upload when Docker service is unavailable"""
-        from consts.exceptions import MCPContainerError
-
-        mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_container_manager_class.side_effect = MCPContainerError(
-            "Docker unavailable")
+        # Service layer raises MCPContainerError
+        mock_upload_service.side_effect = MCPContainerError("Container failed")
 
         file_content = b"fake tar content"
 
@@ -1386,7 +1352,30 @@ class TestUploadMCPImageValidation:
 
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         data = response.json()
-        assert "Docker service unavailable" in data["detail"]
+        assert "Container failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_docker_unavailable(self, mock_get_user_id, mock_upload_service):
+        """Test upload when Docker service is unavailable"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError for Docker unavailable
+        mock_upload_service.side_effect = MCPContainerError("Docker unavailable")
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker unavailable" in data["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -1479,6 +1468,203 @@ class TestGetContainerLogs:
 
 
 # ---------------------------------------------------------------------------
+# Test upload_and_start_mcp_image endpoint with service layer
+# ---------------------------------------------------------------------------
+
+
+class TestUploadMCPImageWithServiceLayer:
+    """Test upload_mcp_image endpoint using the new service layer approach"""
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_success_service_layer(self, mock_get_user_id, mock_upload_service):
+        """Test successful upload using service layer"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "test-service",
+            "mcp_url": "http://localhost:5020/mcp",
+            "container_id": "container-123",
+            "container_name": "test-service-user1234",
+            "host_port": "5020"
+        }
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={
+                "port": 5020,
+                "service_name": "test-service",
+                "env_vars": '{"NODE_ENV": "production"}'
+            },
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["service_name"] == "test-service"
+        assert data["mcp_url"] == "http://localhost:5020/mcp"
+
+        # Verify service layer was called correctly
+        mock_upload_service.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            file_content=file_content,
+            filename="test.tar",
+            port=5020,
+            service_name="test-service",
+            env_vars='{"NODE_ENV": "production"}'
+        )
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_auto_service_name(self, mock_get_user_id, mock_upload_service):
+        """Test upload with auto-generated service name"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "my-image",  # Auto-generated from filename
+            "mcp_url": "http://localhost:5020/mcp",
+            "container_id": "container-123"
+        }
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},  # No service_name provided
+            files={"file": ("my-image.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["service_name"] == "my-image"
+
+        # Verify service was called with None for service_name
+        mock_upload_service.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            file_content=file_content,
+            filename="my-image.tar",
+            port=5020,
+            service_name=None,
+            env_vars=None
+        )
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_validation_error_from_service(self, mock_get_user_id, mock_upload_service):
+        """Test validation error from service layer"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises ValueError for invalid file type
+        mock_upload_service.side_effect = ValueError("Only .tar files are allowed")
+
+        file_content = b"fake content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.txt", file_content, "text/plain")},  # Wrong file type
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Only .tar files are allowed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_name_conflict(self, mock_get_user_id, mock_upload_service):
+        """Test MCP service name conflict"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPNameIllegal for name conflict
+        mock_upload_service.side_effect = MCPNameIllegal("MCP service name already exists")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020, "service_name": "existing-service"},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.CONFLICT
+        data = response.json()
+        assert "MCP service name already exists" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_container_error(self, mock_get_user_id, mock_upload_service):
+        """Test container startup error"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError
+        mock_upload_service.side_effect = MCPContainerError("Container failed")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Container failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_docker_unavailable(self, mock_get_user_id, mock_upload_service):
+        """Test Docker service unavailable"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError for Docker unavailable
+        mock_upload_service.side_effect = MCPContainerError("Docker unavailable")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker unavailable" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_general_exception(self, mock_get_user_id, mock_upload_service):
+        """Test general exception handling"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises unexpected exception
+        mock_upload_service.side_effect = Exception("Unexpected error")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to upload and start MCP container" in data["detail"]
+        assert "Unexpected error" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Additional test cases for upload_mcp_image validation
 # ---------------------------------------------------------------------------
 
@@ -1486,113 +1672,55 @@ class TestGetContainerLogs:
 class TestUploadMCPImageValidationAdditional:
     """Additional test cases for upload_mcp_image endpoint validation"""
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
-    def test_upload_mcp_image_invalid_port_range(self, mock_get_user_id):
-        """Test upload with invalid port range (covers lines 429-430)"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
-
-        # Test port <= 0
+    def test_upload_mcp_image_invalid_port_range_fastapi_validation(self):
+        """Test upload with invalid port range using FastAPI native validation"""
         file_content = b"fake tar content"
+
+        # Test port <= 0 - should fail FastAPI validation
         response = client.post(
             "/mcp/upload-image",
             data={"port": 0},  # Invalid port
-            files={"file": ("test.tar", file_content,
-                            "application/octet-stream")},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY  # FastAPI validation error
         data = response.json()
-        assert "Port must be between 1 and 65535" in data["detail"]
+        assert "port" in str(data["detail"]).lower()
 
-        # Test port > 65535
+        # Test port > 65535 - should fail FastAPI validation
         response = client.post(
             "/mcp/upload-image",
             data={"port": 70000},  # Invalid port
-            files={"file": ("test.tar", file_content,
-                            "application/octet-stream")},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
-        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY  # FastAPI validation error
         data = response.json()
-        assert "Port must be between 1 and 65535" in data["detail"]
+        assert "port" in str(data["detail"]).lower()
 
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
     @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
-    def test_upload_mcp_image_env_vars_not_dict(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
-        """Test upload with environment variables that are not a JSON object (covers lines 459-460)"""
+    def test_upload_mcp_image_env_vars_validation_in_service(self, mock_get_user_id, mock_upload_service):
+        """Test environment variables validation now handled in service layer"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
-        mock_container_manager = MagicMock()
-        mock_container_manager_class.return_value = mock_container_manager
+        # Test with array instead of object - now handled in service layer
+        mock_upload_service.side_effect = ValueError("Invalid environment variables format: Environment variables must be a JSON object")
 
         file_content = b"fake tar content"
-
-        # Test with array instead of object
         response = client.post(
             "/mcp/upload-image",
             data={
                 "port": 5020,
                 "env_vars": '["VAR1", "VAR2"]'  # Array instead of object
             },
-            files={"file": ("test.tar", file_content,
-                            "application/octet-stream")},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
         assert response.status_code == HTTPStatus.BAD_REQUEST
         data = response.json()
         assert "Invalid environment variables format" in data["detail"]
         assert "Environment variables must be a JSON object" in data["detail"]
-
-    @patch('apps.remote_mcp_app.get_current_user_id')
-    @patch('apps.remote_mcp_app.MCPContainerManager')
-    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
-    @patch('tempfile.NamedTemporaryFile')
-    @patch('os.unlink', side_effect=OSError("Permission denied"))
-    @patch('apps.remote_mcp_app.logger')
-    def test_upload_mcp_image_temp_file_cleanup_warning(self, mock_logger, mock_unlink, mock_temp_file, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
-        """Test upload with temporary file cleanup failure (covers lines 536-537)"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
-
-        # Mock tempfile.NamedTemporaryFile
-        mock_temp_file_obj = MagicMock()
-        mock_temp_file_obj.__enter__.return_value = mock_temp_file_obj
-        mock_temp_file_obj.__exit__.return_value = None
-        mock_temp_file_obj.name = "/tmp/test.tar"
-        mock_temp_file.return_value = mock_temp_file_obj
-
-        mock_container_manager = MagicMock()
-        mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container_from_tar = AsyncMock(return_value={
-            "container_id": "container-123",
-            "mcp_url": "http://localhost:5020/mcp",
-            "host_port": "5020",
-            "status": "started",
-            "container_name": "test-image-user1234"
-        })
-
-        mock_add_server.return_value = None
-
-        file_content = b"fake tar content"
-
-        response = client.post(
-            "/mcp/upload-image",
-            data={"port": 5020},
-            files={"file": ("test.tar", file_content,
-                            "application/octet-stream")},
-            headers={"Authorization": "Bearer test_token"}
-        )
-
-        # Should still succeed despite cleanup failure
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["status"] == "success"
-
-        # Verify warning was logged
-        mock_logger.warning.assert_called_once()
-        warning_call_args = mock_logger.warning.call_args[0][0]
-        assert "Failed to clean up temporary file /tmp/test.tar" in warning_call_args
 
 
 if __name__ == "__main__":

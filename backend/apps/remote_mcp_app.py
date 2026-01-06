@@ -1,13 +1,11 @@
 import logging
-import tempfile
-import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
-from consts.const import NEXENT_MCP_DOCKER_IMAGE
+from consts.const import NEXENT_MCP_DOCKER_IMAGE, ENABLE_UPLOAD_IMAGE
 from consts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError
 from consts.model import MCPConfigRequest
 from services.remote_mcp_service import (
@@ -16,6 +14,7 @@ from services.remote_mcp_service import (
     get_remote_mcp_server_list,
     check_mcp_health_and_update_db,
     delete_mcp_by_container_id,
+    upload_and_start_mcp_image,
 )
 from database.remote_mcp_db import check_mcp_name_exists
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
@@ -119,6 +118,7 @@ async def get_remote_proxies(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"remote_mcp_server_list": remote_mcp_server_list,
+                     "enable_upload_image": ENABLE_UPLOAD_IMAGE,
                      "status": "success"}
         )
     except Exception as e:
@@ -407,141 +407,60 @@ async def get_container_logs(
         )
 
 
-@router.post("/upload-image")
-async def upload_mcp_image(
-    file: UploadFile = File(..., description="Docker image tar file"),
-    port: int = Form(..., description="Host port to expose the MCP server on"),
-    service_name: Optional[str] = Form(
-        None, description="Name for the MCP service (auto-generated if not provided)"),
-    env_vars: Optional[str] = Form(
-        None, description="Environment variables as JSON string"),
-    authorization: Optional[str] = Header(None)
-):
-    """
-    Upload Docker image tar file and start MCP container.
+# Conditionally add upload-image route based on ENABLE_UPLOAD_IMAGE setting
+if ENABLE_UPLOAD_IMAGE:
+    @router.post("/upload-image")
+    async def upload_mcp_image(
+        file: UploadFile = File(..., description="Docker image tar file"),
+        port: int = Form(..., ge=1, le=65535,
+                         description="Host port to expose the MCP server on (1-65535)"),
+        service_name: Optional[str] = Form(
+            None, description="Name for the MCP service (auto-generated if not provided)"),
+        env_vars: Optional[str] = Form(
+            None, description="Environment variables as JSON string"),
+        authorization: Optional[str] = Header(None)
+    ):
+        """
+        Upload Docker image tar file and start MCP container.
 
-    Container naming: {filename-without-extension}-{tenant-id[:8]}-{user-id[:8]}
-    """
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-
-        # Basic parameter validation
-        if port <= 0 or port > 65535:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Port must be between 1 and 65535"
-            )
-
-        # Validate file type
-        if not file.filename.lower().endswith('.tar'):
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="Only .tar files are allowed"
-            )
-
-        # Validate file size (limit to 1GB)
-        file_size = 0
-        content = await file.read()
-        file_size = len(content)
-
-        if file_size > 1024 * 1024 * 1024:  # 1GB limit
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="File size exceeds 1GB limit"
-            )
-
-        # Parse environment variables
-        parsed_env_vars = None
-        if env_vars:
-            try:
-                import json
-                parsed_env_vars = json.loads(env_vars)
-                if not isinstance(parsed_env_vars, dict):
-                    raise ValueError(
-                        "Environment variables must be a JSON object")
-            except (json.JSONDecodeError, ValueError) as e:
-                raise HTTPException(
-                    status_code=HTTPStatus.BAD_REQUEST,
-                    detail=f"Invalid environment variables format: {str(e)}"
-                )
-
-        # Generate service name if not provided
-        final_service_name = service_name
-        if not final_service_name:
-            # Remove .tar extension from filename
-            final_service_name = os.path.splitext(file.filename)[0]
-
-        # Check if MCP service name already exists before starting container
-        if check_mcp_name_exists(mcp_name=final_service_name, tenant_id=tenant_id):
-            raise HTTPException(
-                status_code=HTTPStatus.CONFLICT,
-                detail="MCP service name already exists"
-            )
-
-        # Save file to temporary location
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-
+        Container naming: {filename-without-extension}-{tenant-id[:8]}-{user-id[:8]}
+        """
         try:
-            # Initialize container manager
-            try:
-                container_manager = MCPContainerManager()
-            except MCPContainerError as e:
-                logger.error(f"Failed to initialize container manager: {e}")
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail="Docker service unavailable"
-                )
+            user_id, tenant_id = get_current_user_id(authorization)
 
-            # Start container from uploaded image
-            # Note: uploaded image should be a complete MCP server implementation
-            # that can be started directly without additional commands (uses image's CMD/ENTRYPOINT)
-            container_info = await container_manager.start_mcp_container_from_tar(
-                tar_file_path=temp_file_path,
-                service_name=final_service_name,
+            # Read file content
+            content = await file.read()
+
+            # Call service layer to handle the business logic
+            result = await upload_and_start_mcp_image(
                 tenant_id=tenant_id,
                 user_id=user_id,
-                env_vars=parsed_env_vars,
-                host_port=port,
-                full_command=None,  # Uploaded image should contain the MCP server
+                file_content=content,
+                filename=file.filename,
+                port=port,
+                service_name=service_name,
+                env_vars=env_vars,
             )
 
-            # Register to remote MCP server list
-            await add_remote_mcp_server_list(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                remote_mcp_server=container_info["mcp_url"],
-                remote_mcp_server_name=final_service_name,
-                container_id=container_info["container_id"],
+            return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+        except ValueError as e:
+            logger.error(f"Validation error: {e}")
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+        except MCPNameIllegal as e:
+            logger.error(f"MCP name conflict: {e}")
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+        except MCPContainerError as e:
+            logger.error(f"Container error: {e}")
+            raise HTTPException(
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(e))
+        except Exception as e:
+            logger.error(f"Failed to upload and start MCP container: {e}")
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload and start MCP container: {str(e)}"
             )
-
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={
-                    "message": "MCP container started successfully from uploaded image",
-                    "status": "success",
-                    "service_name": final_service_name,
-                    "mcp_url": container_info["mcp_url"],
-                    "container_id": container_info["container_id"],
-                    "container_name": container_info.get("container_name"),
-                    "host_port": container_info.get("host_port")
-                }
-            )
-
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_file_path)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to clean up temporary file {temp_file_path}: {e}")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to upload and start MCP container: {e}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload and start MCP container: {str(e)}"
-        )
+else:
+    logger.info(
+        "MCP image upload feature is disabled (ENABLE_UPLOAD_IMAGE=false)")
