@@ -1,5 +1,3 @@
-from consts.exceptions import TimeoutException
-import asyncio
 import os
 import sys
 from unittest import mock
@@ -792,5 +790,3 @@ async def test_embedding_dimension_check_wrapper_value_error():
         mock_logger.error.assert_called_once_with(
             "Error checking embedding dimension: Unsupported model type"
         )
-
-

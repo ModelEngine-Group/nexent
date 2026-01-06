@@ -601,6 +601,7 @@
   "model.dialog.placeholder.name": "请输入请求体中的模型名称",
   "model.dialog.placeholder.displayName": "请输入模型的展示名称",
   "model.dialog.placeholder.url": "请输入模型URL, 例如: https://api.openai.com/v1",
+  "model.dialog.placeholder.modelEngineUrl": "请输入 ModelEngine 主机地址，例如：https://120.253.225.102:50001",
   "model.dialog.placeholder.url.embedding": "请输入模型URL, 例如: https://api.openai.com/v1/embeddings",
   "model.dialog.placeholder.apiKey": "请输入API Key",
   "model.dialog.placeholder.maxTokens": "请输入最大Token数",

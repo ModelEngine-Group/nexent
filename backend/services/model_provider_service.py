@@ -85,19 +85,22 @@ class ModelEngineProvider(AbstractModelProvider):
             List of models with canonical fields
         """
         try:
-            if not MODEL_ENGINE_HOST or not MODEL_ENGINE_APIKEY:
-                logger.warning("ModelEngine environment variables not configured")
+            model_type: str = provider_config.get("model_type", "")
+            host = provider_config.get("base_url")
+            api_key = provider_config.get("api_key")
+
+            if not host or not api_key:
+                logger.warning("ModelEngine host or api key not configured")
                 return []
 
-            model_type: str = provider_config.get("model_type", "")
-            headers = {"Authorization": f"Bearer {MODEL_ENGINE_APIKEY}"}
+            headers = {"Authorization": f"Bearer {api_key}"}
 
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
                 connector=aiohttp.TCPConnector(ssl=False)
             ) as session:
                 async with session.get(
-                    f"{MODEL_ENGINE_HOST}/open/router/v1/models",
+                    f"{host.rstrip('/')}/open/router/v1/models",
                     headers=headers
                 ) as response:
                     response.raise_for_status()
@@ -130,9 +133,8 @@ class ModelEngineProvider(AbstractModelProvider):
                         "model_type": internal_type,
                         "model_tag": me_type,
                         "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
-                        # ModelEngine models will get base_url and api_key from environment
-                        "base_url": MODEL_ENGINE_HOST,
-                        "api_key": MODEL_ENGINE_APIKEY,
+                        "base_url": host,
+                        "api_key": api_key,
                     })
 
             return filtered_models
