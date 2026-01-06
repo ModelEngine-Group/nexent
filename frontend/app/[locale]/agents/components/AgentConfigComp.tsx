@@ -23,9 +23,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
-  const selectedTools = useAgentConfigStore((state) => state.editedAgent.tools);
-
-  const updateTools = useAgentConfigStore((state) => state.updateTools);
 
   const editable = !!(currentAgentId || isCreatingMode);
 
@@ -33,7 +30,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Use tool list hook for data management
-  const { availableTools, groupedTools, invalidate } = useToolList();
+  const { groupedTools, invalidate } = useToolList();
 
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
@@ -54,22 +51,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
     }
   }, [invalidate]);
 
-  const handleToolSelect = useCallback(
-    (toolId: number) => {
-      // Find the tool from available tools
-      const tool = availableTools.find((t) => parseInt(t.id) === toolId);
-      if (!tool) return;
-
-      const isCurrentlySelected = selectedTools.some(
-        (t) => parseInt(t.id) === toolId
-      );
-      const newSelectedTools = isCurrentlySelected
-        ? selectedTools.filter((t) => parseInt(t.id) !== toolId)
-        : [...selectedTools, tool];
-      updateTools(newSelectedTools);
-    },
-    [selectedTools, availableTools]
-  );
 
   return (
     <>
@@ -164,9 +145,8 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
           <Col xs={24} className="h-full">
             <ToolManagement
               toolGroups={groupedTools}
-              selectedToolIds={selectedTools.map((t) => parseInt(t.id))}
-              onToolSelect={handleToolSelect}
               editable={editable}
+              currentAgentId={currentAgentId?? undefined}
             />
           </Col>
         </Row>

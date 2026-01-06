@@ -1,24 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ToolConfigModal from "./tool/ToolConfigModal";
-import { ToolGroup, Tool } from "@/types/agentConfig";
+import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
 import { Tabs, Collapse } from "antd";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useToolList } from "@/hooks/agent/useToolList";
+import { updateToolConfig } from "@/services/agentConfigService";
+import { useToolInfo } from "@/hooks/tool/useToolInfo";
+import { message } from "antd";
+import { useQueryClient } from "@tanstack/react-query";
 
-import {
-  LoaderCircle,
-  Settings,
-  RefreshCw,
-  Lightbulb,
-  Plug,
-} from "lucide-react";
+import { Settings } from "lucide-react";
 
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
-  selectedToolIds?: number[];
-  onToolSelect?: (toolId: number) => void;
   editable?: boolean;
+  currentAgentId?: number | undefined;
 }
 
 /**
@@ -27,22 +26,74 @@ interface ToolManagementProps {
  */
 export default function ToolManagement({
   toolGroups,
-  selectedToolIds = [],
-  onToolSelect,
   editable = true,
+  currentAgentId,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
+
+  // Get state from store
+  const usedTools = useAgentConfigStore((state) => state.editedAgent.tools);
+  const updateTools = useAgentConfigStore((state) => state.updateTools);
+
+  // Use tool list hook for data management
+  const { availableTools } = useToolList();
 
   const [activeTabKey, setActiveTabKey] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set()
   );
   const [isToolModalOpen, setIsToolModalOpen] = useState<boolean>(false);
+  const [isClickSetting, setIsClickSetting] = useState<boolean>(false);
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
+  const [toolParams, setToolParams] = useState<ToolParam[]>([]);
+
+  // Get tool info for selected tool (when checking if config is needed)
+  const { data: selectedToolInfo } = useToolInfo(
+    (selectedTool) ? parseInt(selectedTool.id) : null,
+    currentAgentId ?? null
+  );
+
+  // Effect to handle tool selection when tool info is loaded
+  useEffect(() => {
+    if (selectedTool && selectedToolInfo) {
+      // Use instance params if available, otherwise use default params
+      const mergedParams = selectedTool.initParams?.map((param: ToolParam) => {
+        const instanceValue = selectedToolInfo?.params?.[param.name];
+        return {
+          ...param,
+          value: instanceValue !== undefined ? instanceValue : param.value,
+        };
+      }) || [];
+      console.log(selectedTool.id, selectedTool.name, mergedParams)
+      setToolParams(mergedParams);
+      
+      const hasEmptyRequiredParams = mergedParams.some(
+        (param: ToolParam) => param.required &&
+        (param.value === undefined || param.value === '' || param.value === null)
+      );
+      console.log(isClickSetting, hasEmptyRequiredParams)
+      if (isClickSetting || hasEmptyRequiredParams) {
+        // Open modal for configuration with pre-calculated params
+        setIsToolModalOpen(true);
+        setIsClickSetting(false)
+      } else {
+        // Add tool directly
+        const newSelectedTools = [...usedTools, {
+          ...selectedTool,
+          initParams: mergedParams
+        }];
+        updateTools(newSelectedTools);
+        setSelectedTool(null); // Clear selected tool
+        setIsClickSetting(false)
+      }
+
+    }
+  }, [selectedTool, selectedToolInfo]); 
 
   // Create selected tool ID set for efficient lookup
   const selectedToolIdsSet = new Set(
-    selectedToolIds.map((id) => id.toString())
+    usedTools.map((tool) => tool.id)
   );
 
   // Set default active tab
@@ -55,24 +106,80 @@ export default function ToolManagement({
   const handleToolModalCancel = () => {
     setIsToolModalOpen(false);
     setSelectedTool(null);
+    setToolParams([]);
+    setIsClickSetting(false)
   };
 
-  const handleToolModalSave = (tool: Tool) => {
-    setIsToolModalOpen(false);
-    setSelectedTool(null);
-    // TODO: Handle tool save logic here
+  const handleToolModalSave = async (params: ToolParam[]) => {
+    if (!selectedTool || !currentAgentId) return;
+
+    try {
+      // Convert params to backend format
+      const paramsObj = params.reduce((acc, param) => {
+        acc[param.name] = param.value;
+        return acc;
+      }, {} as Record<string, any>);
+
+      // Save tool config
+      const isEnabled = true; // New tool is enabled by default
+      const result = await updateToolConfig(
+        parseInt(selectedTool.id),
+        currentAgentId,
+        paramsObj,
+        isEnabled
+      );
+
+      if (result.success) {
+        // Add tool to selected tools with updated params
+        const updatedTool = { ...selectedTool, initParams: params };
+        const newSelectedTools = [...usedTools, updatedTool];
+        updateTools(newSelectedTools);
+
+        message.success(t("toolConfig.message.saveSuccess"));
+
+        queryClient.invalidateQueries({ 
+          queryKey: ["toolInfo", parseInt(selectedTool.id), currentAgentId] 
+        });
+
+        setIsToolModalOpen(false);
+        setSelectedTool(null);
+        setToolParams([]);
+        setIsClickSetting(false)
+      } else {
+        message.error(result.message || t("toolConfig.message.saveError"));
+      }
+    } catch (error) {
+      message.error(t("toolConfig.message.saveError"));
+    }
   };
 
   const handleToolSettingsClick = (tool: Tool) => {
-    setSelectedTool(tool);
-    setIsToolModalOpen(true);
+    console.log("fuck")
+    setIsClickSetting(true)
+    setSelectedTool(tool); 
   };
 
-  const handleToolClick = (toolId: string) => {
-    if (onToolSelect) {
-      const numericId = parseInt(toolId, 10);
-      onToolSelect(numericId);
+  const handleToolSelect = (toolId: number) => {
+    console.log("select")
+    // Find the tool from available tools
+    const tool = availableTools.find((t) => parseInt(t.id) === toolId);
+    if (!tool) return;
+
+    const isCurrentlySelected = usedTools.some(
+      (t) => parseInt(t.id) === toolId
+    );
+
+    if (isCurrentlySelected) {
+      const newSelectedTools = usedTools.filter((t) => parseInt(t.id) !== toolId);
+      updateTools(newSelectedTools);   
+    } else {
+      setSelectedTool(tool);
     }
+  }
+
+  const handleToolClick = (toolId: string) => {
+    const numericId = parseInt(toolId, 10);
+    handleToolSelect(numericId);
   };
 
   // Generate Tabs configuration
@@ -236,7 +343,7 @@ export default function ToolManagement({
         </div>
       ) : (
         <Tabs
-          tabPosition="left"
+          tabPlacement="start"
           activeKey={activeTabKey}
           onChange={setActiveTabKey}
           items={tabItems}
@@ -257,7 +364,8 @@ export default function ToolManagement({
         isOpen={isToolModalOpen}
         onCancel={handleToolModalCancel}
         onSave={handleToolModalSave}
-        tool={selectedTool}
+        tool={selectedTool ?? undefined}
+        initialParams={toolParams}
       />
     </div>
   );

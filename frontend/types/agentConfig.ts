@@ -233,15 +233,7 @@ export interface CollaborativeAgentDisplayProps {
 }
 
 // ToolConfigModal component props interface
-export interface ToolConfigModalProps {
-  isOpen: boolean;
-  onCancel: () => void;
-  onSave: (tool: Tool) => void;
-  tool: Tool | null;
-  mainAgentId?: number | null;
-  selectedTools?: Tool[];
-  isEditingMode?: boolean;
-}
+
 
 // ExpandEditModal component props interface
 export interface ExpandEditModalProps {
