@@ -25,6 +25,9 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
+# Enable upload image feature for tests
+patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
+
 # Patch container service dependencies to avoid Docker connections
 patch('services.mcp_container_service.create_container_client_from_config').start()
 patch('services.mcp_container_service.DockerContainerConfig').start()

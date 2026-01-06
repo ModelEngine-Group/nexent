@@ -630,11 +630,13 @@ class TestUploadAndStartMcpImage(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(str(context.exception), "Container failed")
 
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    async def test_upload_docker_unavailable(self, mock_container_manager_class):
+    async def test_upload_docker_unavailable(self, mock_container_manager_class, mock_check_name):
         """Test upload when Docker service is unavailable"""
         from backend.consts.exceptions import MCPContainerError
 
+        mock_check_name.return_value = False  # Name doesn't exist
         mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
 
         with self.assertRaises(MCPContainerError) as context:
