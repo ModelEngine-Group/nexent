@@ -2,7 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Checkbox, ConfigProvider } from 'antd'
-import { SyncOutlined, PlusOutlined } from '@ant-design/icons'
+import { SyncOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons'
 
 import { KnowledgeBase } from '@/types/knowledgeBase'
 
@@ -43,11 +43,13 @@ interface KnowledgeBaseListProps {
   activeKnowledgeBase: KnowledgeBase | null
   currentEmbeddingModel: string | null
   isLoading?: boolean
+  syncLoading?: boolean
   onSelect: (id: string) => void
   onClick: (kb: KnowledgeBase) => void
   onDelete: (id: string) => void
   onSync: () => void
   onCreateNew: () => void
+  onDataMateConfig?: () => void
   isSelectable: (kb: KnowledgeBase) => boolean
   getModelDisplayName: (modelId: string) => string
   containerHeight?: string // Container total height, consistent with DocumentList
@@ -60,11 +62,13 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   activeKnowledgeBase,
   currentEmbeddingModel,
   isLoading = false,
+  syncLoading = false,
   onSelect,
   onClick,
   onDelete,
   onSync,
   onCreateNew,
+  onDataMateConfig,
   isSelectable,
   getModelDisplayName,
   containerHeight = '70vh', // Default container height consistent with DocumentList
@@ -162,9 +166,27 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   height: "14px",
                 }}
               >
-                <SyncOutlined spin={isLoading} style={{ color: "white" }} />
+                <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
               </span>
               <span>{t("knowledgeBase.button.sync")}</span>
+            </Button>
+            <Button
+              style={{
+                padding: "4px 15px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                backgroundColor: "#52c41a",
+                color: "white",
+                border: "none",
+              }}
+              className="hover:!bg-green-600"
+              type="primary"
+              onClick={onDataMateConfig}
+              icon={<SettingOutlined />}
+            >
+              {t("knowledgeBase.button.dataMateConfig")}
             </Button>
           </div>
         </div>

@@ -202,35 +202,46 @@ class TestTenantConfigApp(unittest.TestCase):
 
     def test_update_knowledge_list_success(self):
         """Test successful knowledge list update"""
-        knowledge_list = ["kb1", "kb3"]
+        request_data = {
+            "nexent": ["kb1"],
+            "datamate": ["kb2"]
+        }
 
         response = self.client.post(
             "/tenant_config/update_knowledge_list",
             headers={"authorization": "Bearer test-token"},
-            json=knowledge_list
+            json=request_data
         )
 
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["message"], "update success")
+        self.assertIn("content", data)
+        self.assertIn("selectedKbNames", data["content"])
+        self.assertIn("selectedKbModels", data["content"])
+        self.assertIn("selectedKbSources", data["content"])
 
-        # Verify the mock was called with correct parameters
+        # Verify the mock was called with correct parameters (flattened)
         self.mock_update_knowledge.assert_called_once_with(
             tenant_id="test_tenant",
             user_id="test_user",
-            index_name_list=knowledge_list
+            index_name_list=["kb1", "kb2"],
+            knowledge_sources=["nexent", "datamate"]
         )
 
     def test_update_knowledge_list_failure(self):
         """Test knowledge list update failure"""
         self.mock_update_knowledge.return_value = False
-        knowledge_list = ["kb1", "kb3"]
+        request_data = {
+            "nexent": ["kb1"],
+            "datamate": ["kb2"]
+        }
 
         response = self.client.post(
             "/tenant_config/update_knowledge_list",
             headers={"authorization": "Bearer test-token"},
-            json=knowledge_list
+            json=request_data
         )
 
         self.assertEqual(response.status_code,
@@ -241,12 +252,15 @@ class TestTenantConfigApp(unittest.TestCase):
     def test_update_knowledge_list_auth_error(self):
         """Test knowledge list update with authentication error"""
         self.mock_get_user_id.side_effect = Exception("Authentication failed")
-        knowledge_list = ["kb1", "kb3"]
+        request_data = {
+            "nexent": ["kb1"],
+            "datamate": ["kb2"]
+        }
 
         response = self.client.post(
             "/tenant_config/update_knowledge_list",
             headers={"authorization": "Bearer invalid-token"},
-            json=knowledge_list
+            json=request_data
         )
 
         self.assertEqual(response.status_code,
@@ -257,12 +271,15 @@ class TestTenantConfigApp(unittest.TestCase):
     def test_update_knowledge_list_service_error(self):
         """Test knowledge list update with service error"""
         self.mock_update_knowledge.side_effect = Exception("Database error")
-        knowledge_list = ["kb1", "kb3"]
+        request_data = {
+            "nexent": ["kb1"],
+            "datamate": ["kb2"]
+        }
 
         response = self.client.post(
             "/tenant_config/update_knowledge_list",
             headers={"authorization": "Bearer test-token"},
-            json=knowledge_list
+            json=request_data
         )
 
         self.assertEqual(response.status_code,
@@ -272,12 +289,15 @@ class TestTenantConfigApp(unittest.TestCase):
 
     def test_update_knowledge_list_empty_list(self):
         """Test updating with empty knowledge list"""
-        knowledge_list = []
+        request_data = {
+            "nexent": [],
+            "datamate": []
+        }
 
         response = self.client.post(
             "/tenant_config/update_knowledge_list",
             headers={"authorization": "Bearer test-token"},
-            json=knowledge_list
+            json=request_data
         )
 
         self.assertEqual(response.status_code, HTTPStatus.OK)
@@ -292,17 +312,10 @@ class TestTenantConfigApp(unittest.TestCase):
             headers={"authorization": "Bearer test-token"}
         )
 
-        # When no body is provided, FastAPI will pass None to the knowledge_list parameter
-        self.assertEqual(response.status_code, HTTPStatus.OK)
+        # When no body is provided, Pydantic will raise validation error
+        self.assertEqual(response.status_code, 422)  # Unprocessable Entity
         data = response.json()
-        self.assertEqual(data["status"], "success")
-
-        # Verify the mock was called with None
-        self.mock_update_knowledge.assert_called_once_with(
-            tenant_id="test_tenant",
-            user_id="test_user",
-            index_name_list=None
-        )
+        self.assertIn("detail", data)
 
     def test_get_deployment_version_success(self):
         """Test successful retrieval of deployment version"""
@@ -326,11 +339,14 @@ class TestTenantConfigApp(unittest.TestCase):
 
     def test_update_knowledge_list_no_auth_header(self):
         """Test updating knowledge list without authorization header"""
-        knowledge_list = ["kb1", "kb2"]
+        request_data = {
+            "nexent": ["kb1"],
+            "datamate": ["kb2"]
+        }
 
         response = self.client.post(
             "/tenant_config/update_knowledge_list",
-            json=knowledge_list
+            json=request_data
         )
 
         # This should still work as the authorization parameter is Optional

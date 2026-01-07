@@ -134,6 +134,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     setActiveKnowledgeBase,
     isKnowledgeBaseSelectable,
     refreshKnowledgeBaseData,
+    refreshKnowledgeBaseDataWithDataMate,
     loadUserSelectedKnowledgeBases,
     saveUserSelectedKnowledgeBases,
     dispatch: kbDispatch,
@@ -173,7 +174,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         setIsCreatingMode(false);
         setHasClickedUpload(false);
         setActiveKnowledgeBase(knowledgeBase);
-        fetchDocuments(knowledgeBase.id);
+        fetchDocuments(knowledgeBase.id, false, knowledgeBase.source);
       }
     };
 
@@ -271,9 +272,18 @@ function DataConfig({ isActive }: DataConfigProps) {
       // When component unmounts, if previously active and user has interacted, execute save
       if (prevIsActiveRef.current === true && hasUserInteractedRef.current) {
         // Use saved state instead of current potentially cleared state
-        const selectedKbNames = savedKnowledgeBasesRef.current
-          .filter((kb) => savedSelectedIdsRef.current.includes(kb.id))
-          .map((kb) => kb.id);
+        const selectedKnowledgeBases = savedKnowledgeBasesRef.current
+          .filter((kb) => savedSelectedIdsRef.current.includes(kb.id));
+
+        // Group knowledge bases by source
+        const knowledgeBySource: { nexent?: string[]; datamate?: string[] } = {};
+        selectedKnowledgeBases.forEach((kb) => {
+          const source = kb.source as keyof typeof knowledgeBySource;
+          if (!knowledgeBySource[source]) {
+            knowledgeBySource[source] = [];
+          }
+          knowledgeBySource[source]!.push(kb.id);
+        });
 
         try {
           // Use fetch with keepalive to ensure request can be sent during page unload
@@ -283,7 +293,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               "Content-Type": "application/json",
               ...getAuthHeaders(),
             },
-            body: JSON.stringify(selectedKbNames),
+            body: JSON.stringify(knowledgeBySource),
             keepalive: true,
           }).catch((error) => {
             log.error("卸载时保存失败:", error);
@@ -371,7 +381,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   }, [
     isActive,
     kbState.isLoading,
-    kbState.selectedIds,
     kbState.knowledgeBases,
     modelConfig?.embedding?.modelName,
     modelConfig?.multiEmbedding?.modelName,
@@ -439,7 +448,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       });
 
       // Get latest document data
-      const documents = await knowledgeBaseService.getAllFiles(kb.id);
+      const documents = await knowledgeBaseService.getAllFiles(kb.id, kb.source);
 
       // Trigger document update event
       knowledgeBasePollingService.triggerDocumentsUpdate(kb.id, documents);
@@ -447,8 +456,8 @@ function DataConfig({ isActive }: DataConfigProps) {
       // Background update knowledge base statistics, but don't duplicate document fetching
       setTimeout(async () => {
         try {
-          // Directly call fetchKnowledgeBases to update knowledge base list data
-          await fetchKnowledgeBases(false, true);
+          // Directly call fetchKnowledgeBases to update knowledge base list data, but don't reload user selections
+          await fetchKnowledgeBases(false, false);
         } catch (error) {
           log.error("获取知识库最新数据失败:", error);
         }
@@ -517,20 +526,43 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   };
 
-  // Handle knowledge base sync
-  const handleSync = () => {
-    // When manually syncing, force fetch latest data from server
-    refreshKnowledgeBaseData(true)
-      .then(() => {
-        message.success(t("knowledgeBase.message.syncSuccess"));
-      })
-      .catch((error) => {
-        message.error(
-          t("knowledgeBase.message.syncError", {
-            error: error.message || t("common.unknownError"),
-          })
-        );
-      });
+  // Handle knowledge base sync (includes both indices and DataMate sync and create records)
+  const handleSync = async () => {
+    // Set sync loading state
+    kbDispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING, payload: true });
+
+    try {
+      // refreshKnowledgeBaseDataWithDataMate calls syncDataMateAndCreateRecords which syncs DataMate and creates local records
+      await refreshKnowledgeBaseDataWithDataMate();
+      message.success(t("knowledgeBase.message.syncDataMateSuccess"));
+    } catch (error) {
+      message.error(
+        t("knowledgeBase.message.syncDataMateError", {
+          error: (error as Error)?.message || t("common.unknownError"),
+        })
+      );
+    } finally {
+      // Clear sync loading state
+      kbDispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING, payload: false });
+    }
+  };
+
+  // Handle DataMate configuration
+  const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
+  const [dataMateUrl, setDataMateUrl] = useState("");
+
+  const handleDataMateConfig = () => {
+    setShowDataMateConfigModal(true);
+  };
+
+  const handleDataMateConfigSave = async () => {
+    try {
+      // TODO: Implement DataMate URL configuration save logic
+      message.success(t("knowledgeBase.message.dataMateConfigSaved"));
+      setShowDataMateConfigModal(false);
+    } catch (error) {
+      message.error(t("knowledgeBase.message.dataMateConfigError"));
+    }
   };
 
   // Handle new knowledge base creation
@@ -856,6 +888,37 @@ function DataConfig({ isActive }: DataConfigProps) {
             </div>
           </div>
         </Modal>
+
+        {/* DataMate Configuration Modal */}
+        <Modal
+          open={showDataMateConfigModal}
+          title={t("knowledgeBase.modal.dataMateConfig.title")}
+          onOk={handleDataMateConfigSave}
+          onCancel={() => setShowDataMateConfigModal(false)}
+          okText={t("common.save")}
+          cancelText={t("common.cancel")}
+          centered
+          getContainer={() => contentRef.current || document.body}
+        >
+          <div className="py-4">
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {t("knowledgeBase.modal.dataMateConfig.urlLabel")}
+              </label>
+              <input
+                type="url"
+                value={dataMateUrl}
+                onChange={(e) => setDataMateUrl(e.target.value)}
+                placeholder={t("knowledgeBase.modal.dataMateConfig.urlPlaceholder")}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div className="text-sm text-gray-600">
+              {t("knowledgeBase.modal.dataMateConfig.description")}
+            </div>
+          </div>
+        </Modal>
+
         <Row gutter={TWO_COLUMN_LAYOUT.GUTTER} className="h-full">
           <Col
             xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
@@ -870,11 +933,13 @@ function DataConfig({ isActive }: DataConfigProps) {
               activeKnowledgeBase={kbState.activeKnowledgeBase}
               currentEmbeddingModel={kbState.currentEmbeddingModel}
               isLoading={kbState.isLoading}
+              syncLoading={kbState.syncLoading}
               onSelect={handleSelectKnowledgeBase}
               onClick={handleKnowledgeBaseClick}
               onDelete={handleDelete}
               onSync={handleSync}
               onCreateNew={handleCreateNew}
+              onDataMateConfig={handleDataMateConfig}
               isSelectable={isKnowledgeBaseSelectable}
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}

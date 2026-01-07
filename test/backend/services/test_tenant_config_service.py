@@ -14,6 +14,7 @@ from backend.services.tenant_config_service import (
     update_selected_knowledge,
     delete_selected_knowledge_by_index_name,
 )
+from consts.model import UpdateKnowledgeListRequest
 
 
 class TestTenantConfigService(unittest.TestCase):
@@ -55,48 +56,55 @@ class TestTenantConfigService(unittest.TestCase):
         )
         mock_get_knowledge_info.assert_called_once_with([self.knowledge_id])
 
+    @patch("backend.services.tenant_config_service.get_selected_knowledge_list")
     @patch("backend.services.tenant_config_service.delete_config_by_tenant_config_id")
     @patch("backend.services.tenant_config_service.insert_config")
     @patch("backend.services.tenant_config_service.get_tenant_config_info")
     @patch("backend.services.tenant_config_service.get_knowledge_ids_by_index_names")
     def test_update_selected_knowledge_add_only(
-        self, mock_get_ids, mock_get_config, mock_insert, mock_delete
+        self, mock_get_ids, mock_get_config, mock_insert, mock_delete, mock_get_list
     ):
         mock_get_ids.return_value = self.knowledge_ids
         mock_get_config.return_value = []
         mock_insert.return_value = True
+        mock_get_list.return_value = []
 
+        request = UpdateKnowledgeListRequest(nexent=self.index_name_list)
         result = update_selected_knowledge(
-            self.tenant_id, self.user_id, self.index_name_list
+            self.tenant_id, self.user_id, request
         )
-        self.assertTrue(result)
+        self.assertIsNotNone(result)
         self.assertEqual(mock_insert.call_count, 2)
         mock_delete.assert_not_called()
 
+    @patch("backend.services.tenant_config_service.get_selected_knowledge_list")
     @patch("backend.services.tenant_config_service.delete_config_by_tenant_config_id")
     @patch("backend.services.tenant_config_service.insert_config")
     @patch("backend.services.tenant_config_service.get_tenant_config_info")
     @patch("backend.services.tenant_config_service.get_knowledge_ids_by_index_names")
     def test_update_selected_knowledge_remove_only(
-        self, mock_get_ids, mock_get_config, mock_insert, mock_delete
+        self, mock_get_ids, mock_get_config, mock_insert, mock_delete, mock_get_list
     ):
         mock_get_ids.return_value = []
         mock_get_config.return_value = [
             {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = True
+        mock_get_list.return_value = []
 
-        result = update_selected_knowledge(self.tenant_id, self.user_id, [])
-        self.assertTrue(result)
+        request = UpdateKnowledgeListRequest()
+        result = update_selected_knowledge(self.tenant_id, self.user_id, request)
+        self.assertIsNotNone(result)
         mock_insert.assert_not_called()
         mock_delete.assert_called_once_with(self.tenant_config_id)
 
+    @patch("backend.services.tenant_config_service.get_selected_knowledge_list")
     @patch("backend.services.tenant_config_service.delete_config_by_tenant_config_id")
     @patch("backend.services.tenant_config_service.insert_config")
     @patch("backend.services.tenant_config_service.get_tenant_config_info")
     @patch("backend.services.tenant_config_service.get_knowledge_ids_by_index_names")
     def test_update_selected_knowledge_add_and_remove(
-        self, mock_get_ids, mock_get_config, mock_insert, mock_delete
+        self, mock_get_ids, mock_get_config, mock_insert, mock_delete, mock_get_list
     ):
         mock_get_ids.return_value = ["knowledge_id_2"]
         mock_get_config.return_value = [
@@ -104,35 +112,40 @@ class TestTenantConfigService(unittest.TestCase):
         ]
         mock_insert.return_value = True
         mock_delete.return_value = True
+        mock_get_list.return_value = []
 
-        result = update_selected_knowledge(self.tenant_id, self.user_id, ["new_index"])
-        self.assertTrue(result)
+        request = UpdateKnowledgeListRequest(nexent=["new_index"])
+        result = update_selected_knowledge(self.tenant_id, self.user_id, request)
+        self.assertIsNotNone(result)
         mock_insert.assert_called_once()
         mock_delete.assert_called_once_with("tenant_config_id_1")
 
+    @patch("backend.services.tenant_config_service.get_selected_knowledge_list")
     @patch("backend.services.tenant_config_service.delete_config_by_tenant_config_id")
     @patch("backend.services.tenant_config_service.insert_config")
     @patch("backend.services.tenant_config_service.get_tenant_config_info")
     @patch("backend.services.tenant_config_service.get_knowledge_ids_by_index_names")
     def test_update_selected_knowledge_insert_failure(
-        self, mock_get_ids, mock_get_config, mock_insert, mock_delete
+        self, mock_get_ids, mock_get_config, mock_insert, mock_delete, mock_get_list
     ):
         mock_get_ids.return_value = self.knowledge_ids
         mock_get_config.return_value = []
         mock_insert.return_value = False
 
+        request = UpdateKnowledgeListRequest(nexent=self.index_name_list)
         result = update_selected_knowledge(
-            self.tenant_id, self.user_id, self.index_name_list
+            self.tenant_id, self.user_id, request
         )
-        self.assertFalse(result)
+        self.assertIsNone(result)
         mock_insert.assert_called_once()
 
+    @patch("backend.services.tenant_config_service.get_selected_knowledge_list")
     @patch("backend.services.tenant_config_service.delete_config_by_tenant_config_id")
     @patch("backend.services.tenant_config_service.insert_config")
     @patch("backend.services.tenant_config_service.get_tenant_config_info")
     @patch("backend.services.tenant_config_service.get_knowledge_ids_by_index_names")
     def test_update_selected_knowledge_delete_failure(
-        self, mock_get_ids, mock_get_config, mock_insert, mock_delete
+        self, mock_get_ids, mock_get_config, mock_insert, mock_delete, mock_get_list
     ):
         mock_get_ids.return_value = []
         mock_get_config.return_value = [
@@ -140,8 +153,9 @@ class TestTenantConfigService(unittest.TestCase):
         ]
         mock_delete.return_value = False
 
-        result = update_selected_knowledge(self.tenant_id, self.user_id, [])
-        self.assertFalse(result)
+        request = UpdateKnowledgeListRequest()
+        result = update_selected_knowledge(self.tenant_id, self.user_id, request)
+        self.assertIsNone(result)
         mock_delete.assert_called_once_with(self.tenant_config_id)
 
     @patch("backend.services.tenant_config_service.delete_config_by_tenant_config_id")

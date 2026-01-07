@@ -100,7 +100,7 @@ class TestPostgresClient:
         """Test PostgresClient initialization"""
         # Reset singleton instance
         PostgresClient._instance = None
-        
+
         mock_engine = MagicMock()
         mock_create_engine.return_value = mock_engine
         mock_session = MagicMock()
@@ -120,7 +120,7 @@ class TestPostgresClient:
         """Test PostgresClient is a singleton"""
         # Reset singleton instance
         PostgresClient._instance = None
-        
+
         client1 = PostgresClient()
         client2 = PostgresClient()
 
@@ -166,7 +166,7 @@ class TestMinioClient:
         """Test MinioClient initialization"""
         # Reset singleton instance
         MinioClient._instance = None
-        
+
         mock_config = MagicMock()
         mock_config.default_bucket = 'test-bucket'
         mock_config_class.return_value = mock_config
@@ -184,7 +184,7 @@ class TestMinioClient:
         """Test MinioClient is a singleton"""
         # Reset singleton instance
         MinioClient._instance = None
-        
+
         with patch('backend.database.client.create_storage_client_from_config'), \
              patch('backend.database.client.MinIOStorageConfig'):
             client1 = MinioClient()
@@ -197,7 +197,7 @@ class TestMinioClient:
     def test_minio_client_upload_file(self, mock_config_class, mock_create_client):
         """Test MinioClient.upload_file delegates to storage client"""
         MinioClient._instance = None
-        
+
         mock_storage_client = MagicMock()
         mock_storage_client.upload_file.return_value = (True, '/bucket/file.txt')
         mock_create_client.return_value = mock_storage_client
@@ -215,7 +215,7 @@ class TestMinioClient:
     def test_minio_client_upload_fileobj(self, mock_config_class, mock_create_client):
         """Test MinioClient.upload_fileobj delegates to storage client"""
         MinioClient._instance = None
-        
+
         from io import BytesIO
         mock_storage_client = MagicMock()
         mock_storage_client.upload_fileobj.return_value = (True, '/bucket/file.txt')
@@ -235,7 +235,7 @@ class TestMinioClient:
     def test_minio_client_download_file(self, mock_config_class, mock_create_client):
         """Test MinioClient.download_file delegates to storage client"""
         MinioClient._instance = None
-        
+
         mock_storage_client = MagicMock()
         mock_storage_client.download_file.return_value = (True, 'Downloaded successfully')
         mock_create_client.return_value = mock_storage_client
@@ -253,7 +253,7 @@ class TestMinioClient:
     def test_minio_client_get_file_url(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_url delegates to storage client"""
         MinioClient._instance = None
-        
+
         mock_storage_client = MagicMock()
         mock_storage_client.get_file_url.return_value = (True, 'http://example.com/file.txt')
         mock_create_client.return_value = mock_storage_client
@@ -271,7 +271,7 @@ class TestMinioClient:
     def test_minio_client_get_file_size(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_size delegates to storage client"""
         MinioClient._instance = None
-        
+
         mock_storage_client = MagicMock()
         mock_storage_client.get_file_size.return_value = 1024
         mock_create_client.return_value = mock_storage_client
@@ -288,7 +288,7 @@ class TestMinioClient:
     def test_minio_client_list_files(self, mock_config_class, mock_create_client):
         """Test MinioClient.list_files delegates to storage client"""
         MinioClient._instance = None
-        
+
         mock_storage_client = MagicMock()
         mock_storage_client.list_files.return_value = [
             {'key': 'file1.txt', 'size': 100},
@@ -309,7 +309,7 @@ class TestMinioClient:
     def test_minio_client_delete_file(self, mock_config_class, mock_create_client):
         """Test MinioClient.delete_file delegates to storage client"""
         MinioClient._instance = None
-        
+
         mock_storage_client = MagicMock()
         mock_storage_client.delete_file.return_value = (True, 'Deleted successfully')
         mock_create_client.return_value = mock_storage_client
@@ -327,7 +327,7 @@ class TestMinioClient:
     def test_minio_client_get_file_stream(self, mock_config_class, mock_create_client):
         """Test MinioClient.get_file_stream delegates to storage client"""
         MinioClient._instance = None
-        
+
         from io import BytesIO
         mock_storage_client = MagicMock()
         mock_stream = BytesIO(b'test data')
@@ -350,7 +350,7 @@ class TestGetDbSession:
         """Test get_db_session creates and manages a new session"""
         mock_session = MagicMock()
         mock_session_maker = MagicMock(return_value=mock_session)
-        
+
         # Mock db_client
         with patch('backend.database.client.db_client') as mock_db_client:
             mock_db_client.session_maker = mock_session_maker
@@ -377,7 +377,7 @@ class TestGetDbSession:
         """Test get_db_session rolls back on exception"""
         mock_session = MagicMock()
         mock_session_maker = MagicMock(return_value=mock_session)
-        
+
         with patch('backend.database.client.db_client') as mock_db_client:
             mock_db_client.session_maker = mock_session_maker
 

@@ -58,6 +58,11 @@ const knowledgeBaseReducer = (state: KnowledgeBaseState, action: KnowledgeBaseAc
         ...state,
         isLoading: action.payload
       };
+    case KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING:
+      return {
+        ...state,
+        syncLoading: action.payload
+      };
     case KNOWLEDGE_BASE_ACTION_TYPES.ERROR:
       return {
         ...state,
@@ -79,6 +84,7 @@ export const KnowledgeBaseContext = createContext<{
   setActiveKnowledgeBase: (kb: KnowledgeBase) => void;
   isKnowledgeBaseSelectable: (kb: KnowledgeBase) => boolean;
   refreshKnowledgeBaseData: (forceRefresh?: boolean) => Promise<void>;
+  refreshKnowledgeBaseDataWithDataMate: () => Promise<void>;
   loadUserSelectedKnowledgeBases: () => Promise<void>;
   saveUserSelectedKnowledgeBases: () => Promise<boolean>;
 }>({
@@ -88,6 +94,7 @@ export const KnowledgeBaseContext = createContext<{
     activeKnowledgeBase: null,
     currentEmbeddingModel: null,
     isLoading: false,
+    syncLoading: false,
     error: null
   },
   dispatch: () => {},
@@ -98,6 +105,7 @@ export const KnowledgeBaseContext = createContext<{
   setActiveKnowledgeBase: () => {},
   isKnowledgeBaseSelectable: () => false,
   refreshKnowledgeBaseData: async () => {},
+  refreshKnowledgeBaseDataWithDataMate: async () => {},
   loadUserSelectedKnowledgeBases: async () => {},
   saveUserSelectedKnowledgeBases: async () => false,
 });
@@ -118,9 +126,10 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     activeKnowledgeBase: null,
     currentEmbeddingModel: null,
     isLoading: false,
+    syncLoading: false,
     error: null
   });
-  
+
   // Check if knowledge base is selectable - memoized with useCallback
   const isKnowledgeBaseSelectable = useCallback((kb: KnowledgeBase): boolean => {
     // If no current embedding model is set, not selectable
@@ -131,8 +140,48 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     return kb.embeddingModel === "unknown" || kb.embeddingModel === state.currentEmbeddingModel;
   }, [state.currentEmbeddingModel]);
 
+  // Load user selected knowledge bases from backend
+  const loadUserSelectedKnowledgeBases = useCallback(async () => {
+    try {
+      const userConfig = await userConfigService.loadKnowledgeList();
+      if (userConfig) {
+        let allSelectedNames: string[] = [];
+
+        // Handle new format (selectedKbNames array)
+        if (userConfig.selectedKbNames && userConfig.selectedKbNames.length > 0) {
+          allSelectedNames = userConfig.selectedKbNames;
+        }
+        // Fallback to legacy grouped format for backward compatibility
+        else if (userConfig.nexent || userConfig.datamate) {
+          allSelectedNames = [
+            ...(userConfig.nexent || []),
+            ...(userConfig.datamate || [])
+          ];
+        }
+
+        if (allSelectedNames.length > 0) {
+          // Find matching knowledge base IDs based on index names
+          const selectedIds = state.knowledgeBases
+            .filter((kb) => allSelectedNames.includes(kb.id))
+            .map((kb) => kb.id);
+
+          dispatch({
+            type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
+            payload: selectedIds,
+          });
+        }
+      }
+    } catch (error) {
+      log.error(t("knowledgeBase.error.loadSelected"), error);
+      dispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
+        payload: t("knowledgeBase.error.loadSelectedRetry"),
+      });
+    }
+  }, [state.knowledgeBases]);
+
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
-  const fetchKnowledgeBases = useCallback(async (skipHealthCheck = true) => {
+  const fetchKnowledgeBases = useCallback(async (skipHealthCheck = true, shouldLoadSelected = true) => {
     // If already loading, return directly
     if (state.isLoading) {
       return;
@@ -146,16 +195,21 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
 
       // Get knowledge base list data directly from server
       const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(skipHealthCheck);
-      
+
       dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS, payload: kbs });
-      
+
+      // After loading knowledge bases, automatically load user's selected knowledge bases if requested
+      if (shouldLoadSelected && kbs.length > 0) {
+        await loadUserSelectedKnowledgeBases();
+      }
+
     } catch (error) {
       log.error(t('knowledgeBase.error.fetchList'), error);
       dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: t('knowledgeBase.error.fetchListRetry') });
     } finally {
       dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: false });
     }
-  }, [state.isLoading, t]);
+  }, [state.isLoading, t, loadUserSelectedKnowledgeBases]);
 
   // Select knowledge base - memoized with useCallback
   const selectKnowledgeBase = useCallback((id: string) => {
@@ -233,48 +287,32 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     }
   }, [state.knowledgeBases, state.selectedIds, state.activeKnowledgeBase]);
 
-  // Load user selected knowledge bases from backend
-  const loadUserSelectedKnowledgeBases = useCallback(async () => {
-    try {
-      const userConfig = await userConfigService.loadKnowledgeList();
-      if (userConfig && userConfig.selectedKbNames.length > 0) {
-        // Find matching knowledge base IDs based on index names
-        const selectedIds = state.knowledgeBases
-          .filter((kb) => userConfig.selectedKbNames.includes(kb.id))
-          .map((kb) => kb.id);
-
-        dispatch({
-          type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
-          payload: selectedIds,
-        });
-      }
-    } catch (error) {
-      log.error(t("knowledgeBase.error.loadSelected"), error);
-      dispatch({
-        type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
-        payload: t("knowledgeBase.error.loadSelectedRetry"),
-      });
-    }
-  }, [state.knowledgeBases]);
-
   // Save user selected knowledge bases to backend
   const saveUserSelectedKnowledgeBases = useCallback(async () => {
     try {
-      // Get selected knowledge base index names (globally unique identifiers)
-      const selectedKbNames = state.knowledgeBases
-        .filter((kb) => state.selectedIds.includes(kb.id))
-        .map((kb) => kb.id);
+      // Get selected knowledge bases grouped by source
+      const selectedKnowledgeBases = state.knowledgeBases
+        .filter((kb) => state.selectedIds.includes(kb.id));
 
-      const success = await userConfigService.updateKnowledgeList(
-        selectedKbNames
-      );
-      if (!success) {
+      // Group knowledge bases by source
+      const knowledgeBySource: { nexent?: string[]; datamate?: string[] } = {};
+      selectedKnowledgeBases.forEach((kb) => {
+        const source = kb.source as keyof typeof knowledgeBySource;
+        if (!knowledgeBySource[source]) {
+          knowledgeBySource[source] = [];
+        }
+        knowledgeBySource[source]!.push(kb.id);
+      });
+
+      const result = await userConfigService.updateKnowledgeList(knowledgeBySource);
+      if (!result) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.saveSelected"),
         });
+        return false;
       }
-      return success;
+      return true;
     } catch (error) {
       log.error(t("knowledgeBase.error.saveSelected"), error);
       dispatch({
@@ -286,16 +324,16 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
   }, [state.knowledgeBases, state.selectedIds, t]);
 
   // Add a function to refresh the knowledge base data
-  const refreshKnowledgeBaseData = useCallback(async () => {
+  const refreshKnowledgeBaseData = useCallback(async (forceRefresh = false) => {
     try {
-      // Get latest knowledge base data directly from server
-      await fetchKnowledgeBases(false);
+      // Get latest knowledge base data directly from server, but don't reload user selections
+      await fetchKnowledgeBases(false, false);
 
       // If there is an active knowledge base, also refresh its document information
       if (state.activeKnowledgeBase) {
         // Publish document update event to notify document list component to refresh document data
         try {
-          const documents = await knowledgeBaseService.getAllFiles(state.activeKnowledgeBase.id);
+          const documents = await knowledgeBaseService.getAllFiles(state.activeKnowledgeBase.id, state.activeKnowledgeBase.source);
           log.log("documents", documents);
           window.dispatchEvent(new CustomEvent('documentsUpdated', {
             detail: {
@@ -310,6 +348,37 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     } catch (error) {
       log.error("Failed to refresh knowledge base data:", error);
       dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: 'Failed to refresh knowledge base data' });
+    }
+  }, [fetchKnowledgeBases, state.activeKnowledgeBase]);
+
+  // Add a function to refresh the knowledge base data with DataMate sync and create records
+  const refreshKnowledgeBaseDataWithDataMate = useCallback(async () => {
+    try {
+      // First sync DataMate and create records
+      await knowledgeBaseService.syncDataMateAndCreateRecords();
+
+      // Then get latest knowledge base data directly from server, but don't reload user selections during sync
+      await fetchKnowledgeBases(false, false);
+
+      // If there is an active knowledge base, also refresh its document information
+      if (state.activeKnowledgeBase) {
+        // Publish document update event to notify document list component to refresh document data
+        try {
+          const documents = await knowledgeBaseService.getAllFiles(state.activeKnowledgeBase.id, state.activeKnowledgeBase.source);
+          log.log("documents", documents);
+          window.dispatchEvent(new CustomEvent('documentsUpdated', {
+            detail: {
+              kbId: state.activeKnowledgeBase.id,
+              documents
+            }
+          }));
+        } catch (error) {
+          log.error("Failed to refresh document information:", error);
+        }
+      }
+    } catch (error) {
+      log.error("Failed to refresh knowledge base data with DataMate:", error);
+      dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: 'Failed to refresh knowledge base data with DataMate' });
     }
   }, [fetchKnowledgeBases, state.activeKnowledgeBase]);
 
@@ -360,10 +429,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
       // Check if need to force fetch data from server
       const customEvent = e as CustomEvent;
       const forceRefresh = customEvent.detail?.forceRefresh === true;
-      
+
       // If first time loading data or force refresh, get from server
       if (!initialDataLoaded || forceRefresh) {
-        fetchKnowledgeBases(false);
+        // For force refresh, don't reload user selections to preserve current state
+        fetchKnowledgeBases(false, !forceRefresh);
         initialDataLoaded = true;
       }
     };
@@ -390,6 +460,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     setActiveKnowledgeBase,
     isKnowledgeBaseSelectable,
     refreshKnowledgeBaseData,
+    refreshKnowledgeBaseDataWithDataMate,
     loadUserSelectedKnowledgeBases,
     saveUserSelectedKnowledgeBases
   }), [
@@ -401,6 +472,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({ ch
     setActiveKnowledgeBase,
     isKnowledgeBaseSelectable,
     refreshKnowledgeBaseData,
+    refreshKnowledgeBaseDataWithDataMate,
     loadUserSelectedKnowledgeBases,
     saveUserSelectedKnowledgeBases
   ]);

@@ -147,6 +147,10 @@ export const API_ENDPOINTS = {
         pathOrUrl
       )}/error-info`,
   },
+  datamate: {
+    syncAndCreateRecords: `${API_BASE_URL}/datamate/sync_and_create_records`,
+    files: (knowledgeBaseId: string) => `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
+  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
