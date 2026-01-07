@@ -267,7 +267,7 @@ export default function AgentGenerateDetail({
           userManuallySwitchedTabRef.current = false; // Reset manual switch tracking when generation fails
         },
         () => {
-          // 生成完成后，获取所有 form 值并更新父组件状态
+          // After generation completes, get all form values and update parent component state
           const formValues = form.getFieldsValue();
           const profileUpdates: AgentProfileInfo = {
             name: formValues.agentName,
@@ -281,7 +281,7 @@ export default function AgentGenerateDetail({
             few_shots_prompt: formValues.fewShotsPrompt,
           };
 
-          // 更新父组件状态
+          // Update parent component state
           onUpdateProfile(profileUpdates);
 
           message.success(t("businessLogic.config.message.generateSuccess"));
@@ -680,19 +680,19 @@ export default function AgentGenerateDetail({
         .agent-config-tabs .ant-tabs-nav-list {
           width: 100% !important;
           display: flex !important;
-          transform: none !important; /* 禁用 JS 动态平移（注意会影响滚动行为） */
+          transform: none !important;
           transition: none !important;
           justify-content: center !important;
         }
 
-        /* 每个 tab 固定为父宽度的 1/4 */
+        /* Each tab is fixed to 1/4 of parent width */
         .agent-config-tabs .ant-tabs-tab {
           flex: 0 0 25% !important;
           max-width: 25% !important;
           box-sizing: border-box;
         }
 
-        /* 保证 tab 内文字水平居中并在超出时展示省略号 */
+        /* Ensure text in tab is horizontally centered and shows ellipsis when overflow */
         .agent-config-tabs .ant-tabs-tab-btn {
           display: block;
           width: 100%;
@@ -702,7 +702,7 @@ export default function AgentGenerateDetail({
           text-align: center;
         }
 
-        /* 选中状态样式：背景蓝色，文字白色 */
+        /* Selected state style: blue background, white text */
         .agent-config-tabs .ant-tabs-tab-active {
           background-color: #1890ff !important;
         }
