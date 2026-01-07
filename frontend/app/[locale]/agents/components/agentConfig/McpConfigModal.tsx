@@ -795,7 +795,7 @@ export default function McpConfigModal({
                       </div>
                       <div style={{ display: "flex", gap: 8,alignItems: "center" }}>
                         <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
-                        <Inputtype="number"
+                        <Input type="number"
                           placeholder={t("mcpConfig.addContainer.portPlaceholder")}
                           value={containerPort }
                           onChange={(e) => {

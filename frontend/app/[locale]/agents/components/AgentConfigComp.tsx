@@ -117,7 +117,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 size="small"
                 icon={<RefreshCw size={16} />}
                 onClick={handleRefreshTools}
-                disabled={!editable}
                 loading={isRefreshing}
                 className="text-green-500 hover:!text-green-600 hover:!bg-green-50"
                 title={t("toolManagement.refresh.title")}
@@ -129,7 +128,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
                 size="small"
                 icon={<Plug size={16} />}
                 onClick={() => setIsMcpModalOpen(true)}
-                disabled={!editable}
                 className="text-blue-500 hover:!text-blue-600 hover:!bg-blue-50"
                 title={t("toolManagement.mcp.title")}
               >
