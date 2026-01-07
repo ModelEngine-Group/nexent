@@ -10,6 +10,7 @@ import { getMcpServerList, addMcpServer, updateToolList } from "@/services/mcpSe
 import { McpServer, AgentRefreshEvent } from "@/types/agentConfig";
 import { ImportAgentData } from "@/hooks/useAgentImport";
 import { importAgent, checkAgentNameConflictBatch, regenerateAgentNameBatch, fetchTools } from "@/services/agentConfigService";
+import { useQueryClient } from "@tanstack/react-query";
 import log from "@/lib/logger";
 
 export interface AgentImportWizardProps {
@@ -102,6 +103,7 @@ export default function AgentImportWizard({
 }: AgentImportWizardProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [llmModels, setLlmModels] = useState<ModelOption[]>([]);
@@ -785,6 +787,7 @@ export default function AgentImportWizard({
       
       if (result.success) {
         message.success(t("market.install.success", "Agent installed successfully!"));
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
         onImportComplete?.();
         handleCancel(); // Close wizard after success
       } else {

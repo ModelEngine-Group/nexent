@@ -987,7 +987,7 @@ export const ModelConfigSection = forwardRef<
                   }}
                 >
                   <Space
-                    direction="vertical"
+                    orientation="vertical"
                     style={{
                       width: "100%",
                       height: "100%",

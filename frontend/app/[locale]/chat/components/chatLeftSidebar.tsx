@@ -222,28 +222,30 @@ export function ChatSidebar({
               <>
                 <TooltipProvider>
                   <Tooltip
-                    title={<p className="break-words">{dialog.conversation_title}</p>}
+                    title={
+                      <p className="break-words">{dialog.conversation_title}</p>
+                    }
                     placement="right"
-                    overlayStyle={{ maxWidth: "300px" }}
+                    styles={{ root: { maxWidth: "300px" } }}
                   >
                     <Button
-                        type="text"
-                        size="middle"
-                        className="flex-1 justify-start text-left min-w-0 max-w-[250px] px-3 py-2 h-auto border-0 shadow-none bg-transparent hover:!bg-transparent active:!bg-transparent"
-                        onClick={() => onDialogClick(dialog)}
-                      >
-                        <ConversationStatusIndicator
-                          isStreaming={streamingConversations.has(
-                            dialog.conversation_id
-                          )}
-                          isCompleted={completedConversations.has(
-                            dialog.conversation_id
-                          )}
-                        />
-                        <span className="truncate block text-base font-normal text-gray-800 tracking-wide font-sans">
-                          {dialog.conversation_title}
-                        </span>
-                      </Button>
+                      type="text"
+                      size="middle"
+                      className="flex-1 justify-start text-left min-w-0 max-w-[250px] px-3 py-2 h-auto border-0 shadow-none bg-transparent hover:!bg-transparent active:!bg-transparent"
+                      onClick={() => onDialogClick(dialog)}
+                    >
+                      <ConversationStatusIndicator
+                        isStreaming={streamingConversations.has(
+                          dialog.conversation_id
+                        )}
+                        isCompleted={completedConversations.has(
+                          dialog.conversation_id
+                        )}
+                      />
+                      <span className="truncate block text-base font-normal text-gray-800 tracking-wide font-sans">
+                        {dialog.conversation_title}
+                      </span>
+                    </Button>
                   </Tooltip>
                 </TooltipProvider>
 
@@ -313,7 +315,10 @@ export function ChatSidebar({
         {/* Expand/Collapse button */}
         <div className="py-3 flex justify-center">
           <TooltipProvider>
-            <Tooltip title={t("chatLeftSidebar.expandSidebar")} placement="right">
+            <Tooltip
+              title={t("chatLeftSidebar.expandSidebar")}
+              placement="right"
+            >
               <Button
                 type="text"
                 size="middle"
@@ -329,7 +334,10 @@ export function ChatSidebar({
         {/* New conversation button */}
         <div className="py-3 flex justify-center">
           <TooltipProvider>
-            <Tooltip title={t("chatLeftSidebar.newConversation")} placement="right">
+            <Tooltip
+              title={t("chatLeftSidebar.newConversation")}
+              placement="right"
+            >
               <Button
                 type="text"
                 size="middle"
