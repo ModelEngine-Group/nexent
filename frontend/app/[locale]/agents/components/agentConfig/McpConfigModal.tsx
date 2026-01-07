@@ -13,6 +13,8 @@ import {
   Divider,
   Tooltip,
   App,
+  Upload,
+  Tabs,
 } from "antd";
 import {
   Trash,
@@ -24,6 +26,8 @@ import {
   RefreshCw,
   FileText,
   Container,
+  Upload as UploadIcon,
+  Unplug,
 } from "lucide-react";
 
 import { McpConfigModalProps, AgentRefreshEvent } from "@/types/agentConfig";
@@ -35,6 +39,7 @@ import {
   updateToolList,
   checkMcpServerHealth,
   addMcpFromConfig,
+  uploadMcpImage,
   getMcpContainers,
   getMcpContainerLogs,
   deleteMcpContainer,
@@ -42,6 +47,8 @@ import {
 import { McpServer, McpTool, McpContainer } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
+import { UploadFile } from "antd/es/upload/interface";
+import { TabsProps } from "antd";
 
 const { Text, Title } = Typography;
 
@@ -55,6 +62,7 @@ export default function McpConfigModal({
   const [serverList, setServerList] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
+  const [enableUploadImage, setEnableUploadImage] = useState(false);
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
@@ -81,7 +89,13 @@ export default function McpConfigModal({
   const [loadingLogs, setLoadingLogs] = useState(false);
   const delayedContainerRefreshRef = useRef<number | undefined>(undefined);
 
-  const actionsLocked = updatingTools || addingContainer;
+  // Upload image related state
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
+  const [uploadPort, setUploadPort] = useState<number | undefined>(undefined);
+  const [uploadServiceName, setUploadServiceName] = useState("");
+
+  const actionsLocked = updatingTools || addingContainer || uploadingImage;
 
   // Helper function to refresh tools and agents asynchronously
   const refreshToolsAndAgents = async () => {
@@ -113,6 +127,7 @@ export default function McpConfigModal({
       const result = await getMcpServerList();
       if (result.success) {
         setServerList(result.data);
+        setEnableUploadImage(result.enable_upload_image || false);
       } else {
         message.error(result.message);
       }
@@ -459,6 +474,62 @@ export default function McpConfigModal({
     }
   };
 
+  // Upload MCP image
+  const handleUploadImage = async () => {
+    if (uploadFileList.length === 0) {
+      message.error(t("mcpConfig.message.uploadImageFileRequired"));
+      return;
+    }
+
+    if (!uploadPort || uploadPort < 1 || uploadPort > 65535) {
+      message.error(t("mcpConfig.message.uploadImageValidPortRequired"));
+      return;
+    }
+
+    const file = uploadFileList[0].originFileObj;
+    if (!file) {
+      message.error(t("mcpConfig.message.uploadImageFileRequired"));
+      return;
+    }
+
+    // Validate file type
+    if (!file.name.toLowerCase().endsWith('.tar')) {
+      message.error(t("mcpConfig.message.uploadImageInvalidFileType"));
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      const result = await uploadMcpImage(
+        file,
+        uploadPort,
+        uploadServiceName.trim() || undefined
+      );
+
+      if (result.success) {
+        // Clear form
+        setUploadFileList([]);
+        setUploadPort(undefined);
+        setUploadServiceName("");
+
+        // Refresh lists
+        await loadContainerList();
+        await loadServerList();
+
+        // Refresh tools and agents
+        await refreshToolsAndAgents();
+
+        message.success(t("mcpService.message.uploadImageSuccess"));
+      } else {
+        message.error(result.message);
+      }
+    } catch (error) {
+      message.error(t("mcpConfig.message.uploadImageFailed"));
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   // Add containerized MCP server
   const handleAddContainer = async () => {
     if (!containerConfigJson.trim()) {
@@ -643,113 +714,204 @@ export default function McpConfigModal({
               </Text>
             </div>
           )}
-          {/* Add server section */}
-          <Card size="small" style={{ marginBottom: 16 }}>
-            <Title level={5} style={{ margin: "0 0 12px 0" }}>
-              {t("mcpConfig.addServer.title")}
-            </Title>
-            <Space orientation="vertical" style={{ width: "100%" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Input
-                  placeholder={t("mcpConfig.addServer.namePlaceholder")}
-                  value={newServerName}
-                  onChange={(e) => setNewServerName(e.target.value)}
-                  style={{ flex: 1 }}
-                  maxLength={20}
-                  disabled={actionsLocked || addingServer}
-                />
-                <Input
-                  placeholder={t("mcpConfig.addServer.urlPlaceholder")}
-                  value={newServerUrl}
-                  onChange={(e) => setNewServerUrl(e.target.value)}
-                  style={{ flex: 2 }}
-                  disabled={actionsLocked || addingServer}
-                />
-                <Button
-                  type="primary"
-                  onClick={handleAddServer}
-                  loading={addingServer || updatingTools}
-                  icon={
-                    addingServer || updatingTools ? (
-                      <LoaderCircle className="animate-spin" style={{ width: 16, height: 16 }} />
-                    ) : (
-                      <Plus style={{ width: 16, height: 16 }} />
-                    )
-                  }
-                  disabled={actionsLocked}
-                >
-                  {updatingTools
-                    ? t("mcpConfig.addServer.button.updating")
-                    : t("mcpConfig.addServer.button.add")}
-                </Button>
-              </div>
-            </Space>
-          </Card>
+          {/* Add MCP server tabs */}
+          <Tabs
+            defaultActiveKey="remote"
+            size="small"
+            style={{ marginBottom: 16 }}
+            items={[
+              {
+                key: "remote",
+                label: (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <Unplug style={{ width: 16, height: 16 }} />
+                    {t("mcpConfig.addServer.title")}
+                  </span>
+                ),
+                children: (
+                  <Card size="small" style={{ marginTop: 8 }}>
+                    <Space orientation="vertical" style={{ width: "100%" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <Input
+                          placeholder={t("mcpConfig.addServer.namePlaceholder")}
+                          value={newServerName}
+                          onChange={(e) => setNewServerName(e.target.value)}
+                          style={{ flex: 1 }}
+                          maxLength={20}
+                          disabled={actionsLocked || addingServer}
+                        />
+                        <Input
+                          placeholder={t("mcpConfig.addServer.urlPlaceholder")}
+                          value={newServerUrl}
+                          onChange={(e) => setNewServerUrl(e.target.value)}
+                          style={{ flex: 2 }}
+                          disabled={actionsLocked || addingServer}
+                        />
+                        <Button
+                          type="primary"
+                          onClick={handleAddServer}
+                          loading={addingServer || updatingTools}
+                          icon={
+                            addingServer || updatingTools ? (
+                              <LoaderCircle className="animate-spin" style={{ width: 16, height: 16 }} />
+                            ) : (
+                              <Plus style={{ width: 16, height: 16 }} />
+                            )
+                          }
+                          disabled={actionsLocked}
+                        >
+                          {updatingTools
+                            ? t("mcpConfig.addServer.button.updating")
+                            : t("mcpConfig.addServer.button.add")}
+                        </Button>
+                      </div>
+                    </Space>
+                  </Card>
+                ),
+              },
+              {
+                key: "container",
+                label: (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <Container style={{ width: 16, height: 16 }} />
+                    {t("mcpConfig.addContainer.title")}
+                  </span>
+                ),
+                children: (
+                  <Card size="small" style={{ marginTop: 8 }}>
+                    <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+                          {t("mcpConfig.addContainer.configHint")}
+                        </Text>
+                        <Input.TextArea
+                          placeholder={t("mcpConfig.addContainer.configPlaceholder")}
+                          value={containerConfigJson}
+                          onChange={(e) => setContainerConfigJson(e.target.value)}
+                          rows={6}
+                          disabled={actionsLocked}
+                          style={{ fontFamily: "monospace", fontSize: 12 }}
+                        />
+                      </div>
+                      <div style={{ display: "flex", gap: 8,alignItems: "center" }}>
+                        <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
+                        <Input type="number"
+                          placeholder={t("mcpConfig.addContainer.portPlaceholder")}
+                          value={containerPort }
+                          onChange={(e) => {
+                            const port = parseInt(e.target.value);
 
-          {/* Add containerized MCP server section */}
-          <Card size="small" style={{ marginBottom: 16 }}>
-            <Title level={5} style={{ margin: "0 0 12px 0" }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <Container style={{ width: 16, height: 16 }} />
-                {t("mcpConfig.addContainer.title")}
-              </span>
-            </Title>
-            <Space orientation="vertical" style={{ width: "100%" }} size="middle">
-              <div>
-                <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-                  {t("mcpConfig.addContainer.configHint")}
-                </Text>
-                <Input.TextArea
-                  placeholder={t("mcpConfig.addContainer.configPlaceholder")}
-                  value={containerConfigJson}
-                  onChange={(e) => setContainerConfigJson(e.target.value)}
-                  rows={6}
-                  disabled={actionsLocked}
-                  style={{ fontFamily: "monospace", fontSize: 12 }}
-                />
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
-                <Input
-                  type="number"
-                  placeholder={t("mcpConfig.addContainer.portPlaceholder")}
-                  value={containerPort}
-                  onChange={(e) => {
-                    const port = parseInt(e.target.value);
-                    setContainerPort(isNaN(port) ? undefined : port);
-                  }}
-                  min={1}
-                  max={65535}
-                  style={{ width: 150 }}
-                  disabled={actionsLocked}
-                />
-                <div style={{ flex: 1 }} />
-                <Button
-                  type="primary"
-                  onClick={handleAddContainer}
-                  loading={addingContainer || updatingTools}
-                  icon={
-                    addingContainer || updatingTools ? (
-                      <LoaderCircle className="animate-spin" size={16} />
-                    ) : (
-                      <Plus className="size-4" />
-                    )
-                  }
-                  disabled={actionsLocked}
-                >
-                  {updatingTools
-                    ? t("mcpConfig.addContainer.button.updating")
-                    : t("mcpConfig.addContainer.button.add")}
-                </Button>
-              </div>
-            </Space>
-          </Card>
+                              setContainerPort(isNaN(port) ? undefined :port);
+                            }}
+                            min={1}
+                          max={65535}
+                          style={{ width: 150 }}
+                          disabled={actionsLocked}
+                        />
+                        <div style={{ flex: 1 }} />
+                        <Button
+                          type="primary"
+                          onClick={handleAddContainer}
+                          loading={addingContainer || updatingTools}
+                          icon={
+                            addingContainer || updatingTools ? (
+                              <LoaderCircle className="animate-spin" size={16} />
+                            ) : (
+                              <Plus className="size-4" />
+                            )
+                          }
+                          disabled={actionsLocked}
+                        >
+                          {updatingTools
+                            ? t("mcpConfig.addContainer.button.updating")
+                            : t("mcpConfig.addContainer.button.add")}
+                        </Button>
+                      </div>
+                    </Space>
+                  </Card>
+                ),
+              },
+              ...(enableUploadImage ? [{
+                key: "upload",
+                label: (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <UploadIcon style={{ width: 16, height: 16 }} />
+                    {t("mcpConfig.uploadImage.title")}
+                  </span>
+                ),
+                children: (
+                  <Card size="small" style={{ marginTop: 8 }}>
+                    <Space direction="vertical" style={{ width: "100%" }} size="middle">
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+                          {t("mcpConfig.uploadImage.fileHint")}
+                        </Text>
+                        <Upload
+                          fileList={uploadFileList}
+                          onChange={({ fileList }) => setUploadFileList(fileList)}
+                          beforeUpload={() => false} // Prevent auto upload
+                          accept=".tar"
+                          maxCount={1}
+                          disabled={actionsLocked}
+                        >
+                          <Button
+                            icon={<UploadIcon size={16} />}
+                            disabled={actionsLocked}
+                          >
+                            {t("mcpConfig.uploadImage.button.selectFile")}
+                          </Button>
+                        </Upload>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <Input
+                          placeholder={t("mcpConfig.uploadImage.portPlaceholder")}
+                          value={uploadPort || ""}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value === "") {
+                              setUploadPort(undefined);
+                              return;
+                            }
+                            const port = parseInt(value);
+                            if (!isNaN(port) && port >= 1 && port <= 65535) {
+                              setUploadPort(port);
+                            }
+                            // If invalid input, keep the previous valid value
+                          }}
+                          style={{ width: 150 }}
+                          disabled={actionsLocked}
+                        />
+                        <Input
+                          placeholder={t("mcpConfig.uploadImage.serviceNamePlaceholder")}
+                          value={uploadServiceName}
+                          onChange={(e) => setUploadServiceName(e.target.value)}
+                          style={{ flex: 1 }}
+                          disabled={actionsLocked}
+                        />
+                        <Button
+                          type="primary"
+                          onClick={handleUploadImage}
+                          loading={uploadingImage || updatingTools}
+                          icon={
+                            uploadingImage || updatingTools ? (
+                              <LoaderCircle className="animate-spin" size={16} />
+                            ) : (
+                              <Plus className="size-4" />
+                            )
+                          }
+                          disabled={actionsLocked}
+                        >
+                          {updatingTools
+                            ? t("mcpConfig.addContainer.button.updating")
+                            : t("mcpConfig.addContainer.button.add")}
+                        </Button>
+                      </div>
+                    </Space>
+                  </Card>
+                ),
+              }] : []),
+            ]}
+          />
 
           <Divider style={{ margin: "16px 0" }} />
 

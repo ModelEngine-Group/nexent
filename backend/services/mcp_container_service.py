@@ -42,10 +42,43 @@ class MCPContainerManager:
             )
             # Create container client from config
             self.client = create_container_client_from_config(config)
-            logger.info("MCPContainerManager initialized using SDK container module")
+            logger.info(
+                "MCPContainerManager initialized using SDK container module")
         except ContainerError as e:
             logger.error(f"Failed to initialize container manager: {e}")
             raise MCPContainerError(f"Cannot connect to Docker: {e}")
+
+    async def load_image_from_tar_file(self, tar_file_path: str) -> str:
+        """
+        Load Docker image from tar file
+
+        Args:
+            tar_file_path: Path to the tar file containing the Docker image
+
+        Returns:
+            Image name/tag that was loaded
+
+        Raises:
+            MCPContainerError: If image loading fails
+        """
+        try:
+            # Load image from tar file
+            with open(tar_file_path, 'rb') as tar_file:
+                images = self.client.client.images.load(tar_file.read())
+
+            if not images:
+                raise MCPContainerError("No images found in tar file")
+
+            # Get the first loaded image
+            loaded_image = images[0]
+            image_name = loaded_image.tags[0] if loaded_image.tags else str(
+                loaded_image.id)
+
+        except Exception as e:
+            logger.error(f"Failed to load image from tar file: {e}")
+            raise MCPContainerError(f"Failed to load image from tar file: {e}")
+        logger.info(f"Successfully loaded image: {image_name}")
+        return image_name
 
     async def start_mcp_container(
         self,
@@ -73,8 +106,6 @@ class MCPContainerManager:
             MCPContainerError: If container startup fails
         """
         try:
-            if not full_command:
-                raise MCPContainerError("full_command is required to start MCP container")
             result = await self.client.start_container(
                 service_name=service_name,
                 tenant_id=tenant_id,
@@ -87,7 +118,8 @@ class MCPContainerManager:
             # Map SDK response to existing interface (mcp_url instead of service_url)
             return {
                 "container_id": result["container_id"],
-                "mcp_url": result["service_url"],  # Map service_url to mcp_url for compatibility
+                # Map service_url to mcp_url for compatibility
+                "mcp_url": result["service_url"],
                 "host_port": result["host_port"],
                 "status": result["status"],
                 "container_name": result.get("container_name"),
@@ -98,6 +130,54 @@ class MCPContainerManager:
         except ContainerConnectionError as e:
             logger.error(f"MCP connection error: {e}")
             raise MCPConnectionError(f"MCP connection failed: {e}")
+
+    async def start_mcp_container_from_tar(
+        self,
+        tar_file_path: str,
+        service_name: str,
+        tenant_id: str,
+        user_id: str,
+        env_vars: Optional[Dict[str, str]] = None,
+        host_port: Optional[int] = None,
+        full_command: Optional[List[str]] = None,
+    ) -> Dict[str, str]:
+        """
+        Load image from tar file and start MCP container
+
+        Args:
+            tar_file_path: Path to the tar file containing the Docker image
+            service_name: Name of the MCP service
+            tenant_id: Tenant ID for isolation
+            user_id: User ID for isolation
+            env_vars: Optional environment variables
+            host_port: Optional host port to bind
+            full_command: Optional command to run in container
+
+        Returns:
+            Dictionary with container_id, mcp_url, host_port, and status
+
+        Raises:
+            MCPContainerError: If container startup fails
+        """
+        try:
+            # Load image from tar file
+            image_name = await self.load_image_from_tar_file(tar_file_path)
+
+            # Start container with the loaded image
+            return await self.start_mcp_container(
+                service_name=service_name,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                env_vars=env_vars,
+                host_port=host_port,
+                image=image_name,
+                full_command=full_command,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to start MCP container from tar file: {e}")
+            raise MCPContainerError(
+                f"Failed to start container from tar file: {e}")
 
     async def stop_mcp_container(self, container_id: str) -> bool:
         """
@@ -117,7 +197,7 @@ class MCPContainerManager:
             stop_result = await self.client.stop_container(container_id)
             if not stop_result:
                 return False
-            
+
             # Then remove the container
             remove_result = await self.client.remove_container(container_id)
             return remove_result

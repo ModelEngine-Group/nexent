@@ -83,14 +83,16 @@ class TestDockerContainerClientInit:
             mock_docker_class.return_value = mock_docker_client
             client = DockerContainerClient(mock_docker_config)
             assert client.client == mock_docker_client
-            mock_docker_class.assert_called_once_with(base_url="tcp://localhost:2375")
+            mock_docker_class.assert_called_once_with(
+                base_url="tcp://localhost:2375")
             mock_docker_client.ping.assert_called_once()
 
     def test_init_docker_connection_failure(self, mock_docker_config):
         """Test initialization failure when Docker connection fails"""
         with patch("nexent.container.docker_client.docker.DockerClient") as mock_docker_class:
             mock_docker_client = MagicMock()
-            mock_docker_client.ping.side_effect = DockerException("Connection failed")
+            mock_docker_client.ping.side_effect = DockerException(
+                "Connection failed")
             mock_docker_class.return_value = mock_docker_client
 
             with pytest.raises(ContainerError, match="Cannot connect to Docker"):
@@ -117,111 +119,118 @@ class TestIsRunningInDocker:
 
     def test_is_running_in_docker_with_dockerenv(self):
         """Test detection when /.dockerenv exists"""
+
         def mock_exists(self):
             if str(self) == str(Path("/.dockerenv")):
                 return True
             return False
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.dict(os.environ, {}, clear=True):
+                patch.dict(os.environ, {}, clear=True):
             result = DockerContainerClient._is_running_in_docker()
             assert result is True
 
     def test_is_running_in_docker_with_cgroup_docker(self):
         """Test detection when /proc/self/cgroup contains docker"""
+
         def mock_exists(self):
             if str(self) == str(Path("/.dockerenv")):
                 return False
             if str(self) == str(Path("/proc/self/cgroup")):
                 return True
             return False
-        
+
         def mock_read_text(self):
             if str(self) == str(Path("/proc/self/cgroup")):
                 return "1:name=systemd:/docker/12345"
             return ""
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.object(Path, "read_text", mock_read_text), \
-             patch.dict(os.environ, {}, clear=True):
+                patch.object(Path, "read_text", mock_read_text), \
+                patch.dict(os.environ, {}, clear=True):
             result = DockerContainerClient._is_running_in_docker()
             assert result is True
 
     def test_is_running_in_docker_with_cgroup_containerd(self):
         """Test detection when /proc/self/cgroup contains containerd"""
+
         def mock_exists(self):
             if str(self) == str(Path("/.dockerenv")):
                 return False
             if str(self) == str(Path("/proc/self/cgroup")):
                 return True
             return False
-        
+
         def mock_read_text(self):
             if str(self) == str(Path("/proc/self/cgroup")):
                 return "1:name=systemd:/containerd/12345"
             return ""
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.object(Path, "read_text", mock_read_text), \
-             patch.dict(os.environ, {}, clear=True):
+                patch.object(Path, "read_text", mock_read_text), \
+                patch.dict(os.environ, {}, clear=True):
             result = DockerContainerClient._is_running_in_docker()
             assert result is True
 
     def test_is_running_in_docker_ignores_env_var(self):
         """Test detection ignores container environment variable (SDK must not read env)"""
+
         def mock_exists(self):
             return False
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.dict(os.environ, {"container": "docker"}):
+                patch.dict(os.environ, {"container": "docker"}):
             result = DockerContainerClient._is_running_in_docker()
             assert result is False
 
     def test_is_running_in_docker_not_in_docker(self):
         """Test detection when not in Docker"""
+
         def mock_exists(self):
             return False
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.dict(os.environ, {}, clear=True):
+                patch.dict(os.environ, {}, clear=True):
             result = DockerContainerClient._is_running_in_docker()
             assert result is False
 
     def test_is_running_in_docker_cgroup_read_exception(self):
         """Test detection when cgroup read raises exception"""
+
         def mock_exists(self):
             if str(self) == str(Path("/.dockerenv")):
                 return False
             if str(self) == str(Path("/proc/self/cgroup")):
                 return True
             return False
-        
+
         def mock_read_text(self):
             raise IOError("Permission denied")
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.object(Path, "read_text", mock_read_text), \
-             patch.dict(os.environ, {}, clear=True):
+                patch.object(Path, "read_text", mock_read_text), \
+                patch.dict(os.environ, {}, clear=True):
             result = DockerContainerClient._is_running_in_docker()
             assert result is False
 
     def test_is_running_in_docker_cgroup_no_docker(self):
         """Test detection when cgroup exists but doesn't contain docker"""
+
         def mock_exists(self):
             if str(self) == str(Path("/.dockerenv")):
                 return False
             if str(self) == str(Path("/proc/self/cgroup")):
                 return True
             return False
-        
+
         def mock_read_text(self):
             if str(self) == str(Path("/proc/self/cgroup")):
                 return "1:name=systemd:/user/12345"
             return ""
-        
+
         with patch.object(Path, "exists", mock_exists), \
-             patch.object(Path, "read_text", mock_read_text), \
-             patch.dict(os.environ, {}, clear=True):
+                patch.object(Path, "read_text", mock_read_text), \
+                patch.dict(os.environ, {}, clear=True):
             result = DockerContainerClient._is_running_in_docker()
             assert result is False
 
@@ -265,7 +274,8 @@ class TestFindFreePort:
             mock_socket.connect_ex.return_value = 1  # Port is free
             mock_socket_class.return_value = mock_socket
 
-            port = docker_container_client.find_free_port(start_port=5020, max_attempts=10)
+            port = docker_container_client.find_free_port(
+                start_port=5020, max_attempts=10)
             assert port == 5020
 
     def test_find_free_port_second_attempt(self, docker_container_client):
@@ -278,7 +288,8 @@ class TestFindFreePort:
             mock_socket.connect_ex.side_effect = [0, 1]
             mock_socket_class.return_value = mock_socket
 
-            port = docker_container_client.find_free_port(start_port=5020, max_attempts=10)
+            port = docker_container_client.find_free_port(
+                start_port=5020, max_attempts=10)
             assert port == 5021
 
     def test_find_free_port_no_available_port(self, docker_container_client):
@@ -291,7 +302,8 @@ class TestFindFreePort:
             mock_socket_class.return_value = mock_socket
 
             with pytest.raises(ContainerError, match="No available port found"):
-                docker_container_client.find_free_port(start_port=5020, max_attempts=5)
+                docker_container_client.find_free_port(
+                    start_port=5020, max_attempts=5)
 
     def test_find_free_port_custom_start_port(self, docker_container_client):
         """Test finding free port with custom start port"""
@@ -302,7 +314,8 @@ class TestFindFreePort:
             mock_socket.connect_ex.return_value = 1
             mock_socket_class.return_value = mock_socket
 
-            port = docker_container_client.find_free_port(start_port=9000, max_attempts=10)
+            port = docker_container_client.find_free_port(
+                start_port=9000, max_attempts=10)
             assert port == 9000
 
 
@@ -316,12 +329,14 @@ class TestGenerateContainerName:
 
     def test_generate_container_name_basic(self, docker_container_client):
         """Test basic container name generation"""
-        name = docker_container_client._generate_container_name("test-service", "tenant123", "user12345")
+        name = docker_container_client._generate_container_name(
+            "test-service", "tenant123", "user12345")
         assert name == "mcp-test-service-tenant12-user1234"
 
     def test_generate_container_name_with_special_chars(self, docker_container_client):
         """Test container name generation with special characters"""
-        name = docker_container_client._generate_container_name("test@service#123", "tenant123", "user12345")
+        name = docker_container_client._generate_container_name(
+            "test@service#123", "tenant123", "user12345")
         assert name == "mcp-test-service-123-tenant12-user1234"
         assert "@" not in name
         assert "#" not in name
@@ -329,13 +344,15 @@ class TestGenerateContainerName:
     def test_generate_container_name_long_user_id(self, docker_container_client):
         """Test container name generation with long user ID"""
         long_user_id = "a" * 20
-        name = docker_container_client._generate_container_name("test-service", "tenant123", long_user_id)
+        name = docker_container_client._generate_container_name(
+            "test-service", "tenant123", long_user_id)
         # Should only use first 8 characters of tenant_id and user_id
         assert name == f"mcp-test-service-tenant12-{long_user_id[:8]}"
 
     def test_generate_container_name_short_user_id(self, docker_container_client):
         """Test container name generation with short user ID"""
-        name = docker_container_client._generate_container_name("test-service", "tenant123", "user")
+        name = docker_container_client._generate_container_name(
+            "test-service", "tenant123", "user")
         assert name == "mcp-test-service-tenant12-user"
 
 
@@ -380,9 +397,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -396,7 +413,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_not_found(self, docker_container_client):
         """Test starting container when no existing container exists"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -404,9 +422,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -419,7 +437,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_existing_check_error(self, docker_container_client):
         """Test starting container when checking existing container raises error"""
-        docker_container_client.client.containers.get.side_effect = Exception("Connection error")
+        docker_container_client.client.containers.get.side_effect = Exception(
+            "Connection error")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -427,9 +446,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -442,7 +461,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_find_port_failure(self, docker_container_client):
         """Test starting container when finding free port fails"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         with patch.object(DockerContainerClient, "find_free_port", side_effect=ContainerError("No ports available")):
             with pytest.raises(ContainerError, match="No ports available"):
@@ -456,7 +476,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_with_env_vars(self, docker_container_client):
         """Test starting container with environment variables"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -464,9 +485,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             env_vars = {"CUSTOM_VAR": "value", "ANOTHER_VAR": "another_value"}
             await docker_container_client.start_container(
                 service_name="test-service",
@@ -487,7 +508,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_npx_command(self, docker_container_client):
         """Test starting container with npx full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -495,9 +517,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -513,7 +535,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_node_command(self, docker_container_client):
         """Test starting container with node full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -521,9 +544,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -538,7 +561,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_python_command(self, docker_container_client):
         """Test starting container with python full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -546,9 +570,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -564,7 +588,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_generic_command(self, docker_container_client):
         """Test starting container with generic full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -572,9 +597,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -589,8 +614,10 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_api_error(self, docker_container_client):
         """Test starting container when Docker API error occurs"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
-        docker_container_client.client.containers.run.side_effect = APIError("API error")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+        docker_container_client.client.containers.run.side_effect = APIError(
+            "API error")
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020):
             with pytest.raises(ContainerError, match="Container startup failed"):
@@ -604,8 +631,10 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_generic_exception(self, docker_container_client):
         """Test starting container when generic exception occurs"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
-        docker_container_client.client.containers.run.side_effect = Exception("Unexpected error")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+        docker_container_client.client.containers.run.side_effect = Exception(
+            "Unexpected error")
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020):
             with pytest.raises(ContainerError, match="Container startup failed"):
@@ -619,7 +648,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_health_check_failure_container_stopped(self, docker_container_client):
         """Test starting container when health check fails and container stopped"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -628,10 +658,10 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", 
-                         side_effect=ContainerConnectionError("Service not ready")), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready",
+                             side_effect=ContainerConnectionError("Service not ready")), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(ContainerError, match="stopped unexpectedly"):
                 await docker_container_client.start_container(
                     service_name="test-service",
@@ -643,7 +673,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_health_check_failure_container_not_found(self, docker_container_client):
         """Test starting container when health check fails and container not found"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -652,10 +683,10 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", 
-                         side_effect=ContainerConnectionError("Service not ready")), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready",
+                             side_effect=ContainerConnectionError("Service not ready")), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(ContainerError, match="not found after start"):
                 await docker_container_client.start_container(
                     service_name="test-service",
@@ -667,7 +698,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_health_check_failure_but_running(self, docker_container_client):
         """Test starting container when health check fails but container is running"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -676,10 +708,10 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", 
-                         side_effect=ContainerConnectionError("Service not ready")), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready",
+                             side_effect=ContainerConnectionError("Service not ready")), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             # Should not raise error, just log warning
             result = await docker_container_client.start_container(
                 service_name="test-service",
@@ -707,9 +739,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -723,7 +755,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_npm_command(self, docker_container_client):
         """Test starting container with npm full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -731,9 +764,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -748,7 +781,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_python3_command(self, docker_container_client):
         """Test starting container with python3 full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -756,9 +790,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -774,7 +808,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_bash_command(self, docker_container_client):
         """Test starting container with bash full_command"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -782,9 +817,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -816,9 +851,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -848,9 +883,9 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -899,7 +934,7 @@ class TestStartContainer:
         }
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -913,22 +948,10 @@ class TestStartContainer:
             assert result["host_port"] == "5025"
 
     @pytest.mark.asyncio
-    async def test_start_container_empty_full_command(self, docker_container_client):
-        """Test starting container with empty full_command raises error (line 272-273)"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
-
-        with pytest.raises(ContainerError, match="full_command is required to start container"):
-            await docker_container_client.start_container(
-                service_name="test-service",
-                tenant_id="tenant123",
-                user_id="user12345",
-                full_command=[],  # Empty command
-            )
-
-    @pytest.mark.asyncio
-    async def test_start_container_with_custom_image(self, docker_container_client):
-        """Test starting container with custom image parameter (line 276-277)"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+    async def test_start_container_with_none_full_command(self, docker_container_client):
+        """Test starting container with None full_command uses default CMD/ENTRYPOINT"""
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -937,9 +960,69 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=None,  # No command, use image default
+            )
+
+            assert result["status"] == "started"
+            # Check that containers.run was called without command parameter
+            call_args = docker_container_client.client.containers.run.call_args
+            assert call_args is not None
+            assert "command" not in call_args.kwargs or call_args.kwargs.get(
+                "command") is None
+
+    @pytest.mark.asyncio
+    async def test_start_container_with_empty_full_command(self, docker_container_client):
+        """Test starting container with empty full_command list uses default CMD/ENTRYPOINT"""
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await docker_container_client.start_container(
+                service_name="test-service",
+                tenant_id="tenant123",
+                user_id="user12345",
+                full_command=[],  # Empty command list, should use default
+            )
+
+            assert result["status"] == "started"
+            # Check that containers.run was called without command parameter
+            call_args = docker_container_client.client.containers.run.call_args
+            assert call_args is not None
+            assert "command" not in call_args.kwargs or call_args.kwargs.get(
+                "command") is None
+
+    @pytest.mark.asyncio
+    async def test_start_container_with_custom_image(self, docker_container_client):
+        """Test starting container with custom image parameter (line 276-277)"""
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        new_container.status = "running"
+        new_container.reload.return_value = None
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -955,7 +1038,8 @@ class TestStartContainer:
     @pytest.mark.asyncio
     async def test_start_container_with_host_port_provided(self, docker_container_client):
         """Test starting container when host_port is provided (line 252 - skip find_free_port)"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -964,10 +1048,10 @@ class TestStartContainer:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port") as mock_find_port, \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock), \
+                patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
             await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -1007,6 +1091,7 @@ class TestWaitForServiceReady:
         mock_client = MagicMock()
         # First two attempts fail, third succeeds
         call_count = 0
+
         def is_connected():
             nonlocal call_count
             call_count += 1
@@ -1016,7 +1101,7 @@ class TestWaitForServiceReady:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("nexent.container.docker_client.Client", return_value=mock_client), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch("asyncio.sleep", new_callable=AsyncMock):
             await docker_container_client._wait_for_service_ready("http://localhost:5020/mcp", max_retries=5, retry_delay=0.1)
 
     @pytest.mark.asyncio
@@ -1028,7 +1113,7 @@ class TestWaitForServiceReady:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("nexent.container.docker_client.Client", return_value=mock_client), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(ContainerConnectionError, match="Service not ready after"):
                 await docker_container_client._wait_for_service_ready("http://localhost:5020/mcp", max_retries=3, retry_delay=0.1)
 
@@ -1036,11 +1121,12 @@ class TestWaitForServiceReady:
     async def test_wait_for_service_ready_exception(self, docker_container_client):
         """Test waiting for service ready when exception occurs"""
         mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(side_effect=Exception("Connection error"))
+        mock_client.__aenter__ = AsyncMock(
+            side_effect=Exception("Connection error"))
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("nexent.container.docker_client.Client", return_value=mock_client), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(ContainerConnectionError):
                 await docker_container_client._wait_for_service_ready("http://localhost:5020/mcp", max_retries=3, retry_delay=0.1)
 
@@ -1050,6 +1136,7 @@ class TestWaitForServiceReady:
         mock_client = MagicMock()
         # Simulate multiple failures before success to test loop
         call_count = 0
+
         def is_connected():
             nonlocal call_count
             call_count += 1
@@ -1059,9 +1146,9 @@ class TestWaitForServiceReady:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("nexent.container.docker_client.Client", return_value=mock_client), \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await docker_container_client._wait_for_service_ready("http://localhost:5020/mcp", max_retries=10, retry_delay=0.01)
-            
+
             # Should have slept 4 times (before 5th attempt succeeds)
             assert mock_sleep.call_count == 4
 
@@ -1089,7 +1176,8 @@ class TestStopContainer:
     @pytest.mark.asyncio
     async def test_stop_container_not_found(self, docker_container_client):
         """Test stopping container that doesn't exist"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         result = await docker_container_client.stop_container("non-existent-container")
 
@@ -1136,7 +1224,8 @@ class TestRemoveContainer:
     @pytest.mark.asyncio
     async def test_remove_container_not_found(self, docker_container_client):
         """Test removing container that doesn't exist"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         result = await docker_container_client.remove_container("non-existent-container")
 
@@ -1171,7 +1260,8 @@ class TestListContainers:
 
     def test_list_containers_no_filters(self, docker_container_client, mock_container):
         """Test listing containers without filters"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = docker_container_client.list_containers()
@@ -1184,44 +1274,53 @@ class TestListContainers:
 
     def test_list_containers_with_tenant_filter(self, docker_container_client, mock_container):
         """Test listing containers with tenant filter"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             # tenant_id should match first 8 chars of user_id in container name
-            result = docker_container_client.list_containers(tenant_id="user1234")
+            result = docker_container_client.list_containers(
+                tenant_id="user1234")
 
             assert len(result) == 1
 
     def test_list_containers_with_tenant_filter_no_match(self, docker_container_client, mock_container):
         """Test listing containers with tenant filter that doesn't match"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
-            result = docker_container_client.list_containers(tenant_id="different")
+            result = docker_container_client.list_containers(
+                tenant_id="different")
 
             assert len(result) == 0
 
     def test_list_containers_with_service_filter(self, docker_container_client, mock_container):
         """Test listing containers with service filter"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
-            result = docker_container_client.list_containers(service_name="test-service")
+            result = docker_container_client.list_containers(
+                service_name="test-service")
 
             assert len(result) == 1
 
     def test_list_containers_with_service_filter_no_match(self, docker_container_client, mock_container):
         """Test listing containers with service filter that doesn't match"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
-            result = docker_container_client.list_containers(service_name="other-service")
+            result = docker_container_client.list_containers(
+                service_name="other-service")
 
             assert len(result) == 0
 
     def test_list_containers_with_both_filters(self, docker_container_client, mock_container):
         """Test listing containers with both tenant and service filters"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = docker_container_client.list_containers(
@@ -1242,7 +1341,8 @@ class TestListContainers:
                 "Ports": {}
             }
         }
-        docker_container_client.client.containers.list.return_value = [container]
+        docker_container_client.client.containers.list.return_value = [
+            container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = docker_container_client.list_containers()
@@ -1264,7 +1364,8 @@ class TestListContainers:
                 }
             }
         }
-        docker_container_client.client.containers.list.return_value = [container]
+        docker_container_client.client.containers.list.return_value = [
+            container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             result = docker_container_client.list_containers()
@@ -1286,10 +1387,11 @@ class TestListContainers:
                 }
             }
         }
-        docker_container_client.client.containers.list.return_value = [container]
+        docker_container_client.client.containers.list.return_value = [
+            container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+                patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
             result = docker_container_client.list_containers()
 
             assert len(result) == 1
@@ -1300,7 +1402,8 @@ class TestListContainers:
 
     def test_list_containers_exception(self, docker_container_client):
         """Test listing containers when exception occurs"""
-        docker_container_client.client.containers.list.side_effect = Exception("Connection error")
+        docker_container_client.client.containers.list.side_effect = Exception(
+            "Connection error")
 
         result = docker_container_client.list_containers()
 
@@ -1308,14 +1411,17 @@ class TestListContainers:
 
     def test_list_containers_service_filter_special_chars(self, docker_container_client, mock_container):
         """Test listing containers with service filter containing special characters"""
-        docker_container_client.client.containers.list.return_value = [mock_container]
+        docker_container_client.client.containers.list.return_value = [
+            mock_container]
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
             # Service name with special chars should be sanitized
-            result = docker_container_client.list_containers(service_name="test@service#123")
+            result = docker_container_client.list_containers(
+                service_name="test@service#123")
 
             # Should match because sanitized name is "test-service-123"
-            assert len(result) == 0  # Actually will not match because container name is "mcp-test-service-tenant12-user1234"
+            # Actually will not match because container name is "mcp-test-service-tenant12-user1234"
+            assert len(result) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1331,25 +1437,31 @@ class TestGetContainerLogs:
         mock_container.logs.return_value = b"Log line 1\nLog line 2\nLog line 3"
         docker_container_client.client.containers.get.return_value = mock_container
 
-        logs = docker_container_client.get_container_logs("test-container-id", tail=100)
+        logs = docker_container_client.get_container_logs(
+            "test-container-id", tail=100)
 
         assert logs == "Log line 1\nLog line 2\nLog line 3"
-        mock_container.logs.assert_called_once_with(tail=100, stdout=True, stderr=True)
+        mock_container.logs.assert_called_once_with(
+            tail=100, stdout=True, stderr=True)
 
     def test_get_container_logs_custom_tail(self, docker_container_client, mock_container):
         """Test getting container logs with custom tail"""
         mock_container.logs.return_value = b"Log line 1\nLog line 2"
         docker_container_client.client.containers.get.return_value = mock_container
 
-        logs = docker_container_client.get_container_logs("test-container-id", tail=50)
+        logs = docker_container_client.get_container_logs(
+            "test-container-id", tail=50)
 
-        mock_container.logs.assert_called_once_with(tail=50, stdout=True, stderr=True)
+        mock_container.logs.assert_called_once_with(
+            tail=50, stdout=True, stderr=True)
 
     def test_get_container_logs_not_found(self, docker_container_client):
         """Test getting logs for non-existent container"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
-        logs = docker_container_client.get_container_logs("non-existent-container")
+        logs = docker_container_client.get_container_logs(
+            "non-existent-container")
 
         assert logs == ""
 
@@ -1366,7 +1478,8 @@ class TestGetContainerLogs:
 
     def test_get_container_logs_exception(self, docker_container_client):
         """Test getting container logs when exception occurs"""
-        docker_container_client.client.containers.get.side_effect = Exception("Connection error")
+        docker_container_client.client.containers.get.side_effect = Exception(
+            "Connection error")
 
         logs = docker_container_client.get_container_logs("test-container-id")
 
@@ -1385,7 +1498,8 @@ class TestGetContainerStatus:
         """Test getting container status successfully"""
         docker_container_client.client.containers.get.return_value = mock_container
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
-            result = docker_container_client.get_container_status("test-container-id")
+            result = docker_container_client.get_container_status(
+                "test-container-id")
 
             assert result is not None
             assert result["container_id"] == "test-container-id"
@@ -1397,9 +1511,11 @@ class TestGetContainerStatus:
 
     def test_get_container_status_not_found(self, docker_container_client):
         """Test getting status for non-existent container"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
-        result = docker_container_client.get_container_status("non-existent-container")
+        result = docker_container_client.get_container_status(
+            "non-existent-container")
 
         assert result is None
 
@@ -1419,7 +1535,8 @@ class TestGetContainerStatus:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
-            result = docker_container_client.get_container_status("test-container-id")
+            result = docker_container_client.get_container_status(
+                "test-container-id")
 
             assert result is not None
             assert result["host_port"] is None
@@ -1427,9 +1544,11 @@ class TestGetContainerStatus:
 
     def test_get_container_status_exception(self, docker_container_client):
         """Test getting container status when exception occurs"""
-        docker_container_client.client.containers.get.side_effect = Exception("Connection error")
+        docker_container_client.client.containers.get.side_effect = Exception(
+            "Connection error")
 
-        result = docker_container_client.get_container_status("test-container-id")
+        result = docker_container_client.get_container_status(
+            "test-container-id")
 
         assert result is None
 
@@ -1451,7 +1570,8 @@ class TestGetContainerStatus:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"):
-            result = docker_container_client.get_container_status("test-container-id")
+            result = docker_container_client.get_container_status(
+                "test-container-id")
 
             assert result is not None
             assert result["host_port"] is None
@@ -1475,8 +1595,9 @@ class TestGetContainerStatus:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_get_service_host", return_value="localhost"), \
-             patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
-            result = docker_container_client.get_container_status("test-container-id")
+                patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False):
+            result = docker_container_client.get_container_status(
+                "test-container-id")
 
             assert result is not None
             # Should not break on None or empty HostPort
@@ -1500,19 +1621,23 @@ class TestEnsureNetwork:
 
         docker_container_client._ensure_network("nexent_nexent")
 
-        docker_container_client.client.networks.get.assert_called_once_with("nexent_nexent")
+        docker_container_client.client.networks.get.assert_called_once_with(
+            "nexent_nexent")
         docker_container_client.client.networks.create.assert_not_called()
 
     def test_ensure_network_create_new(self, docker_container_client):
         """Test ensuring network when it doesn't exist"""
-        docker_container_client.client.networks.get.side_effect = NotFound("Network not found")
+        docker_container_client.client.networks.get.side_effect = NotFound(
+            "Network not found")
         mock_network = MagicMock()
         docker_container_client.client.networks.create.return_value = mock_network
 
         docker_container_client._ensure_network("nexent_nexent")
 
-        docker_container_client.client.networks.get.assert_called_once_with("nexent_nexent")
-        docker_container_client.client.networks.create.assert_called_once_with("nexent_nexent")
+        docker_container_client.client.networks.get.assert_called_once_with(
+            "nexent_nexent")
+        docker_container_client.client.networks.create.assert_called_once_with(
+            "nexent_nexent")
 
     def test_ensure_network_race_condition(self, docker_container_client):
         """Test ensuring network when race condition occurs (another process creates it)"""
@@ -1521,7 +1646,8 @@ class TestEnsureNetwork:
             NotFound("Network not found"),
             MagicMock()  # Second call succeeds
         ]
-        docker_container_client.client.networks.create.side_effect = APIError("Network already exists")
+        docker_container_client.client.networks.create.side_effect = APIError(
+            "Network already exists")
 
         docker_container_client._ensure_network("nexent_nexent")
 
@@ -1534,14 +1660,16 @@ class TestEnsureNetwork:
             NotFound("Network not found"),
             Exception("Get failed")
         ]
-        docker_container_client.client.networks.create.side_effect = APIError("Create failed")
+        docker_container_client.client.networks.create.side_effect = APIError(
+            "Create failed")
 
         with pytest.raises(ContainerError, match="Failed to create or get Docker network"):
             docker_container_client._ensure_network("nexent_nexent")
 
     def test_ensure_network_get_api_error(self, docker_container_client):
         """Test ensuring network when get raises APIError"""
-        docker_container_client.client.networks.get.side_effect = APIError("API error")
+        docker_container_client.client.networks.get.side_effect = APIError(
+            "API error")
 
         with pytest.raises(ContainerError, match="Failed to get Docker network"):
             docker_container_client._ensure_network("nexent_nexent")
@@ -1723,7 +1851,8 @@ class TestGetContainerServicePort:
         container = MagicMock()
         container.attrs = {
             "Config": {
-                "Env": [123, "PORT=5020", None, {"key": "value"}]  # Mixed types
+                # Mixed types
+                "Env": [123, "PORT=5020", None, {"key": "value"}]
             },
             "NetworkSettings": {
                 "Ports": {}
@@ -1746,7 +1875,8 @@ class TestStartContainerInDocker:
     @pytest.mark.asyncio
     async def test_start_container_in_docker_uses_port_env(self, docker_container_client):
         """Test starting container in Docker mode uses PORT env variable"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -1763,9 +1893,9 @@ class TestStartContainerInDocker:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -1776,7 +1906,8 @@ class TestStartContainerInDocker:
             assert result["status"] == "started"
             # Should not publish ports when running in Docker
             call_args = docker_container_client.client.containers.run.call_args
-            assert "ports" not in call_args.kwargs or call_args.kwargs.get("ports") is None
+            assert "ports" not in call_args.kwargs or call_args.kwargs.get(
+                "ports") is None
             # Should use container name as host
             assert "test-service-user1234" in result["service_url"]
 
@@ -1795,7 +1926,7 @@ class TestStartContainerInDocker:
         }
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -1822,7 +1953,7 @@ class TestStartContainerInDocker:
         }
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -1837,7 +1968,8 @@ class TestStartContainerInDocker:
     @pytest.mark.asyncio
     async def test_start_container_in_docker_default_port(self, docker_container_client):
         """Test starting container in Docker mode uses default port 5020"""
-        docker_container_client.client.containers.get.side_effect = NotFound("Container not found")
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
 
         new_container = MagicMock()
         new_container.id = "new-container-id"
@@ -1846,9 +1978,9 @@ class TestStartContainerInDocker:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             result = await docker_container_client.start_container(
                 service_name="test-service",
                 tenant_id="tenant123",
@@ -1860,7 +1992,8 @@ class TestStartContainerInDocker:
             # Should use default port 5020 when running in Docker
             call_args = docker_container_client.client.containers.run.call_args
             assert call_args.kwargs["environment"]["PORT"] == "5020"
-            assert "ports" not in call_args.kwargs or call_args.kwargs.get("ports") is None
+            assert "ports" not in call_args.kwargs or call_args.kwargs.get(
+                "ports") is None
 
     @pytest.mark.asyncio
     async def test_start_container_in_docker_existing_no_port(self, docker_container_client, mock_container):
@@ -1883,9 +2016,9 @@ class TestStartContainerInDocker:
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
-             patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="test-service-user1234"), \
+                patch.object(DockerContainerClient, "_wait_for_service_ready", new_callable=AsyncMock), \
+                patch("asyncio.sleep", new_callable=AsyncMock):
             # Should create new container since existing one has no port info
             result = await docker_container_client.start_container(
                 service_name="test-service",
@@ -1920,10 +2053,11 @@ class TestListContainersInDocker:
                 "Ports": {}  # No published ports in Docker mode
             }
         }
-        docker_container_client.client.containers.list.return_value = [container]
+        docker_container_client.client.containers.list.return_value = [
+            container]
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
             result = docker_container_client.list_containers()
 
             assert len(result) == 1
@@ -1944,10 +2078,11 @@ class TestListContainersInDocker:
                 "Ports": {}
             }
         }
-        docker_container_client.client.containers.list.return_value = [container]
+        docker_container_client.client.containers.list.return_value = [
+            container]
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
+                patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
             result = docker_container_client.list_containers()
 
             assert len(result) == 1
@@ -1982,8 +2117,9 @@ class TestGetContainerStatusInDocker:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
-            result = docker_container_client.get_container_status("test-container-id")
+                patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
+            result = docker_container_client.get_container_status(
+                "test-container-id")
 
             assert result is not None
             assert result["host_port"] == "5020"
@@ -2008,10 +2144,10 @@ class TestGetContainerStatusInDocker:
         docker_container_client.client.containers.get.return_value = container
 
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=True), \
-             patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
-            result = docker_container_client.get_container_status("test-container-id")
+                patch.object(DockerContainerClient, "_get_service_host", return_value="mcp-test-service-tenant12-user1234"):
+            result = docker_container_client.get_container_status(
+                "test-container-id")
 
             assert result is not None
             assert result["host_port"] is None
             assert result["service_url"] is None
-

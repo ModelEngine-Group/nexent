@@ -16,15 +16,24 @@ storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
+      return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+      lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
+# Enable upload image feature for tests
+patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
+
+# Patch container service dependencies to avoid Docker connections
+patch('services.mcp_container_service.create_container_client_from_config').start()
+patch('services.mcp_container_service.DockerContainerConfig').start()
+
 # Import exception classes
-from consts.exceptions import MCPConnectionError, MCPNameIllegal
+from consts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError
 
 # Import the modules we need
 import pytest
@@ -39,6 +48,7 @@ from fastapi import FastAPI
 import apps.remote_mcp_app as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
 remote_app.MCPNameIllegal = MCPNameIllegal
+remote_app.MCPContainerError = MCPContainerError
 
 app = FastAPI()
 app.include_router(router)
@@ -47,7 +57,7 @@ client = TestClient(app)
 
 class MockToolInfo:
     """Mock ToolInfo class for testing"""
-    
+
     def __init__(self, name, description, params=None):
         self.name = name
         self.description = description
@@ -95,7 +105,8 @@ class TestGetToolsFromRemoteMCP:
     @patch('apps.remote_mcp_app.get_tool_from_remote_mcp_server')
     def test_get_tools_connection_error(self, mock_get_tools):
         """Test MCP connection error when retrieving tool information"""
-        mock_get_tools.side_effect = MCPConnectionError("MCP connection failed")
+        mock_get_tools.side_effect = MCPConnectionError(
+            "MCP connection failed")
 
         response = client.post(
             "/mcp/tools",
@@ -196,7 +207,7 @@ class TestAddRemoteProxies:
     def test_add_remote_proxy_database_error(self, mock_add_server, mock_get_user_id):
         """Test database error - should be handled as general exception"""
         from sqlalchemy.exc import SQLAlchemyError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_add_server.side_effect = SQLAlchemyError("Database error")
 
@@ -247,7 +258,7 @@ class TestDeleteRemoteProxies:
     def test_delete_remote_proxy_database_error(self, mock_delete_server, mock_get_user_id):
         """Test database error during deletion - should be handled as general exception"""
         from sqlalchemy.exc import SQLAlchemyError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_delete_server.side_effect = SQLAlchemyError("Database error")
 
@@ -347,7 +358,8 @@ class TestCheckMCPHealth:
     def test_check_mcp_health_connection_error(self, mock_health_check, mock_get_user_id):
         """Test MCP connection error during health check"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_health_check.side_effect = MCPConnectionError("MCP connection failed")
+        mock_health_check.side_effect = MCPConnectionError(
+            "MCP connection failed")
 
         response = client.get(
             "/mcp/healthcheck",
@@ -370,7 +382,7 @@ class TestCheckMCPHealth:
     def test_check_mcp_health_database_error(self, mock_health_check, mock_get_user_id):
         """Test database error during health check - should be handled as general exception"""
         from sqlalchemy.exc import SQLAlchemyError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_health_check.side_effect = SQLAlchemyError("Database error")
 
@@ -505,10 +517,11 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_success(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_success(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test successful addition of MCP server from config"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         # Mock container manager
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
@@ -519,7 +532,7 @@ class TestAddMCPFromConfig:
             "status": "started",
             "container_name": "test-service-user1234"
         })
-        
+
         mock_add_server.return_value = None
 
         response = client.post(
@@ -547,10 +560,11 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_multiple_servers(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_multiple_servers(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test adding multiple MCP servers from config"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         mock_container_manager.start_mcp_container = AsyncMock(side_effect=[
@@ -569,7 +583,7 @@ class TestAddMCPFromConfig:
                 "container_name": "service2-user1234"
             }
         ])
-        
+
         mock_add_server.return_value = None
 
         response = client.post(
@@ -598,10 +612,11 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_missing_command(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_missing_command(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with missing command"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
 
@@ -624,10 +639,11 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_empty_command(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_empty_command(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with empty command string (covers line 189-191)"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
 
@@ -652,10 +668,11 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_missing_port(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_missing_port(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with missing port"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
 
@@ -676,25 +693,17 @@ class TestAddMCPFromConfig:
         data = response.json()
         assert "port is required" in data["detail"]
 
+    @patch('apps.remote_mcp_app.check_mcp_name_exists')
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_name_exists(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    def test_add_mcp_from_config_name_exists(self, mock_add_server, mock_container_manager_class, mock_get_user_id, mock_check_name):
         """Test adding MCP server when name already exists"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+        mock_check_name.return_value = True  # Name already exists
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container = AsyncMock(return_value={
-            "container_id": "container-123",
-            "mcp_url": "http://localhost:5020/mcp",
-            "host_port": "5020",
-            "status": "started",
-            "container_name": "test-service-user1234"
-        })
-        mock_container_manager.stop_mcp_container = AsyncMock(return_value=True)
-        
-        mock_add_server.side_effect = MCPNameIllegal("MCP name already exists")
 
         response = client.post(
             "/mcp/add-from-config",
@@ -714,28 +723,20 @@ class TestAddMCPFromConfig:
         data = response.json()
         assert "All MCP servers failed" in data["detail"]
         assert "MCP name already exists" in data["detail"]
-        mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+        # Container should not be started when name already exists
+        mock_container_manager.start_mcp_container.assert_not_called()
 
+    @patch('apps.remote_mcp_app.check_mcp_name_exists')
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_name_exists_stop_fails(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
-        """Test adding MCP server when name exists and stopping container fails (covers line 236)"""
+    def test_add_mcp_from_config_name_exists_early_check(self, mock_add_server, mock_container_manager_class, mock_get_user_id, mock_check_name):
+        """Test adding MCP server when name exists (checked before starting container)"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+        mock_check_name.return_value = True  # Name already exists
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container = AsyncMock(return_value={
-            "container_id": "container-123",
-            "mcp_url": "http://localhost:5020/mcp",
-            "host_port": "5020",
-            "status": "started",
-            "container_name": "test-service-user1234"
-        })
-        # stop_mcp_container raises exception, should be silently caught
-        mock_container_manager.stop_mcp_container = AsyncMock(side_effect=Exception("Stop failed"))
-        
-        mock_add_server.side_effect = MCPNameIllegal("MCP name already exists")
 
         response = client.post(
             "/mcp/add-from-config",
@@ -755,20 +756,22 @@ class TestAddMCPFromConfig:
         data = response.json()
         assert "All MCP servers failed" in data["detail"]
         assert "MCP name already exists" in data["detail"]
-        # Verify stop was attempted even though it failed
-        mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+        # Container should not be started when name already exists
+        mock_container_manager.start_mcp_container.assert_not_called()
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_container_error(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_container_error(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when container startup fails"""
         from consts.exceptions import MCPContainerError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container = AsyncMock(side_effect=MCPContainerError("Container failed"))
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container failed"))
 
         response = client.post(
             "/mcp/add-from-config",
@@ -791,14 +794,16 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when unexpected exception occurs in loop (covers line 253-255)"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         # Raise a non-MCPContainerError exception to trigger the general Exception handler
-        mock_container_manager.start_mcp_container = AsyncMock(side_effect=ValueError("Unexpected error"))
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=ValueError("Unexpected error"))
 
         response = client.post(
             "/mcp/add-from-config",
@@ -821,15 +826,17 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_all_fail(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_all_fail(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP servers when all fail"""
         from consts.exceptions import MCPContainerError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.start_mcp_container = AsyncMock(side_effect=MCPContainerError("Container failed"))
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container failed"))
 
         response = client.post(
             "/mcp/add-from-config",
@@ -851,12 +858,14 @@ class TestAddMCPFromConfig:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_add_mcp_from_config_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_docker_unavailable(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server when Docker is unavailable"""
         from consts.exceptions import MCPContainerError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+        mock_container_manager_class.side_effect = MCPContainerError(
+            "Docker unavailable")
 
         response = client.post(
             "/mcp/add-from-config",
@@ -879,10 +888,11 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
-    def test_add_mcp_from_config_with_custom_image(self, mock_add_server, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_with_custom_image(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_id):
         """Test adding MCP server with custom Docker image"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         mock_container_manager.start_mcp_container = AsyncMock(return_value={
@@ -892,7 +902,7 @@ class TestAddMCPFromConfig:
             "status": "started",
             "container_name": "test-service-user1234"
         })
-        
+
         mock_add_server.return_value = None
 
         response = client.post(
@@ -917,7 +927,8 @@ class TestAddMCPFromConfig:
         assert call_kwargs["image"] == "custom-image:latest"
 
     @patch('apps.remote_mcp_app.get_current_user_id')
-    def test_add_mcp_from_config_outer_exception(self, mock_get_user_id):
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_outer_exception(self, mock_check_name, mock_get_user_id):
         """Test adding MCP server when exception occurs outside loop (covers line 275-277)"""
         # Make get_current_user_id raise an exception to trigger outer exception handler
         mock_get_user_id.side_effect = RuntimeError("Failed to get user ID")
@@ -955,10 +966,11 @@ class TestStopMCPContainer:
     def test_stop_mcp_container_success(self, mock_container_manager_class, mock_delete_mcp, mock_get_user_id):
         """Test successful stopping of MCP container"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.stop_mcp_container = AsyncMock(return_value=True)
+        mock_container_manager.stop_mcp_container = AsyncMock(
+            return_value=True)
 
         response = client.delete(
             "/mcp/container/container-123",
@@ -969,7 +981,8 @@ class TestStopMCPContainer:
         data = response.json()
         assert data["status"] == "success"
         assert "stopped successfully" in data["message"]
-        mock_container_manager.stop_mcp_container.assert_called_once_with("container-123")
+        mock_container_manager.stop_mcp_container.assert_called_once_with(
+            "container-123")
         mock_delete_mcp.assert_called_once_with(
             tenant_id="tenant456",
             user_id="user123",
@@ -981,10 +994,11 @@ class TestStopMCPContainer:
     def test_stop_mcp_container_not_found(self, mock_container_manager_class, mock_get_user_id):
         """Test stopping non-existent container"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.stop_mcp_container = AsyncMock(return_value=False)
+        mock_container_manager.stop_mcp_container = AsyncMock(
+            return_value=False)
 
         response = client.delete(
             "/mcp/container/non-existent",
@@ -1001,9 +1015,10 @@ class TestStopMCPContainer:
     def test_stop_mcp_container_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
         """Test stopping container when Docker is unavailable"""
         from consts.exceptions import MCPContainerError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+        mock_container_manager_class.side_effect = MCPContainerError(
+            "Docker unavailable")
 
         response = client.delete(
             "/mcp/container/container-123",
@@ -1019,10 +1034,11 @@ class TestStopMCPContainer:
     def test_stop_mcp_container_exception(self, mock_container_manager_class, mock_get_user_id):
         """Test stopping container when exception occurs"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.stop_mcp_container = AsyncMock(side_effect=Exception("Unexpected error"))
+        mock_container_manager.stop_mcp_container = AsyncMock(
+            side_effect=Exception("Unexpected error"))
 
         response = client.delete(
             "/mcp/container/container-123",
@@ -1044,10 +1060,11 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_success(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_success(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test successful listing of MCP containers"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         mock_container_manager.list_mcp_containers.return_value = [
@@ -1076,14 +1093,16 @@ class TestListMCPContainers:
         data = response.json()
         assert data["status"] == "success"
         assert len(data["containers"]) == 2
-        mock_container_manager.list_mcp_containers.assert_called_once_with(tenant_id="tenant456")
+        mock_container_manager.list_mcp_containers.assert_called_once_with(
+            tenant_id="tenant456")
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_empty(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_empty(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when none exist"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         mock_container_manager.list_mcp_containers.return_value = []
@@ -1100,12 +1119,14 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_docker_unavailable(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when Docker is unavailable"""
         from consts.exceptions import MCPContainerError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+        mock_container_manager_class.side_effect = MCPContainerError(
+            "Docker unavailable")
 
         response = client.get(
             "/mcp/containers",
@@ -1118,13 +1139,15 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_list_mcp_containers_exception(self, mock_container_manager_class, mock_get_user_id):
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', side_effect=Exception("Unexpected error"))
+    def test_list_mcp_containers_exception(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when exception occurs"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.list_mcp_containers.side_effect = Exception("Unexpected error")
+        mock_container_manager.list_mcp_containers.side_effect = Exception(
+            "Unexpected error")
 
         response = client.get(
             "/mcp/containers",
@@ -1134,6 +1157,228 @@ class TestListMCPContainers:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
         assert "Failed to list containers" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Test upload_mcp_image
+# ---------------------------------------------------------------------------
+
+
+class TestUploadMCPImageValidation:
+    """Test endpoint for uploading MCP image and starting container"""
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_success(self, mock_get_user_id, mock_upload_service):
+        """Test successful upload and start of MCP image"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "test-service",
+            "mcp_url": "http://localhost:5020/mcp",
+            "container_id": "container-123",
+            "container_name": "test-image-user1234",
+            "host_port": "5020"
+        }
+
+        # Use actual file content
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={
+                "port": 5020,
+                "service_name": "test-service",
+                "env_vars": '{"NODE_ENV": "production"}'
+            },
+            files={"file": ("test-image.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert "MCP container started successfully" in data["message"]
+        assert data["service_name"] == "test-service"
+        assert data["mcp_url"] == "http://localhost:5020/mcp"
+        assert data["container_id"] == "container-123"
+
+        mock_get_user_id.assert_called_once_with("Bearer test_token")
+        mock_upload_service.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            file_content=file_content,
+            filename="test-image.tar",
+            port=5020,
+            service_name="test-service",
+            env_vars='{"NODE_ENV": "production"}'
+        )
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_invalid_file_type(self, mock_get_user_id):
+        """Test upload with invalid file type"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.txt", "content", "text/plain")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Only .tar files are allowed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_file_too_large(self, mock_get_user_id):
+        """Test upload with file exceeding size limit"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Create a large file content (over 1GB) - use smaller size for test
+        large_content = b"x" * (1024 * 1024 * 1024 + 1)
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("large.tar", large_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "File size exceeds 1GB limit" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_auto_service_name(self, mock_get_user_id, mock_upload_service):
+        """Test upload with auto-generated service name"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "my-image",  # Auto-generated from filename
+            "mcp_url": "http://localhost:5020/mcp",
+            "container_id": "container-123",
+            "container_name": "my-image-user1234",
+            "host_port": "5020"
+        }
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},  # No service_name provided
+            files={"file": ("my-image.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        # Should use filename without extension
+        assert data["service_name"] == "my-image"
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_upload_mcp_image_invalid_env_vars_json(self, mock_check_name, mock_container_manager_class, mock_get_user_id):
+        """Test upload with invalid JSON in env_vars"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={
+                "port": 5020,
+                "env_vars": "invalid json {"
+            },
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Invalid environment variables format" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_name_conflict(self, mock_get_user_id, mock_upload_service):
+        """Test upload when MCP service name already exists"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPNameIllegal for name conflict
+        mock_upload_service.side_effect = MCPNameIllegal("MCP service name already exists")
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020, "service_name": "existing-service"},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.CONFLICT
+        data = response.json()
+        assert "MCP service name already exists" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_container_error(self, mock_get_user_id, mock_upload_service):
+        """Test upload when container startup fails"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError
+        mock_upload_service.side_effect = MCPContainerError("Container failed")
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Container failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_docker_unavailable(self, mock_get_user_id, mock_upload_service):
+        """Test upload when Docker service is unavailable"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError for Docker unavailable
+        mock_upload_service.side_effect = MCPContainerError("Docker unavailable")
+
+        file_content = b"fake tar content"
+
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker unavailable" in data["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -1149,7 +1394,7 @@ class TestGetContainerLogs:
     def test_get_container_logs_success(self, mock_container_manager_class, mock_get_user_id):
         """Test successful retrieval of container logs"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         mock_container_manager.get_container_logs.return_value = "Log line 1\nLog line 2\nLog line 3"
@@ -1163,14 +1408,15 @@ class TestGetContainerLogs:
         data = response.json()
         assert data["status"] == "success"
         assert "Log line 1" in data["logs"]
-        mock_container_manager.get_container_logs.assert_called_once_with("container-123", tail=100)
+        mock_container_manager.get_container_logs.assert_called_once_with(
+            "container-123", tail=100)
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     def test_get_container_logs_custom_tail(self, mock_container_manager_class, mock_get_user_id):
         """Test getting container logs with custom tail"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
         mock_container_manager.get_container_logs.return_value = "Log line 1"
@@ -1181,16 +1427,18 @@ class TestGetContainerLogs:
         )
 
         assert response.status_code == HTTPStatus.OK
-        mock_container_manager.get_container_logs.assert_called_once_with("container-123", tail=50)
+        mock_container_manager.get_container_logs.assert_called_once_with(
+            "container-123", tail=50)
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     def test_get_container_logs_docker_unavailable(self, mock_container_manager_class, mock_get_user_id):
         """Test getting logs when Docker is unavailable"""
         from consts.exceptions import MCPContainerError
-        
+
         mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_container_manager_class.side_effect = MCPContainerError("Docker unavailable")
+        mock_container_manager_class.side_effect = MCPContainerError(
+            "Docker unavailable")
 
         response = client.get(
             "/mcp/container/container-123/logs",
@@ -1206,10 +1454,11 @@ class TestGetContainerLogs:
     def test_get_container_logs_exception(self, mock_container_manager_class, mock_get_user_id):
         """Test getting logs when exception occurs"""
         mock_get_user_id.return_value = ("user123", "tenant456")
-        
+
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.get_container_logs.side_effect = Exception("Unexpected error")
+        mock_container_manager.get_container_logs.side_effect = Exception(
+            "Unexpected error")
 
         response = client.get(
             "/mcp/container/container-123/logs",
@@ -1219,6 +1468,262 @@ class TestGetContainerLogs:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
         assert "Failed to get container logs" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Test upload_and_start_mcp_image endpoint with service layer
+# ---------------------------------------------------------------------------
+
+
+class TestUploadMCPImageWithServiceLayer:
+    """Test upload_mcp_image endpoint using the new service layer approach"""
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_success_service_layer(self, mock_get_user_id, mock_upload_service):
+        """Test successful upload using service layer"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "test-service",
+            "mcp_url": "http://localhost:5020/mcp",
+            "container_id": "container-123",
+            "container_name": "test-service-user1234",
+            "host_port": "5020"
+        }
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={
+                "port": 5020,
+                "service_name": "test-service",
+                "env_vars": '{"NODE_ENV": "production"}'
+            },
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["service_name"] == "test-service"
+        assert data["mcp_url"] == "http://localhost:5020/mcp"
+
+        # Verify service layer was called correctly
+        mock_upload_service.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            file_content=file_content,
+            filename="test.tar",
+            port=5020,
+            service_name="test-service",
+            env_vars='{"NODE_ENV": "production"}'
+        )
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_auto_service_name(self, mock_get_user_id, mock_upload_service):
+        """Test upload with auto-generated service name"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        mock_upload_service.return_value = {
+            "message": "MCP container started successfully from uploaded image",
+            "status": "success",
+            "service_name": "my-image",  # Auto-generated from filename
+            "mcp_url": "http://localhost:5020/mcp",
+            "container_id": "container-123"
+        }
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},  # No service_name provided
+            files={"file": ("my-image.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["service_name"] == "my-image"
+
+        # Verify service was called with None for service_name
+        mock_upload_service.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            file_content=file_content,
+            filename="my-image.tar",
+            port=5020,
+            service_name=None,
+            env_vars=None
+        )
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_validation_error_from_service(self, mock_get_user_id, mock_upload_service):
+        """Test validation error from service layer"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises ValueError for invalid file type
+        mock_upload_service.side_effect = ValueError("Only .tar files are allowed")
+
+        file_content = b"fake content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.txt", file_content, "text/plain")},  # Wrong file type
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Only .tar files are allowed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_name_conflict(self, mock_get_user_id, mock_upload_service):
+        """Test MCP service name conflict"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPNameIllegal for name conflict
+        mock_upload_service.side_effect = MCPNameIllegal("MCP service name already exists")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020, "service_name": "existing-service"},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.CONFLICT
+        data = response.json()
+        assert "MCP service name already exists" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_container_error(self, mock_get_user_id, mock_upload_service):
+        """Test container startup error"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError
+        mock_upload_service.side_effect = MCPContainerError("Container failed")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Container failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_docker_unavailable(self, mock_get_user_id, mock_upload_service):
+        """Test Docker service unavailable"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises MCPContainerError for Docker unavailable
+        mock_upload_service.side_effect = MCPContainerError("Docker unavailable")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "Docker unavailable" in data["detail"]
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_general_exception(self, mock_get_user_id, mock_upload_service):
+        """Test general exception handling"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Service layer raises unexpected exception
+        mock_upload_service.side_effect = Exception("Unexpected error")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 5020},
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to upload and start MCP container" in data["detail"]
+        assert "Unexpected error" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Additional test cases for upload_mcp_image validation
+# ---------------------------------------------------------------------------
+
+
+class TestUploadMCPImageValidationAdditional:
+    """Additional test cases for upload_mcp_image endpoint validation"""
+
+    def test_upload_mcp_image_invalid_port_range_fastapi_validation(self):
+        """Test upload with invalid port range using FastAPI native validation"""
+        file_content = b"fake tar content"
+
+        # Test port <= 0 - should fail FastAPI validation
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 0},  # Invalid port
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY  # FastAPI validation error
+        data = response.json()
+        assert "port" in str(data["detail"]).lower()
+
+        # Test port > 65535 - should fail FastAPI validation
+        response = client.post(
+            "/mcp/upload-image",
+            data={"port": 70000},  # Invalid port
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY  # FastAPI validation error
+        data = response.json()
+        assert "port" in str(data["detail"]).lower()
+
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    def test_upload_mcp_image_env_vars_validation_in_service(self, mock_get_user_id, mock_upload_service):
+        """Test environment variables validation now handled in service layer"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+
+        # Test with array instead of object - now handled in service layer
+        mock_upload_service.side_effect = ValueError("Invalid environment variables format: Environment variables must be a JSON object")
+
+        file_content = b"fake tar content"
+        response = client.post(
+            "/mcp/upload-image",
+            data={
+                "port": 5020,
+                "env_vars": '["VAR1", "VAR2"]'  # Array instead of object
+            },
+            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            headers={"Authorization": "Bearer test_token"}
+        )
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "Invalid environment variables format" in data["detail"]
+        assert "Environment variables must be a JSON object" in data["detail"]
 
 
 if __name__ == "__main__":

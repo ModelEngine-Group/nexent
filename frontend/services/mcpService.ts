@@ -31,27 +31,28 @@ export const getMcpServerList = async () => {
     });
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
-      
+
       // Convert backend field names to frontend expected format
       const formattedData = (data.remote_mcp_server_list || []).map((server: any) => {
         return {
           service_name: server.remote_mcp_server_name,
           mcp_url: server.remote_mcp_server,
-          status: server.status || false 
+          status: server.status || false
         };
       });
-      
+
       return {
         success: true,
         data: formattedData,
+        enable_upload_image: data.enable_upload_image || false,
         message: ''
       };
     } else {
       // Handle specific error information based on HTTP status code
       let errorMessage = data.message || t('mcpService.message.getServerListFailed');
-      
+
       switch (response.status) {
         case 500:
           errorMessage = t('mcpService.message.getRemoteProxyFailed');
@@ -62,7 +63,7 @@ export const getMcpServerList = async () => {
         default:
           errorMessage = data.message || t('mcpService.message.getServerListFailed');
       }
-      
+
       return {
         success: false,
         data: [],
@@ -93,7 +94,7 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string) => {
     );
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -103,7 +104,7 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string) => {
     } else {
       // Handle specific error status codes and error information
       let errorMessage = data.message || t('mcpService.message.addServerFailed');
-      
+
       if (response.status === 409) {
         errorMessage = t('mcpService.message.nameAlreadyUsed');
       } else if (response.status === 503) {
@@ -111,7 +112,7 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string) => {
       } else {
           errorMessage = t('mcpService.message.addProxyFailed');
       }
-      
+
       return {
         success: false,
         data: null,
@@ -142,7 +143,7 @@ export const deleteMcpServer = async (mcpUrl: string, serviceName: string) => {
     );
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -152,7 +153,7 @@ export const deleteMcpServer = async (mcpUrl: string, serviceName: string) => {
     } else {
       // Handle specific error information based on HTTP status code
       let errorMessage = data.message || t('mcpService.message.deleteServerFailed');
-      
+
       switch (response.status) {
         case 500:
           errorMessage = t('mcpService.message.deleteProxyFailed');
@@ -160,7 +161,7 @@ export const deleteMcpServer = async (mcpUrl: string, serviceName: string) => {
         default:
           errorMessage = data.message || t('mcpService.message.deleteServerFailed');
       }
-      
+
       return {
         success: false,
         data: null,
@@ -191,7 +192,7 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
     );
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -201,7 +202,7 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
     } else {
       // Handle specific error information based on HTTP status code
       let errorMessage = data.message || t('mcpService.message.getToolsFailed');
-      
+
       switch (response.status) {
         case 500:
           errorMessage = t('mcpService.message.getToolsFromServerFailed');
@@ -212,7 +213,7 @@ export const getMcpTools = async (serviceName: string, mcpUrl: string) => {
         default:
           errorMessage = data.message || t('mcpService.message.getToolsFailed');
       }
-      
+
       return {
         success: false,
         data: [],
@@ -239,7 +240,7 @@ export const updateToolList = async () => {
     });
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -249,7 +250,7 @@ export const updateToolList = async () => {
     } else {
       // Handle specific error information based on HTTP status code
       let errorMessage = data.message || t('mcpService.message.updateToolListFailed');
-      
+
       switch (response.status) {
         case 500:
           errorMessage = t('mcpService.message.updateToolListBadRequest');
@@ -260,7 +261,7 @@ export const updateToolList = async () => {
         default:
           errorMessage = data.message || t('mcpService.message.updateToolListFailed');
       }
-      
+
       return {
         success: false,
         data: null,
@@ -290,7 +291,7 @@ export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string) 
     );
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -330,7 +331,7 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
     });
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -339,13 +340,13 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
       };
     } else {
       let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
-      
+
       if (response.status === 400) {
         errorMessage = data.detail || t('mcpService.message.invalidConfig');
       } else if (response.status === 503) {
         errorMessage = t('mcpService.message.dockerServiceUnavailable');
       }
-      
+
       return {
         success: false,
         data: null,
@@ -372,7 +373,7 @@ export const getMcpContainers = async () => {
     });
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -381,11 +382,11 @@ export const getMcpContainers = async () => {
       };
     } else {
       let errorMessage = data.detail || data.message || t('mcpService.message.getContainersFailed');
-      
+
       if (response.status === 503) {
         errorMessage = t('mcpService.message.dockerServiceUnavailable');
       }
-      
+
       return {
         success: false,
         data: [],
@@ -415,7 +416,7 @@ export const getMcpContainerLogs = async (containerId: string, tail: number = 10
     );
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -424,13 +425,13 @@ export const getMcpContainerLogs = async (containerId: string, tail: number = 10
       };
     } else {
       let errorMessage = data.detail || data.message || t('mcpService.message.getContainerLogsFailed');
-      
+
       if (response.status === 404) {
         errorMessage = t('mcpService.message.containerNotFound');
       } else if (response.status === 503) {
         errorMessage = t('mcpService.message.dockerServiceUnavailable');
       }
-      
+
       return {
         success: false,
         data: '',
@@ -448,6 +449,69 @@ export const getMcpContainerLogs = async (containerId: string, tail: number = 10
 };
 
 /**
+ * Upload MCP image and start container
+ */
+export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('port', port.toString());
+    if (serviceName) {
+      formData.append('service_name', serviceName);
+    }
+    if (envVars) {
+      formData.append('env_vars', envVars);
+    }
+
+    const authHeaders = getAuthHeaders();
+    // Remove Content-Type header for FormData - let browser set it with boundary
+    const headers = { ...authHeaders };
+    delete headers['Content-Type'];
+
+    const response = await fetch(API_ENDPOINTS.mcp.uploadImage, {
+      method: 'POST',
+      headers: headers,
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t('mcpService.message.uploadImageSuccess')
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.uploadImageFailed');
+
+      if (response.status === 400) {
+        errorMessage = data.detail || t('mcpService.message.invalidUploadParameters');
+      } else if (response.status === 409) {
+        errorMessage = t('mcpService.message.serviceNameAlreadyExists');
+      } else if (response.status === 413) {
+        errorMessage = t('mcpService.message.fileTooLarge');
+      } else if (response.status === 503) {
+        errorMessage = t('mcpService.message.dockerServiceUnavailable');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.uploadImageFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
  * Delete MCP container
  */
 export const deleteMcpContainer = async (containerId: string) => {
@@ -458,7 +522,7 @@ export const deleteMcpContainer = async (containerId: string) => {
     });
 
     const data = await response.json();
-    
+
     if (response.ok && data.status === 'success') {
       return {
         success: true,
@@ -467,13 +531,13 @@ export const deleteMcpContainer = async (containerId: string) => {
       };
     } else {
       let errorMessage = data.detail || data.message || t('mcpService.message.deleteContainerFailed');
-      
+
       if (response.status === 404) {
         errorMessage = t('mcpService.message.containerNotFound');
       } else if (response.status === 503) {
         errorMessage = t('mcpService.message.dockerServiceUnavailable');
       }
-      
+
       return {
         success: false,
         data: null,

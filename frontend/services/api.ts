@@ -163,6 +163,7 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
+    uploadImage: `${API_BASE_URL}/mcp/upload-image`,
     containers: `${API_BASE_URL}/mcp/containers`,
     containerLogs: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}/logs`,
     deleteContainer: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}`,
