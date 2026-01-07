@@ -65,14 +65,12 @@ export default function ToolManagement({
           value: instanceValue !== undefined ? instanceValue : param.value,
         };
       }) || [];
-      console.log(selectedTool.id, selectedTool.name, mergedParams)
       setToolParams(mergedParams);
       
       const hasEmptyRequiredParams = mergedParams.some(
         (param: ToolParam) => param.required &&
         (param.value === undefined || param.value === '' || param.value === null)
       );
-      console.log(isClickSetting, hasEmptyRequiredParams)
       if (isClickSetting || hasEmptyRequiredParams) {
         // Open modal for configuration with pre-calculated params
         setIsToolModalOpen(true);
@@ -154,13 +152,11 @@ export default function ToolManagement({
   };
 
   const handleToolSettingsClick = (tool: Tool) => {
-    console.log("fuck")
     setIsClickSetting(true)
     setSelectedTool(tool); 
   };
 
   const handleToolSelect = (toolId: number) => {
-    console.log("select")
     // Find the tool from available tools
     const tool = availableTools.find((t) => parseInt(t.id) === toolId);
     if (!tool) return;
