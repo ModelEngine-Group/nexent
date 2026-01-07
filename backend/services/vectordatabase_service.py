@@ -23,8 +23,9 @@ from fastapi.responses import StreamingResponse
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
+from consts.const import DATAMATE_BASE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -106,6 +107,9 @@ def get_vector_db_core(
             verify_certs=False,
             ssl_show_warn=False,
         )
+
+    if db_type == VectorDatabaseType.DATAMATE:
+        return DataMateCore(base_url=DATAMATE_BASE_URL)
 
     raise ValueError(f"Unsupported vector database type: {db_type}")
 
@@ -507,6 +511,8 @@ class ElasticSearchService:
         filtered_indices_list = []
         model_name_is_none_list = []
         for record in db_record:
+            if record['knowledge_sources'] != 'elasticsearch':
+                continue
             # async PG database to sync ES, remove the data that is not in ES
             if record["index_name"] not in all_indices_list:
                 delete_knowledge_record(
