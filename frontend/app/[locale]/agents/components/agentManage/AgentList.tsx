@@ -287,7 +287,8 @@ export default function AgentList({
                 key: "info",
                 render: (_: any, agent: Agent) => {
                   const isAvailable = agent.is_available !== false;
-                  const displayName = agent.display_name || agent.name;
+                  const displayName = agent.display_name || "";
+                  const name = agent.name || "";
                   const isSelected =
                     currentAgentId !== null &&
                     String(currentAgentId) === String(agent.id);
@@ -311,7 +312,25 @@ export default function AgentList({
                           }}
                         >
                           {!isAvailable && (
-                            <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0" />
+                            <Tooltip
+                              title={(() => {
+                                const reasons = agent.unavailable_reasons || [];
+                                if (reasons.includes('agent_not_found')) {
+                                  return t('subAgentPool.tooltip.unavailableAgent');
+                                } else if (reasons.includes('tool_unavailable')) {
+                                  return t('toolPool.tooltip.unavailableTool');
+                                } else if (reasons.includes('duplicate_name')) {
+                                  return t('agent.error.nameExists', { name });
+                                } else if (reasons.includes('duplicate_display_name')) {
+                                  return t('agent.error.displayNameExists', { displayName });
+                                } else if (reasons.includes('model_unavailable')) {
+                                  return t('agent.error.modelUnavailable');
+                                }
+                                return t('subAgentPool.tooltip.unavailableAgent'); // fallback
+                              })()}
+                            >
+                              <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />
+                            </Tooltip>
                           )}
                           {displayName && (
                             <span className="text-base leading-normal max-w-[220px] truncate break-all">
