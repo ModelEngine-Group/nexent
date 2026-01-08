@@ -406,8 +406,10 @@ export default function MarketContent() {
                         {/* Featured row per category (show only if there are featured items) */}
                         {featuredItems.length > 0 && (
                           <div className="mb-6 featured-area">
-                            <div className="flex items-center justify-between mb-4">
-                              <h2 className="text-2xl font-bold">{t("market.featuredTitle", "精选智能体")}</h2>
+                            <div className="flex items-center justify-between mb-5">
+                              <h2 className="text-2xl font-bold">
+                                {isZh ? t("market.featuredTitle", "精选智能体") : "Featured Agents"}
+                              </h2>
                               <div className="hidden md:flex items-center gap-2">
                                 <button
                                   aria-label="Prev featured"
@@ -440,7 +442,7 @@ export default function MarketContent() {
                             <div
                               id="featured-row"
                               ref={featuredRowRef}
-                              className="flex gap-4 overflow-x-auto no-scrollbar pb-2"
+                              className="flex gap-4 overflow-x-auto no-scrollbar pt-2 pb-2"
                             >
                               {featuredItems.map((agent, index) => (
                                 <div
@@ -460,9 +462,16 @@ export default function MarketContent() {
                           </div>
                         )}
 
+                        {/* Separator between featured and main list (only when both exist) */}
+                        {featuredItems.length > 0 && agents.length > 0 && (
+                          <div className="mt-4 mb-8">
+                            <div className="w-full h-[0.5px] bg-slate-200 dark:bg-slate-700 rounded" />
+                          </div>
+                        )}
+
                         {agents.length > 0 && (
                           <>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
+                            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
                               {agents.map((agent, index) => (
                                 <motion.div
                                   key={agent.id}

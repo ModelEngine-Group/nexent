@@ -209,6 +209,12 @@
   }
 }
 
+/* Reserve space at bottom of featured area so separator spacing stays consistent
+   whether native scrollbar is visible or not. Matches typical scrollbar height. */
+.featured-area {
+  padding-bottom: 0px;
+}
+
 /* Tool Pool Tabs scroll fix */
 .tool-pool-tabs .ant-tabs-content-holder {
   overflow: hidden;

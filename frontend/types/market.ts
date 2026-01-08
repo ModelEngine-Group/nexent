@@ -90,6 +90,8 @@ export interface MarketPagination {
 export interface MarketAgentListResponse {
   items: MarketAgentListItem[];
   pagination: MarketPagination;
+  // Optional featured items returned by the API when requested
+  featured_items?: MarketAgentListItem[];
 }
 
 export interface MarketAgentListParams {
@@ -98,5 +100,9 @@ export interface MarketAgentListParams {
   category?: string;
   tag?: string;
   search?: string;
+  // Request featured items in the response (optional)
+  include_featured?: boolean;
+  // Limit how many featured items to return; undefined means no limit
+  featured_limit?: number;
 }
 
