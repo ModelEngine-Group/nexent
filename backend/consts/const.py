@@ -287,4 +287,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 
 
 # APP Version
-APP_VERSION = "v1.7.9"
+APP_VERSION = "v1.7.9.1"
