@@ -191,7 +191,23 @@ def remove_disabled_useragent_id(user_id: str, ua_id: str) -> bool:
 	return _remove_multi_value(user_id, DISABLE_USERAGENT_ID_KEY, ua_id)
 
 
-def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int) -> MemoryContext:
+def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip_query: bool = False) -> MemoryContext:
+	if skip_query:
+		# When memory is forcibly disabled (e.g., debug mode), return minimum context without database queries
+		memory_user_config = MemoryUserConfig(
+			memory_switch=False,
+			agent_share_option="never",
+			disable_agent_ids=[],
+			disable_user_agent_ids=[],
+		)
+		return MemoryContext(
+			user_config=memory_user_config,
+			memory_config=dict(),
+			tenant_id=tenant_id,
+			user_id=user_id,
+			agent_id=str(agent_id),
+		)
+
 	memory_user_config = MemoryUserConfig(
 		memory_switch=get_memory_switch(user_id),
 		agent_share_option=get_agent_share(user_id).value,

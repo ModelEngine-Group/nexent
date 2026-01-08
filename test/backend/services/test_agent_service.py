@@ -2567,7 +2567,7 @@ async def test_prepare_agent_run(
     assert agent_run_info == mock_run_info
     assert memory_context == mock_memory_context
     mock_build_memory_context.assert_called_once_with(
-        "test_user", "test_tenant", 1)
+        "test_user", "test_tenant", 1, skip_query=False)
     mock_create_run_info.assert_called_once()
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
         123, mock_run_info, "test_user")
@@ -2647,10 +2647,13 @@ async def test_run_agent_stream(
     # Test debug mode
     mock_agent_request.is_debug = True
     mock_save_messages.reset_mock()
+    mock_build_mem_ctx.reset_mock()
 
     await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
 
     mock_save_messages.assert_not_called()
+    # In debug mode, build_memory_context is called with skip_query=True to avoid database queries
+    mock_build_mem_ctx.assert_called_once_with(None, None, 1, skip_query=True)
 
     # Memory switch should be True to trigger generate_stream_with_memory path
     mock_build_mem_ctx.return_value = MagicMock(
