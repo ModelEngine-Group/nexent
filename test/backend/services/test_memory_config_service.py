@@ -348,6 +348,61 @@ class TestMemoryConfigService(unittest.TestCase):
             self.assertEqual(ctx.memory_config, {"cfg": 1})
             m_build.assert_called_once_with(self.tenant_id)
 
+    def test_build_memory_context_skip_query(self):
+        """Test build_memory_context with skip_query=True"""
+        from backend.services.memory_config_service import build_memory_context
+
+        ctx = build_memory_context(self.user_id, self.tenant_id, self.agent_id, skip_query=True)
+
+        self.assertEqual(ctx.tenant_id, self.tenant_id)
+        self.assertEqual(ctx.user_id, self.user_id)
+        self.assertEqual(ctx.agent_id, str(self.agent_id))
+        self.assertEqual(ctx.memory_config, {})  # empty dict when query skipped
+        self.assertEqual(ctx.user_config.memory_switch, False)
+        self.assertEqual(ctx.user_config.agent_share_option, "never")  # Updated to "never"
+        self.assertEqual(ctx.user_config.disable_agent_ids, [])
+        self.assertEqual(ctx.user_config.disable_user_agent_ids, [])
+
+    def test_build_memory_context_skip_query_no_db_calls(self):
+        """Test that skip_query=True doesn't make any database calls"""
+        from backend.services.memory_config_service import build_memory_context
+
+        # Mock all the database functions to ensure they're not called
+        with patch("backend.services.memory_config_service.get_memory_switch") as mock_memory_switch, \
+             patch("backend.services.memory_config_service.get_agent_share") as mock_agent_share, \
+             patch("backend.services.memory_config_service.get_disabled_agent_ids") as mock_disabled_agents, \
+             patch("backend.services.memory_config_service.get_disabled_useragent_ids") as mock_disabled_user_agents, \
+             patch("backend.services.memory_config_service.build_memory_config") as mock_build_config:
+
+            ctx = build_memory_context(self.user_id, self.tenant_id, self.agent_id, skip_query=True)
+
+            # Verify no database functions were called
+            mock_memory_switch.assert_not_called()
+            mock_agent_share.assert_not_called()
+            mock_disabled_agents.assert_not_called()
+            mock_disabled_user_agents.assert_not_called()
+            mock_build_config.assert_not_called()
+
+            # Verify the context is still properly constructed
+            self.assertEqual(ctx.tenant_id, self.tenant_id)
+            self.assertEqual(ctx.user_id, self.user_id)
+            self.assertEqual(ctx.agent_id, str(self.agent_id))
+
+    def test_build_memory_context_default_behavior(self):
+        """Test build_memory_context default behavior (skip_query=False)"""
+        from backend.services.memory_config_service import build_memory_context
+
+        # Test that default parameter works as expected
+        ctx = build_memory_context(self.user_id, self.tenant_id, self.agent_id)
+
+        # Should have called database functions (covered by existing tests)
+        # Just verify the structure
+        self.assertEqual(ctx.tenant_id, self.tenant_id)
+        self.assertEqual(ctx.user_id, self.user_id)
+        self.assertEqual(ctx.agent_id, str(self.agent_id))
+        self.assertIsInstance(ctx.memory_config, dict)
+        self.assertIsNotNone(ctx.user_config)
+
 
 if __name__ == "__main__":
     unittest.main()
