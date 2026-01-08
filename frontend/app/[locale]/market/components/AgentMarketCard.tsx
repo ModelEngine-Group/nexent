@@ -43,15 +43,19 @@ export function AgentMarketCard({
     : "📦";
 
   const baseClasses =
-    "group h-full min-h-[320px] rounded-lg border transition-all duration-300 overflow-hidden flex flex-col cursor-pointer relative";
+    "group z-10 hover:z-0 h-full min-h-[320px] rounded-lg border transition-all duration-300 overflow-visible flex flex-col cursor-pointer relative";
   const defaultClasses =
     "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-lg";
   const featuredClasses =
-    "border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white";
+    "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-lg";
+
+  const unifiedHoverShadow =
+    "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)";
 
   return (
     <motion.div
-      whileHover={{ y: -4 }}
+      whileHover={{ y: -4, boxShadow: unifiedHoverShadow }}
+      transition={{ type: "spring", stiffness: 300, damping: 25 }}
       onClick={handleCardClick}
       className={`${baseClasses} ${variant === "featured" ? featuredClasses : defaultClasses}`}
     >
@@ -142,7 +146,7 @@ export function AgentMarketCard({
       <div className="absolute left-0 right-0 bottom-0 px-4 py-3 border-t border-slate-100 dark:border-slate-700 bg-transparent z-10">
         <button
           onClick={handleDownload}
-          className="w-full px-4 py-2 rounded-md bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2 group-hover:shadow-md z-10"
+          className="w-full px-4 py-2 rounded-md bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2"
         >
           <Download className="h-4 w-4" />
           {t("market.download", "Download")}
