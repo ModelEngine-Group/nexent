@@ -848,9 +848,9 @@ export const ModelConfigSection = forwardRef<
                 size="middle" 
                 onClick={handleSyncModels}
                 style={{ width: "100%" }}
-                icon={<RefreshCw size={16} />}
                 block
               >
+                <RefreshCw className="mr-1" size={16} />
                 <span style={{ marginLeft: 4 }}>
                   <span className="hidden xl:inline button-text-full">
                     {t("modelConfig.button.syncModelEngine")}
