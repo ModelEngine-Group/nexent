@@ -142,19 +142,18 @@ export default function MarketContent() {
         params.search = searchKeyword.trim();
       }
 
-      // Request featured items for this query (category/search). Backend will return relevant featured_items.
-      params.include_featured = true;
-      params.featured_limit = 6;
-
+      // Backend now returns paginated items including is_featured.
       const data = await marketService.fetchMarketAgentList(params);
-      const featured = data.featured_items || [];
-      const featuredIds = new Set(featured.map((f) => f.agent_id));
-      // Exclude featured agents from main items (de-duplicate)
-      const items = (data.items || []).filter((it) => !featuredIds.has(it.agent_id));
+      const allItems = data.items || [];
+      const featured = allItems.filter((a) => a.is_featured);
+      const items = allItems.filter((a) => !a.is_featured);
 
       setFeaturedItems(featured);
       setAgents(items);
-      setTotalAgents(data.pagination.total);
+      // Adjust total to represent non-featured items for pagination
+      const featuredCount = featured.length || 0;
+      const total = (data.pagination?.total || 0) - featuredCount;
+      setTotalAgents(total > 0 ? total : 0);
     } catch (error) {
       log.error("Failed to load market agents:", error);
 
