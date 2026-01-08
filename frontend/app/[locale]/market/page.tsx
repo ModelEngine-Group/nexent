@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { ShoppingBag, Search, RefreshCw } from "lucide-react";
@@ -36,6 +36,7 @@ export default function MarketContent() {
   // State management
   const [categories, setCategories] = useState<MarketCategory[]>([]);
   const [agents, setAgents] = useState<MarketAgentListItem[]>([]);
+  const [featuredItems, setFeaturedItems] = useState<MarketAgentListItem[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   const [currentCategory, setCurrentCategory] = useState<string>("all");
@@ -54,6 +55,7 @@ export default function MarketContent() {
   );
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
+
   // Install modal state
   const [installModalVisible, setInstallModalVisible] = useState(false);
   const [installAgent, setInstallAgent] = useState<MarketAgentDetail | null>(
@@ -65,6 +67,33 @@ export default function MarketContent() {
     loadCategories();
     loadAgents(); // Auto-refresh on page load
   }, []);
+
+  // Refs and state for featured card width calculation
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const featuredRowRef = useRef<HTMLDivElement | null>(null);
+  const [featuredCardWidth, setFeaturedCardWidth] = useState<number | null>(null);
+
+  // Calculate featured card width so it matches grid column width (accounting for gaps)
+  useEffect(() => {
+    const calc = () => {
+      const container = contentRef.current;
+      if (!container) return;
+      const containerWidth = container.clientWidth;
+      const w = window.innerWidth;
+      let columns = 4;
+      if (w < 768) columns = 1;
+      else if (w < 1024) columns = 2;
+      else if (w < 1280) columns = 3;
+      else columns = 4;
+      const gap = 16; // tailwind gap-4 == 16px
+      const totalGap = gap * (columns - 1);
+      const cardW = Math.floor((containerWidth - totalGap) / columns);
+      setFeaturedCardWidth(cardW);
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, [featuredItems]);
 
   // Load agents when category, page, or search changes (but not on initial mount)
   useEffect(() => {
@@ -113,8 +142,18 @@ export default function MarketContent() {
         params.search = searchKeyword.trim();
       }
 
+      // Request featured items for this query (category/search). Backend will return relevant featured_items.
+      params.include_featured = true;
+      params.featured_limit = 6;
+
       const data = await marketService.fetchMarketAgentList(params);
-      setAgents(data.items);
+      const featured = data.featured_items || [];
+      const featuredIds = new Set(featured.map((f) => f.agent_id));
+      // Exclude featured agents from main items (de-duplicate)
+      const items = (data.items || []).filter((it) => !featuredIds.has(it.agent_id));
+
+      setFeaturedItems(featured);
+      setAgents(items);
       setTotalAgents(data.pagination.total);
     } catch (error) {
       log.error("Failed to load market agents:", error);
@@ -255,7 +294,7 @@ export default function MarketContent() {
           className="w-full h-full overflow-auto"
         >
           <div className="w-full px-4 md:px-8 lg:px-16 py-8">
-            <div className="max-w-7xl mx-auto">
+            <div ref={contentRef} className="max-w-7xl mx-auto">
               {/* Page header */}
               <div className="flex items-center justify-between mb-6">
                 <motion.div
@@ -354,7 +393,7 @@ export default function MarketContent() {
                       <div className="flex justify-center py-16">
                         <Spin size="large" />
                       </div>
-                    ) : agents.length === 0 ? (
+                    ) : agents.length === 0 && featuredItems.length === 0 ? (
                       <Empty
                         description={t(
                           "market.noAgents",
@@ -364,44 +403,105 @@ export default function MarketContent() {
                       />
                     ) : (
                       <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
-                          {agents.map((agent, index) => (
-                            <motion.div
-                              key={agent.id}
-                              initial={{ opacity: 0, scale: 0.9 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              transition={{
-                                duration: 0.3,
-                                delay: 0.05 * index,
-                              }}
-                              className="h-full"
+                        {/* Featured row per category (show only if there are featured items) */}
+                        {featuredItems.length > 0 && (
+                          <div className="mb-6 featured-area">
+                            <div className="flex items-center justify-between mb-4">
+                              <h2 className="text-2xl font-bold">{t("market.featuredTitle", "精选智能体")}</h2>
+                              <div className="hidden md:flex items-center gap-2">
+                                <button
+                                  aria-label="Prev featured"
+                                  onClick={() => {
+                                    const el = document.getElementById("featured-row");
+                                    if (el) el.scrollBy({ left: -Math.floor(el.clientWidth * 0.9), behavior: "smooth" });
+                                  }}
+                                  className="px-2 py-1 hover:opacity-90"
+                                  style={{ background: "transparent" }}
+                                >
+                                  <svg className="w-6 h-6 text-slate-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                                    <path fillRule="evenodd" d="M12.707 14.707a1 1 0 01-1.414 0L7 10.414a1 1 0 010-1.414l4.293-4.293a1 1 0 111.414 1.414L9.414 10l3.293 3.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                                  </svg>
+                                </button>
+                                <button
+                                  aria-label="Next featured"
+                                  onClick={() => {
+                                    const el = document.getElementById("featured-row");
+                                    if (el) el.scrollBy({ left: Math.floor(el.clientWidth * 0.9), behavior: "smooth" });
+                                  }}
+                                  className="px-2 py-1 hover:opacity-90"
+                                  style={{ background: "transparent" }}
+                                >
+                                  <svg className="w-6 h-6 text-slate-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                                    <path fillRule="evenodd" d="M7.293 5.293a1 1 0 011.414 0L13 9.586a1 1 0 010 1.414L8.707 15.293a1 1 0 01-1.414-1.414L10.586 10 7.293 6.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                            <div
+                              id="featured-row"
+                              ref={featuredRowRef}
+                              className="flex gap-4 overflow-x-auto no-scrollbar pb-2"
                             >
-                              <AgentMarketCard
-                                agent={agent}
-                                onDownload={handleDownload}
-                                onViewDetails={handleViewDetails}
-                              />
-                            </motion.div>
-                          ))}
-                        </div>
-
-                        {/* Pagination */}
-                        {totalAgents > pageSize && (
-                          <div className="flex justify-center mt-8">
-                            <Pagination
-                              current={currentPage}
-                              total={totalAgents}
-                              pageSize={pageSize}
-                              onChange={handlePageChange}
-                              showSizeChanger={false}
-                              showTotal={(total) =>
-                                t("market.totalAgents", {
-                                  defaultValue: "Total {{total}} agents",
-                                  total,
-                                })
-                              }
-                            />
+                              {featuredItems.map((agent, index) => (
+                                <div
+                                  key={`featured-${agent.id}`}
+                                  className="flex-shrink-0 h-full"
+                                  style={featuredCardWidth ? { width: `${featuredCardWidth}px` } : undefined}
+                                >
+                                  <AgentMarketCard
+                                    agent={agent}
+                                    onDownload={handleDownload}
+                                    onViewDetails={handleViewDetails}
+                                    variant="featured"
+                                  />
+                                </div>
+                              ))}
+                            </div>
                           </div>
+                        )}
+
+                        {agents.length > 0 && (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
+                              {agents.map((agent, index) => (
+                                <motion.div
+                                  key={agent.id}
+                                  initial={{ opacity: 0, scale: 0.9 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{
+                                    duration: 0.3,
+                                    delay: 0.05 * index,
+                                  }}
+                                  className="h-full"
+                                >
+                                  <AgentMarketCard
+                                    agent={agent}
+                                    onDownload={handleDownload}
+                                    onViewDetails={handleViewDetails}
+                                  />
+                                </motion.div>
+                              ))}
+                            </div>
+
+                            {/* Pagination */}
+                            {totalAgents > pageSize && (
+                              <div className="flex justify-center mt-8">
+                                <Pagination
+                                  current={currentPage}
+                                  total={totalAgents}
+                                  pageSize={pageSize}
+                                  onChange={handlePageChange}
+                                  showSizeChanger={false}
+                                  showTotal={(total) =>
+                                    t("market.totalAgents", {
+                                      defaultValue: "Total {{total}} agents",
+                                      total,
+                                    })
+                                  }
+                                />
+                              </div>
+                            )}
+                          </>
                         )}
                       </>
                     )}
