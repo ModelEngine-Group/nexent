@@ -1,7 +1,11 @@
-'use client';
+"use client";
 
-import { GlobalConfig, AppConfig, ModelConfig } from '../types/modelConfig';
-import { APP_CONFIG_KEY, MODEL_CONFIG_KEY, defaultConfig } from '../const/modelConfig';
+import { GlobalConfig, AppConfig, ModelConfig } from "../types/modelConfig";
+import {
+  APP_CONFIG_KEY,
+  MODEL_CONFIG_KEY,
+  defaultConfig,
+} from "../const/modelConfig";
 import log from "@/lib/logger";
 
 class ConfigStoreClass {
@@ -18,7 +22,7 @@ class ConfigStoreClass {
     this.updateModelConfig = this.updateModelConfig.bind(this);
     this.clearConfig = this.clearConfig.bind(this);
     this.reloadFromStorage = this.reloadFromStorage.bind(this);
-    
+
     // Initialize config
     this.initializeConfig();
   }
@@ -34,7 +38,7 @@ class ConfigStoreClass {
     try {
       this.config = this.loadFromStorage();
     } catch (error) {
-      log.error('Failed to initialize config:', error);
+      log.error("Failed to initialize config:", error);
       this.config = JSON.parse(JSON.stringify(defaultConfig));
     }
   }
@@ -43,14 +47,18 @@ class ConfigStoreClass {
   private deepMerge<T>(target: T, source: Partial<T>): T {
     if (!source) return target;
     if (!target) return source as T;
-    
+
     const result = { ...target } as T;
-    
-    Object.keys(source).forEach(key => {
+
+    Object.keys(source).forEach((key) => {
       const targetValue = (target as any)[key];
       const sourceValue = (source as any)[key];
-      
-      if (sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)) {
+
+      if (
+        sourceValue &&
+        typeof sourceValue === "object" &&
+        !Array.isArray(sourceValue)
+      ) {
         // If target has no value for this key, use source value directly
         if (targetValue !== undefined && targetValue !== null) {
           (result as any)[key] = this.deepMerge(targetValue, sourceValue);
@@ -61,7 +69,7 @@ class ConfigStoreClass {
         (result as any)[key] = sourceValue;
       }
     });
-    
+
     return result;
   }
 
@@ -69,7 +77,7 @@ class ConfigStoreClass {
   private loadFromStorage(): GlobalConfig {
     try {
       // Check if we're in browser environment
-      if (typeof window === 'undefined') {
+      if (typeof window === "undefined") {
         return JSON.parse(JSON.stringify(defaultConfig));
       }
 
@@ -77,21 +85,31 @@ class ConfigStoreClass {
       const storedModelConfig = localStorage.getItem(MODEL_CONFIG_KEY);
 
       // Start with default configuration
-      let mergedConfig: GlobalConfig = JSON.parse(JSON.stringify(defaultConfig));
+      let mergedConfig: GlobalConfig = JSON.parse(
+        JSON.stringify(defaultConfig)
+      );
 
       // Check for old configuration format and migrate if found
-      const oldConfig = localStorage.getItem('config');
+      const oldConfig = localStorage.getItem("config");
       if (oldConfig) {
         try {
           const parsedOldConfig = JSON.parse(oldConfig);
           // Migrate old config to new format
-          if (parsedOldConfig.app) localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(parsedOldConfig.app));
-          if (parsedOldConfig.models) localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(parsedOldConfig.models));
-          
+          if (parsedOldConfig.app)
+            localStorage.setItem(
+              APP_CONFIG_KEY,
+              JSON.stringify(parsedOldConfig.app)
+            );
+          if (parsedOldConfig.models)
+            localStorage.setItem(
+              MODEL_CONFIG_KEY,
+              JSON.stringify(parsedOldConfig.models)
+            );
+
           // Remove old config
-          localStorage.removeItem('config');
+          localStorage.removeItem("config");
         } catch (error) {
-          log.error('Failed to migrate old config:', error);
+          log.error("Failed to migrate old config:", error);
         }
       }
 
@@ -100,7 +118,7 @@ class ConfigStoreClass {
         try {
           mergedConfig.app = JSON.parse(storedAppConfig);
         } catch (error) {
-          log.error('Failed to parse app config:', error);
+          log.error("Failed to parse app config:", error);
         }
       }
 
@@ -108,13 +126,13 @@ class ConfigStoreClass {
         try {
           mergedConfig.models = JSON.parse(storedModelConfig);
         } catch (error) {
-          log.error('Failed to parse model config:', error);
+          log.error("Failed to parse model config:", error);
         }
       }
 
       return mergedConfig;
     } catch (error) {
-      log.error('Failed to load config from storage:', error);
+      log.error("Failed to load config from storage:", error);
       return JSON.parse(JSON.stringify(defaultConfig));
     }
   }
@@ -122,12 +140,15 @@ class ConfigStoreClass {
   // Save configuration to storage
   private saveToStorage(): void {
     try {
-      if (typeof window === 'undefined' || !this.config) return;
-      
+      if (typeof window === "undefined" || !this.config) return;
+
       localStorage.setItem(APP_CONFIG_KEY, JSON.stringify(this.config.app));
-      localStorage.setItem(MODEL_CONFIG_KEY, JSON.stringify(this.config.models));
+      localStorage.setItem(
+        MODEL_CONFIG_KEY,
+        JSON.stringify(this.config.models)
+      );
     } catch (error) {
-      log.error('Failed to save config to storage:', error);
+      log.error("Failed to save config to storage:", error);
     }
   }
 
@@ -179,7 +200,7 @@ class ConfigStoreClass {
 
   // Clear all configuration
   clearConfig(): void {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       localStorage.removeItem(APP_CONFIG_KEY);
       localStorage.removeItem(MODEL_CONFIG_KEY);
     }
@@ -193,75 +214,81 @@ class ConfigStoreClass {
       ? {
           appName: backendConfig.app.name || "",
           appDescription: backendConfig.app.description || "",
-          iconType: (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
+          iconType:
+            (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
           customIconUrl: backendConfig.app.icon?.customUrl || null,
-          avatarUri: backendConfig.app.icon?.avatarUri || null
+          avatarUri: backendConfig.app.icon?.avatarUri || null,
         }
       : {
           appName: "",
           appDescription: "",
           iconType: "preset" as "preset" | "custom",
           customIconUrl: null,
-          avatarUri: null
+          avatarUri: null,
         };
 
     // Adapt models field
-    const models = backendConfig.models ? {
-      llm: {
-        modelName: backendConfig.models.llm?.name || "",
-        displayName: backendConfig.models.llm?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.llm?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.llm?.apiConfig?.modelUrl || ""
+    const models = backendConfig.models
+      ? {
+          llm: {
+            modelName: backendConfig.models.llm?.name || "",
+            displayName: backendConfig.models.llm?.displayName || "",
+            apiConfig: {
+              apiKey: backendConfig.models.llm?.apiConfig?.apiKey || "",
+              modelUrl: backendConfig.models.llm?.apiConfig?.modelUrl || "",
+            },
+          },
+          embedding: {
+            modelName: backendConfig.models.embedding?.name || "",
+            displayName: backendConfig.models.embedding?.displayName || "",
+            apiConfig: {
+              apiKey: backendConfig.models.embedding?.apiConfig?.apiKey || "",
+              modelUrl:
+                backendConfig.models.embedding?.apiConfig?.modelUrl || "",
+            },
+            dimension: backendConfig.models.embedding?.dimension || 0,
+          },
+          multiEmbedding: {
+            modelName: backendConfig.models.multiEmbedding?.name || "",
+            displayName: backendConfig.models.multiEmbedding?.displayName || "",
+            apiConfig: {
+              apiKey:
+                backendConfig.models.multiEmbedding?.apiConfig?.apiKey || "",
+              modelUrl:
+                backendConfig.models.multiEmbedding?.apiConfig?.modelUrl || "",
+            },
+            dimension: backendConfig.models.multiEmbedding?.dimension || 0,
+          },
+          rerank: {
+            modelName: backendConfig.models.rerank?.name || "",
+            displayName: backendConfig.models.rerank?.displayName || "",
+          },
+          vlm: {
+            modelName: backendConfig.models.vlm?.name || "",
+            displayName: backendConfig.models.vlm?.displayName || "",
+            apiConfig: {
+              apiKey: backendConfig.models.vlm?.apiConfig?.apiKey || "",
+              modelUrl: backendConfig.models.vlm?.apiConfig?.modelUrl || "",
+            },
+          },
+          stt: {
+            modelName: backendConfig.models.stt?.name || "",
+            displayName: backendConfig.models.stt?.displayName || "",
+            apiConfig: {
+              apiKey: backendConfig.models.stt?.apiConfig?.apiKey || "",
+              modelUrl: backendConfig.models.stt?.apiConfig?.modelUrl || "",
+            },
+          },
+          tts: {
+            modelName: backendConfig.models.tts?.name || "",
+            displayName: backendConfig.models.tts?.displayName || "",
+            apiConfig: {
+              apiKey: backendConfig.models.tts?.apiConfig?.apiKey || "",
+              modelUrl: backendConfig.models.tts?.apiConfig?.modelUrl || "",
+            },
+          },
         }
-      },
-      embedding: {
-        modelName: backendConfig.models.embedding?.name || "",
-        displayName: backendConfig.models.embedding?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.embedding?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.embedding?.apiConfig?.modelUrl || ""
-        },
-        dimension: backendConfig.models.embedding?.dimension || 0
-      },
-      multiEmbedding: {
-        modelName: backendConfig.models.multiEmbedding?.name || "",
-        displayName: backendConfig.models.multiEmbedding?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.multiEmbedding?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.multiEmbedding?.apiConfig?.modelUrl || ""
-        },
-        dimension: backendConfig.models.multiEmbedding?.dimension || 0
-      },
-      rerank: {
-        modelName: backendConfig.models.rerank?.name || "",
-        displayName: backendConfig.models.rerank?.displayName || ""
-      },
-      vlm: {
-        modelName: backendConfig.models.vlm?.name || "",
-        displayName: backendConfig.models.vlm?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.vlm?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.vlm?.apiConfig?.modelUrl || ""
-        }
-      },
-      stt: {
-        modelName: backendConfig.models.stt?.name || "",
-        displayName: backendConfig.models.stt?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.stt?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.stt?.apiConfig?.modelUrl || ""
-        }
-      },
-      tts: {
-        modelName: backendConfig.models.tts?.name || "",
-        displayName: backendConfig.models.tts?.displayName || "",
-        apiConfig: {
-          apiKey: backendConfig.models.tts?.apiConfig?.apiKey || "",
-          modelUrl: backendConfig.models.tts?.apiConfig?.modelUrl || ""
-        }
-      }
-    } : undefined;
+      : undefined;
 
     return {
       app,
@@ -272,10 +299,12 @@ class ConfigStoreClass {
   // New: Reload configuration from localStorage and trigger configChanged event
   reloadFromStorage(): void {
     this.config = this.loadFromStorage();
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('configChanged', {
-        detail: { config: this.config }
-      }));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("configChanged", {
+          detail: { config: this.config },
+        })
+      );
     }
   }
 }
@@ -285,4 +314,4 @@ class ConfigStoreClass {
 export const ConfigStore = ConfigStoreClass;
 
 // Export singleton
-export const configStore = ConfigStoreClass.getInstance(); 
+export const configStore = ConfigStoreClass.getInstance();

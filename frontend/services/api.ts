@@ -312,5 +312,8 @@ function handleSessionExpired() {
 declare global {
   interface Window {
     __isHandlingSessionExpired?: boolean;
+    __ENV__?: {
+      MODEL_ENGINE_ENABLED?: string;
+    };
   }
 }

@@ -49,7 +49,8 @@ def handle_model_config(tenant_id: str, user_id: str, config_key: str, model_id:
         return
 
     current_model_id = tenant_config_dict.get(config_key)
-    current_model_id = int(current_model_id) if str(current_model_id).isdigit() else None
+    current_model_id = int(current_model_id) if str(
+        current_model_id).isdigit() else None
 
     if current_model_id == model_id:
         tenant_config_manager.update_single_config(tenant_id, config_key)

@@ -19,9 +19,9 @@ export async function generateMetadata(props: {
   params: Promise<{ locale?: string }>;
 }): Promise<Metadata> {
   const { locale } = await props.params;
-  const resolvedLocale = (["zh", "en"].includes(locale ?? "")
-    ? locale
-    : "zh") as "zh" | "en";
+  const resolvedLocale = (
+    ["zh", "en"].includes(locale ?? "") ? locale : "zh"
+  ) as "zh" | "en";
   let messages: any = {};
 
   if (["zh", "en"].includes(resolvedLocale)) {
@@ -65,9 +65,12 @@ export default async function RootLayout({
   params: Promise<{ locale?: string }>;
 }) {
   const { locale } = await params;
-  const resolvedLocale = (["zh", "en"].includes(locale ?? "")
-    ? locale
-    : "zh") as "zh" | "en";
+  const resolvedLocale = (
+    ["zh", "en"].includes(locale ?? "") ? locale : "zh"
+  ) as "zh" | "en";
+
+  // 获取环境变量
+  const modelEngineEnabled = process.env.MODEL_ENGINE_ENABLED || "true";
 
   return (
     <html lang={resolvedLocale} suppressHydrationWarning>
@@ -82,6 +85,16 @@ export default async function RootLayout({
             <RootProvider>{children}</RootProvider>
           </I18nProviderWrapper>
         </NextThemesProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.__ENV__ = {
+                MODEL_ENGINE_ENABLED: "${modelEngineEnabled}"
+              };
+              console.log("Client: window.__ENV__ =", window.__ENV__);
+            `,
+          }}
+        />
       </body>
     </html>
   );
