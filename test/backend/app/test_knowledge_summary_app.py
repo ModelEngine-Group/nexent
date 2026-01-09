@@ -49,6 +49,11 @@ vector_db_module.base = vector_db_base_module
 sys.modules['nexent.vector_database'] = vector_db_module
 sys.modules['nexent.vector_database.base'] = vector_db_base_module
 sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
+# Provide datamate_core module with DataMateCore to satisfy imports like
+# `from nexent.vector_database.datamate_core import DataMateCore`
+datamate_core_module = types.ModuleType("nexent.vector_database.datamate_core")
+datamate_core_module.DataMateCore = MagicMock()
+sys.modules['nexent.vector_database.datamate_core'] = datamate_core_module
 
 # Mock specific classes that are imported
 class MockToolConfig:
