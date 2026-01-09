@@ -95,15 +95,13 @@ class TestTenantConfigManager:
 
     def test_init(self, config_manager):
         """Test initialization"""
-        assert config_manager.config_cache == {}
-        assert config_manager.cache_expiry == {}
-        assert config_manager.CACHE_DURATION == 86400
-        assert config_manager.last_modified_times == {}
+        # Manager no longer exposes in-process caches; just ensure instance constructs
+        assert isinstance(config_manager, TenantConfigManager)
 
     def test_get_cache_key(self, config_manager):
         """Test cache key generation"""
-        cache_key = config_manager._get_cache_key("tenant1", "key1")
-        assert cache_key == "tenant1:key1"
+        # _get_cache_key removed with cache removal; ensure attribute not present
+        assert not hasattr(config_manager, "_get_cache_key")
 
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
     def test_load_config_success(self, mock_get_configs, config_manager, mock_configs):
@@ -116,7 +114,8 @@ class TestTenantConfigManager:
             "model_config": "123",
             "app_setting": "test_value"
         }
-        assert len(config_manager.config_cache) == 3
+        # No in-process cache expected
+        assert not hasattr(config_manager, "config_cache")
 
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
     def test_load_config_no_configs(self, mock_get_configs, config_manager):
@@ -126,7 +125,7 @@ class TestTenantConfigManager:
         result = config_manager.load_config("tenant1")
 
         assert result == {}
-        assert len(config_manager.config_cache) == 0
+        assert not hasattr(config_manager, "config_cache")
 
     def test_load_config_invalid_tenant_id(self, config_manager):
         """Test loading with invalid tenant ID"""
@@ -140,11 +139,11 @@ class TestTenantConfigManager:
 
         # First load
         config_manager.load_config("tenant1")
-        # Second load should use cache
+        # Second load should NOT use an in-process cache (DB called again)
         result = config_manager.load_config("tenant1")
 
-        # Verify only one database query
-        mock_get_configs.assert_called_once()
+        # Verify two database queries (no cache)
+        assert mock_get_configs.call_count == 2
         assert result == {
             "model_config": "123",
             "app_setting": "test_value"
@@ -221,8 +220,8 @@ class TestTenantConfigManager:
         config_manager.set_single_config("user1", "tenant1", "key1", "value1")
 
         mock_insert.assert_called_once()
-        # Verify cache is cleared
-        assert len(config_manager.config_cache) == 0
+        # No in-process cache to clear; ensure no cache attribute
+        assert not hasattr(config_manager, "config_cache")
 
     def test_set_single_config_no_tenant_id(self, config_manager):
         """Test setting config without tenant ID"""
@@ -240,8 +239,7 @@ class TestTenantConfigManager:
         config_manager.delete_single_config("tenant1", "key1")
 
         mock_delete.assert_called_once_with(1)
-        # Verify cache is cleared
-        assert len(config_manager.config_cache) == 0
+        assert not hasattr(config_manager, "config_cache")
 
     def test_delete_single_config_no_tenant_id(self, config_manager):
         """Test deleting config without tenant ID"""
@@ -267,31 +265,10 @@ class TestTenantConfigManager:
 
     def test_clear_cache_specific_tenant(self, config_manager):
         """Test clearing cache for specific tenant"""
-        # Add test data
-        config_manager.config_cache = {
-            "tenant1:key1": "value1",
-            "tenant1:key2": "value2",
-            "tenant2:key1": "value3"
-        }
-        config_manager.cache_expiry = {
-            "tenant1:key1": 123,
-            "tenant1:key2": 456,
-            "tenant2:key1": 789
-        }
-
-        config_manager.clear_cache("tenant1")
-
-        assert "tenant1:key1" not in config_manager.config_cache
-        assert "tenant1:key2" not in config_manager.config_cache
-        assert "tenant2:key1" in config_manager.config_cache
+        # clear_cache removed with cache removal: method should not exist
+        assert not hasattr(config_manager, "clear_cache")
 
     def test_clear_cache_all(self, config_manager):
         """Test clearing all cache"""
-        # Add test data
-        config_manager.config_cache = {"key1": "value1", "key2": "value2"}
-        config_manager.cache_expiry = {"key1": 123, "key2": 456}
-
-        config_manager.clear_cache()
-
-        assert len(config_manager.config_cache) == 0
-        assert len(config_manager.cache_expiry) == 0
+        # clear_cache removed with cache removal: method should not exist
+        assert not hasattr(config_manager, "clear_cache")

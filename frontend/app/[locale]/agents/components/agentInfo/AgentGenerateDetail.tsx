@@ -399,7 +399,15 @@ export default function AgentGenerateDetail({
                 >
                   <Select
                     placeholder={t("businessLogic.config.modelPlaceholder")}
-                    onChange={(value) => onUpdateProfile({ model: value })}
+                    onChange={(value) => {
+                      const selectedModel = availableLlmModels.find(
+                        (m) => m.displayName === value
+                      );
+                      onUpdateProfile({
+                        model: value,
+                        model_id: selectedModel?.id || 0,
+                      });
+                    }}
                   >
                     {availableLlmModels.map((model) => (
                       <Select.Option

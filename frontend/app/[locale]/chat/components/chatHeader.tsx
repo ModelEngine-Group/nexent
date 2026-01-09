@@ -31,11 +31,6 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   const { confirm } = useConfirmModal();
   const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
-  const goToModelSetup = () => {
-    saveView("models");
-    router.push(`/${i18n.language}`);
-  };
-
   const showAutoOffConfirm = () => {
     confirm({
       title: t("embedding.chatMemoryAutoDeselectModal.title"),
@@ -47,13 +42,6 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
           {!isAdmin && (
             <div className="mt-2 text-xs opacity-70">
               {t("embedding.chatMemoryAutoDeselectModal.tip")}
-            </div>
-          )}
-          {isAdmin && (
-            <div className="mt-4 flex justify-end">
-              <Button type="primary" danger onClick={goToModelSetup}>
-                {t("embedding.chatMemoryAutoDeselectModal.ok_config")}
-              </Button>
             </div>
           )}
         </div>
