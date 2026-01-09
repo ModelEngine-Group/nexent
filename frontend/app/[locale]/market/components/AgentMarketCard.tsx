@@ -42,22 +42,16 @@ export function AgentMarketCard({
     ? agent.category.icon || getCategoryIcon(agent.category.name)
     : "📦";
 
-  const baseClasses =
-    "group z-10 hover:z-0 h-full min-h-[320px] rounded-lg border transition-all duration-300 overflow-visible flex flex-col cursor-pointer relative";
-  const defaultClasses =
-    "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-lg";
-  const featuredClasses =
-    "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-lg";
-
-  const unifiedHoverShadow =
-    "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)";
 
   return (
     <motion.div
-      whileHover={{ y: -4, boxShadow: unifiedHoverShadow }}
+      whileHover={{
+        y: -4,
+        boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)"
+      }}
       transition={{ type: "spring", stiffness: 300, damping: 25 }}
       onClick={handleCardClick}
-      className={`${baseClasses} ${variant === "featured" ? featuredClasses : defaultClasses}`}
+      className="group z-10 hover:z-0 h-full min-h-[320px] rounded-lg border transition-all duration-300 overflow-visible flex flex-col cursor-pointer relative bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-lg"
     >
       {variant === "featured" && (
         // Full-card subtle purple gradient background overlay
@@ -137,7 +131,7 @@ export function AgentMarketCard({
         <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
           <Wrench className="h-3.5 w-3.5" />
           <span>
-            {agent.tool_count} {t("market.tools", "tools")}
+            {agent.tool_count || 0} {t("market.tools", "tools")}
           </span>
         </div>
       </div>

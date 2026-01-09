@@ -29,11 +29,12 @@ export interface MarketAgentListItem {
   display_name: string;
   description: string;
   author?: string;
-  category: MarketCategory;
+  category?: MarketCategory; // 可选，与后端保持一致
   tags: MarketTag[];
   download_count: number;
   created_at: string;
-  tool_count: number;
+  tool_count?: number; // 可选，与后端保持一致
+  is_featured: boolean; // 必填，后端默认为false
 }
 
 export interface MarketAgentTool {
@@ -100,9 +101,5 @@ export interface MarketAgentListParams {
   category?: string;
   tag?: string;
   search?: string;
-  // Request featured items in the response (optional)
-  include_featured?: boolean;
-  // Limit how many featured items to return; undefined means no limit
-  featured_limit?: number;
 }
 
