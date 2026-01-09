@@ -990,6 +990,8 @@ class TestLoadConfigImpl:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = [
             "Custom App Name",  # APP_NAME
             "Custom description",  # APP_DESCRIPTION
+            "Test Tenant",  # TENANT_NAME
+            "default-group-123",  # DEFAULT_GROUP_ID
             "preset",  # ICON_TYPE
             "avatar-uri",  # AVATAR_URI
             "https://custom-icon.com"  # CUSTOM_ICON_URL
@@ -1011,6 +1013,12 @@ class TestLoadConfigImpl:
         result = await load_config_impl(language, tenant_id)
 
         assert result["app"]["name"] == "Custom App Name"
+        assert result["app"]["description"] == "Custom description"
+        assert result["app"]["tenantName"] == "Test Tenant"
+        assert result["app"]["defaultGroupId"] == "default-group-123"
+        assert result["app"]["icon"]["type"] == "preset"
+        assert result["app"]["icon"]["avatarUri"] == "avatar-uri"
+        assert result["app"]["icon"]["customUrl"] == "https://custom-icon.com"
         assert result["models"]["llm"]["displayName"] == "Test LLM"
 
     @pytest.mark.asyncio
@@ -1034,6 +1042,12 @@ class TestLoadConfigImpl:
 
         # Check Chinese default values
         assert result["app"]["name"] == "Nexent 智能体"
+        assert result["app"]["description"] == "面向企业应用的智能体平台"
+        assert result["app"]["tenantName"] == ""
+        assert result["app"]["defaultGroupId"] == ""
+        assert result["app"]["icon"]["type"] == "preset"
+        assert result["app"]["icon"]["avatarUri"] == ""
+        assert result["app"]["icon"]["customUrl"] == ""
 
     @pytest.mark.asyncio
     async def test_load_config_impl_with_embedding_dimension(self, service_mocks):
@@ -1085,6 +1099,12 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
+        # Check app config (should use defaults)
+        assert result["app"]["name"] == "Nexent Agent"
+        assert result["app"]["description"] == "Intelligent agent platform for enterprise applications"
+        assert result["app"]["tenantName"] == ""
+        assert result["app"]["defaultGroupId"] == ""
+
         # Check dimension values
         assert result["models"]["embedding"]["dimension"] == 1536
         assert result["models"]["multiEmbedding"]["dimension"] == 768
@@ -1107,6 +1127,12 @@ class TestLoadConfigImpl:
 
         # Execute
         result = await load_config_impl(language, tenant_id)
+
+        # Check app config (should use defaults)
+        assert result["app"]["name"] == "Nexent Agent"
+        assert result["app"]["description"] == "Intelligent agent platform for enterprise applications"
+        assert result["app"]["tenantName"] == ""
+        assert result["app"]["defaultGroupId"] == ""
 
         # Check that models have empty values
         assert result["models"]["llm"]["name"] == ""

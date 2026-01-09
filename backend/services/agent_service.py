@@ -53,6 +53,8 @@ from database.tool_db import (
     query_tool_instances_by_id,
     search_tools_for_sub_agent
 )
+from database.group_db import query_group_ids_by_user
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
 from utils.auth_utils import get_current_user_info, get_user_language
@@ -89,6 +91,26 @@ def _resolve_user_tenant_language(
         return user_id, tenant_id, get_user_language(http_request)
 
 
+def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
+    """
+    Get user's group IDs as a comma-separated string.
+
+    Args:
+        user_id: User ID
+        tenant_id: Tenant ID
+
+    Returns:
+        Comma-separated string of group IDs
+    """
+    try:
+        group_ids = query_group_ids_by_user(user_id)
+        return convert_list_to_string(group_ids)
+    except Exception as e:
+        logger.warning(
+            f"Failed to get user groups for user {user_id}: {str(e)}")
+        return ""
+
+
 def _resolve_model_with_fallback(
     model_display_name: str | None,
     exported_model_id: str | None,
@@ -97,45 +119,45 @@ def _resolve_model_with_fallback(
 ) -> str | None:
     """
     Resolve model_id from model_display_name with fallback to quick config LLM model.
-    
+
     Args:
         model_display_name: Display name of the model to lookup
         exported_model_id: Original model_id from export (for logging only)
         model_label: Label for logging (e.g., "Model", "Business logic model")
         tenant_id: Tenant ID for model lookup
-    
+
     Returns:
         Resolved model_id or None if not found and no fallback available
     """
     if not model_display_name:
         return None
-    
+
     # Try to find model by display name in current tenant
     resolved_id = get_model_id_by_display_name(model_display_name, tenant_id)
-    
+
     if resolved_id:
         logger.info(
             f"{model_label} '{model_display_name}' found in tenant {tenant_id}, "
             f"mapped to model_id: {resolved_id} (exported model_id was: {exported_model_id})")
         return resolved_id
-    
+
     # Model not found, try fallback to quick config LLM model
     logger.warning(
         f"{model_label} '{model_display_name}' (exported model_id: {exported_model_id}) "
         f"not found in tenant {tenant_id}, falling back to quick config LLM model.")
-    
+
     quick_config_model = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id
     )
-    
+
     if quick_config_model:
         fallback_id = quick_config_model.get("model_id")
         logger.info(
             f"Using quick config LLM model for {model_label.lower()}: "
             f"{quick_config_model.get('display_name')} (model_id: {fallback_id})")
         return fallback_id
-    
+
     logger.warning(f"No quick config LLM model found for tenant {tenant_id}")
     return None
 
@@ -775,7 +797,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     agent_id: Optional[int] = request.agent_id
     try:
         if agent_id is None:
-            # Create agent
+            # Create agent - automatically set group_ids to current user's groups
+            user_group_ids = _get_user_group_ids(user_id, tenant_id)
             created = create_agent(agent_info={
                 "name": request.name,
                 "display_name": request.display_name,
@@ -791,7 +814,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
-                "enabled": request.enabled if request.enabled is not None else True
+                "enabled": request.enabled if request.enabled is not None else True,
+                "group_ids": user_group_ids
             }, tenant_id=tenant_id, user_id=user_id)
             agent_id = created["agent_id"]
         else:
@@ -1132,7 +1156,7 @@ async def import_agent_by_agent_id(
     if not import_agent_info.name.isidentifier():
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
-    
+
     # Resolve model IDs with fallback
     # Note: We use model_display_name for cross-tenant compatibility
     # The exported model_id is kept for reference/debugging only
@@ -1142,7 +1166,7 @@ async def import_agent_by_agent_id(
         model_label="Model",
         tenant_id=tenant_id
     )
-    
+
     business_logic_model_id = _resolve_model_with_fallback(
         model_display_name=import_agent_info.business_logic_model_name,
         exported_model_id=import_agent_info.business_logic_model_id,
@@ -1153,7 +1177,8 @@ async def import_agent_by_agent_id(
     agent_name = import_agent_info.name
     agent_display_name = import_agent_info.display_name
 
-    # create a new agent
+    # create a new agent - use current user's groups instead of imported group_ids
+    user_group_ids = _get_user_group_ids(user_id, tenant_id)
     new_agent = create_agent(agent_info={"name": agent_name,
                                          "display_name": agent_display_name,
                                          "description": import_agent_info.description,
@@ -1168,7 +1193,8 @@ async def import_agent_by_agent_id(
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
-                                         "enabled": import_agent_info.enabled},
+                                         "enabled": import_agent_info.enabled,
+                                         "group_ids": user_group_ids},
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
@@ -1248,7 +1274,8 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
                 "description": agent["description"],
                 "author": agent.get("author"),
                 "is_available": len(unavailable_reasons) == 0,
-                "unavailable_reasons": unavailable_reasons
+                "unavailable_reasons": unavailable_reasons,
+                "group_ids": convert_string_to_list(agent.get("group_ids"))
             })
 
         return simple_agent_list
@@ -1344,28 +1371,28 @@ def check_agent_availability(
 ) -> tuple[bool, list[str]]:
     """
     Check if an agent is available based on its tools and model configuration.
-    
+
     Args:
         agent_id: The agent ID to check
         tenant_id: The tenant ID
         agent_info: Optional pre-fetched agent info (to avoid duplicate DB queries)
         model_cache: Optional model cache for performance optimization
-        
+
     Returns:
         tuple: (is_available: bool, unavailable_reasons: list[str])
     """
     unavailable_reasons: list[str] = []
-    
+
     if model_cache is None:
         model_cache = {}
-    
+
     # Fetch agent info if not provided
     if agent_info is None:
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
-    
+
     if not agent_info:
         return False, ["agent_not_found"]
-    
+
     # Check tool availability
     tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
     tool_id_list = [tool["tool_id"] for tool in tool_info if tool.get("tool_id") is not None]
@@ -1373,7 +1400,7 @@ def check_agent_availability(
         tool_statuses = check_tool_is_available(tool_id_list)
         if not all(tool_statuses):
             unavailable_reasons.append("tool_unavailable")
-    
+
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
         agent=agent_info,
@@ -1381,7 +1408,7 @@ def check_agent_availability(
         model_cache=model_cache
     )
     unavailable_reasons.extend(model_reasons)
-    
+
     is_available = len(unavailable_reasons) == 0
     return is_available, unavailable_reasons
 

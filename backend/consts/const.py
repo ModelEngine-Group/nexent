@@ -183,6 +183,9 @@ INVITE_CODE = os.getenv("INVITE_CODE")
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
+# User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
+USER_INFO_QUERY_SOURCE = os.getenv('USER_INFO_QUERY_SOURCE', 'supabase').lower()
+
 # Memory Search Status Messages (for i18n placeholders)
 MEMORY_SEARCH_START_MSG = "<MEM_START>"
 MEMORY_SEARCH_DONE_MSG = "<MEM_DONE>"
@@ -247,6 +250,9 @@ APP_DESCRIPTION = "APP_DESCRIPTION"
 ICON_TYPE = "ICON_TYPE"
 AVATAR_URI = "AVATAR_URI"
 CUSTOM_ICON_URL = "CUSTOM_ICON_URL"
+TENANT_NAME = "TENANT_NAME"
+TENANT_ID = "TENANT_ID"
+DEFAULT_GROUP_ID = "DEFAULT_GROUP_ID"
 
 # Task Status Constants
 TASK_STATUS = {
