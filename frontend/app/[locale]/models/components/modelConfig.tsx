@@ -851,7 +851,7 @@ export const ModelConfigSection = forwardRef<
                 icon={<RefreshCw size={16} />}
                 block
               >
-                <span className="hidden xl:inline button-text-full" style={{ overflow: 'hidden' }}>
+                <span className="button-text-full">
                   {t("modelConfig.button.syncModelEngine")}
                 </span>
               </Button>
@@ -868,7 +868,7 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full" style={{ overflow: 'hidden' }}>
+                <span className="button-text-full">
                   {t("modelConfig.button.addCustomModel")}
                 </span>
               </Button>
@@ -882,7 +882,7 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full" style={{ overflow: 'hidden' }}>
+                <span className="button-text-full">
                   {t("modelConfig.button.editCustomModel")}
                 </span>
               </Button>
@@ -897,7 +897,7 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full" style={{ overflow: 'hidden' }}>
+                <span className="button-text-full">
                   {t("modelConfig.button.checkConnectivity")}
                 </span>
               </Button>
