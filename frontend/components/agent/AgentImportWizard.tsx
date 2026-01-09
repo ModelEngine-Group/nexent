@@ -786,7 +786,7 @@ export default function AgentImportWizard({
       const result = await importAgent(importData, { forceImport: false });
       
       if (result.success) {
-        message.success(t("market.install.success", "Agent installed successfully!"));
+        // Parent component will show a success message; invalidate and notify parent
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         onImportComplete?.();
         handleCancel(); // Close wizard after success
