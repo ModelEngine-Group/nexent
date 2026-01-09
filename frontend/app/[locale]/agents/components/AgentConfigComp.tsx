@@ -143,7 +143,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
           <Col xs={24} className="h-full">
             <ToolManagement
               toolGroups={groupedTools}
-              editable={editable}
+              isCreatingMode={isCreatingMode}
               currentAgentId={currentAgentId?? undefined}
             />
           </Col>

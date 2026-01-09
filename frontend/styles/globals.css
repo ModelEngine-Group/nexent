@@ -317,13 +317,13 @@
   }
 }
 
-@media (min-width: 1280px) {
-  .button-text-full {
-    display: inline !important;
-  }
-  .button-text-short {
-    display: none !important;
-  }
+
+.button-text-full {
+  display: inline !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 /* Selected table row: draw full-height left stripe inside first cell */
