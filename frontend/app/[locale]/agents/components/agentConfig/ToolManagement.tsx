@@ -16,7 +16,7 @@ import { Settings } from "lucide-react";
 
 interface ToolManagementProps {
   toolGroups: ToolGroup[];
-  editable?: boolean;
+  isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
 }
 
@@ -26,12 +26,13 @@ interface ToolManagementProps {
  */
 export default function ToolManagement({
   toolGroups,
-  editable = true,
+  isCreatingMode = true,
   currentAgentId,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
+  const editable = currentAgentId !== null || isCreatingMode;
   // Get state from store
   const usedTools = useAgentConfigStore((state) => state.editedAgent.tools);
   const updateTools = useAgentConfigStore((state) => state.updateTools);
@@ -49,45 +50,50 @@ export default function ToolManagement({
   const [toolParams, setToolParams] = useState<ToolParam[]>([]);
 
   // Get tool info for selected tool (when checking if config is needed)
-  const { data: selectedToolInfo } = useToolInfo(
+  const { data: selectedToolInfo, isLoading: isToolInfoLoading } = useToolInfo(
     (selectedTool) ? parseInt(selectedTool.id) : null,
     currentAgentId ?? null
   );
 
   // Effect to handle tool selection when tool info is loaded
   useEffect(() => {
-    if (selectedTool && selectedToolInfo) {
-      // Use instance params if available, otherwise use default params
-      const mergedParams = selectedTool.initParams?.map((param: ToolParam) => {
+    let mergedParams: ToolParam[];
+
+    if (isCreatingMode && selectedTool) {
+      mergedParams = selectedTool.initParams || [];
+    } else if (selectedTool && selectedToolInfo) {
+      mergedParams = selectedTool.initParams?.map((param: ToolParam) => {
         const instanceValue = selectedToolInfo?.params?.[param.name];
         return {
           ...param,
           value: instanceValue !== undefined ? instanceValue : param.value,
         };
       }) || [];
-      setToolParams(mergedParams);
-      
-      const hasEmptyRequiredParams = mergedParams.some(
-        (param: ToolParam) => param.required &&
-        (param.value === undefined || param.value === '' || param.value === null)
-      );
-      if (isClickSetting || hasEmptyRequiredParams) {
-        // Open modal for configuration with pre-calculated params
-        setIsToolModalOpen(true);
-        setIsClickSetting(false)
-      } else {
-        // Add tool directly
-        const newSelectedTools = [...usedTools, {
-          ...selectedTool,
-          initParams: mergedParams
-        }];
-        updateTools(newSelectedTools);
-        setSelectedTool(null); // Clear selected tool
-        setIsClickSetting(false)
-      }
-
+    } else {
+      return;
     }
-  }, [selectedTool, selectedToolInfo]); 
+    setToolParams(mergedParams);
+    const hasEmptyRequiredParams = mergedParams.some(
+      (param: ToolParam) => param.required &&
+        (param.value === undefined || param.value === '' || param.value === null)
+    );
+    if (isClickSetting || hasEmptyRequiredParams) {
+      // Open modal for configuration with pre-calculated params
+      setIsToolModalOpen(true);
+      setIsClickSetting(false)
+    } else {
+      // Add tool directly
+      const newSelectedTools = [...usedTools, {
+        ...selectedTool,
+        initParams: mergedParams
+      }];
+      updateTools(newSelectedTools);
+      setSelectedTool(null); // Clear selected tool
+      setIsClickSetting(false)
+    }
+
+    
+  }, [selectedTool, isToolInfoLoading]); 
 
   // Create selected tool ID set for efficient lookup
   const selectedToolIdsSet = new Set(
@@ -109,48 +115,55 @@ export default function ToolManagement({
   };
 
   const handleToolModalSave = async (params: ToolParam[]) => {
-    if (!selectedTool || !currentAgentId) return;
+    if (!selectedTool) return;
 
-    try {
       // Convert params to backend format
       const paramsObj = params.reduce((acc, param) => {
         acc[param.name] = param.value;
         return acc;
       }, {} as Record<string, any>);
 
-      // Save tool config
-      const isEnabled = true; // New tool is enabled by default
-      const result = await updateToolConfig(
-        parseInt(selectedTool.id),
-        currentAgentId,
-        paramsObj,
-        isEnabled
-      );
+      if (isCreatingMode) {
+        saveToolConfig(params);
+      } else if (currentAgentId) {
 
-      if (result.success) {
-        // Add tool to selected tools with updated params
-        const updatedTool = { ...selectedTool, initParams: params };
-        const newSelectedTools = [...usedTools, updatedTool];
-        updateTools(newSelectedTools);
+        try {
+          const isEnabled = true; // New tool is enabled by default
+          const result = await updateToolConfig(
+            parseInt(selectedTool.id),
+            currentAgentId,
+            paramsObj,
+            isEnabled
+          );
 
-        message.success(t("toolConfig.message.saveSuccess"));
-
-        queryClient.invalidateQueries({ 
-          queryKey: ["toolInfo", parseInt(selectedTool.id), currentAgentId] 
-        });
-
-        setIsToolModalOpen(false);
-        setSelectedTool(null);
-        setToolParams([]);
-        setIsClickSetting(false)
-      } else {
-        message.error(result.message || t("toolConfig.message.saveError"));
+          if (result.success) {
+            saveToolConfig(params);
+            queryClient.invalidateQueries({ 
+              queryKey: ["toolInfo", parseInt(selectedTool.id), currentAgentId] 
+            });
+          } else {
+            message.error(result.message || t("toolConfig.message.saveError"));
+          }
+        } catch (error) {
+          message.error(t("toolConfig.message.saveError"));
+        }
       }
-    } catch (error) {
-      message.error(t("toolConfig.message.saveError"));
-    }
   };
 
+
+  const saveToolConfig = async (params: ToolParam[]) => {
+    // Add tool to selected tools with updated params
+    const updatedTool = { ...selectedTool, initParams: params };
+    const newSelectedTools = [...usedTools, updatedTool];
+    updateTools(newSelectedTools);
+
+    message.success(t("toolConfig.message.saveSuccess"));
+
+    setIsToolModalOpen(false);
+    setSelectedTool(null);
+    setToolParams([]);
+    setIsClickSetting(false)
+  }
   const handleToolSettingsClick = (tool: Tool) => {
     setIsClickSetting(true)
     setSelectedTool(tool); 
@@ -164,7 +177,6 @@ export default function ToolManagement({
     const isCurrentlySelected = usedTools.some(
       (t) => parseInt(t.id) === toolId
     );
-
     if (isCurrentlySelected) {
       const newSelectedTools = usedTools.filter((t) => parseInt(t.id) !== toolId);
       updateTools(newSelectedTools);   
