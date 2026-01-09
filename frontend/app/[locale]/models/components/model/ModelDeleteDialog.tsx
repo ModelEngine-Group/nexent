@@ -262,40 +262,105 @@ export const ModelDeleteDialog = ({
     }
   };
 
-  // Get API key by model type
-  const getApiKeyByType = (type: ModelType | null): string => {
+  // Get API key by model type, optionally scoped to a provider
+  const getApiKeyByType = (
+    type: ModelType | null,
+    provider?: ModelSource
+  ): string => {
     if (!type) return "";
-    // Prioritize silicon models of the current type
-    const byType = models.find(
+
+    // If a provider is specified, return the first model for that provider+type
+    if (provider) {
+      const byProvider = models.find(
+        (m) => m.source === provider && m.type === type && m.apiKey
+      );
+      if (byProvider?.apiKey) return byProvider.apiKey;
+    }
+
+    // Prefer provider entries in order: Silicon, ModelEngine
+    const bySilicon = models.find(
       (m) => m.source === MODEL_SOURCES.SILICON && m.type === type && m.apiKey
     );
-    if (byType?.apiKey) return byType.apiKey;
-    // Fall back to any available silicon model
-    const anySilicon = models.find(
-      (m) => m.source === MODEL_SOURCES.SILICON && m.apiKey
+    if (bySilicon?.apiKey) return bySilicon.apiKey;
+
+    const byModelEngine = models.find(
+      (m) => m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiKey
     );
-    return anySilicon?.apiKey || "";
+    if (byModelEngine?.apiKey) return byModelEngine.apiKey;
+
+    // Fallback: any model that has apiKey
+    const anyWithKey = models.find((m) => m.apiKey);
+    return anyWithKey?.apiKey || "";
   };
 
-  // Prefetch SiliconCloud provider model list
-  const prefetchSiliconProviderModels = async (
+  // Get provider base URL by model type (prefer ModelEngine entries)
+  const getProviderBaseUrlByType = (type: ModelType | null): string | undefined => {
+    if (!type) return undefined;
+    // Prefer provider entries (ModelEngine) first, then explicit modelConfig, then any model
+    const engineModel = models.find(
+      (m) => m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiUrl
+    );
+    if (engineModel?.apiUrl) return engineModel.apiUrl;
+
+    try {
+      if (type === MODEL_TYPES.EMBEDDING) {
+        const cfgUrl = modelConfig?.embedding?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.MULTI_EMBEDDING) {
+        const cfgUrl = modelConfig?.multiEmbedding?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.VLM) {
+        const cfgUrl = modelConfig?.vlm?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+      if (type === MODEL_TYPES.LLM) {
+        const cfgUrl = modelConfig?.llm?.apiConfig?.modelUrl;
+        if (cfgUrl && cfgUrl.trim() !== "") return cfgUrl;
+      }
+    } catch (e) {
+      // ignore and continue
+    }
+
+    const anyModelWithUrl = models.find((m) => m.apiUrl);
+    return anyModelWithUrl?.apiUrl || undefined;
+  };
+
+  // Prefetch provider model list (supports Silicon and ModelEngine)
+  const prefetchProviderModels = async (
+    provider: ModelSource,
     modelType: ModelType | null
   ): Promise<void> => {
     if (!modelType) return;
     try {
-      const apiKey = getApiKeyByType(modelType);
-      const result = await modelService.addProviderModel({
-        provider: MODEL_SOURCES.SILICON,
-        type: modelType,
-        apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
-      });
+      let result: any[] = [];
+      if (provider === MODEL_SOURCES.SILICON) {
+        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.SILICON);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.SILICON,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+        });
+      } else if (provider === MODEL_SOURCES.MODELENGINE) {
+        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.MODELENGINE);
+        const baseUrl = getProviderBaseUrlByType(modelType);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.MODELENGINE,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+          baseUrl: baseUrl || undefined,
+        });
+      } else {
+        // Unsupported provider for prefetching
+        return;
+      }
+
       setProviderModels(result || []);
       // Initialize pending selected switch states (based on current models status)
       const currentIds = new Set(
         models
-          .filter(
-            (m) => m.type === modelType && m.source === MODEL_SOURCES.SILICON
-          )
+          .filter((m) => m.type === modelType && m.source === provider)
           .map((m) => m.name)
       );
       setPendingSelectedProviderIds(
@@ -310,24 +375,24 @@ export const ModelDeleteDialog = ({
       }
     } catch (e) {
       message.error(t("model.dialog.error.noModelsFetched"));
-      log.error("Failed to prefetch Silicon provider models", e);
+      log.error("Failed to prefetch provider models", e);
     }
   };
 
   // Handle source selection
   const handleSourceSelect = async (source: ModelSource) => {
-    if (source === MODEL_SOURCES.SILICON) {
-      setLoadingSource(source);
-      try {
-        await prefetchSiliconProviderModels(deletingModelType);
-      } finally {
-        setLoadingSource(null);
+    setLoadingSource(source);
+    try {
+      if (source === MODEL_SOURCES.SILICON || source === MODEL_SOURCES.MODELENGINE) {
+        await prefetchProviderModels(source, deletingModelType);
+      } else if (source === MODEL_SOURCES.OPENAI) {
+        // For OpenAI source, just set the selected source without prefetching
+        // TODO: Call the relevant API to fetch OpenAI models
+        setSelectedSource(source);
+        return;
       }
-    } else if (source === MODEL_SOURCES.OPENAI) {
-      // For OpenAI source, just set the selected source without prefetching
-      // TODO: Call the relevant API to fetch OpenAI models
-      setSelectedSource(source);
-      return;
+    } finally {
+      setLoadingSource(null);
     }
     setSelectedSource(source);
     setProviderModelSearchTerm("");
@@ -338,10 +403,14 @@ export const ModelDeleteDialog = ({
   };
 
   // Handle model deletion
-  const handleDeleteModel = async (displayName: string) => {
+  const handleDeleteModel = async (displayName: string, provider?: ModelSource) => {
     setDeletingModels((prev) => new Set(prev).add(displayName));
     try {
-      await modelService.deleteCustomModel(displayName);
+      // Prefer explicit provider passed in, fall back to selectedSource
+      await modelService.deleteCustomModel(
+        displayName,
+        provider || selectedSource || undefined
+      );
       let configUpdates: any = {};
 
       // Check each model configuration, if currently using a deleted model, clear the configuration
@@ -472,24 +541,28 @@ export const ModelDeleteDialog = ({
     maxTokens: number;
   }) => {
     setMaxTokens(maxTokens);
-    if (selectedSource === MODEL_SOURCES.SILICON && deletingModelType) {
+    if (
+      (selectedSource === MODEL_SOURCES.SILICON ||
+        selectedSource === MODEL_SOURCES.MODELENGINE) &&
+      deletingModelType
+    ) {
       try {
         const currentIds = new Set(
           models
             .filter(
               (m) =>
                 m.type === deletingModelType &&
-                m.source === MODEL_SOURCES.SILICON
+                m.source === (selectedSource as ModelSource)
             )
             .map((m) => m.name)
         );
 
-        // Build payload items for the current silicon models in required format
+        // Build payload items for the current provider models in required format
         const currentModelPayloads = models
           .filter(
             (m) =>
               m.type === deletingModelType &&
-              m.source === MODEL_SOURCES.SILICON &&
+              m.source === (selectedSource as ModelSource) &&
               currentIds.has(m.name)
           )
           .map((m) => ({
@@ -498,7 +571,10 @@ export const ModelDeleteDialog = ({
             maxTokens: maxTokens || m.maxTokens,
           }));
 
-        await modelService.updateBatchModel(currentModelPayloads);
+        await modelService.updateBatchModel(
+          currentModelPayloads,
+          selectedSource as ModelSource
+        );
 
         // Show success message since no exception was thrown
         message.success(t("model.dialog.success.updateSuccess"));
@@ -510,8 +586,6 @@ export const ModelDeleteDialog = ({
             max_tokens: maxTokens || model.max_tokens || 4096,
           }))
         );
-
-        // Optionally use currentModelPayloads for subsequent API calls if needed
       } catch (e) {
         message.error(t("model.dialog.error.noModelsFetched"));
       }
@@ -610,7 +684,11 @@ export const ModelDeleteDialog = ({
       const displayName =
         selectedEmbeddingModel.displayName || selectedEmbeddingModel.name;
       const apiKey =
-        selectedEmbeddingModel.apiKey || getApiKeyByType(deletingModelType);
+        selectedEmbeddingModel.apiKey ||
+        getApiKeyByType(
+          deletingModelType,
+          (selectedEmbeddingModel?.source as ModelSource) || selectedSource || undefined
+        );
 
       await modelService.updateSingleModel({
         currentDisplayName: displayName,
@@ -674,18 +752,67 @@ export const ModelDeleteDialog = ({
                       );
 
                       if (allEnabledModels) {
-                        const apiKey = getApiKeyByType(deletingModelType);
+                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.SILICON);
                         const isEmbeddingType =
                           deletingModelType === MODEL_TYPES.EMBEDDING ||
                           deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
                         // Pass all currently enabled models
                         // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
+                      await modelService.addBatchCustomModel({
+                        api_key:
+                          apiKey && apiKey.trim() !== ""
+                            ? apiKey
+                            : "sk-no-api-key",
+                        provider: MODEL_SOURCES.SILICON,
+                        type: deletingModelType,
+                        models: allEnabledModels.map((model) => {
+                          if (isEmbeddingType) {
+                            const { max_tokens, ...modelWithoutMaxTokens } =
+                              model;
+                            return modelWithoutMaxTokens;
+                          } else {
+                            return {
+                              ...model,
+                              max_tokens: model.max_tokens || 4096,
+                            };
+                          }
+                        }),
+                      });
+                      }
+
+                      // Refresh list
+                      await onSuccess();
+                      // Re-fetch provider models and sync switch states
+                      await prefetchProviderModels(selectedSource, deletingModelType);
+                      message.success(t("model.dialog.success.updateSuccess"));
+                      // Close dialog
+                      handleClose();
+                    } catch (e) {
+                      log.error("Failed to apply model updates", e);
+                      message.error(
+                        t("model.dialog.error.addFailed", { error: e as any })
+                      );
+                    }
+                  } else if (
+                    selectedSource === MODEL_SOURCES.MODELENGINE &&
+                    deletingModelType
+                  ) {
+                    try {
+                      const allEnabledModels = providerModels.filter(
+                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                      );
+
+                      if (allEnabledModels) {
+                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.MODELENGINE);
+                        const isEmbeddingType =
+                          deletingModelType === MODEL_TYPES.EMBEDDING ||
+                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
                         await modelService.addBatchCustomModel({
                           api_key:
                             apiKey && apiKey.trim() !== ""
                               ? apiKey
                               : "sk-no-api-key",
-                          provider: MODEL_SOURCES.SILICON,
+                          provider: MODEL_SOURCES.MODELENGINE,
                           type: deletingModelType,
                           models: allEnabledModels.map((model) => {
                             if (isEmbeddingType) {
@@ -702,15 +829,12 @@ export const ModelDeleteDialog = ({
                         });
                       }
 
-                      // Refresh list
                       await onSuccess();
-                      // Re-fetch provider models and sync switch states
-                      await prefetchSiliconProviderModels(deletingModelType);
+                      await prefetchProviderModels(selectedSource, deletingModelType);
                       message.success(t("model.dialog.success.updateSuccess"));
-                      // Close dialog
                       handleClose();
                     } catch (e) {
-                      log.error("Failed to apply model updates", e);
+                      log.error("Failed to apply ModelEngine model updates", e);
                       message.error(
                         t("model.dialog.error.addFailed", { error: e as any })
                       );
@@ -949,11 +1073,15 @@ export const ModelDeleteDialog = ({
                   icon={<RefreshCw className="text-blue-500" size={16} />}
                   onClick={async () => {
                     if (
-                      selectedSource === MODEL_SOURCES.SILICON &&
+                      (selectedSource === MODEL_SOURCES.SILICON ||
+                        selectedSource === MODEL_SOURCES.MODELENGINE) &&
                       deletingModelType
                     ) {
                       try {
-                        await prefetchSiliconProviderModels(deletingModelType);
+                        await prefetchProviderModels(
+                          selectedSource as ModelSource,
+                          deletingModelType
+                        );
                         message.success(t("common.message.refreshSuccess"));
                       } catch (error) {
                         message.error(t("common.message.refreshFailed"));
@@ -972,7 +1100,8 @@ export const ModelDeleteDialog = ({
             )}
           </div>
 
-          {selectedSource === MODEL_SOURCES.SILICON &&
+          {(selectedSource === MODEL_SOURCES.SILICON ||
+            selectedSource === MODEL_SOURCES.MODELENGINE) &&
           providerModels.length > 0 ? (
             <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-200">
               {providerModels.length > 0 && (
@@ -1126,9 +1255,9 @@ export const ModelDeleteDialog = ({
                         </div>
                       </div>
                       <button
-                        onClick={(e) => {
+                          onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteModel(model.displayName || model.name);
+                          handleDeleteModel(model.displayName || model.name, model.source);
                         }}
                         disabled={
                           deletingModels.has(model.displayName || model.name) ||
@@ -1226,10 +1355,12 @@ export const ModelDeleteDialog = ({
       <ProviderConfigEditDialog
         isOpen={isProviderConfigOpen}
         onClose={() => setIsProviderConfigOpen(false)}
-        initialApiKey={getApiKeyByType(deletingModelType)}
+        initialApiKey={getApiKeyByType(deletingModelType, selectedSource || undefined)}
         initialMaxTokens={(
           models.find(
-            (m) => m.type === deletingModelType && m.source === "silicon"
+            (m) =>
+              m.type === deletingModelType &&
+              m.source === (selectedSource || MODEL_SOURCES.SILICON)
           )?.maxTokens || 4096
         ).toString()}
         modelType={deletingModelType || undefined}

@@ -103,6 +103,7 @@ export const ModelConfigSection = forwardRef<
   // State management
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] = useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -595,6 +596,7 @@ export const ModelConfigSection = forwardRef<
 
   // Open batch add dialog with ModelEngine provider pre-selected
   const handleSyncModels = () => {
+    setAddModalDefaultIsBatch(true);
     setIsAddModalOpen(true);
   };
 
@@ -841,21 +843,16 @@ export const ModelConfigSection = forwardRef<
         >
           <Row gutter={[8, 8]} style={{ width: "100%" }}>
             <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button 
-                type="primary" 
-                size="middle" 
+              <Button
+                type="primary"
+                size="middle"
                 onClick={handleSyncModels}
                 style={{ width: "100%" }}
+                icon={<RefreshCw size={16} />}
                 block
               >
-                <RefreshCw className="mr-1" size={16} />
-                <span style={{ marginLeft: 4 }}>
-                  <span className="hidden xl:inline button-text-full">
-                    {t("modelConfig.button.syncModelEngine")}
-                  </span>
-                  <span className="xl:hidden button-text-short">
-                    {t("modelConfig.button.sync")}
-                  </span>
+                <span className="button-text-full">
+                  {t("modelConfig.button.syncModelEngine")}
                 </span>
               </Button>
             </Col>
@@ -864,15 +861,15 @@ export const ModelConfigSection = forwardRef<
                 type="primary"
                 size="middle"
                 icon={<Plus size={16} />}
-                onClick={() => setIsAddModalOpen(true)}
+                onClick={() => {
+                  setAddModalDefaultIsBatch(false);
+                  setIsAddModalOpen(true);
+                }}
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full">
+                <span className="button-text-full">
                   {t("modelConfig.button.addCustomModel")}
-                </span>
-                <span className="xl:hidden button-text-short">
-                  {t("modelConfig.button.add")}
                 </span>
               </Button>
             </Col>
@@ -885,11 +882,8 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full">
+                <span className="button-text-full">
                   {t("modelConfig.button.editCustomModel")}
-                </span>
-                <span className="xl:hidden button-text-short">
-                  {t("modelConfig.button.edit")}
                 </span>
               </Button>
             </Col>
@@ -903,11 +897,8 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full">
+                <span className="button-text-full">
                   {t("modelConfig.button.checkConnectivity")}
-                </span>
-                <span className="xl:hidden button-text-short">
-                  {t("modelConfig.button.check")}
                 </span>
               </Button>
             </Col>
@@ -982,7 +973,7 @@ export const ModelConfigSection = forwardRef<
                   }}
                 >
                   <Space
-                    direction="vertical"
+                    orientation="vertical"
                     style={{
                       width: "100%",
                       height: "100%",
@@ -1036,6 +1027,7 @@ export const ModelConfigSection = forwardRef<
             }
           }}
           defaultProvider="modelengine"
+          defaultIsBatchImport={addModalDefaultIsBatch}
         />
 
         <ModelDeleteDialog

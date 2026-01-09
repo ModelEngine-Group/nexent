@@ -136,6 +136,7 @@ export const modelService = {
     provider: string;
     type: ModelType;
     apiKey: string;
+    baseUrl?: string;
   }): Promise<any[]> => {
     try {
       const response = await fetch(
@@ -147,6 +148,7 @@ export const modelService = {
             provider: model.provider,
             model_type: model.type,
             api_key: model.apiKey,
+            ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
         }
       );
@@ -202,6 +204,7 @@ export const modelService = {
     provider: string;
     type: ModelType;
     api_key: string;
+    baseUrl?: string;
   }): Promise<any[]> => {
     try {
       const response = await fetch(
@@ -213,6 +216,7 @@ export const modelService = {
             provider: model.provider,
             model_type: model.type,
             api_key: model.api_key,
+            ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
         }
       );
@@ -290,7 +294,8 @@ export const modelService = {
       model_id: string;
       apiKey: string;
       maxTokens?: number;
-    }[]
+    }[],
+    provider?: string
   ): Promise<any> => {
     try {
       const response = await fetch(API_ENDPOINTS.model.updateBatchModel, {
@@ -301,6 +306,7 @@ export const modelService = {
             model_id: m.model_id,
             api_key: m.apiKey,
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
+            ...(provider ? { model_factory: provider } : {}),
           }))
         ),
       });
@@ -319,15 +325,19 @@ export const modelService = {
   },
 
   // Delete custom model
-  deleteCustomModel: async (displayName: string): Promise<void> => {
+  deleteCustomModel: async (
+    displayName: string,
+    provider?: string
+  ): Promise<void> => {
     try {
-      const response = await fetch(
-        API_ENDPOINTS.model.customModelDelete(displayName),
-        {
-          method: "POST",
-          headers: getAuthHeaders(),
-        }
-      );
+      const baseUrl = API_ENDPOINTS.model.customModelDelete(displayName);
+      const url = provider
+        ? `${baseUrl}&provider=${encodeURIComponent(provider)}`
+        : baseUrl;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(

@@ -54,7 +54,8 @@ interface ChunkFormValues {
 }
 
 interface DocumentChunkProps {
-  knowledgeBaseName: string;
+  knowledgeBaseName: string; // User-facing knowledge base name (display name)
+  knowledgeBaseId: string; // Internal knowledge base ID / Elasticsearch index name
   documents: Document[];
   getFileIcon: (type: string) => string;
   currentEmbeddingModel?: string | null;
@@ -69,6 +70,7 @@ const { TextArea } = Input;
 
 const DocumentChunk: React.FC<DocumentChunkProps> = ({
   knowledgeBaseName,
+  knowledgeBaseId,
   documents,
   getFileIcon,
   currentEmbeddingModel = null,
@@ -270,7 +272,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
     try {
       const response = await knowledgeBaseService.hybridSearch(
-        knowledgeBaseName,
+        knowledgeBaseId,
         trimmedValue,
         {
           topK: pagination.pageSize,

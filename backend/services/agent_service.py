@@ -1433,7 +1433,7 @@ async def prepare_agent_run(
     """
 
     memory_context = build_memory_context(
-        user_id, tenant_id, agent_request.agent_id)
+        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
     agent_run_info = await create_agent_run_info(
         agent_id=agent_request.agent_id,
         minio_files=agent_request.minio_files,
@@ -1682,12 +1682,12 @@ async def run_agent_stream(
         })
         monitoring_manager.set_span_attributes(user_message_saved=False)
 
-    # Step 3: Build memory context
+    # Step 3: Build memory context (skip for debug mode)
     memory_start_time = time.time()
     monitoring_manager.add_span_event("memory_context_build.started")
 
     memory_ctx_preview = build_memory_context(
-        resolved_user_id, resolved_tenant_id, agent_request.agent_id
+        resolved_user_id, resolved_tenant_id, agent_request.agent_id, skip_query=agent_request.is_debug
     )
 
     memory_duration = time.time() - memory_start_time
@@ -1695,7 +1695,8 @@ async def run_agent_stream(
     monitoring_manager.add_span_event("memory_context_build.completed", {
         "duration": memory_duration,
         "memory_enabled": memory_enabled,
-        "agent_share_option": getattr(memory_ctx_preview.user_config, "agent_share_option", "unknown")
+        "agent_share_option": getattr(memory_ctx_preview.user_config, "agent_share_option", "unknown"),
+        "debug_mode": agent_request.is_debug
     })
     monitoring_manager.set_span_attributes(
         memory_enabled=memory_enabled,

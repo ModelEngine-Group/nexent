@@ -52,7 +52,8 @@ class DockerContainerClient(ContainerClient):
             self.client = docker.DockerClient(base_url=base_url)
             # Test connection
             self.client.ping()
-            logger.info(f"Docker client initialized successfully with base_url={base_url}")
+            logger.info(
+                f"Docker client initialized successfully with base_url={base_url}")
         except DockerException as e:
             logger.error(f"Failed to connect to Docker socket: {e}")
             raise ContainerError(f"Cannot connect to Docker: {e}")
@@ -114,7 +115,8 @@ class DockerContainerClient(ContainerClient):
                         f"Failed to create or get Docker network '{network_name}': {e}"
                     ) from inner
         except APIError as e:
-            raise ContainerError(f"Failed to get Docker network '{network_name}': {e}")
+            raise ContainerError(
+                f"Failed to get Docker network '{network_name}': {e}")
 
     @staticmethod
     def _get_container_service_port(container: Any) -> Optional[str]:
@@ -135,7 +137,8 @@ class DockerContainerClient(ContainerClient):
 
         # Fall back to published host port mapping
         try:
-            ports = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+            ports = container.attrs.get(
+                "NetworkSettings", {}).get("Ports", {}) or {}
             for _, host_mappings in ports.items():
                 if host_mappings and len(host_mappings) > 0:
                     host_port = host_mappings[0].get("HostPort")
@@ -175,7 +178,8 @@ class DockerContainerClient(ContainerClient):
     def _generate_container_name(self, service_name: str, tenant_id: str, user_id: str) -> str:
         """Generate unique container name with service, tenant, and user segments."""
         # Sanitize service name for container name (only alphanumeric and hyphens)
-        safe_name = "".join(c if c.isalnum() or c == "-" else "-" for c in service_name)
+        safe_name = "".join(c if c.isalnum() or c ==
+                            "-" else "-" for c in service_name)
         tenant_part = (tenant_id or "")[:8]
         user_part = (user_id or "")[:8]
         return f"mcp-{safe_name}-{tenant_part}-{user_part}"
@@ -185,7 +189,7 @@ class DockerContainerClient(ContainerClient):
         service_name: str,
         tenant_id: str,
         user_id: str,
-        full_command: List[str],
+        full_command: Optional[List[str]] = None,
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         image: Optional[str] = None,
@@ -197,7 +201,8 @@ class DockerContainerClient(ContainerClient):
             service_name: Name of the service
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
-            full_command: Complete command list to run inside container (must start an HTTP endpoint)
+            full_command: Optional complete command list to run inside container (must start an HTTP endpoint).
+                         If None, uses the image's default CMD/ENTRYPOINT.
             env_vars: Optional environment variables
 
         Returns:
@@ -206,7 +211,8 @@ class DockerContainerClient(ContainerClient):
         Raises:
             ContainerError: If container startup fails
         """
-        container_name = self._generate_container_name(service_name, tenant_id, user_id)
+        container_name = self._generate_container_name(
+            service_name, tenant_id, user_id)
         self._ensure_network(self.DEFAULT_NETWORK_NAME)
 
         # Check if container already exists
@@ -220,7 +226,8 @@ class DockerContainerClient(ContainerClient):
                 else:
                     # Local mode: prefer published host port mapping over internal PORT env.
                     service_port = None
-                    ports = existing.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+                    ports = existing.attrs.get(
+                        "NetworkSettings", {}).get("Ports", {}) or {}
                     for _, host_mappings in ports.items():
                         if host_mappings and len(host_mappings) > 0:
                             mapped = host_mappings[0].get("HostPort")
@@ -243,7 +250,8 @@ class DockerContainerClient(ContainerClient):
                         "container_name": container_name,
                     }
             # Remove existing stopped container
-            logger.info(f"Removing existing stopped container {container_name}")
+            logger.info(
+                f"Removing existing stopped container {container_name}")
             existing.remove(force=True)
         except NotFound:
             pass
@@ -271,9 +279,7 @@ class DockerContainerClient(ContainerClient):
         if env_vars:
             container_env.update(env_vars)
 
-        if not full_command:
-            raise ContainerError("full_command is required to start container")
-
+        # Determine image name
         command0 = full_command[0] if full_command else ""
         if image is not None:
             image_name = image
@@ -287,7 +293,6 @@ class DockerContainerClient(ContainerClient):
         container_config = {
             "image": image_name,
             "name": container_name,
-            "command": full_command_to_run,
             "environment": container_env,
             "network": self.DEFAULT_NETWORK_NAME,
             "restart_policy": {"Name": "unless-stopped"},
@@ -297,12 +302,21 @@ class DockerContainerClient(ContainerClient):
             "tty": False,
         }
 
+        # Only set command if full_command is provided
+        if full_command_to_run:
+            container_config["command"] = full_command_to_run
+
         # Only publish ports when running locally; inside Docker network DNS is used.
         if not DockerContainerClient._is_running_in_docker():
             container_config["ports"] = {f"{host_port}/tcp": host_port}
 
         try:
-            logger.info(f"Starting container {container_name} with command: {full_command_to_run}")
+            if full_command_to_run:
+                logger.info(
+                    f"Starting container {container_name} with command: {full_command_to_run}")
+            else:
+                logger.info(
+                    f"Starting container {container_name} with default image CMD/ENTRYPOINT")
             container = self.client.containers.run(**container_config)
 
             # Wait a bit for container to start
@@ -322,11 +336,14 @@ class DockerContainerClient(ContainerClient):
                 try:
                     container.reload()
                     if container.status != "running":
-                        raise ContainerError(f"Container {container_name} stopped unexpectedly")
+                        raise ContainerError(
+                            f"Container {container_name} stopped unexpectedly")
                 except NotFound:
-                    raise ContainerError(f"Container {container_name} not found after start")
+                    raise ContainerError(
+                        f"Container {container_name} not found after start")
 
-            logger.info(f"Container {container_name} started successfully on port {host_port}")
+            logger.info(
+                f"Container {container_name} started successfully on port {host_port}")
             return {
                 "container_id": container.id,
                 "service_url": service_url,
@@ -364,16 +381,19 @@ class DockerContainerClient(ContainerClient):
                         return
                     # If not connected, treat as failure
                     if i < max_retries - 1:
-                        logger.debug(f"Service not ready yet (attempt {i+1}/{max_retries}): not connected")
+                        logger.debug(
+                            f"Service not ready yet (attempt {i+1}/{max_retries}): not connected")
                         await asyncio.sleep(retry_delay)
                     else:
-                        logger.error(f"Service not ready after {max_retries} attempts: not connected")
+                        logger.error(
+                            f"Service not ready after {max_retries} attempts: not connected")
                         raise ContainerConnectionError(
                             f"Service not ready after {max_retries * retry_delay} seconds: not connected"
                         )
             except BaseException as e:
                 if i < max_retries - 1:
-                    logger.debug(f"Service not ready yet (attempt {i+1}/{max_retries}): {e}")
+                    logger.debug(
+                        f"Service not ready yet (attempt {i+1}/{max_retries}): {e}")
                     await asyncio.sleep(retry_delay)
                 else:
                     logger.error(
@@ -398,7 +418,8 @@ class DockerContainerClient(ContainerClient):
         """
         try:
             container = self.client.containers.get(container_id)
-            logger.info(f"Stopping container {container.name} ({container.id})")
+            logger.info(
+                f"Stopping container {container.name} ({container.id})")
             container.stop(timeout=10)
             logger.info(f"Container {container.name} stopped")
             return True
@@ -409,7 +430,8 @@ class DockerContainerClient(ContainerClient):
             logger.error(f"Failed to stop container {container_id}: {e}")
             raise ContainerError(f"Failed to stop container: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error stopping container {container_id}: {e}")
+            logger.error(
+                f"Unexpected error stopping container {container_id}: {e}")
             raise ContainerError(f"Failed to stop container: {e}")
 
     async def remove_container(self, container_id: str) -> bool:
@@ -427,7 +449,8 @@ class DockerContainerClient(ContainerClient):
         """
         try:
             container = self.client.containers.get(container_id)
-            logger.info(f"Removing container {container.name} ({container.id})")
+            logger.info(
+                f"Removing container {container.name} ({container.id})")
             container.remove()
             logger.info(f"Container {container.name} removed")
             return True
@@ -438,7 +461,8 @@ class DockerContainerClient(ContainerClient):
             logger.error(f"Failed to remove container {container_id}: {e}")
             raise ContainerError(f"Failed to remove container: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error removing container {container_id}: {e}")
+            logger.error(
+                f"Unexpected error removing container {container_id}: {e}")
             raise ContainerError(f"Failed to remove container: {e}")
 
     def list_containers(
@@ -455,7 +479,8 @@ class DockerContainerClient(ContainerClient):
             List of container information dictionaries
         """
         try:
-            containers = self.client.containers.list(all=True, filters={"name": "mcp-"})
+            containers = self.client.containers.list(
+                all=True, filters={"name": "mcp-"})
             result = []
             for container in containers:
                 # Filter by tenant_id if provided
@@ -470,7 +495,8 @@ class DockerContainerClient(ContainerClient):
                     if safe_name not in container.name:
                         continue
 
-                ports = container.attrs.get("NetworkSettings", {}).get("Ports", {})
+                ports = container.attrs.get(
+                    "NetworkSettings", {}).get("Ports", {})
                 host_port = None
                 for port_mappings in ports.values():
                     if port_mappings and len(port_mappings) > 0:
@@ -566,4 +592,3 @@ class DockerContainerClient(ContainerClient):
         except Exception as e:
             logger.error(f"Failed to get container status: {e}")
             return None
-

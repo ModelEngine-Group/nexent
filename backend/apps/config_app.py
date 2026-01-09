@@ -10,7 +10,6 @@ from apps.vectordatabase_app import router as vectordatabase_router
 from apps.file_management_app import file_management_config_router as file_manager_router
 from apps.image_app import router as proxy_router
 from apps.knowledge_summary_app import router as summary_router
-from apps.me_model_managment_app import router as me_model_manager_router
 from apps.mock_user_management_app import router as mock_user_management_router
 from apps.model_managment_app import router as model_manager_router
 from apps.prompt_app import router as prompt_router
@@ -37,7 +36,6 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-app.include_router(me_model_manager_router)
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)

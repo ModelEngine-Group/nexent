@@ -129,8 +129,8 @@ DISABLE_RAY_DASHBOARD = os.getenv(
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
-DOCKER_HOST = os.getenv("DOCKER_HOST")
-MCP_DOCKER_IMAGE = os.getenv("MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
+NEXENT_MCP_DOCKER_IMAGE = os.getenv("NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
+ENABLE_UPLOAD_IMAGE = os.getenv("ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 
 
 # Celery Configuration
@@ -287,4 +287,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 
 
 # APP Version
-APP_VERSION = "v1.7.9"
+APP_VERSION = "v1.7.9.1"

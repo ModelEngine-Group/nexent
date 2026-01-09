@@ -13,24 +13,23 @@ import {
 } from "antd";
 
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
-import { ToolParam, ToolConfigModalProps } from "@/types/agentConfig";
-import {
-  updateToolConfig,
-  searchToolConfig,
-  loadLastToolConfig,
-} from "@/services/agentConfigService";
-import log from "@/lib/logger";
+import { ToolParam, Tool } from "@/types/agentConfig";
 import { useModalPosition } from "@/hooks/useModalPosition";
 import ToolTestPanel from "./ToolTestPanel";
+export interface ToolConfigModalProps {
+  isOpen: boolean;
+  onCancel: () => void;
+  onSave: (params: ToolParam[]) => void; // 修改：返回参数数组
+  tool?: Tool;
+  initialParams: ToolParam[]; // 修改：变为必需，移除currentAgentId
+}
 
 export default function ToolConfigModal({
   isOpen,
   onCancel,
   onSave,
   tool,
-  mainAgentId,
-  selectedTools = [],
-  isEditingMode = true,
+  initialParams,
 }: ToolConfigModalProps) {
   const [currentParams, setCurrentParams] = useState<ToolParam[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -41,13 +40,6 @@ export default function ToolConfigModal({
   const [testPanelVisible, setTestPanelVisible] = useState(false);
   const { windowWidth, mainModalTop, mainModalRight } =
     useModalPosition(isOpen);
-
-  const normalizedAgentId =
-    typeof mainAgentId === "number" && !Number.isNaN(mainAgentId)
-      ? mainAgentId
-      : null;
-  const canPersistToolConfig =
-    typeof normalizedAgentId === "number" && normalizedAgentId > 0;
 
   // Apply transform to modal when test panel is visible
   // Move main modal to the left to center both panels together
@@ -91,65 +83,15 @@ export default function ToolConfigModal({
     };
   }, [testPanelVisible, isOpen, windowWidth]);
 
-  // load tool config
+  // Initialize with provided params
   useEffect(() => {
-    const buildDefaultParams = () =>
-      (tool?.initParams || []).map((param) => ({
-        ...param,
-        value: param.value,
-      }));
-
-    const loadToolConfig = async () => {
-      if (!tool) {
-        setCurrentParams([]);
-        return;
-      }
-
-      // In creation mode (no agent ID), always use backend-provided default params
-      if (!normalizedAgentId) {
-        setCurrentParams(buildDefaultParams());
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        // In edit mode, load tool config for the specific agent
-        const result = await searchToolConfig(
-          parseInt(tool.id),
-          normalizedAgentId
-        );
-        if (result.success) {
-          if (result.data?.params) {
-            const savedParams = tool.initParams.map((param) => {
-              const savedValue = result.data.params[param.name];
-              return {
-                ...param,
-                value: savedValue !== undefined ? savedValue : param.value,
-              };
-            });
-            setCurrentParams(savedParams);
-          } else {
-            setCurrentParams(buildDefaultParams());
-          }
-        } else {
-          message.error(result.message || t("toolConfig.message.loadError"));
-          setCurrentParams(buildDefaultParams());
-        }
-      } catch (error) {
-        log.error(t("toolConfig.message.loadError"), error);
-        message.error(t("toolConfig.message.loadErrorUseDefault"));
-        setCurrentParams(buildDefaultParams());
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (isOpen && tool) {
-      loadToolConfig();
+    if (isOpen && tool && initialParams) {
+      setCurrentParams(initialParams);
+      setIsLoading(false);
     } else {
       setCurrentParams([]);
     }
-  }, [isOpen, tool, normalizedAgentId, t, message]);
+  }, [tool, initialParams, isOpen]);
 
   // check required fields
   const checkRequiredFields = () => {
@@ -182,78 +124,10 @@ export default function ToolConfigModal({
     setCurrentParams(newParams);
   };
 
-  // load last tool config
-  const handleLoadLastConfig = async () => {
-    if (!tool) return;
 
-    try {
-      const result = await loadLastToolConfig(parseInt(tool.id));
-      if (result.success && result.data) {
-        // Parse the last config data
-        const lastConfig = result.data;
-        
-        // Update current params with last config values
-        const updatedParams = currentParams.map((param) => {
-          const lastValue = lastConfig[param.name];
-          return {
-            ...param,
-            value: lastValue !== undefined ? lastValue : param.value,
-          };
-        });
-        
-        setCurrentParams(updatedParams);
-        message.success(t("toolConfig.message.loadLastConfigSuccess"));
-      } else {
-        message.warning(t("toolConfig.message.loadLastConfigNotFound"));
-      }
-    } catch (error) {
-      log.error(t("toolConfig.message.loadLastConfigFailed"), error);
-      message.error(t("toolConfig.message.loadLastConfigFailed"));
-    }
-  };
-
-  const handleSave = async () => {
-    if (!tool || !checkRequiredFields()) return;
-
-    try {
-      // convert params to backend format
-      const params = currentParams.reduce((acc, param) => {
-        acc[param.name] = param.value;
-        return acc;
-      }, {} as Record<string, any>);
-
-      if (!canPersistToolConfig) {
-        message.success(t("toolConfig.message.saveSuccess"));
-        onSave({
-          ...tool,
-          initParams: currentParams,
-        });
-        return;
-      }
-
-      // decide enabled status based on whether the tool is in selectedTools
-      const isEnabled = selectedTools.some((t) => t.id === tool.id);
-
-      const result = await updateToolConfig(
-        parseInt(tool.id),
-        normalizedAgentId,
-        params,
-        isEnabled
-      );
-
-      if (result.success) {
-        message.success(t("toolConfig.message.saveSuccess"));
-        onSave({
-          ...tool,
-          initParams: currentParams,
-        });
-      } else {
-        message.error(result.message || t("toolConfig.message.saveError"));
-      }
-    } catch (error) {
-      log.error(t("toolConfig.message.saveFailed"), error);
-      message.error(t("toolConfig.message.saveFailed"));
-    }
+  const handleSave = () => {
+    if (!checkRequiredFields()) return;
+    onSave(currentParams);
   };
 
   // Handle tool testing - open test panel
@@ -372,12 +246,6 @@ export default function ToolConfigModal({
           <div className="flex justify-between items-center w-full pr-8">
             <span>{`${tool?.name}`}</span>
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleLoadLastConfig}
-                className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-              >
-                {t("toolConfig.message.loadLastConfig")}
-              </button>
               <Tag
                 color={
                   tool?.source === "mcp"
@@ -406,7 +274,7 @@ export default function ToolConfigModal({
         className="tool-config-modal-content"
         footer={
           <div className="flex justify-end items-center">
-            {isEditingMode && (
+            {(
               <button
                 onClick={handleTestTool}
                 disabled={!tool}

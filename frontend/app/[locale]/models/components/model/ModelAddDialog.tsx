@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 import { Modal, Select, Input, Button, Switch, Tooltip, App } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
 import {
-  LoaderCircle, 
-  ChevronRight, 
-  ChevronDown, 
-  Settings 
+  LoaderCircle,
+  ChevronRight,
+  ChevronDown,
+  Settings
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
@@ -37,6 +37,7 @@ interface ModelAddDialogProps {
   onClose: () => void;
   onSuccess: (model?: AddedModel) => Promise<void>;
   defaultProvider?: string; // Default provider to select when dialog opens
+  defaultIsBatchImport?: boolean;
 }
 
 // Connectivity status type comes from utils
@@ -131,6 +132,7 @@ export const ModelAddDialog = ({
   onClose,
   onSuccess,
   defaultProvider,
+  defaultIsBatchImport,
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -169,6 +171,7 @@ export const ModelAddDialog = ({
     // Whether to import multiple models at once
     isBatchImport: false,
     provider: "modelengine",
+    modelEngineUrl: "",
     vectorDimension: "1024",
     // Default chunk size range for embedding models
     chunkSizeRange: [
@@ -222,16 +225,18 @@ export const ModelAddDialog = ({
     setLoadingModelList,
   });
 
-  // Handle default provider when dialog opens
+  // When dialog opens, apply default provider and optional default batch mode
   useEffect(() => {
-    if (isOpen && defaultProvider) {
-      setForm((prev) => ({
-        ...prev,
-        provider: defaultProvider,
-        isBatchImport: true,
-      }));
-    }
-  }, [isOpen, defaultProvider]);
+    if (!isOpen) return;
+    setForm((prev) => ({
+      ...prev,
+      provider: defaultProvider || prev.provider,
+      isBatchImport:
+        typeof defaultIsBatchImport !== "undefined"
+          ? Boolean(defaultIsBatchImport)
+          : prev.isBatchImport,
+    }));
+  }, [isOpen, defaultProvider, defaultIsBatchImport]);
 
   const parseModelName = (name: string): string => {
     if (!name) return "";
@@ -306,6 +311,14 @@ export const ModelAddDialog = ({
   // Check if the form is valid
   const isFormValid = () => {
     if (form.isBatchImport) {
+      // If provider is ModelEngine, require the ModelEngine URL as well.
+      if (form.provider === "modelengine") {
+        return (
+          form.provider.trim() !== "" &&
+          form.apiKey.trim() !== "" &&
+          ((form as any).modelEngineUrl || "").toString().trim() !== ""
+        );
+      }
       return form.provider.trim() !== "" && form.apiKey.trim() !== "";
     }
     if (form.type === MODEL_TYPES.EMBEDDING) {
@@ -602,6 +615,7 @@ export const ModelAddDialog = ({
         isMultimodal: false,
         isBatchImport: false,
         provider: "silicon",
+        modelEngineUrl: "",
         vectorDimension: "1024",
         chunkSizeRange: [
           DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -675,6 +689,21 @@ export const ModelAddDialog = ({
               <Option value="modelengine">{t("model.provider.modelengine")}</Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
+            {/* ModelEngine URL input (only when provider is ModelEngine) */}
+            {form.provider === "modelengine" && (
+              <div className="mt-3">
+                <label className="block mb-1 text-sm font-medium text-gray-700">
+                  ModelEngine URL
+                </label>
+                <Input
+                  placeholder={t("model.dialog.placeholder.modelEngineUrl")}
+                  value={(form as any).modelEngineUrl}
+                  onChange={(e) =>
+                    handleFormChange("modelEngineUrl", e.target.value)
+                  }
+                />
+              </div>
+            )}
           </div>
         )}
 
