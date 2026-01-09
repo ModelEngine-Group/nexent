@@ -142,18 +142,18 @@ export default function MarketContent() {
         params.search = searchKeyword.trim();
       }
 
-      // Backend now returns paginated items including is_featured.
+      // Backend returns all items in pagination, with is_featured flag
       const data = await marketService.fetchMarketAgentList(params);
       const allItems = data.items || [];
+
+      // Separate featured and regular items
       const featured = allItems.filter((a) => a.is_featured);
       const items = allItems.filter((a) => !a.is_featured);
 
       setFeaturedItems(featured);
       setAgents(items);
-      // Adjust total to represent non-featured items for pagination
-      const featuredCount = featured.length || 0;
-      const total = (data.pagination?.total || 0) - featuredCount;
-      setTotalAgents(total > 0 ? total : 0);
+      // Use pagination total as is - it represents total items across both featured and regular
+      setTotalAgents(data.pagination?.total || 0);
     } catch (error) {
       log.error("Failed to load market agents:", error);
 
@@ -471,43 +471,43 @@ export default function MarketContent() {
                         {agents.length > 0 && (
                           <>
                             <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8">
-                              {agents.map((agent, index) => (
-                                <motion.div
-                                  key={agent.id}
-                                  initial={{ opacity: 0, scale: 0.9 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{
-                                    duration: 0.3,
-                                    delay: 0.05 * index,
-                                  }}
-                                  className="h-full"
-                                >
-                                  <AgentMarketCard
-                                    agent={agent}
-                                    onDownload={handleDownload}
-                                    onViewDetails={handleViewDetails}
-                                  />
-                                </motion.div>
-                              ))}
-                            </div>
+                          {agents.map((agent, index) => (
+                            <motion.div
+                              key={agent.id}
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{
+                                duration: 0.3,
+                                delay: 0.05 * index,
+                              }}
+                              className="h-full"
+                            >
+                              <AgentMarketCard
+                                agent={agent}
+                                onDownload={handleDownload}
+                                onViewDetails={handleViewDetails}
+                              />
+                            </motion.div>
+                          ))}
+                        </div>
 
-                            {/* Pagination */}
-                            {totalAgents > pageSize && (
-                              <div className="flex justify-center mt-8">
-                                <Pagination
-                                  current={currentPage}
-                                  total={totalAgents}
-                                  pageSize={pageSize}
-                                  onChange={handlePageChange}
-                                  showSizeChanger={false}
-                                  showTotal={(total) =>
-                                    t("market.totalAgents", {
-                                      defaultValue: "Total {{total}} agents",
-                                      total,
-                                    })
-                                  }
-                                />
-                              </div>
+                        {/* Pagination */}
+                        {totalAgents > pageSize && (
+                          <div className="flex justify-center mt-8">
+                            <Pagination
+                              current={currentPage}
+                              total={totalAgents}
+                              pageSize={pageSize}
+                              onChange={handlePageChange}
+                              showSizeChanger={false}
+                              showTotal={(total) =>
+                                t("market.totalAgents", {
+                                  defaultValue: "Total {{total}} agents",
+                                  total,
+                                })
+                              }
+                            />
+                          </div>
                             )}
                           </>
                         )}
