@@ -51,17 +51,7 @@ def get_model_name_from_config(model_config: Dict[str, Any]) -> str:
 
 
 class TenantConfigManager:
-    """Tenant configuration manager for dynamic loading and caching configurations from database"""
-
-    def __init__(self):
-        self.config_cache = {}
-        self.cache_expiry = {}  # Store expiration timestamps for each cache entry
-        self.CACHE_DURATION = 86400  # 1 day in seconds
-        self.last_modified_times = {}  # Store last modified times for each tenant
-
-    def _get_cache_key(self, tenant_id: str, key: str) -> str:
-        """Generate a unique cache key combining tenant_id and key"""
-        return f"{tenant_id}:{key}"
+    """Tenant configuration manager that reads configurations from the database on demand."""
 
     def load_config(self, tenant_id: str, force_reload: bool = False):
         """Load configuration from database and update cache
@@ -78,60 +68,21 @@ class TenantConfigManager:
             logger.warning("Invalid tenant ID provided")
             return {}
 
-        complete_cache_key = self._get_cache_key(tenant_id, "*")
-        current_time = time.time()
-
-        # Check if we have a valid cache entry
-        if not force_reload and complete_cache_key in self.config_cache:
-            # Check if cache is still valid
-            if complete_cache_key in self.cache_expiry and current_time < self.cache_expiry[complete_cache_key]:
-                return self.config_cache[complete_cache_key]
-
-        # Cache miss or forced reload - Get configurations from database
+        # Always load latest configurations directly from DB (no in-process cache).
         configs = get_all_configs_by_tenant_id(tenant_id)
 
         if not configs:
             logger.info(f"No configurations found for tenant {tenant_id}")
             return {}
 
-        # Update cache with new configurations
-        cache_updates = 0
         tenant_configs = {}
-
         for config in configs:
-            cache_key = self._get_cache_key(tenant_id, config["config_key"])
-            self.config_cache[cache_key] = config["config_value"]
             tenant_configs[config["config_key"]] = config["config_value"]
-            self.cache_expiry[cache_key] = current_time + self.CACHE_DURATION
-            cache_updates += 1
-
-        # Store the complete tenant config
-        self.config_cache[complete_cache_key] = tenant_configs
-        self.cache_expiry[complete_cache_key] = current_time + \
-            self.CACHE_DURATION
-
-        # Store the last modified time from database
-        self.last_modified_times[tenant_id] = self._get_tenant_config_modified_time(
-            tenant_id)
 
         logger.info(
-            f"Configuration reloaded for tenant {tenant_id} at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            f"Configuration loaded for tenant {tenant_id} at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         return tenant_configs
-
-    def _get_tenant_config_modified_time(self, tenant_id: str) -> float:
-        """Get the last modification time of tenant configurations
-
-        Args:
-            tenant_id (str): The tenant ID to check
-
-        Returns:
-            float: The last modification timestamp
-        """
-        # This is a placeholder - implement actual database query
-        # to get the last modification time of tenant configurations
-        # Example: return db.query("SELECT MAX(modified_at) FROM tenant_configs WHERE tenant_id = %s", tenant_id)
-        return time.time()  # Temporary implementation
 
     def get_model_config(self, key: str, default=None, tenant_id: str | None = None):
         if default is None:
@@ -186,8 +137,6 @@ class TenantConfigManager:
         }
 
         insert_config(insert_data)
-        # Clear cache for this tenant after setting new config
-        self.clear_cache(tenant_id)
 
     def delete_single_config(self, tenant_id: str | None = None, key: str | None = None, ):
         """Delete configuration value in database"""
@@ -200,8 +149,6 @@ class TenantConfigManager:
         if existing_config:
             delete_config_by_tenant_config_id(
                 existing_config["tenant_config_id"])
-            # Clear cache for this tenant after deleting config
-            self.clear_cache(tenant_id)
             return
 
     def update_single_config(self, tenant_id: str | None = None, key: str | None = None):
@@ -219,26 +166,7 @@ class TenantConfigManager:
             }
             update_config_by_tenant_config_id_and_data(
                 existing_config["tenant_config_id"], update_data)
-
-            # Clear cache for this tenant after updating config so that
-            # subsequent reads immediately see the latest configuration
-            self.clear_cache(tenant_id)
             return
-
-    def clear_cache(self, tenant_id: str | None = None):
-        """Clear the cache for a specific tenant or all tenants"""
-        if tenant_id:
-            # Clear cache for specific tenant
-            keys_to_remove = [
-                k for k in self.config_cache.keys() if k.startswith(f"{tenant_id}:")]
-            for key in keys_to_remove:
-                del self.config_cache[key]
-                if key in self.cache_expiry:
-                    del self.cache_expiry[key]
-        else:
-            # Clear all cache
-            self.config_cache.clear()
-            self.cache_expiry.clear()
 
 
 tenant_config_manager = TenantConfigManager()
