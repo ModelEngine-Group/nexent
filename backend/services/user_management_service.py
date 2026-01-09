@@ -12,7 +12,7 @@ from utils.auth_utils import (
     calculate_expires_at,
     get_jwt_expiry_seconds,
 )
-from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
+from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 
 from database.model_management_db import create_model_record
@@ -21,6 +21,8 @@ from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from utils.memory_utils import build_memory_config
 from nexent.memory.memory_service import clear_memory
+from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
+from services.group_service import add_user_to_groups
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -120,39 +122,114 @@ async def check_auth_service_health():
 
 async def signup_user(email: EmailStr,
                       password: str,
-                      is_admin: Optional[bool] = False,
                       invite_code: Optional[str] = None):
-    """User registration"""
+    """User registration with invitation code support"""
     client = get_supabase_client()
     logging.info(
-        f"Receive registration request: email={email}, is_admin={is_admin}")
-    if is_admin:
-        await verify_invite_code(invite_code)
+        f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}")
+
+    # Default user role is USER
+    user_role = "USER"
+    invitation_info = None
+
+    # Validate invitation code if provided (without using it yet)
+    if invite_code:
+        try:
+            # Convert invite code to upper case for consistency
+            invite_code = invite_code.upper()
+
+            # Check if invitation is available
+            if not check_invitation_available(invite_code):
+                raise IncorrectInviteCodeException(
+                    f"Invitation code {invite_code} is not available")
+
+            # Get invitation code details
+            invitation_info = get_invitation_by_code(invite_code)
+            if not invitation_info:
+                raise IncorrectInviteCodeException(
+                    f"Invitation code {invite_code} not found")
+
+            # Determine user role based on invitation code type
+            code_type = invitation_info["code_type"]
+            if code_type == "ADMIN_INVITE":
+                user_role = "ADMIN"
+            elif code_type == "DEV_INVITE":
+                user_role = "DEV"
+
+            logging.info(
+                f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
+
+        except IncorrectInviteCodeException:
+            raise
+        except Exception as e:
+            logging.error(
+                f"Invitation code {invite_code} validation failed: {str(e)}")
+            raise IncorrectInviteCodeException(
+                f"Invalid invitation code: {str(e)}")
 
     # Set user metadata, including role information
     response = client.auth.sign_up({
         "email": email,
         "password": password,
         "options": {
-            "data": {"role": "admin" if is_admin else "user"}
+            "data": {"role": user_role.lower()}
         }
     })
 
     if response.user:
         user_id = response.user.id
-        user_role = "admin" if is_admin else "user"
-        tenant_id = user_id if is_admin else "tenant_id"
+
+        # Determine tenant_id based on invitation code
+        if invitation_info:
+            tenant_id = invitation_info["tenant_id"]
+        else:
+            tenant_id = DEFAULT_TENANT_ID
 
         # Create user tenant relationship
-        insert_user_tenant(user_id=user_id, tenant_id=tenant_id)
+        insert_user_tenant(
+            user_id=user_id, tenant_id=tenant_id, user_role=user_role)
+
+        # Use invitation code now that we have the real user_id
+        if invitation_info:
+            try:
+                invitation_result = use_invitation_code(
+                    invite_code, user_id)
+                logging.info(
+                    f"Invitation code {invite_code} used successfully for user {user_id}")
+
+                # Add user to groups specified in invitation code
+                group_ids = invitation_result.get("group_ids", [])
+                if group_ids:
+                    try:
+                        # Convert group_ids from string to list if needed
+                        if isinstance(group_ids, str):
+                            from utils.str_utils import convert_string_to_list
+                            group_ids = convert_string_to_list(group_ids)
+
+                        if group_ids:
+                            group_results = add_user_to_groups(
+                                user_id, group_ids, user_id)
+                            successful_adds = [
+                                r for r in group_results if not r.get("error")]
+                            logging.info(
+                                f"User {user_id} added to {len(successful_adds)} groups from invitation code")
+
+                    except Exception as e:
+                        logging.error(
+                            f"Failed to add user {user_id} to invitation groups: {str(e)}")
+
+            except Exception as e:
+                # If using invitation code fails after registration, log error but don't fail registration
+                logging.error(
+                    f"Failed to use invitation code {invite_code} for user {user_id}: {str(e)}")
 
         logging.info(
             f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}")
 
-        if is_admin:
+        if user_role == "ADMIN":
             await generate_tts_stt_4_admin(tenant_id, user_id)
 
-        return await parse_supabase_response(is_admin, response, user_role)
+        return await parse_supabase_response(user_role == "ADMIN", response, user_role)
     else:
         logging.error(
             "Supabase registration request returned no user object")
