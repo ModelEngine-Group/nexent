@@ -153,7 +153,7 @@ export default function ToolManagement({
 
   const saveToolConfig = async (params: ToolParam[]) => {
     // Add tool to selected tools with updated params
-    const updatedTool = { ...selectedTool, initParams: params };
+    const updatedTool = { ...selectedTool!, initParams: params };
     const newSelectedTools = [...usedTools, updatedTool];
     updateTools(newSelectedTools);
 
