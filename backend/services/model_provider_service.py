@@ -9,12 +9,9 @@ from consts.const import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_EXPECTED_CHUNK_SIZE,
     DEFAULT_MAXIMUM_CHUNK_SIZE,
-    MODEL_ENGINE_HOST,
-    MODEL_ENGINE_APIKEY,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
 from consts.provider import SILICON_GET_URL, ProviderEnum
-from consts.exceptions import TimeoutException
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from utils.model_name_utils import split_repo_name, add_repo_to_name
