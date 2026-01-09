@@ -217,6 +217,7 @@ class AgentInfo(TableBase):
         Text, doc="Manually entered by the user to describe the entire business process")
     business_logic_model_name = Column(String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
+    group_ids = Column(String, doc="Agent group IDs list")
 
 
 class ToolInstance(TableBase):
@@ -251,6 +252,9 @@ class KnowledgeRecord(TableBase):
     knowledge_sources = Column(String(300), doc="Knowledge base sources")
     embedding_model_name = Column(String(200), doc="Embedding model name, used to record the embedding model used by the knowledge base")
     tenant_id = Column(String(100), doc="Tenant ID")
+    group_ids = Column(String, doc="Knowledge base group IDs list")
+    ingroup_permission = Column(
+        String(30), doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
 
 
 class TenantConfig(TableBase):
@@ -322,6 +326,7 @@ class UserTenant(TableBase):
                             primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    user_role = Column(String(30), doc="User role: SU, ADMIN, DEV, USER")
 
 
 class AgentRelation(TableBase):
@@ -355,3 +360,85 @@ class PartnerMappingId(TableBase):
         30), doc="Type of the external - internal mapping, value set: CONVERSATION")
     tenant_id = Column(String(100), doc="Tenant ID")
     user_id = Column(String(100), doc="User ID")
+
+
+class TenantInvitationCode(TableBase):
+    """
+    Tenant invitation code information table
+    """
+    __tablename__ = "tenant_invitation_code_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    invitation_id = Column(Integer, Sequence("tenant_invitation_code_t_invitation_id_seq", schema=SCHEMA),
+                           primary_key=True, nullable=False, doc="Invitation ID, primary key")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID, foreign key")
+    invitation_code = Column(String(100), nullable=False,
+                             unique=True, doc="Invitation code")
+    group_ids = Column(String, doc="Associated group IDs list")
+    capacity = Column(Integer, nullable=False, default=1,
+                      doc="Invitation code capacity")
+    expiry_date = Column(TIMESTAMP(timezone=False),
+                         doc="Invitation code expiry date")
+    status = Column(String(30), nullable=False,
+                    doc="Invitation code status: IN_USE, EXPIRE, DISABLE, RUN_OUT")
+    code_type = Column(String(30), nullable=False,
+                       doc="Invitation code type: ADMIN_INVITE, DEV_INVITE, USER_INVITE")
+
+
+class TenantInvitationRecord(TableBase):
+    """
+    Tenant invitation record table
+    """
+    __tablename__ = "tenant_invitation_record_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    invitation_record_id = Column(Integer, Sequence("tenant_invitation_record_t_invitation_record_id_seq", schema=SCHEMA),
+                                  primary_key=True, nullable=False, doc="Invitation record ID, primary key")
+    invitation_id = Column(Integer, nullable=False,
+                           doc="Invitation ID, foreign key")
+    user_id = Column(String(100), nullable=False, doc="User ID")
+
+
+class TenantGroupInfo(TableBase):
+    """
+    Tenant group information table
+    """
+    __tablename__ = "tenant_group_info_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    group_id = Column(Integer, Sequence("tenant_group_info_t_group_id_seq", schema=SCHEMA),
+                      primary_key=True, nullable=False, doc="Group ID, primary key")
+    tenant_id = Column(String(100), nullable=False,
+                       doc="Tenant ID, foreign key")
+    group_name = Column(String(100), nullable=False, doc="Group name")
+    group_description = Column(String(500), doc="Group description")
+
+
+class TenantGroupUser(TableBase):
+    """
+    Tenant group user membership table
+    """
+    __tablename__ = "tenant_group_user_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    group_user_id = Column(Integer, Sequence("tenant_group_user_t_group_user_id_seq", schema=SCHEMA),
+                           primary_key=True, nullable=False, doc="Group user ID, primary key")
+    group_id = Column(Integer, nullable=False, doc="Group ID, foreign key")
+    user_id = Column(String(100), nullable=False, doc="User ID, foreign key")
+
+
+class RolePermission(TableBase):
+    """
+    Role permission configuration table
+    """
+    __tablename__ = "role_permission_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    role_permission_id = Column(Integer, Sequence("role_permission_t_role_permission_id_seq", schema=SCHEMA),
+                                primary_key=True, nullable=False, doc="Role permission ID, primary key")
+    user_role = Column(String(30), nullable=False,
+                       doc="User role: SU, ADMIN, DEV, USER")
+    permission_category = Column(String(30), doc="Permission category")
+    permission_type = Column(String(30), doc="Permission type")
+    permission_subtype = Column(String(30), doc="Permission subtype")

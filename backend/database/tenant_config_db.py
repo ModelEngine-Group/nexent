@@ -137,3 +137,19 @@ def update_config_by_tenant_config_id_and_data(tenant_config_id: int, insert_dat
             session.rollback()
             logger.error(f"update config by tenant config id and data failed, error: {e}")
             return False
+
+
+def get_all_tenant_ids():
+    """
+    Get all tenant IDs that have tenant configurations
+
+    Returns:
+        List[str]: List of tenant IDs
+    """
+    with get_db_session() as session:
+        result = session.query(TenantConfig.tenant_id).filter(
+            TenantConfig.config_key == "TENANT_NAME",
+            TenantConfig.delete_flag == "N"
+        ).distinct().all()
+
+        return [row[0] for row in result]

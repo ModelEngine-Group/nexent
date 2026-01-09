@@ -26,10 +26,13 @@ sys.modules['consts.const'] = consts_mock.const
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
+utils_mock.str_utils = MagicMock()
+utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.str_utils'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -78,6 +81,8 @@ class MockKnowledgeRecord:
         self.knowledge_sources = kwargs.get('knowledge_sources', 'elasticsearch')
         self.tenant_id = kwargs.get('tenant_id', 'test_tenant')
         self.embedding_model_name = kwargs.get('embedding_model_name', 'test_model')
+        self.group_ids = kwargs.get('group_ids', '1,2,3')  # New field
+        self.ingroup_permission = kwargs.get('ingroup_permission', 'READ_ONLY')  # New field, corrected name
         self.delete_flag = kwargs.get('delete_flag', 'N')
         self.update_time = kwargs.get('update_time', "2023-01-01 00:00:00")
         
@@ -91,6 +96,8 @@ class MockKnowledgeRecord:
     knowledge_sources = MagicMock(name="knowledge_sources_column")
     tenant_id = MagicMock(name="tenant_id_column")
     embedding_model_name = MagicMock(name="embedding_model_name_column")
+    group_ids = MagicMock(name="group_ids_column")  # New field
+    ingroup_permission = MagicMock(name="ingroup_permission_column")  # New field, corrected name
     delete_flag = MagicMock(name="delete_flag_column")
     update_time = MagicMock(name="update_time_column")
 
@@ -146,7 +153,9 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "user_id": "test_user",
         "tenant_id": "test_tenant",
         "embedding_model_name": "test_model",
-        "knowledge_name": "test_knowledge"
+        "knowledge_name": "test_knowledge",
+        "group_ids": [1, 2, 3],
+        "ingroup_permission": "READ_ONLY"
     }
     
     # Mock KnowledgeRecord constructor
@@ -158,6 +167,51 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "index_name": "test_knowledge",
         "knowledge_name": "test_knowledge",
     }
+    session.add.assert_called_once_with(mock_record)
+    assert session.flush.call_count == 1
+    session.commit.assert_called_once()
+
+
+def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
+    """Test successful creation of knowledge record with group IDs as list"""
+    session, _ = mock_session
+
+    # Create mock knowledge record
+    mock_record = MockKnowledgeRecord(knowledge_name="test_knowledge")
+    mock_record.knowledge_id = 123
+    mock_record.index_name = "test_knowledge"
+
+    # Mock database session context
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    # Prepare test data with group_ids as list
+    test_query = {
+        "index_name": "test_knowledge",
+        "knowledge_describe": "Test knowledge description",
+        "user_id": "test_user",
+        "tenant_id": "test_tenant",
+        "embedding_model_name": "test_model",
+        "knowledge_name": "test_knowledge",
+        "group_ids": [1, 2, 3],
+        "ingroup_permission": "READ_ONLY"
+    }
+
+    # Mock KnowledgeRecord constructor
+    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record) as mock_constructor:
+        result = create_knowledge_record(test_query)
+
+    assert result == {
+        "knowledge_id": 123,
+        "index_name": "test_knowledge",
+        "knowledge_name": "test_knowledge",
+    }
+    # Verify KnowledgeRecord was called with group_ids converted to string
+    mock_constructor.assert_called_once()
+    call_kwargs = mock_constructor.call_args[1]  # Get kwargs from the call
+    assert call_kwargs["group_ids"] == "1,2,3"  # Should be converted to comma-separated string
     session.add.assert_called_once_with(mock_record)
     assert session.flush.call_count == 1
     session.commit.assert_called_once()

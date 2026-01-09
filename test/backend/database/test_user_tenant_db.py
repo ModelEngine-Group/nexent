@@ -29,10 +29,14 @@ sys.modules['consts.const'] = consts_mock.const
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
+utils_mock.str_utils = MagicMock()
+utils_mock.str_utils.convert_list_to_string = MagicMock(
+    side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.str_utils'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -75,6 +79,8 @@ class MockUserTenant:
     def __init__(self):
         self.user_id = "test_user_id"
         self.tenant_id = "test_tenant_id"
+        self.group_ids = "1,2,3"  # New field
+        self.user_role = "USER"  # New field with correct role value
         self.delete_flag = "N"
         self.created_by = "test_user_id"
         self.updated_by = "test_user_id"
@@ -83,6 +89,8 @@ class MockUserTenant:
         self.__dict__ = {
             "user_id": "test_user_id",
             "tenant_id": "test_tenant_id",
+            "group_ids": "1,2,3",
+            "user_role": "USER",
             "delete_flag": "N",
             "created_by": "test_user_id",
             "updated_by": "test_user_id",
@@ -102,57 +110,59 @@ def test_get_user_tenant_by_user_id_success(monkeypatch, mock_session):
     """Test successful retrieval of user tenant relationship by user ID"""
     session, query = mock_session
     mock_user_tenant = MockUserTenant()
-    
+
     mock_first = MagicMock()
     mock_first.return_value = mock_user_tenant
     mock_filter = MagicMock()
     mock_filter.first = mock_first
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
-    
+
     result = get_user_tenant_by_user_id("test_user_id")
-    
+
     assert result is not None
     assert result["user_id"] == "test_user_id"
     assert result["tenant_id"] == "test_tenant_id"
+    assert result["group_ids"] == "1,2,3"
+    assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
 
 def test_get_user_tenant_by_user_id_not_found(monkeypatch, mock_session):
     """Test retrieval of user tenant relationship when record does not exist"""
     session, query = mock_session
-    
+
     mock_first = MagicMock()
     mock_first.return_value = None
     mock_filter = MagicMock()
     mock_filter.first = mock_first
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     result = get_user_tenant_by_user_id("nonexistent_user_id")
-    
+
     assert result is None
 
 def test_get_user_tenant_by_user_id_database_error(monkeypatch, mock_session):
     """Test database error when retrieving user tenant relationship - exception should propagate"""
     from sqlalchemy.exc import SQLAlchemyError
-    
+
     session, query = mock_session
     query.filter.side_effect = SQLAlchemyError("Database error")
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     # Should raise SQLAlchemyError
     with pytest.raises(SQLAlchemyError):
         get_user_tenant_by_user_id("test_user_id")
@@ -161,31 +171,31 @@ def test_insert_user_tenant_success(monkeypatch, mock_session):
     """Test successful insertion of user tenant relationship"""
     session, _ = mock_session
     session.add = MagicMock()
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", lambda **kwargs: MagicMock())
-    
+
     # Should not raise any exception
     insert_user_tenant("test_user_id", "test_tenant_id")
-    
+
     session.add.assert_called_once()
 
 def test_insert_user_tenant_failure(monkeypatch, mock_session):
     """Test failure of user tenant relationship insertion - exception should propagate"""
     from sqlalchemy.exc import SQLAlchemyError
-    
+
     session, _ = mock_session
     session.add = MagicMock(side_effect=SQLAlchemyError("Database error"))
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", lambda **kwargs: MagicMock())
-    
+
     # Should raise SQLAlchemyError
     with pytest.raises(SQLAlchemyError):
         insert_user_tenant("test_user_id", "test_tenant_id")
@@ -194,51 +204,54 @@ def test_insert_user_tenant_with_empty_user_id(monkeypatch, mock_session):
     """Test insertion of user tenant relationship with empty user ID"""
     session, _ = mock_session
     session.add = MagicMock()
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     # Mock UserTenant constructor to capture the arguments
     mock_user_tenant_instance = MagicMock()
     mock_user_tenant_constructor = MagicMock(return_value=mock_user_tenant_instance)
     monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_constructor)
-    
+
     # Should not raise any exception
     insert_user_tenant("", "test_tenant_id")
-    
+
     # Verify UserTenant was called with correct parameters
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="",
         tenant_id="test_tenant_id",
+        user_role="USER",
         created_by="",
         updated_by=""
     )
     session.add.assert_called_once_with(mock_user_tenant_instance)
 
+
 def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
     """Test insertion of user tenant relationship with empty tenant ID"""
     session, _ = mock_session
     session.add = MagicMock()
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     # Mock UserTenant constructor to capture the arguments
     mock_user_tenant_instance = MagicMock()
     mock_user_tenant_constructor = MagicMock(return_value=mock_user_tenant_instance)
     monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_constructor)
-    
+
     # Should not raise any exception
     insert_user_tenant("test_user_id", "")
-    
+
     # Verify UserTenant was called with correct parameters
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="test_user_id",
         tenant_id="",
+        user_role="USER",
         created_by="test_user_id",
         updated_by="test_user_id"
     )
@@ -248,10 +261,10 @@ def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
 def test_user_tenant_lifecycle(monkeypatch, mock_session):
     """Test complete user tenant lifecycle: insert and then retrieve"""
     session, query = mock_session
-    
+
     # Mock database operations for insertion
     session.add = MagicMock()
-    
+
     # Mock database operations for retrieval
     mock_user_tenant = MockUserTenant()
     mock_first = MagicMock()
@@ -259,48 +272,50 @@ def test_user_tenant_lifecycle(monkeypatch, mock_session):
     mock_filter = MagicMock()
     mock_filter.first = mock_first
     query.filter.return_value = mock_filter
-    
+
     # Create a proper mock UserTenant class with attributes
     mock_user_tenant_class = MagicMock()
     mock_user_tenant_class.user_id = MagicMock()
     mock_user_tenant_class.delete_flag = MagicMock()
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.user_tenant_db.UserTenant", mock_user_tenant_class)
     monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
-    
+
     # 1. Insert user tenant relationship - should not raise exception
     insert_user_tenant("test_user_id", "test_tenant_id")
     session.add.assert_called_once()
-    
+
     # 2. Retrieve user tenant relationship
     result = get_user_tenant_by_user_id("test_user_id")
     assert result is not None
     assert result["user_id"] == "test_user_id"
     assert result["tenant_id"] == "test_tenant_id"
+    assert result["group_ids"] == "1,2,3"
+    assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
 
 def test_get_user_tenant_by_user_id_with_deleted_record(monkeypatch, mock_session):
     """Test retrieval of user tenant relationship when record is marked as deleted"""
     session, query = mock_session
-    
+
     # Mock a deleted record (should not be returned)
     mock_first = MagicMock()
     mock_first.return_value = None  # Filter should exclude deleted records
     mock_filter = MagicMock()
     mock_filter.first = mock_first
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     result = get_user_tenant_by_user_id("deleted_user_id")
-    
+
     assert result is None
     # Verify that the filter was called with correct conditions
     query.filter.assert_called_once()
@@ -309,17 +324,17 @@ def test_get_user_tenant_by_user_id_with_deleted_record(monkeypatch, mock_sessio
 def test_get_all_tenant_ids_empty_database(monkeypatch, mock_session):
     """Test get_all_tenant_ids when database is empty - should return only DEFAULT_TENANT_ID"""
     session, query = mock_session
-    
+
     # Mock empty database result
     query.filter.return_value.distinct.return_value.all.return_value = []
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     result = get_all_tenant_ids()
-    
+
     assert result == ["default_tenant"]  # DEFAULT_TENANT_ID from consts_mock
     assert len(result) == 1
 
@@ -327,7 +342,7 @@ def test_get_all_tenant_ids_empty_database(monkeypatch, mock_session):
 def test_get_all_tenant_ids_with_existing_tenants(monkeypatch, mock_session):
     """Test get_all_tenant_ids with existing tenants - should include all plus DEFAULT_TENANT_ID"""
     session, query = mock_session
-    
+
     # Mock database result with existing tenants
     mock_tenants = [
         ("tenant_1",),
@@ -335,14 +350,14 @@ def test_get_all_tenant_ids_with_existing_tenants(monkeypatch, mock_session):
         ("tenant_3",)
     ]
     query.filter.return_value.distinct.return_value.all.return_value = mock_tenants
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    
+
     result = get_all_tenant_ids()
-    
+
     assert len(result) == 4  # 3 existing + 1 default
     assert "tenant_1" in result
     assert "tenant_2" in result
