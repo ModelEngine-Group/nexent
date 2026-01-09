@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 
 from fastmcp import Client
 
@@ -11,6 +13,7 @@ from database.remote_mcp_db import (
     check_mcp_name_exists,
     update_mcp_status_by_name_and_url,
 )
+from services.mcp_container_service import MCPContainerManager
 
 logger = logging.getLogger("remote_mcp_service")
 
@@ -22,7 +25,8 @@ async def mcp_server_health(remote_mcp_server: str) -> bool:
             connected = client.is_connected()
             return connected
     except BaseException as e:
-        logger.error(f"Remote MCP server health check failed: {e}", exc_info=True)
+        logger.error(
+            f"Remote MCP server health check failed: {e}", exc_info=True)
         # Prevent library-level exits (e.g., SystemExit) from crashing the service
         raise MCPConnectionError("MCP connection failed")
 
@@ -52,7 +56,8 @@ async def add_remote_mcp_server_list(
         "status": True,
         "container_id": container_id,
     }
-    create_mcp_record(mcp_data=insert_mcp_data, tenant_id=tenant_id, user_id=user_id)
+    create_mcp_record(mcp_data=insert_mcp_data,
+                      tenant_id=tenant_id, user_id=user_id)
 
 
 async def delete_remote_mcp_server_list(tenant_id: str,
@@ -108,3 +113,111 @@ async def delete_mcp_by_container_id(tenant_id: str, user_id: str, container_id:
         tenant_id=tenant_id,
         user_id=user_id,
     )
+
+
+async def upload_and_start_mcp_image(
+    tenant_id: str,
+    user_id: str,
+    file_content: bytes,
+    filename: str,
+    port: int,
+    service_name: str | None = None,
+    env_vars: str | None = None,
+):
+    """
+    Upload MCP Docker image and start container.
+
+    Args:
+        tenant_id: Tenant ID for isolation
+        user_id: User ID for isolation
+        file_content: Raw file content bytes
+        filename: Original filename
+        port: Host port to expose the MCP server on
+        service_name: Optional name for the MCP service (auto-generated if not provided)
+        env_vars: Optional environment variables as JSON string
+
+    Returns:
+        Dictionary with service details including mcp_url, container_id, etc.
+
+    Raises:
+        MCPContainerError: If container operations fail
+        MCPNameIllegal: If service name already exists
+        ValueError: If file validation fails
+    """
+    # Validate file type
+    if not filename.lower().endswith('.tar'):
+        raise ValueError("Only .tar files are allowed")
+
+    # Validate file size (limit to 1GB)
+    file_size = len(file_content)
+    if file_size > 1024 * 1024 * 1024:  # 1GB limit
+        raise ValueError("File size exceeds 1GB limit")
+
+    # Parse environment variables
+    parsed_env_vars = None
+    if env_vars:
+        try:
+            import json
+            parsed_env_vars = json.loads(env_vars)
+            if not isinstance(parsed_env_vars, dict):
+                raise ValueError("Environment variables must be a JSON object")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"Invalid environment variables format: {str(e)}")
+
+    # Generate service name if not provided
+    final_service_name = service_name
+    if not final_service_name:
+        # Remove .tar extension from filename
+        final_service_name = os.path.splitext(filename)[0]
+
+    # Check if MCP service name already exists
+    if check_mcp_name_exists(mcp_name=final_service_name, tenant_id=tenant_id):
+        raise MCPNameIllegal("MCP service name already exists")
+
+    # Save file to temporary location (delete=False, manual cleanup)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as temp_file:
+        temp_file.write(file_content)
+        temp_file_path = temp_file.name
+
+    try:
+        # Initialize container manager
+        container_manager = MCPContainerManager()
+
+        # Start container from uploaded image
+        # Note: uploaded image should be a complete MCP server implementation
+        # that can be started directly without additional commands (uses image's CMD/ENTRYPOINT)
+        container_info = await container_manager.start_mcp_container_from_tar(
+            tar_file_path=temp_file_path,
+            service_name=final_service_name,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            env_vars=parsed_env_vars,
+            host_port=port,
+            full_command=None,  # Uploaded image should contain the MCP server
+        )
+    finally:
+        # Manual cleanup of temporary file
+        try:
+            os.unlink(temp_file_path)
+        except Exception as e:
+            logger.warning(
+                f"Failed to clean up temporary file {temp_file_path}: {e}")
+
+    # Register to remote MCP server list
+    await add_remote_mcp_server_list(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        remote_mcp_server=container_info["mcp_url"],
+        remote_mcp_server_name=final_service_name,
+        container_id=container_info["container_id"],
+    )
+
+    return {
+        "message": "MCP container started successfully from uploaded image",
+        "status": "success",
+        "service_name": final_service_name,
+        "mcp_url": container_info["mcp_url"],
+        "container_id": container_info["container_id"],
+        "container_name": container_info.get("container_name"),
+        "host_port": container_info.get("host_port")
+    }

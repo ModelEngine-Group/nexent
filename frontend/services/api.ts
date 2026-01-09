@@ -93,13 +93,10 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/image?url=${encodeURIComponent(url)}&format=${format}`,
   },
   model: {
-    // ModelEngine health check
-    modelEngineHealthcheck: `${API_BASE_URL}/me/healthcheck`,
-
     // Model lists
     officialModelList: `${API_BASE_URL}/model/list`, // ModelEngine models are also in this list
     customModelList: `${API_BASE_URL}/model/list`,
-    
+
     // Custom model service
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
@@ -166,6 +163,7 @@ export const API_ENDPOINTS = {
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
+    uploadImage: `${API_BASE_URL}/mcp/upload-image`,
     containers: `${API_BASE_URL}/mcp/containers`,
     containerLogs: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}/logs`,
     deleteContainer: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}`,
@@ -207,7 +205,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append('category', params.category);
       if (params?.tag) queryParams.append('tag', params.tag);
       if (params?.search) queryParams.append('search', params.search);
-      
+
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ''}`;
     },

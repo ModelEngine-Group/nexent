@@ -66,6 +66,7 @@ class ProviderModelRequest(BaseModel):
     provider: str
     model_type: str
     api_key: Optional[str] = ''
+    base_url: Optional[str] = ''
 
 
 class BatchCreateModelsRequest(BaseModel):
@@ -231,8 +232,10 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
-    tool_ids: Optional[List[int]] = None  # Optional: tool IDs from frontend (takes precedence over database query)
-    sub_agent_ids: Optional[List[int]] = None  # Optional: sub-agent IDs from frontend (takes precedence over database query)
+    tool_ids: Optional[List[int]] = Field(
+        None, description="Optional: tool IDs from frontend (takes precedence over database query)")
+    sub_agent_ids: Optional[List[int]] = Field(
+        None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
 
 
 class GenerateTitleRequest(BaseModel):
@@ -398,19 +401,22 @@ class MemoryAgentShareMode(str, Enum):
 # ---------------------------------------------------------------------------
 class VoiceConnectivityRequest(BaseModel):
     """Request model for voice service connectivity check"""
-    model_type: str = Field(..., description="Type of model to check ('stt' or 'tts')")
+    model_type: str = Field(...,
+                            description="Type of model to check ('stt' or 'tts')")
 
 
 class VoiceConnectivityResponse(BaseModel):
     """Response model for voice service connectivity check"""
-    connected: bool = Field(..., description="Whether the service is connected")
+    connected: bool = Field(...,
+                            description="Whether the service is connected")
     model_type: str = Field(..., description="Type of model checked")
     message: str = Field(..., description="Status message")
 
 
 class TTSRequest(BaseModel):
     """Request model for TTS text-to-speech conversion"""
-    text: str = Field(..., min_length=1, description="Text to convert to speech")
+    text: str = Field(..., min_length=1,
+                      description="Text to convert to speech")
     stream: bool = Field(True, description="Whether to stream the audio")
 
 
@@ -434,7 +440,8 @@ class ToolValidateRequest(BaseModel):
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server"""
     command: str = Field(..., description="Command to run (e.g., 'npx')")
-    args: List[str] = Field(default_factory=list, description="Command arguments")
+    args: List[str] = Field(default_factory=list,
+                            description="Command arguments")
     env: Optional[Dict[str, str]] = Field(
         None, description="Environment variables for the MCP server")
     port: Optional[int] = Field(

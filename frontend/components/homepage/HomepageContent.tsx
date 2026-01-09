@@ -38,7 +38,7 @@ export function HomepageContent({
   const { user, isSpeedMode } = useAuth();
 
   return (
-    <div className="w-full max-w-7xl">
+    <div className="w-full max-w-7xl flex flex-col items-center justify-center">
       {/* Hero area */}
       <section className="relative w-full py-4 flex flex-col items-center justify-center text-center">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
@@ -230,4 +230,3 @@ function FeatureCard({ icon, title, description }: FeatureCardProps) {
     </Card>
   );
 }
-

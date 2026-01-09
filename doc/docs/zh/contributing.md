@@ -217,7 +217,7 @@ git merge upstream/main
 遇到困难或有疑问？我们随时为您提供帮助！通过以下方式联系我们：
 - **GitHub Issues**：新建一个 Issue 进行讨论。
 - **Discord**：加入我们的 [Nexent 社区](https://discord.gg/YXH5C8SQ) 进行实时聊天。
-- **电子邮件**：给我们发邮件至 [chenshuangrui@huawei.com](mailto:chenshuangrui@huawei.com)。
+- **电子邮件**：给我们发邮件至 [wanmingchen1@huawei.com](mailto:wanmingchen1@huawei.com)。
 
 ## 🎉 庆祝您的贡献！
 

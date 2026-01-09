@@ -3,14 +3,12 @@ import {useRouter} from "next/navigation";
 import {useTranslation} from "react-i18next";
 
 import {useAuth} from "@/hooks/useAuth";
-import modelEngineService from "@/services/modelEngineService";
 import {
   USER_ROLES,
   CONNECTION_STATUS,
   ConnectionStatus,
 } from "@/const/modelConfig";
 import {EVENTS} from "@/const/auth";
-import log from "@/lib/logger";
 
 interface UseSetupFlowOptions {
   /** Whether admin role is required to access this page */
@@ -37,7 +35,6 @@ interface UseSetupFlowReturn {
   // Connection status
   connectionStatus: ConnectionStatus;
   isCheckingConnection: boolean;
-  checkModelEngineConnection: () => Promise<void>;
   
   // Animation config
   pageVariants: {
@@ -135,34 +132,6 @@ export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowRet
     }
   }, [requireAdmin, isSpeedMode, user, userLoading, router, nonAdminRedirect]);
 
-  // Internal check connection function
-  const checkModelEngineConnectionInternal = async () => {
-    setInternalIsCheckingConnection(true);
-
-    try {
-      const result = await modelEngineService.checkConnection();
-      setInternalConnectionStatus(result.status);
-      onConnectionStatusChange?.(result.status);
-    } catch (error) {
-      log.error(t("setup.page.error.checkConnection"), error);
-      setInternalConnectionStatus(CONNECTION_STATUS.ERROR);
-      onConnectionStatusChange?.(CONNECTION_STATUS.ERROR);
-    } finally {
-      setInternalIsCheckingConnection(false);
-    }
-  };
-
-  // Use external handler if provided, otherwise use internal
-  const checkModelEngineConnection = externalOnCheckConnection 
-    ? async () => { await Promise.resolve(externalOnCheckConnection()); }
-    : checkModelEngineConnectionInternal;
-
-  // Check connection on mount if not externally managed
-  useEffect(() => {
-    if (canAccessProtectedData && !externalOnCheckConnection) {
-      checkModelEngineConnectionInternal();
-    }
-  }, [canAccessProtectedData, externalOnCheckConnection]);
 
   // Animation variants for smooth page transitions
   const pageVariants = {
@@ -196,7 +165,6 @@ export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowRet
     // Connection
     connectionStatus,
     isCheckingConnection,
-    checkModelEngineConnection,
     
     // Animation
     pageVariants,

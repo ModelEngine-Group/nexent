@@ -81,7 +81,7 @@ export function SpaceContent({
       exit="out"
       variants={pageVariants}
       transition={pageTransition}
-      className="w-full px-4 md:px-8 lg:px-16 py-8"
+      className="w-full px-4 md:px-8 lg:px-16 py-8 h-full"
     >
       <div className="max-w-7xl mx-auto">
         {/* Page header */}
