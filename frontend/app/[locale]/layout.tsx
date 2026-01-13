@@ -69,9 +69,6 @@ export default async function RootLayout({
     ["zh", "en"].includes(locale ?? "") ? locale : "zh"
   ) as "zh" | "en";
 
-  // 获取环境变量
-  const modelEngineEnabled = process.env.MODEL_ENGINE_ENABLED || "true";
-
   return (
     <html lang={resolvedLocale} suppressHydrationWarning>
       <body className={inter.className}>
@@ -85,16 +82,6 @@ export default async function RootLayout({
             <RootProvider>{children}</RootProvider>
           </I18nProviderWrapper>
         </NextThemesProvider>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.__ENV__ = {
-                MODEL_ENGINE_ENABLED: "${modelEngineEnabled}"
-              };
-              console.log("Client: window.__ENV__ =", window.__ENV__);
-            `,
-          }}
-        />
       </body>
     </html>
   );

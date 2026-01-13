@@ -218,6 +218,7 @@ class ConfigStoreClass {
             (backendConfig.app.icon?.type as "preset" | "custom") || "preset",
           customIconUrl: backendConfig.app.icon?.customUrl || null,
           avatarUri: backendConfig.app.icon?.avatarUri || null,
+          modelEngineEnabled: backendConfig.app.modelEngineEnabled ?? false,
         }
       : {
           appName: "",
@@ -225,6 +226,7 @@ class ConfigStoreClass {
           iconType: "preset" as "preset" | "custom",
           customIconUrl: null,
           avatarUri: null,
+          modelEngineEnabled: false,
         };
 
     // Adapt models field

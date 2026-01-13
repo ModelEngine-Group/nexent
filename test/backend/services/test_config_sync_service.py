@@ -1,35 +1,117 @@
-import sys
-from unittest.mock import patch, MagicMock
-
-import pytest
-
-# Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Apply critical patches before importing any modules
+# Apply ALL critical patches BEFORE any imports
 # This prevents real AWS/MinIO/Elasticsearch calls during import
-patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-minio_client_mock._ensure_bucket_exists = MagicMock()
-minio_client_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
-patch('database.client.MinioClient', return_value=minio_client_mock).start()
-patch('backend.database.client.minio_client', minio_client_mock).start()
-patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-
 from backend.services.config_sync_service import (
     handle_model_config,
     save_config_impl,
     load_config_impl,
-    build_models_config
+    build_models_config,
+    build_app_config
 )
+import os
+import sys
+from unittest.mock import MagicMock, patch
+import pytest
+
+# Set mock environment variables BEFORE any imports
+os.environ.setdefault('MINIO_ENDPOINT', 'http://mock-minio:9000')
+os.environ.setdefault('MINIO_ACCESS_KEY', 'mock-key')
+os.environ.setdefault('MINIO_SECRET_KEY', 'mock-secret')
+os.environ.setdefault('MINIO_REGION', 'us-east-1')
+os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'mock-bucket')
+
+# Mock boto3 at the module level
+boto3_mock = MagicMock()
+sys.modules['boto3'] = boto3_mock
+
+# Create comprehensive mocks for MinIO and related modules
+minio_client_mock = MagicMock()
+minio_client_mock._ensure_bucket_exists = MagicMock()
+minio_client_mock.client = MagicMock()
+
+storage_client_mock = MagicMock()
+
+# Mock the entire minio_config module
+minio_config_mock = MagicMock()
+minio_config_mock.MinIOStorageConfig = MagicMock()
+minio_config_mock.MinIOStorageConfig.return_value.validate = MagicMock(
+    return_value=None)
+sys.modules['nexent.storage.minio_config'] = minio_config_mock
+
+# Mock the storage_client_factory module
+storage_factory_mock = MagicMock()
+storage_factory_mock.create_storage_client_from_config = MagicMock(
+    return_value=storage_client_mock)
+sys.modules['nexent.storage.storage_client_factory'] = storage_factory_mock
+
+# Create a more comprehensive mock for the database client module
+db_client_mock = MagicMock()
+
+# Mock classes to prevent instantiation
+db_client_mock.MinioClient = MagicMock(return_value=minio_client_mock)
+db_client_mock.PostgresClient = MagicMock()
+
+# Mock global variables that get assigned at module level
+db_client_mock.minio_client = minio_client_mock
+db_client_mock.db_client = MagicMock()
+
+# Mock utility functions
+db_client_mock.as_dict = MagicMock()
+db_client_mock.get_db_session = MagicMock()
+
+# Set the mock module BEFORE any imports that might trigger it
+sys.modules['backend.database.client'] = db_client_mock
+
+# Also mock the submodules that might be imported
+sys.modules['backend.database'] = MagicMock()
+sys.modules['database'] = MagicMock()
+sys.modules['database.client'] = db_client_mock
+
+# Mock model management database module
+model_mgmt_mock = MagicMock()
+model_mgmt_mock.get_model_id_by_display_name = MagicMock(return_value=None)
+sys.modules['database.model_management_db'] = model_mgmt_mock
+
+# Mock utils modules
+utils_config_mock = MagicMock()
+utils_config_mock.get_env_key = MagicMock(return_value="TEST_KEY")
+utils_config_mock.get_model_name_from_config = MagicMock(
+    return_value="test-model")
+utils_config_mock.safe_value = MagicMock(return_value="safe_value")
+utils_config_mock.tenant_config_manager = MagicMock()
+sys.modules['utils.config_utils'] = utils_config_mock
+sys.modules['utils'] = MagicMock()
+
+# Mock elasticsearch
+es_mock = MagicMock()
+es_mock.Elasticsearch = MagicMock(return_value=MagicMock())
+sys.modules['elasticsearch'] = es_mock
+
+# Mock consts package and submodules
+consts_mock = MagicMock()
+consts_const_mock = MagicMock()
+# Mock the constants used in config_sync_service
+consts_const_mock.APP_DESCRIPTION = "Test description"
+consts_const_mock.APP_NAME = "Test app"
+consts_const_mock.AVATAR_URI = "test-avatar"
+consts_const_mock.CUSTOM_ICON_URL = "test-custom-url"
+consts_const_mock.ICON_TYPE = "test-icon-type"
+consts_const_mock.MODEL_CONFIG_MAPPING = {}
+consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
+consts_const_mock.DEFAULT_APP_DESCRIPTION_EN = "Default description"
+consts_const_mock.DEFAULT_APP_DESCRIPTION_ZH = "默认描述"
+consts_const_mock.DEFAULT_APP_NAME_EN = "Default App"
+consts_const_mock.DEFAULT_APP_NAME_ZH = "默认应用"
+consts_const_mock.MODEL_ENGINE_ENABLED = "false"  # Default to false
+consts_mock.const = consts_const_mock
+sys.modules['consts'] = consts_mock
+sys.modules['consts.const'] = consts_const_mock
+
+# NOW we can safely import the modules under test
+
+# Note: We already mock the entire backend.database.client module above,
+# so we don't need additional patches for individual classes within that module
+
+# NOW we can safely import the modules under test
 
 
 @pytest.fixture
@@ -740,10 +822,14 @@ class TestLoadConfigImpl:
             ""           # TTS_ID
         ]
 
-        # Execute
-        result = await load_config_impl(language, tenant_id)
+        # Mock MODEL_ENGINE_ENABLED for this test
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
+            # Execute
+            result = await load_config_impl(language, tenant_id)
 
         assert result["app"]["name"] == "Custom App Name"
+        # Default value when MODEL_ENGINE_ENABLED == "true"
+        assert result["app"]["modelEngineEnabled"] is True
         assert result["models"]["llm"]["displayName"] == "Test LLM"
 
     @pytest.mark.asyncio
@@ -762,11 +848,14 @@ class TestLoadConfigImpl:
         # Mock model name conversion to return string values
         service_mocks['get_model_name'].return_value = ""
 
-        # Execute
-        result = await load_config_impl(language, tenant_id)
+        # Mock MODEL_ENGINE_ENABLED for this test
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
+            # Execute
+            result = await load_config_impl(language, tenant_id)
 
         # Check Chinese default values
         assert result["app"]["name"] == "Nexent 智能体"
+        assert result["app"]["modelEngineEnabled"] is True
 
     @pytest.mark.asyncio
     async def test_load_config_impl_with_embedding_dimension(self, service_mocks):
@@ -920,3 +1009,87 @@ class TestLoadConfigImpl:
         service_mocks['logger'].warning.assert_called_with(
             "Failed to get config for EMBEDDING_ID: Database timeout"
         )
+
+
+class TestBuildAppConfig:
+    """Test cases for build_app_config function"""
+
+    @pytest.mark.parametrize("language,expected_name,expected_description", [
+        ("zh", "中文应用名称", "中文应用描述"),
+        ("en", "English App Name", "English app description"),
+        # Default to English
+        ("unknown", "English App Name", "English app description"),
+    ])
+    def test_build_app_config_with_custom_values(self, service_mocks, language, expected_name, expected_description):
+        """Test build_app_config with custom app values"""
+        # Setup
+        tenant_id = "test_tenant_id"
+
+        # Mock tenant config manager to return custom values
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = [
+            expected_name,      # APP_NAME
+            expected_description,  # APP_DESCRIPTION
+            "custom",           # ICON_TYPE
+            "test-avatar-uri",  # AVATAR_URI
+            "test-custom-url"   # CUSTOM_ICON_URL
+        ]
+
+        # Mock MODEL_ENGINE_ENABLED
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
+            # Execute
+            result = build_app_config(language, tenant_id)
+
+            # Assert
+            assert result["name"] == expected_name
+            assert result["description"] == expected_description
+            assert result["icon"]["type"] == "custom"
+            assert result["icon"]["avatarUri"] == "test-avatar-uri"
+            assert result["icon"]["customUrl"] == "test-custom-url"
+            assert result["modelEngineEnabled"] is True
+
+    @pytest.mark.parametrize("model_engine_enabled_env,expected_enabled", [
+        ("true", True),
+        ("false", False),
+        ("TRUE", True),   # Case insensitive now - "true" in any case should be True
+        ("True", True),   # Case insensitive now - "true" in any case should be True
+        ("", False),
+        (None, False),
+    ])
+    def test_build_app_config_model_engine_enabled(self, service_mocks, model_engine_enabled_env, expected_enabled):
+        """Test build_app_config with different MODEL_ENGINE_ENABLED values (case insensitive for 'true')"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock tenant config manager to return None (use defaults)
+        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+
+        # Mock MODEL_ENGINE_ENABLED
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', model_engine_enabled_env):
+            # Execute
+            result = build_app_config(language, tenant_id)
+
+            # Assert
+            assert result["modelEngineEnabled"] == expected_enabled
+
+    def test_build_app_config_with_defaults(self, service_mocks):
+        """Test build_app_config with default values"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock tenant config manager to return None (use defaults)
+        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+
+        # Mock MODEL_ENGINE_ENABLED to default
+        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
+            # Execute
+            result = build_app_config(language, tenant_id)
+
+            # Assert default English values
+            assert result["name"] == "Nexent Agent"
+            assert result["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
+            assert result["icon"]["type"] == "preset"
+            assert result["icon"]["avatarUri"] == ""
+            assert result["icon"]["customUrl"] == ""
+            assert result["modelEngineEnabled"] is True

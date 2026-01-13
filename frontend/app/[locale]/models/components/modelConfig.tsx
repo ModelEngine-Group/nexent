@@ -96,10 +96,8 @@ export const ModelConfigSection = forwardRef<
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { skipVerification = false, canAccessProtectedData = false } = props;
-  const { modelConfig, updateModelConfig } = useConfig();
-  const modelEngineEnable =
-    (typeof window !== "undefined" && window.__ENV__?.MODEL_ENGINE_ENABLED) ===
-    "true";
+  const { modelConfig, updateModelConfig, appConfig } = useConfig();
+  const modelEngineEnable = appConfig.modelEngineEnabled;
   const modelData = getModelData(t);
   const { confirm } = useConfirmModal();
 

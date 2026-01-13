@@ -12,7 +12,8 @@ from consts.const import (
     DEFAULT_APP_NAME_ZH,
     ICON_TYPE,
     MODEL_CONFIG_MAPPING,
-    LANGUAGE
+    LANGUAGE,
+    MODEL_ENGINE_ENABLED
 )
 from database.model_management_db import get_model_id_by_display_name
 from utils.config_utils import (
@@ -135,7 +136,8 @@ def build_app_config(language: str, tenant_id: str) -> dict:
             "type": tenant_config_manager.get_app_config(ICON_TYPE, tenant_id=tenant_id) or "preset",
             "avatarUri": tenant_config_manager.get_app_config(AVATAR_URI, tenant_id=tenant_id) or "",
             "customUrl": tenant_config_manager.get_app_config(CUSTOM_ICON_URL, tenant_id=tenant_id) or ""
-        }
+        },
+        "modelEngineEnabled": str(MODEL_ENGINE_ENABLED).lower() == "true"
     }
 
 

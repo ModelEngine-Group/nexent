@@ -7,12 +7,12 @@ export const MODEL_CONFIG_KEY = "model";
 // Model type constants
 export const MODEL_TYPES = {
   LLM: "llm",
-  EMBEDDING: "embedding", 
+  EMBEDDING: "embedding",
   MULTI_EMBEDDING: "multi_embedding",
   RERANK: "rerank",
   STT: "stt",
   TTS: "tts",
-  VLM: "vlm"
+  VLM: "vlm",
 } as const;
 
 // Model source constants
@@ -21,7 +21,7 @@ export const MODEL_SOURCES = {
   SILICON: "silicon",
   MODELENGINE: "modelengine",
   OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
-  CUSTOM: "custom"
+  CUSTOM: "custom",
 } as const;
 
 // Model status constants
@@ -29,13 +29,13 @@ export const MODEL_STATUS = {
   AVAILABLE: "available",
   UNAVAILABLE: "unavailable",
   CHECKING: "detecting",
-  UNCHECKED: "not_detected"
+  UNCHECKED: "not_detected",
 } as const;
 
 // Icon type constants
 export const ICON_TYPES = {
   PRESET: "preset",
-  CUSTOM: "custom"
+  CUSTOM: "custom",
 } as const;
 
 // Provider detection and icon mapping
@@ -76,29 +76,31 @@ export const DEFAULT_PROVIDER_ICON = "/default-icon.png";
 // User role constants
 export const USER_ROLES = {
   USER: "user",
-  ADMIN: "admin"
+  ADMIN: "admin",
 } as const;
 
 // Memory tab key constants
 export const MEMORY_TAB_KEYS = {
   BASE: "base",
-  TENANT: "tenant", 
+  TENANT: "tenant",
   AGENT_SHARED: "agentShared",
   USER_PERSONAL: "userPersonal",
-  USER_AGENT: "userAgent"
+  USER_AGENT: "userAgent",
 } as const;
 
 // Type for memory tab keys
-export type MemoryTabKey = (typeof MEMORY_TAB_KEYS)[keyof typeof MEMORY_TAB_KEYS];
+export type MemoryTabKey =
+  (typeof MEMORY_TAB_KEYS)[keyof typeof MEMORY_TAB_KEYS];
 
 // Connection status constants
 export const CONNECTION_STATUS = {
   SUCCESS: "success",
-  ERROR: "error", 
-  PROCESSING: "processing"
+  ERROR: "error",
+  PROCESSING: "processing",
 } as const;
 
-export type ConnectionStatus = (typeof CONNECTION_STATUS)[keyof typeof CONNECTION_STATUS];
+export type ConnectionStatus =
+  (typeof CONNECTION_STATUS)[keyof typeof CONNECTION_STATUS];
 
 // Layout configuration constants
 export const LAYOUT_CONFIG = {
@@ -148,6 +150,7 @@ export const defaultConfig: GlobalConfig = {
     iconType: ICON_TYPES.PRESET,
     customIconUrl: "",
     avatarUri: "",
+    modelEngineEnabled: false,
   },
   models: {
     llm: {
