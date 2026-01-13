@@ -84,7 +84,7 @@ export default function MarketContent() {
       if (w < 768) columns = 1;
       else if (w < 1024) columns = 2;
       else if (w < 1280) columns = 3;
-      else columns = 4;
+      else ;
       const gap = 16; // tailwind gap-4 == 16px
       const totalGap = gap * (columns - 1);
       const cardW = Math.floor((containerWidth - totalGap) / columns);
