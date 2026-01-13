@@ -1203,6 +1203,7 @@
   "market.downloadSuccess": "Agent downloaded successfully!",
   "market.downloadFailed": "Failed to download agent",
   "market.tools": "tools",
+  "market.featuredTitle": "Featured Agents",
   "market.noAgents": "No agents found in this category",
   "market.totalAgents": "Total {{total}} agents",
   "market.error.loadCategories": "Failed to load categories",

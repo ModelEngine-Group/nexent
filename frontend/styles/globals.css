@@ -167,53 +167,6 @@
   scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
 }
 
-/* Utility to hide scrollbars (useful for horizontal featured row) */
-.no-scrollbar {
-  /* Default: hide visual scrollbar by making thumb transparent while keeping track height minimal.
-     We use hover to fade-in the thumb for desktop (hover-capable) devices. */
-  -ms-overflow-style: none; /* IE and Edge - hides scrollbar */
-  scrollbar-width: thin; /* Firefox: use thin scrollbar so hover can change color */
-  scrollbar-color: rgba(0,0,0,0) transparent;
-}
-
-/* WebKit browsers: keep a small scrollbar height but make thumb transparent by default */
-.no-scrollbar::-webkit-scrollbar {
-  height: 8px;
-  background-color: transparent;
-}
-.no-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.no-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0); /* invisible by default */
-  border-radius: 8px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-  transition: background-color 1000ms ease, opacity 1000ms ease;
-}
-
-/* On hover (desktop), fade the thumb in */
-@media (hover: hover) and (pointer: fine) {
-  .no-scrollbar:hover::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0.35);
-  }
-  .no-scrollbar:hover {
-    scrollbar-color: rgba(0,0,0,0.35) transparent; /* Firefox */
-  }
-  /* Also allow hovering the whole featured area (including header/buttons) to show the scrollbar */
-  .featured-area:hover .no-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0.35);
-  }
-  .featured-area:hover .no-scrollbar {
-    scrollbar-color: rgba(0,0,0,0.35) transparent; /* Firefox */
-  }
-}
-
-/* Reserve space at bottom of featured area so separator spacing stays consistent
-   whether native scrollbar is visible or not. Matches typical scrollbar height. */
-.featured-area {
-  padding-bottom: 0px;
-}
 
 /* Tool Pool Tabs scroll fix */
 .tool-pool-tabs .ant-tabs-content-holder {

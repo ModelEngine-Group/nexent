@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { ShoppingBag, Search, RefreshCw } from "lucide-react";
+import { ShoppingBag, Search, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { Tabs, Input, Spin, Empty, Pagination, App } from "antd";
 import log from "@/lib/logger";
 
@@ -20,6 +20,7 @@ import MarketAgentDetailModal from "./components/MarketAgentDetailModal";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ImportAgentData } from "@/hooks/useAgentImport";
 import MarketErrorState from "./components/MarketErrorState";
+import styles from "./MarketContent.module.css";
 
 /**
  * MarketContent - Agent marketplace page
@@ -404,10 +405,10 @@ export default function MarketContent() {
                       <>
                         {/* Featured row per category (show only if there are featured items) */}
                         {featuredItems.length > 0 && (
-                          <div className="mb-6 featured-area">
+                          <div className="mb-6">
                             <div className="flex items-center justify-between mb-5">
                               <h2 className="text-2xl font-bold">
-                                {isZh ? t("market.featuredTitle", "精选智能体") : "Featured Agents"}
+                                {t("market.featuredTitle")}
                               </h2>
                               <div className="hidden md:flex items-center gap-2">
                                 <button
@@ -419,9 +420,7 @@ export default function MarketContent() {
                                   className="px-2 py-1 hover:opacity-90"
                                   style={{ background: "transparent" }}
                                 >
-                                  <svg className="w-6 h-6 text-slate-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                                    <path fillRule="evenodd" d="M12.707 14.707a1 1 0 01-1.414 0L7 10.414a1 1 0 010-1.414l4.293-4.293a1 1 0 111.414 1.414L9.414 10l3.293 3.293a1 1 0 010 1.414z" clipRule="evenodd" />
-                                  </svg>
+                                  <ChevronLeft className="w-6 h-6 text-slate-500" />
                                 </button>
                                 <button
                                   aria-label="Next featured"
@@ -432,16 +431,14 @@ export default function MarketContent() {
                                   className="px-2 py-1 hover:opacity-90"
                                   style={{ background: "transparent" }}
                                 >
-                                  <svg className="w-6 h-6 text-slate-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                                    <path fillRule="evenodd" d="M7.293 5.293a1 1 0 011.414 0L13 9.586a1 1 0 010 1.414L8.707 15.293a1 1 0 01-1.414-1.414L10.586 10 7.293 6.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                                  </svg>
+                                  <ChevronRight className="w-6 h-6 text-slate-500" />
                                 </button>
                               </div>
                             </div>
                             <div
                               id="featured-row"
                               ref={featuredRowRef}
-                              className="flex gap-4 overflow-x-auto no-scrollbar pt-2 pb-2"
+                              className={`flex gap-4 overflow-x-auto ${styles.noScrollbar} pt-2 pb-2`}
                             >
                               {featuredItems.map((agent, index) => (
                                 <div

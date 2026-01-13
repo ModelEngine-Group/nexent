@@ -1182,6 +1182,7 @@
   "market.downloadSuccess": "智能体下载成功！",
   "market.downloadFailed": "下载智能体失败",
   "market.tools": "工具",
+  "market.featuredTitle": "精选智能体",
   "market.noAgents": "此分类下未找到智能体",
   "market.totalAgents": "共 {{total}} 个智能体",
   "market.error.loadCategories": "加载分类失败",
