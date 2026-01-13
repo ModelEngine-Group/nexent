@@ -15,11 +15,7 @@ export default function AgentSetupOrchestrator() {
   return (
     <>
       {canAccessProtectedData ? (
-        <Flex
-          justify="center"
-          align="center"
-          className="py-8 px-16 h-full w-full"
-        >
+        <Flex justify="center" align="center" className="p-12 h-full w-full">
           <motion.div
             initial="initial"
             animate="in"
@@ -30,7 +26,7 @@ export default function AgentSetupOrchestrator() {
           >
             <Card
               className="h-full min-h-0 w-full min-w-0"
-              style={{ minHeight: 400, maxHeight: "80vh" }}
+              style={{ minHeight: 400 }}
             >
               <style jsx global>{`
                 .ant-card-body {

@@ -25,7 +25,7 @@ export default function ModelsContent() {
 
   return (
     <>
-      <div className="w-full h-full p-8">
+      <div className="w-full h-full p-12">
         <motion.div
           initial="initial"
           animate="in"

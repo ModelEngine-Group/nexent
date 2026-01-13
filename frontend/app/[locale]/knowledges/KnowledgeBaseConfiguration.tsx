@@ -824,14 +824,16 @@ function DataConfig({ isActive }: DataConfigProps) {
         className="w-full h-full mx-auto relative"
         style={{
           maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
         }}
         ref={contentRef}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
+        <Row
+          className="h-full w-full flex align-center"
+          gutter={TWO_COLUMN_LAYOUT.GUTTER}
+        >
           <Col
             className="h-full"
             xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}

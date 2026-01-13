@@ -61,7 +61,6 @@ export default function AppModelConfig({
       className="w-full h-full mx-auto"
       style={{
         maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-        padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
       {isClientSide ? (

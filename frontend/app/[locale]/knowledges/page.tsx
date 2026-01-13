@@ -53,7 +53,7 @@ export default function KnowledgesContent() {
 
   return (
     <>
-      <div className="w-full h-full p-8">
+      <div className="w-full h-full p-12">
         {canAccessProtectedData ? (
           <motion.div
             initial="initial"
