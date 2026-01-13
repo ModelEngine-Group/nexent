@@ -235,7 +235,7 @@ export const ModelEditDialog = ({
       open={isOpen}
       onCancel={onClose}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="space-y-4">
         {/* Model Name */}
@@ -434,7 +434,7 @@ export const ProviderConfigEditDialog = ({
       open={isOpen}
       onCancel={onClose}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="space-y-4">
         <div>
