@@ -4,7 +4,7 @@ import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { updateAgent } from "@/services/agentConfigService";
+import { updateAgent, updateToolConfig } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
 
 /**
@@ -66,43 +66,46 @@ export const useSaveGuard = () => {
             t("businessLogic.config.message.agentSaveSuccess")
         );
 
-        // For both creation and update, ensure the store has the latest agent data
+        // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
+        const finalAgentId = result.data?.agent_id || currentAgentId;
+        if (!finalAgentId) {
+          throw new Error("Failed to get agent ID after save operation");
+        }
+
+        // Handle new agent creation - save tool configurations
         if (!currentAgentId && result.data?.agent_id) {
-          // New agent creation - create agent object with backend-generated ID
-          const newAgentId = result.data.agent_id.toString();
-          const updatedAgent: Agent = {
-            id: newAgentId, // Backend-generated ID as string
-            name: currentEditedAgent.name,
-            display_name: currentEditedAgent.display_name,
-            description: currentEditedAgent.description,
-            author: currentEditedAgent.author,
-            model: currentEditedAgent.model,
-            model_id: currentEditedAgent.model_id,
-            max_step: currentEditedAgent.max_step,
-            provide_run_summary: currentEditedAgent.provide_run_summary,
-            tools: currentEditedAgent.tools || [],
-            duty_prompt: currentEditedAgent.duty_prompt,
-            constraint_prompt: currentEditedAgent.constraint_prompt,
-            few_shots_prompt: currentEditedAgent.few_shots_prompt,
-            business_description: currentEditedAgent.business_description,
-            business_logic_model_name: currentEditedAgent.business_logic_model_name,
-            business_logic_model_id: currentEditedAgent.business_logic_model_id,
-            sub_agent_id_list: currentEditedAgent.sub_agent_id_list,
-          };
-          useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
-        } else if (currentAgentId) {
-          // Existing agent update - invalidate and refetch the specific agent info cache
-          await queryClient.invalidateQueries({
-            queryKey: ["agentInfo", currentAgentId]
-          });
-          await queryClient.refetchQueries({
-            queryKey: ["agentInfo", currentAgentId]
-          });
-          // Get the updated agent data from the refreshed cache
-          const updatedAgent = queryClient.getQueryData(["agentInfo", currentAgentId]) as Agent;
-          if (updatedAgent) {
-            useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
+          // Save tool configurations for the newly created agent
+          const agentIdNumber = result.data.agent_id;
+          if (currentEditedAgent.tools && currentEditedAgent.tools.length > 0) {
+            for (const tool of currentEditedAgent.tools) {
+              const toolId = parseInt(tool.id);
+              const isEnabled = tool.is_available !== false; // Default to true if not explicitly set to false
+              const params = tool.initParams?.reduce((acc, param) => {
+                acc[param.name] = param.value;
+                return acc;
+              }, {} as Record<string, any>) || {};
+
+              try {
+                await updateToolConfig(toolId, agentIdNumber, params, isEnabled);
+              } catch (error) {
+                console.error(`Failed to save tool config for tool ${toolId}:`, error);
+                // Continue with other tools even if one fails
+              }
+            }
           }
+        }
+
+        // Common logic for both creation and update: refresh cache and update store
+        await queryClient.invalidateQueries({
+          queryKey: ["agentInfo", finalAgentId]
+        });
+        await queryClient.refetchQueries({
+          queryKey: ["agentInfo", finalAgentId]
+        });
+        // Get the updated agent data from the refreshed cache
+        const updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
+        if (updatedAgent) {
+          useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
         }
 
         // Also invalidate the agents list cache to ensure the list reflects any changes

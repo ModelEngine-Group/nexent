@@ -84,7 +84,13 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
               <Button
                 type="primary"
                 icon={<Bug size={16} />}
-                onClick={() => setIsDebugDrawerOpen(true)}
+                onClick={() =>
+                  saveGuard.saveWithModal().then((success) => {
+                    if (success) {
+                      setIsDebugDrawerOpen(true);
+                    }
+                  })
+                }
                 size="middle"
               >
                 {t("systemPrompt.button.debug")}
