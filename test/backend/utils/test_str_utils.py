@@ -1,5 +1,5 @@
 import pytest
-from backend.utils.str_utils import remove_think_blocks
+from backend.utils.str_utils import remove_think_blocks, convert_list_to_string
 
 
 class TestStrUtils:
@@ -8,6 +8,7 @@ class TestStrUtils:
     def setup_method(self):
         """Setup before each test method"""
         self.remove_think_blocks = remove_think_blocks
+        self.convert_list_to_string = convert_list_to_string
 
     def test_remove_think_blocks_no_tags(self):
         """Text without any think tags remains unchanged"""
@@ -62,6 +63,36 @@ class TestStrUtils:
         text = "Text with <THINK>uppercase</THINK> tags"
         result = self.remove_think_blocks(text)
         assert result == " tags"
+
+    def test_convert_list_to_string_none_input(self):
+        """None input should return empty string"""
+        result = self.convert_list_to_string(None)
+        assert result == ""
+
+    def test_convert_list_to_string_empty_list(self):
+        """Empty list should return empty string"""
+        result = self.convert_list_to_string([])
+        assert result == ""
+
+    def test_convert_list_to_string_single_item(self):
+        """Single item list should return single item as string"""
+        result = self.convert_list_to_string([42])
+        assert result == "42"
+
+    def test_convert_list_to_string_multiple_items(self):
+        """Multiple items should be joined with commas"""
+        result = self.convert_list_to_string([1, 2, 3])
+        assert result == "1,2,3"
+
+    def test_convert_list_to_string_mixed_types(self):
+        """List with mixed integer types should work correctly"""
+        result = self.convert_list_to_string([1, 2, 3, 10])
+        assert result == "1,2,3,10"
+
+    def test_convert_list_to_string_zero_and_negative(self):
+        """Zero and negative numbers should be handled correctly"""
+        result = self.convert_list_to_string([0, -1, 5])
+        assert result == "0,-1,5"
 
 
 if __name__ == "__main__":

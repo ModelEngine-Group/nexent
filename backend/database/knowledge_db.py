@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
+from utils.str_utils import convert_list_to_string
 
 
 def _generate_index_name(knowledge_id: int) -> str:
@@ -40,6 +41,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_name") or query.get("index_name")
 
             # Prepare data dictionary
+            group_ids = query.get("group_ids")
             data: Dict[str, Any] = {
                 "knowledge_describe": query.get("knowledge_describe", ""),
                 "created_by": query.get("user_id"),
@@ -48,6 +50,8 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "tenant_id": query.get("tenant_id"),
                 "embedding_model_name": query.get("embedding_model_name"),
                 "knowledge_name": knowledge_name,
+                "group_ids": convert_list_to_string(group_ids) if isinstance(group_ids, list) else group_ids,
+                "ingroup_permission": query.get("ingroup_permission"),
             }
 
             # For backward compatibility: if caller explicitly provides index_name,
