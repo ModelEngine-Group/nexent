@@ -131,7 +131,7 @@ export default function SetupPage() {
 
       {/* Bottom fixed action bar */}
       <div className="bg-white dark:bg-slate-900 border-t z-50">
-        <div className="max-w-[1800px] mx-auto px-8 py-4 flex justify-end gap-4">
+        <div className="mx-auto px-8 py-4 flex justify-end gap-4">
           <Button
             onClick={handleBack}
             disabled={isFirstStep}
