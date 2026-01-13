@@ -1,14 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Layout,  } from "antd";
 import { useTranslation } from "react-i18next";
 import Link from "next/link";
 import { APP_VERSION } from "@/const/constants";
-import { FOOTER_CONFIG } from "@/const/layoutConstants";
 import { versionService } from "@/services/versionService";
 import log from "@/lib/logger";
-
 
 /**
  * Footer component with copyright, version, and links
@@ -64,4 +61,3 @@ export function FooterLayout() {
     </div>
   );
 }
-

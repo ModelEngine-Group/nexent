@@ -5,17 +5,23 @@ import { ConfigProvider, App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {
-  AuthProvider as AuthContextProvider,
+  AuthProvider,
   AuthContext,
   useAuth,
 } from "@/hooks/useAuth";
 
 import { LoginModal, RegisterModal, SessionListeners } from "@/components/auth";
 import { FullScreenLoading } from "@/components/ui/loading";
+import { useDeployment } from "./deploymentProvider";
 
 function AppReadyWrapper({ children }: { children: ReactNode }) {
-  const { isReady } = useAuth();
-  return isReady ? <>{children}</> : <FullScreenLoading />;
+  const { isDeploymentReady } = useDeployment();
+  const auth = useAuth();
+  const isAuthReady = (auth as any).isAuthReady;
+
+  const isAppReady = isDeploymentReady && isAuthReady;
+
+  return isAppReady ? <>{children}</> : <FullScreenLoading />;
 }
 
 /**
@@ -27,7 +33,7 @@ export function RootProvider({ children }: { children: ReactNode }) {
     <ConfigProvider getPopupContainer={() => document.body}>
       <QueryClientProvider client={queryClient}>
         <App>
-          <AuthContextProvider>
+          <AuthProvider>
             {(authContextValue) => (
               <AuthContext.Provider value={authContextValue}>
                 <AppReadyWrapper>
@@ -40,7 +46,7 @@ export function RootProvider({ children }: { children: ReactNode }) {
                 <RegisterModal />
               </AuthContext.Provider>
             )}
-          </AuthContextProvider>
+          </AuthProvider>
         </App>
       </QueryClientProvider>
     </ConfigProvider>

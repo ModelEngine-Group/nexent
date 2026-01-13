@@ -1,32 +1,28 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef } from "react"
-import { useTranslation } from 'react-i18next'
-import { Typography, Row, Col } from "antd"
+import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { Typography, Row, Col } from "antd";
 
-import { 
-  SETUP_PAGE_CONTAINER, 
-  TWO_COLUMN_LAYOUT, 
+import {
+  SETUP_PAGE_CONTAINER,
+  TWO_COLUMN_LAYOUT,
   STANDARD_CARD,
-  CARD_HEADER 
-} from '@/const/layoutConstants'
+  CARD_HEADER,
+} from "@/const/layoutConstants";
 
-import { AppConfigSection } from './components/appConfig'
-import { ModelConfigSection, ModelConfigSectionRef } from './components/modelConfig'
+import { AppConfigSection } from "./components/appConfig";
+import {
+  ModelConfigSection,
+  ModelConfigSectionRef,
+} from "./components/modelConfig";
 
-const { Title } = Typography
+const { Title } = Typography;
 
 // Add interface definition
 interface AppModelConfigProps {
   skipModelVerification?: boolean;
   canAccessProtectedData?: boolean;
-  onSelectedModelsChange?: (
-    selected: Record<string, Record<string, string>>
-  ) => void;
-  onEmbeddingConnectivityChange?: (status: {
-    // can add multi_embedding in future
-    embedding?: string;
-  }) => void;
   // Expose a ref from parent to allow programmatic dropdown change
   forwardedRef?: React.Ref<ModelConfigSectionRef>;
 }
@@ -34,8 +30,6 @@ interface AppModelConfigProps {
 export default function AppModelConfig({
   skipModelVerification = false,
   canAccessProtectedData = false,
-  onSelectedModelsChange,
-  onEmbeddingConnectivityChange,
   forwardedRef,
 }: AppModelConfigProps) {
   const { t } = useTranslation();
@@ -51,27 +45,10 @@ export default function AppModelConfig({
     };
   }, [skipModelVerification]);
 
-  // Report selected models from child component to parent (if callback provided)
-  useEffect(() => {
-    if (!onSelectedModelsChange && !onEmbeddingConnectivityChange) return;
-    const timer = setInterval(() => {
-      const current = modelConfigRef.current?.getSelectedModels?.();
-      const embeddingConn =
-        modelConfigRef.current?.getEmbeddingConnectivity?.();
-      if (current && onSelectedModelsChange) onSelectedModelsChange(current);
-      if (embeddingConn && onEmbeddingConnectivityChange) {
-        onEmbeddingConnectivityChange({
-          embedding: embeddingConn.embedding,
-        });
-      }
-    }, 300);
-    return () => clearInterval(timer);
-  }, [onSelectedModelsChange, onEmbeddingConnectivityChange]);
-
   // Bridge internal ref to external forwardedRef so parent can call simulateDropdownChange
   useEffect(() => {
     if (!forwardedRef) return;
-    if (typeof forwardedRef === 'function') {
+    if (typeof forwardedRef === "function") {
       forwardedRef(modelConfigRef.current);
     } else {
       // @ts-ignore allow writing current
@@ -81,16 +58,17 @@ export default function AppModelConfig({
 
   return (
     <div
-      className="w-full mx-auto"
+      className="w-full h-full mx-auto"
       style={{
         maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
         padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
       }}
     >
       {isClientSide ? (
-        <div className="w-full">
-          <Row gutter={TWO_COLUMN_LAYOUT.GUTTER}>
+        <div className="w-full h-full">
+          <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
             <Col
+              className="h-full"
               xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
               md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
               lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
@@ -98,12 +76,9 @@ export default function AppModelConfig({
               xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
             >
               <div
-                className={STANDARD_CARD.BASE_CLASSES}
+                className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
                 style={{
-                  height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
                   padding: STANDARD_CARD.PADDING,
-                  display: "flex",
-                  flexDirection: "column",
                 }}
               >
                 <div
@@ -134,12 +109,9 @@ export default function AppModelConfig({
               xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
             >
               <div
-                className={STANDARD_CARD.BASE_CLASSES}
+                className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
                 style={{
-                  height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
                   padding: STANDARD_CARD.PADDING,
-                  display: "flex",
-                  flexDirection: "column",
                 }}
               >
                 <div

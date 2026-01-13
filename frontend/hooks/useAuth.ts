@@ -9,11 +9,11 @@ import { USER_ROLES } from "@/const/modelConfig"
 
 import { authService } from "@/services/authService"
 import { configService } from "@/services/configService"
-import { API_ENDPOINTS } from "@/services/api"
 import { User, AuthContextType } from "@/types/auth"
 import { EVENTS, STATUS_CODES } from "@/const/auth"
 import { getSessionFromStorage, removeSessionFromStorage } from "@/lib/auth"
 import log from "@/lib/logger"
+import { useDeployment } from "@/components/providers/deploymentProvider"
 
 // Create auth context
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -22,6 +22,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: (value: AuthContextType) => ReactNode }) {
   const { t } = useTranslation('common');
   const { message } = App.useApp();
+  const { isSpeedMode } = useDeployment(); // 从 deployment context 获取
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
@@ -29,8 +30,6 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
   const [isFromSessionExpired, setIsFromSessionExpired] = useState(false)
   const [shouldCheckSession, setShouldCheckSession] = useState(false)
   const [authServiceUnavailable, setAuthServiceUnavailable] = useState(false)
-  const [isSpeedMode, setIsSpeedMode] = useState(false)
-  const [isReady, setIsReady] = useState(false)
   const pathname = usePathname()
 
   // Check auth service availability
@@ -45,27 +44,7 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
     if (isLoginModalOpen || isRegisterModalOpen) {
       checkAuthService()
     }
-  }, [isLoginModalOpen, isRegisterModalOpen])
-
-  // Check deployment version and handle speed mode
-  const checkDeploymentVersion = async () => {
-    try {
-      setIsReady(false);
-      const response = await fetch(API_ENDPOINTS.tenantConfig.deploymentVersion);
-      if (response.ok) {
-        const data = await response.json();
-        const version = data.content?.deployment_version || data.deployment_version;
-        
-        setIsSpeedMode(version === 'speed');
-        // In speed mode, do not perform any auto login; UI should not depend on login
-      }
-    } catch (error) {
-      log.error('Failed to check deployment version:', error);
-      setIsSpeedMode(false);
-    } finally {
-      setIsReady(true);
-    }
-  };
+  }, [isLoginModalOpen, isRegisterModalOpen]);
 
   // Auto login function (for speed mode)
   const performAutoLogin = async () => {
@@ -133,11 +112,6 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
       window.removeEventListener("storage", handleStorage);
     };
   }, []);
-
-  // Check deployment version
-  useEffect(() => {
-    checkDeploymentVersion();
-  }, []); // When user status changes, check again
 
   // Check user login status (skip in speed mode)
   useEffect(() => {
@@ -373,7 +347,7 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
     isFromSessionExpired,
     authServiceUnavailable,
     isSpeedMode,
-    isReady,
+    isAuthReady: true, // 认证部分总是就绪
     openLoginModal,
     closeLoginModal,
     openRegisterModal,
@@ -390,7 +364,7 @@ export function AuthProvider({ children }: { children: (value: AuthContextType) 
 }
 
 // Custom hook for accessing auth context
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext)
   if (context === undefined) {
     throw new Error("useAuth must be used within an AuthProvider")

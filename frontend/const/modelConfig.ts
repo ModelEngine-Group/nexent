@@ -91,15 +91,6 @@ export const MEMORY_TAB_KEYS = {
 // Type for memory tab keys
 export type MemoryTabKey = (typeof MEMORY_TAB_KEYS)[keyof typeof MEMORY_TAB_KEYS];
 
-// Connection status constants
-export const CONNECTION_STATUS = {
-  SUCCESS: "success",
-  ERROR: "error", 
-  PROCESSING: "processing"
-} as const;
-
-export type ConnectionStatus = (typeof CONNECTION_STATUS)[keyof typeof CONNECTION_STATUS];
-
 // Layout configuration constants
 export const LAYOUT_CONFIG = {
   CARD_HEADER_PADDING: "10px 24px",
