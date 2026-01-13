@@ -1,5 +1,4 @@
 import pytest
-from backend.services import datamate_service
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -19,7 +18,39 @@ sys.modules['sdk.nexent.storage'] = storage_factory_mock
 sys.modules['sdk.nexent.storage.storage_client_factory'] = storage_factory_mock
 sys.modules['sdk.nexent.storage.minio_config'] = minio_config_mock
 
-# Mock sqlalchemy module before any database imports
+# Mock nexent modules BEFORE importing datamate_service
+nexent_mock = MagicMock()
+nexent_mock.vector_database = MagicMock()
+nexent_mock.vector_database.datamate_core = MagicMock()
+nexent_mock.vector_database.datamate_core.DataMateCore = MagicMock()
+sys.modules['nexent'] = nexent_mock
+sys.modules['nexent.vector_database'] = nexent_mock.vector_database
+sys.modules['nexent.vector_database.datamate_core'] = nexent_mock.vector_database.datamate_core
+
+# Mock consts module BEFORE any database imports
+consts_package_mock = MagicMock()
+consts_module_mock = MagicMock()
+
+# Set required constants
+consts_module_mock.DATAMATE_BASE_URL = "http://localhost:30000"
+consts_module_mock.MINIO_ENDPOINT = "http://localhost:9000"
+consts_module_mock.MINIO_ACCESS_KEY = "test_access_key"
+consts_module_mock.MINIO_SECRET_KEY = "test_secret_key"
+consts_module_mock.MINIO_REGION = "us-east-1"
+consts_module_mock.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_module_mock.POSTGRES_HOST = "localhost"
+consts_module_mock.POSTGRES_USER = "test_user"
+consts_module_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_module_mock.POSTGRES_DB = "test_db"
+consts_module_mock.POSTGRES_PORT = 5432
+consts_module_mock.DEFAULT_TENANT_ID = "default_tenant"
+
+# Mock the package structure
+consts_package_mock.const = consts_module_mock
+sys.modules['consts'] = consts_package_mock
+sys.modules['consts.const'] = consts_module_mock
+
+# Mock sqlalchemy module BEFORE any database imports
 sqlalchemy_mock = MagicMock()
 sqlalchemy_mock.func = MagicMock()
 sqlalchemy_mock.func.current_timestamp = MagicMock(
@@ -38,6 +69,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Mock the entire client module to avoid actual database connections
+# This MUST be done BEFORE importing any module that uses database.client
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
@@ -64,39 +96,6 @@ knowledge_db_mock.delete_knowledge_record = MagicMock()
 sys.modules['database.knowledge_db'] = knowledge_db_mock
 sys.modules['backend.database.knowledge_db'] = knowledge_db_mock
 
-# Mock consts module completely
-consts_package_mock = MagicMock()
-consts_module_mock = MagicMock()
-
-# Set required constants
-consts_module_mock.DATAMATE_BASE_URL = "http://localhost:30000"
-consts_module_mock.MINIO_ENDPOINT = "http://localhost:9000"
-consts_module_mock.MINIO_ACCESS_KEY = "test_access_key"
-consts_module_mock.MINIO_SECRET_KEY = "test_secret_key"
-consts_module_mock.MINIO_REGION = "us-east-1"
-consts_module_mock.MINIO_DEFAULT_BUCKET = "test-bucket"
-consts_module_mock.POSTGRES_HOST = "localhost"
-consts_module_mock.POSTGRES_USER = "test_user"
-consts_module_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
-consts_module_mock.POSTGRES_DB = "test_db"
-consts_module_mock.POSTGRES_PORT = 5432
-consts_module_mock.DEFAULT_TENANT_ID = "default_tenant"
-
-# Mock the package structure
-consts_package_mock.const = consts_module_mock
-sys.modules['consts'] = consts_package_mock
-sys.modules['consts.const'] = consts_module_mock
-
-# Mock nexent modules
-nexent_mock = MagicMock()
-nexent_mock.vector_database = MagicMock()
-nexent_mock.vector_database.datamate_core = MagicMock()
-nexent_mock.vector_database.datamate_core.DataMateCore = MagicMock()
-sys.modules['nexent'] = nexent_mock
-sys.modules['nexent.vector_database'] = nexent_mock.vector_database
-sys.modules['nexent.vector_database.datamate_core'] = nexent_mock.vector_database.datamate_core
-
-
 # Mock utils module
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
@@ -111,6 +110,9 @@ sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 # if the testing environment does not have it available.
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
+
+# NOW it's safe to import the module under test
+from backend.services import datamate_service
 
 
 class FakeCore:
