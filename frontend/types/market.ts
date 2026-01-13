@@ -29,12 +29,12 @@ export interface MarketAgentListItem {
   display_name: string;
   description: string;
   author?: string;
-  category?: MarketCategory; // 可选，与后端保持一致
+  category?: MarketCategory;
   tags: MarketTag[];
   download_count: number;
   created_at: string;
-  tool_count?: number; // 可选，与后端保持一致
-  is_featured: boolean; // 必填，后端默认为false
+  tool_count?: number;
+  is_featured: boolean;
 }
 
 export interface MarketAgentTool {
