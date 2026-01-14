@@ -3,50 +3,23 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Users } from "lucide-react";
+import { Puzzle } from "lucide-react";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { ConnectionStatus } from "@/const/modelConfig";
-
-interface UsersContentProps {
-  /** Connection status */
-  connectionStatus?: ConnectionStatus;
-  /** Is checking connection */
-  isCheckingConnection?: boolean;
-  /** Check connection callback */
-  onCheckConnection?: () => void;
-  /** Callback to expose connection status */
-  onConnectionStatusChange?: (status: ConnectionStatus) => void;
-}
 
 /**
- * UsersContent - User management coming soon page
- * This will allow admins to manage users, roles, and permissions
+ * McpToolsContent - MCP tools management coming soon page
+ * This will allow admins to manage MCP servers and tools
  */
-export default function UsersContent({
-  connectionStatus: externalConnectionStatus,
-  isCheckingConnection: externalIsCheckingConnection,
-  onCheckConnection: externalOnCheckConnection,
-  onConnectionStatusChange,
-}: UsersContentProps) {
+export default function McpToolsContent({}) {
   const { t } = useTranslation("common");
 
   // Use custom hook for common setup flow logic
-  const {
-    canAccessProtectedData,
-    pageVariants,
-    pageTransition,
-  } = useSetupFlow({
-    requireAdmin: true, // User management requires admin privileges
-    externalConnectionStatus,
-    externalIsCheckingConnection,
-    onCheckConnection: externalOnCheckConnection,
-    onConnectionStatusChange,
-  });
+  const { pageVariants, pageTransition } = useSetupFlow();
 
   return (
     <>
-      {canAccessProtectedData ? (
+      <div className="w-full h-full">
         <motion.div
           initial="initial"
           animate="in"
@@ -61,9 +34,9 @@ export default function UsersContent({
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="w-24 h-24 rounded-full bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center shadow-lg"
+              className="w-24 h-24 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg"
             >
-              <Users className="h-12 w-12 text-white" />
+              <Puzzle className="h-12 w-12 text-white" />
             </motion.div>
 
             {/* Title */}
@@ -73,7 +46,7 @@ export default function UsersContent({
               transition={{ delay: 0.3 }}
               className="text-3xl font-bold text-slate-800 dark:text-slate-100"
             >
-              {t("users.comingSoon.title")}
+              {t("mcpTools.comingSoon.title")}
             </motion.h1>
 
             {/* Description */}
@@ -83,7 +56,7 @@ export default function UsersContent({
               transition={{ delay: 0.4 }}
               className="text-lg text-slate-600 dark:text-slate-400"
             >
-              {t("users.comingSoon.description")}
+              {t("mcpTools.comingSoon.description")}
             </motion.p>
 
             {/* Feature list */}
@@ -94,21 +67,21 @@ export default function UsersContent({
               className="text-left space-y-2 w-full"
             >
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-1">✓</span>
+                <span className="text-sky-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("users.comingSoon.feature1")}
+                  {t("mcpTools.comingSoon.feature1")}
                 </span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-1">✓</span>
+                <span className="text-sky-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("users.comingSoon.feature2")}
+                  {t("mcpTools.comingSoon.feature2")}
                 </span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-green-500 mt-1">✓</span>
+                <span className="text-sky-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("users.comingSoon.feature3")}
+                  {t("mcpTools.comingSoon.feature3")}
                 </span>
               </li>
             </motion.ul>
@@ -118,14 +91,13 @@ export default function UsersContent({
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.6 }}
-              className="px-4 py-2 bg-gradient-to-r from-green-500 to-teal-600 text-white rounded-full text-sm font-medium shadow-md"
+              className="px-4 py-2 bg-gradient-to-r from-sky-500 to-indigo-600 text-white rounded-full text-sm font-medium shadow-md"
             >
-              {t("users.comingSoon.badge")}
+              {t("mcpTools.comingSoon.badge")}
             </motion.div>
           </div>
         </motion.div>
-      ) : null}
+      </div>
     </>
   );
 }
-

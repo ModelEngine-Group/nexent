@@ -257,9 +257,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       const fetchSummary = async () => {
         if (showDetail && knowledgeBaseId) {
           try {
-            const result = await knowledgeBaseService.getSummary(
-              knowledgeBaseId
-            );
+            const result =
+              await knowledgeBaseService.getSummary(knowledgeBaseId);
             setSummary(result);
           } catch (error) {
             log.error(t("knowledgeBase.error.getSummary"), error);
@@ -338,7 +337,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     return (
       <div
-        className={`flex flex-col w-full bg-white border border-gray-200 rounded-md shadow-sm ${containerHeightClass}`}
+        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm `}
       >
         {/* Title bar */}
         <div

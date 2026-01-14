@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { usePathname } from "next/navigation";
-import { Layout, Menu, ConfigProvider, Button } from "antd";
+import { useRouter, usePathname } from "next/navigation";
+import { Menu, ConfigProvider } from "antd";
 import {
   Bot,
   Globe,
@@ -14,51 +14,18 @@ import {
   Database,
   ShoppingBag,
   Code,
-  ChevronLeft,
-  ChevronRight,
   Home,
   Puzzle,
   Activity,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuth } from "@/hooks/useAuth";
-import { HEADER_CONFIG, FOOTER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
-
-const { Sider } = Layout;
+import { SIDER_CONFIG } from "@/const/layoutConstants";
 
 interface SideNavigationProps {
   onAuthRequired?: () => void;
   onAdminRequired?: () => void;
-  onViewChange?: (view: string) => void;
-  currentView?: string;
   collapsed?: boolean;
-}
-
-/**
- * Get menu key based on current pathname
- */
-function getMenuKeyFromPathname(pathname: string): string {
-  // Remove locale prefix (e.g., /zh/, /en/)
-  const segments = pathname.split('/').filter(Boolean);
-  const pathWithoutLocale = segments.length > 1 ? segments[1] : '';
-  
-  // Map paths to menu keys
-  const pathToKeyMap: Record<string, string> = {
-    '': '0',           // Home page
-    'chat': '1',       // Start chat (separate page)
-    'setup': '2',      // Quick config
-    'space': '3',      // Agent space
-    'market': '4',     // Agent market
-    'agents': '5',     // Agent dev
-    'knowledges': '6', // Knowledge base
-    'models': '7',     // Model management
-    'memory': '8',     // Memory management
-    'users': '9',       // User management
-    'mcp-tools': '10',  // MCP tools management
-    'monitoring': '11', // Monitoring and operations
-  };
-  
-  return pathToKeyMap[pathWithoutLocale] || '0';
 }
 
 /**
@@ -68,46 +35,59 @@ function getMenuKeyFromPathname(pathname: string): string {
 export function SideNavigation({
   onAuthRequired,
   onAdminRequired,
-  onViewChange,
-  currentView,
-  collapsed: collapsedProp,
+  collapsed,
 }: SideNavigationProps) {
   const { t } = useTranslation("common");
   const { user, isSpeedMode } = useAuth();
+  const router = useRouter();
   const pathname = usePathname();
-  // Support controlled collapse from parent; fall back to internal state if needed
-  const [internalCollapsed, setInternalCollapsed] = useState(false);
-  const [selectedKey, setSelectedKey] = useState("0");
-  const isCollapsed = typeof collapsedProp === "boolean" ? collapsedProp : internalCollapsed;
-  // Update selected key when pathname or currentView changes
+
+  const [selectedKey, setSelectedKey] = useState("home");
+  const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
+
+  // 添加路径到key的映射
+  const pathToKeyMap: Record<string, string> = {
+    "/": "home",
+    "/chat": "chat",
+    "/setup": "setup",
+    "/space": "space",
+    "/market": "market",
+    "/agents": "agents",
+    "/knowledges": "knowledges",
+    "/mcp-tools": "mcp-tools",
+    "/monitoring": "monitoring",
+    "/models": "models",
+    "/memory": "memory",
+    "/users": "users",
+  };
+
+  // 添加useEffect来监听pathname变化并更新selectedKey
   useEffect(() => {
-    // If we have a currentView from parent, use it to determine the key
-    if (currentView) {
-      const viewToKeyMap: Record<string, string> = {
-        home: "0",
-        chat: "1",
-        setup: "2",
-        space: "3",
-        market: "4",
-        agents: "5",
-        knowledges: "6",
-        models: "7",
-        memory: "8",
-        users: "9",
-        mcpTools: "10",
-        monitoring: "11",
-      };
-      setSelectedKey(viewToKeyMap[currentView] || '0');
-    } else {
-      // Otherwise, fall back to pathname-based selection
-      const key = getMenuKeyFromPathname(pathname);
-      setSelectedKey(key);
+    // 从pathname中提取实际路径（去掉locale前缀）
+    const segments = pathname.split("/").filter(Boolean);
+    // 如果第一个segment是locale（zh或en），则去掉它
+    if (segments.length > 0 && (segments[0] === "zh" || segments[0] === "en")) {
+      segments.shift();
     }
-  }, [pathname, currentView]);
+    // 重新构建路径
+    const currentPath = "/" + segments.join("/");
+
+    // 查找对应的key，找不到则默认为home
+    const matchedKey = pathToKeyMap[currentPath] || "home";
+    setSelectedKey(matchedKey);
+  }, [pathname]);
 
   // Helper function to create menu item with consistent icon styling
-  const createMenuItem = (key: string, Icon: any, labelKey: string, view: string, requiresAuth = false, requiresAdmin = false) => ({
+  const createMenuItem = (
+    key: string,
+    path: string,
+    Icon: any,
+    labelKey: string,
+    requiresAuth = false,
+    requiresAdmin = false
+  ) => ({
     key,
+    path,
     icon: <Icon className="w-4 h-4" />,
     label: t(labelKey),
     onClick: () => {
@@ -116,30 +96,57 @@ export function SideNavigation({
       } else if (!isSpeedMode && requiresAuth && !user) {
         onAuthRequired?.();
       } else {
-        onViewChange?.(view);
+        setSelectedKey(key);
+        if (path) {
+          router.push(path);
+        }
       }
     },
   });
 
-  // Menu items configuration
+  // Menu items configuration - paths without locale prefix (middleware will add it)
   const menuItems: MenuProps["items"] = [
-    createMenuItem("0", Home, "sidebar.homePage", "home"),
-    createMenuItem("1", Bot, "sidebar.startChat", "chat", true),
-    createMenuItem("2", Zap, "sidebar.quickConfig", "setup", false, true),
-    createMenuItem("3", Globe, "sidebar.agentSpace", "space", true),
-    createMenuItem("4", ShoppingBag, "sidebar.agentMarket", "market", true),
-    createMenuItem("5", Code, "sidebar.agentDev", "agents", false, true),
-    createMenuItem("6", BookOpen, "sidebar.knowledgeBase", "knowledges", true),
-    createMenuItem("10", Puzzle, "sidebar.mcpToolsManagement", "mcpTools", false, true),
-    createMenuItem("11", Activity, "sidebar.monitoringManagement", "monitoring", false, true),
-    createMenuItem("7", Settings, "sidebar.modelManagement", "models", false, true),
-    createMenuItem("8", Database, "sidebar.memoryManagement", "memory", false, true),
-    createMenuItem("9", Users, "sidebar.userManagement", "users", false, true),
+    createMenuItem("0", "/", Home, "sidebar.homePage"),
+    createMenuItem("1", "/chat", Bot, "sidebar.startChat", true),
+    createMenuItem("2", "/setup", Zap, "sidebar.quickConfig", false, true),
+    createMenuItem("3", "/space", Globe, "sidebar.agentSpace", true),
+    createMenuItem("4", "/market", ShoppingBag, "sidebar.agentMarket", true),
+    createMenuItem("5", "/agents", Code, "sidebar.agentDev", false, true),
+    createMenuItem("6", "/knowledges", BookOpen, "sidebar.knowledgeBase", true),
+    createMenuItem(
+      "10",
+      "/mcp-tools",
+      Puzzle,
+      "sidebar.mcpToolsManagement",
+      false,
+      true
+    ),
+    createMenuItem(
+      "11",
+      "/monitoring",
+      Activity,
+      "sidebar.monitoringManagement",
+      false,
+      true
+    ),
+    createMenuItem(
+      "7",
+      "/models",
+      Settings,
+      "sidebar.modelManagement",
+      false,
+      true
+    ),
+    createMenuItem(
+      "8",
+      "/memory",
+      Database,
+      "sidebar.memoryManagement",
+      false,
+      true
+    ),
+    createMenuItem("9", "/users", Users, "sidebar.userManagement", false, true),
   ];
-
-  // Calculate sidebar height and position dynamically
-  const sidebarHeight = `calc(100vh - ${HEADER_CONFIG.RESERVED_HEIGHT} - ${FOOTER_CONFIG.RESERVED_HEIGHT})`;
-  const sidebarTop = HEADER_CONFIG.RESERVED_HEIGHT;
 
   return (
     <ConfigProvider>
@@ -147,22 +154,22 @@ export function SideNavigation({
         <div
           className="flex-shrink-0"
           style={{
-            width: isCollapsed ? SIDER_CONFIG.COLLAPSED_WIDTH : SIDER_CONFIG.EXPANDED_WIDTH,
+            width: isCollapsed
+              ? SIDER_CONFIG.COLLAPSED_WIDTH
+              : SIDER_CONFIG.EXPANDED_WIDTH,
           }}
         >
-            <div className="py-2 h-full">
-              <Menu
-                mode="inline"
-                inlineCollapsed={isCollapsed}
-                selectedKeys={[selectedKey]}
-                items={menuItems}
-                onClick={({ key }) => setSelectedKey(key)}
-                className="bg-transparent border-r-0 h-full"
-              />
-            </div>
+          <div className="py-2 h-full">
+            <Menu
+              mode="inline"
+              inlineCollapsed={isCollapsed}
+              selectedKeys={[selectedKey]}
+              items={menuItems}
+              className="bg-transparent border-r-0 h-full"
+            />
+          </div>
         </div>
       </div>
     </ConfigProvider>
   );
 }
-
