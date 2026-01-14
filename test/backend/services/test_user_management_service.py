@@ -48,6 +48,7 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         extend_session,
         check_auth_service_health,
         signup_user,
+        signup_user_with_invitation,
         parse_supabase_response,
         generate_tts_stt_4_admin,
         verify_invite_code,
@@ -55,6 +56,7 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         revoke_regular_user,
+        get_user_info,
     )
 
 # Functions to test
@@ -558,8 +560,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"user": "data"})
         mock_verify_code.assert_not_called()
         mock_generate_tts.assert_not_called()
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="USER")
-        mock_parse_response.assert_called_once_with(False, mock_response, "USER")
+        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id")
+        mock_parse_response.assert_called_once_with(False, mock_response, "user")
 
     @patch('backend.services.user_management_service.parse_supabase_response')
     @patch('backend.services.user_management_service.insert_user_tenant')
@@ -579,8 +581,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         result = await signup_user("user@example.com", "password123")
 
         self.assertEqual(result, {"user": "data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="USER")
-        mock_parse_response.assert_called_once_with(False, mock_response, "USER")
+        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id")
+        mock_parse_response.assert_called_once_with(False, mock_response, "user")
 
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_no_user_returned(self, mock_get_client):
@@ -637,7 +639,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             {"group_id": 3, "user_id": "user-123", "already_member": False}
         ]
 
-        result = await signup_user("admin@example.com", "password123", "ADMIN123")
+        result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
 
         # Verify generate_tts_stt_4_admin was called for admin user
         mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
@@ -646,7 +648,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN")
         mock_use_invite.assert_called_once_with("ADMIN123", "user-123")
         mock_add_groups.assert_called_once_with("user-123", [1, 2, 3], "user-123")
-        mock_parse_response.assert_called_once_with(True, mock_response, "ADMIN")
+        mock_parse_response.assert_called_once_with(False, mock_response, "ADMIN")
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
@@ -687,7 +689,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             {"group_id": 5, "user_id": "user-456", "already_member": False}
         ]
 
-        result = await signup_user("dev@example.com", "password123", "DEV456")
+        result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
 
         self.assertEqual(result, {"user": "dev_data"})
         mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV")
@@ -704,7 +706,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_check_available.return_value = False
 
         with self.assertRaises(IncorrectInviteCodeException) as context:
-            await signup_user("test@example.com", "password123", "INVALID")
+            await signup_user_with_invitation("test@example.com", "password123", "INVALID")
 
         self.assertIn("is not available", str(context.exception))
 
@@ -1056,12 +1058,12 @@ class TestRevokeRegularUser(unittest.IsolatedAsyncioTestCase):
             await revoke_regular_user("u1", "t1")
 
 
-class TestGetUserInfo(unittest.TestCase):
+class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
     """Test get_user_info function"""
 
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.query_group_ids_by_user')
-    def test_get_user_info_success(self, mock_query_group_ids, mock_get_user_tenant):
+    async def test_get_user_info_success(self, mock_query_group_ids, mock_get_user_tenant):
         """Test getting user information successfully"""
         # Setup mocks
         mock_get_user_tenant.return_value = {
@@ -1071,7 +1073,7 @@ class TestGetUserInfo(unittest.TestCase):
         mock_query_group_ids.return_value = [1, 2, 3]
 
         # Execute
-        result = get_user_info("test_user")
+        result = await get_user_info("test_user")
 
         # Assert
         assert result is not None
@@ -1084,13 +1086,13 @@ class TestGetUserInfo(unittest.TestCase):
         mock_query_group_ids.assert_called_once_with("test_user")
 
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
-    def test_get_user_info_user_not_found(self, mock_get_user_tenant):
+    async def test_get_user_info_user_not_found(self, mock_get_user_tenant):
         """Test getting user information when user doesn't exist"""
         # Setup mocks
         mock_get_user_tenant.return_value = None
 
         # Execute
-        result = get_user_info("nonexistent_user")
+        result = await get_user_info("nonexistent_user")
 
         # Assert
         assert result is None
@@ -1098,13 +1100,13 @@ class TestGetUserInfo(unittest.TestCase):
 
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.query_group_ids_by_user')
-    def test_get_user_info_exception_handling(self, mock_query_group_ids, mock_get_user_tenant):
+    async def test_get_user_info_exception_handling(self, mock_query_group_ids, mock_get_user_tenant):
         """Test get_user_info handles exceptions gracefully"""
         # Setup mocks to raise exception
         mock_get_user_tenant.side_effect = Exception("Database error")
 
         # Execute
-        result = get_user_info("test_user")
+        result = await get_user_info("test_user")
 
         # Assert
         assert result is None

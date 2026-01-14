@@ -1042,7 +1042,7 @@ class TestLoadConfigImpl:
 
         # Check Chinese default values
         assert result["app"]["name"] == "Nexent 智能体"
-        assert result["app"]["description"] == "面向企业应用的智能体平台"
+        assert result["app"]["description"] == "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
         assert result["app"]["tenantName"] == ""
         assert result["app"]["defaultGroupId"] == ""
         assert result["app"]["icon"]["type"] == "preset"
@@ -1101,7 +1101,7 @@ class TestLoadConfigImpl:
 
         # Check app config (should use defaults)
         assert result["app"]["name"] == "Nexent Agent"
-        assert result["app"]["description"] == "Intelligent agent platform for enterprise applications"
+        assert result["app"]["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
         assert result["app"]["tenantName"] == ""
         assert result["app"]["defaultGroupId"] == ""
 
@@ -1130,7 +1130,7 @@ class TestLoadConfigImpl:
 
         # Check app config (should use defaults)
         assert result["app"]["name"] == "Nexent Agent"
-        assert result["app"]["description"] == "Intelligent agent platform for enterprise applications"
+        assert result["app"]["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
         assert result["app"]["tenantName"] == ""
         assert result["app"]["defaultGroupId"] == ""
 
@@ -1397,6 +1397,8 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = [
             "Custom App Name",  # APP_NAME
             "Custom description",  # APP_DESCRIPTION
+            None,  # TENANT_NAME (use default)
+            None,  # DEFAULT_GROUP_ID (use default)
             "custom",  # ICON_TYPE
             "avatar-uri",  # AVATAR_URI
             "https://custom-icon.com"  # CUSTOM_ICON_URL
@@ -1410,6 +1412,8 @@ class TestBuildAppConfig:
             # Assert
             assert result["name"] == "Custom App Name"
             assert result["description"] == "Custom description"
+            assert result["tenantName"] == ""  # None returns default empty string
+            assert result["defaultGroupId"] == ""  # None returns default empty string
             assert result["icon"]["type"] == "custom"
             assert result["icon"]["avatarUri"] == "avatar-uri"
             assert result["icon"]["customUrl"] == "https://custom-icon.com"
@@ -1419,11 +1423,13 @@ class TestBuildAppConfig:
         expected_calls = [
             ("APP_NAME", tenant_id),
             ("APP_DESCRIPTION", tenant_id),
+            ("TENANT_NAME", tenant_id),
+            ("DEFAULT_GROUP_ID", tenant_id),
             ("ICON_TYPE", tenant_id),
             ("AVATAR_URI", tenant_id),
             ("CUSTOM_ICON_URL", tenant_id)
         ]
-        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 5
+        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 7
         service_mocks['tenant_config_manager'].get_app_config.assert_has_calls(
             [call(key, tenant_id=tenant_id)
              for key, _ in expected_calls]
