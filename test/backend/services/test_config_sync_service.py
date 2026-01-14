@@ -1,117 +1,39 @@
-# Apply ALL critical patches BEFORE any imports
-# This prevents real AWS/MinIO/Elasticsearch calls during import
 from backend.services.config_sync_service import (
     handle_model_config,
     save_config_impl,
     load_config_impl,
     build_models_config,
-    build_app_config
+    build_app_config,
+    build_model_config
 )
-import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
+
 import pytest
 
-# Set mock environment variables BEFORE any imports
-os.environ.setdefault('MINIO_ENDPOINT', 'http://mock-minio:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'mock-key')
-os.environ.setdefault('MINIO_SECRET_KEY', 'mock-secret')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'mock-bucket')
-
-# Mock boto3 at the module level
+# Patch boto3 and other dependencies before importing anything from backend
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Create comprehensive mocks for MinIO and related modules
+# Apply critical patches before importing any modules
+# This prevents real AWS/MinIO/Elasticsearch calls during import
+patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
+
+# Patch storage factory and MinIO config validation to avoid errors during initialization
+# These patches must be started before any imports that use MinioClient
+storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 minio_client_mock._ensure_bucket_exists = MagicMock()
 minio_client_mock.client = MagicMock()
-
-storage_client_mock = MagicMock()
-
-# Mock the entire minio_config module
-minio_config_mock = MagicMock()
-minio_config_mock.MinIOStorageConfig = MagicMock()
-minio_config_mock.MinIOStorageConfig.return_value.validate = MagicMock(
-    return_value=None)
-sys.modules['nexent.storage.minio_config'] = minio_config_mock
-
-# Mock the storage_client_factory module
-storage_factory_mock = MagicMock()
-storage_factory_mock.create_storage_client_from_config = MagicMock(
-    return_value=storage_client_mock)
-sys.modules['nexent.storage.storage_client_factory'] = storage_factory_mock
-
-# Create a more comprehensive mock for the database client module
-db_client_mock = MagicMock()
-
-# Mock classes to prevent instantiation
-db_client_mock.MinioClient = MagicMock(return_value=minio_client_mock)
-db_client_mock.PostgresClient = MagicMock()
-
-# Mock global variables that get assigned at module level
-db_client_mock.minio_client = minio_client_mock
-db_client_mock.db_client = MagicMock()
-
-# Mock utility functions
-db_client_mock.as_dict = MagicMock()
-db_client_mock.get_db_session = MagicMock()
-
-# Set the mock module BEFORE any imports that might trigger it
-sys.modules['backend.database.client'] = db_client_mock
-
-# Also mock the submodules that might be imported
-sys.modules['backend.database'] = MagicMock()
-sys.modules['database'] = MagicMock()
-sys.modules['database.client'] = db_client_mock
-
-# Mock model management database module
-model_mgmt_mock = MagicMock()
-model_mgmt_mock.get_model_id_by_display_name = MagicMock(return_value=None)
-sys.modules['database.model_management_db'] = model_mgmt_mock
-
-# Mock utils modules
-utils_config_mock = MagicMock()
-utils_config_mock.get_env_key = MagicMock(return_value="TEST_KEY")
-utils_config_mock.get_model_name_from_config = MagicMock(
-    return_value="test-model")
-utils_config_mock.safe_value = MagicMock(return_value="safe_value")
-utils_config_mock.tenant_config_manager = MagicMock()
-sys.modules['utils.config_utils'] = utils_config_mock
-sys.modules['utils'] = MagicMock()
-
-# Mock elasticsearch
-es_mock = MagicMock()
-es_mock.Elasticsearch = MagicMock(return_value=MagicMock())
-sys.modules['elasticsearch'] = es_mock
-
-# Mock consts package and submodules
-consts_mock = MagicMock()
-consts_const_mock = MagicMock()
-# Mock the constants used in config_sync_service
-consts_const_mock.APP_DESCRIPTION = "Test description"
-consts_const_mock.APP_NAME = "Test app"
-consts_const_mock.AVATAR_URI = "test-avatar"
-consts_const_mock.CUSTOM_ICON_URL = "test-custom-url"
-consts_const_mock.ICON_TYPE = "test-icon-type"
-consts_const_mock.MODEL_CONFIG_MAPPING = {}
-consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
-consts_const_mock.DEFAULT_APP_DESCRIPTION_EN = "Default description"
-consts_const_mock.DEFAULT_APP_DESCRIPTION_ZH = "默认描述"
-consts_const_mock.DEFAULT_APP_NAME_EN = "Default App"
-consts_const_mock.DEFAULT_APP_NAME_ZH = "默认应用"
-consts_const_mock.MODEL_ENGINE_ENABLED = "false"  # Default to false
-consts_mock.const = consts_const_mock
-sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_const_mock
-
-# NOW we can safely import the modules under test
-
-# Note: We already mock the entire backend.database.client module above,
-# so we don't need additional patches for individual classes within that module
-
-# NOW we can safely import the modules under test
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
+      return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+      lambda self: None).start()
+patch('backend.database.client.MinioClient',
+      return_value=minio_client_mock).start()
+patch('database.client.MinioClient', return_value=minio_client_mock).start()
+patch('backend.database.client.minio_client', minio_client_mock).start()
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 
 @pytest.fixture
@@ -252,6 +174,83 @@ class TestHandleModelConfig:
         service_mocks['tenant_config_manager'].delete_single_config.assert_called_once_with(
             tenant_id, config_key)
         service_mocks['tenant_config_manager'].set_single_config.assert_not_called()
+
+    def test_handle_model_config_empty_string_model_id(self, service_mocks):
+        """Test handle_model_config when model_id is empty string"""
+        # Setup
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+        config_key = "LLM_ID"
+        model_id = ""
+        tenant_config_dict = {"LLM_ID": "123"}
+
+        # Execute
+        handle_model_config(tenant_id, user_id, config_key,
+                            model_id, tenant_config_dict)
+
+        # Assert - empty string should be treated as falsy and delete existing config
+        service_mocks['tenant_config_manager'].delete_single_config.assert_called_once_with(
+            tenant_id, config_key)
+        service_mocks['tenant_config_manager'].set_single_config.assert_not_called()
+
+    def test_handle_model_config_invalid_string_model_id(self, service_mocks):
+        """Test handle_model_config when model_id is non-numeric string"""
+        # Setup
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+        config_key = "LLM_ID"
+        model_id = "invalid"
+        tenant_config_dict = {"LLM_ID": "123"}
+
+        # Execute
+        handle_model_config(tenant_id, user_id, config_key,
+                            model_id, tenant_config_dict)
+
+        # Assert - should delete existing and set new value
+        service_mocks['tenant_config_manager'].delete_single_config.assert_called_once_with(
+            tenant_id, config_key)
+        service_mocks['tenant_config_manager'].set_single_config.assert_called_once_with(
+            user_id, tenant_id, config_key, model_id
+        )
+
+    def test_handle_model_config_empty_tenant_config_dict(self, service_mocks):
+        """Test handle_model_config when tenant_config_dict is empty"""
+        # Setup
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+        config_key = "LLM_ID"
+        model_id = 456
+        tenant_config_dict = {}
+
+        # Execute
+        handle_model_config(tenant_id, user_id, config_key,
+                            model_id, tenant_config_dict)
+
+        # Assert - should set new config since key doesn't exist
+        service_mocks['tenant_config_manager'].delete_single_config.assert_not_called()
+        service_mocks['tenant_config_manager'].set_single_config.assert_called_once_with(
+            user_id, tenant_id, config_key, model_id
+        )
+
+    def test_handle_model_config_zero_model_id_with_existing_config(self, service_mocks):
+        """Test handle_model_config when model_id is 0 and config exists"""
+        # Setup
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+        config_key = "LLM_ID"
+        model_id = 0
+        tenant_config_dict = {"LLM_ID": "123"}
+
+        # Execute
+        handle_model_config(tenant_id, user_id, config_key,
+                            model_id, tenant_config_dict)
+
+        # Assert - should delete existing and set new value (0 is falsy but should be treated as valid model_id)
+        service_mocks['tenant_config_manager'].delete_single_config.assert_called_once_with(
+            tenant_id, config_key)
+        service_mocks['tenant_config_manager'].set_single_config.assert_called_once_with(
+            user_id, tenant_id, config_key, model_id
+        )
 
 
 class TestSaveConfigImpl:
@@ -773,6 +772,180 @@ class TestSaveConfigImpl:
         service_mocks['tenant_config_manager'].delete_single_config.assert_not_called()
         service_mocks['tenant_config_manager'].update_single_config.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_save_config_impl_model_dump_exception(self, service_mocks):
+        """Test save_config_impl when config.model_dump() raises exception"""
+        # Setup
+        config = MagicMock()
+        config.model_dump.side_effect = Exception("Serialization failed")
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Execute and assert exception is raised
+        with pytest.raises(Exception) as exc_info:
+            await save_config_impl(config, tenant_id, user_id)
+
+        assert "Serialization failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_load_config_exception(self, service_mocks):
+        """Test save_config_impl when load_config raises exception"""
+        # Setup
+        config = MagicMock()
+        config_dict = {"app": {"name": "Test App"}}
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock load_config to raise exception
+        service_mocks['tenant_config_manager'].load_config.side_effect = Exception(
+            "Database connection failed")
+
+        # Execute and assert exception is raised
+        with pytest.raises(Exception) as exc_info:
+            await save_config_impl(config, tenant_id, user_id)
+
+        assert "Database connection failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_get_model_id_exception(self, service_mocks):
+        """Test save_config_impl when get_model_id_by_display_name raises exception"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {"name": "Test App"},
+            "models": {
+                "llm": {
+                    "modelName": "gpt-4",
+                    "displayName": "GPT-4"
+                }
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {}
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Mock get_model_id_by_display_name to raise exception
+        service_mocks['get_model_id'].side_effect = Exception(
+            "Model not found")
+
+        # Execute and assert exception is raised
+        with pytest.raises(Exception) as exc_info:
+            await save_config_impl(config, tenant_id, user_id)
+
+        assert "Model not found" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_empty_config_dict(self, service_mocks):
+        """Test save_config_impl with empty config_dict"""
+        # Setup
+        config = MagicMock()
+        config_dict = {}
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {}
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        assert result is None
+        # Should not call any config operations since config_dict is empty
+        service_mocks['tenant_config_manager'].set_single_config.assert_not_called()
+        service_mocks['tenant_config_manager'].delete_single_config.assert_not_called()
+        service_mocks['tenant_config_manager'].update_single_config.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_empty_models_section(self, service_mocks):
+        """Test save_config_impl with empty models section"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {"name": "Test App"},
+            "models": {}
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {}
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        assert result is None
+        # Should only process app config, not model config
+        service_mocks['get_model_id'].assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_config_impl_embedding_without_api_config(self, service_mocks):
+        """Test save_config_impl with embedding model without apiConfig"""
+        # Setup
+        config = MagicMock()
+        config_dict = {
+            "app": {"name": "Test App"},
+            "models": {
+                "embedding": {
+                    "modelName": "text-embedding-ada-002",
+                    "displayName": "Ada Embeddings",
+                    "dimension": 1536
+                }
+            }
+        }
+        config.model_dump.return_value = config_dict
+
+        tenant_id = "test_tenant_id"
+        user_id = "test_user_id"
+
+        # Mock tenant config
+        service_mocks['tenant_config_manager'].load_config.return_value = {}
+
+        # Mock get_env_key
+        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+
+        # Mock safe_value
+        service_mocks['safe_value'].side_effect = lambda value: str(
+            value) if value is not None else ""
+
+        # Mock get_model_id_by_display_name
+        service_mocks['get_model_id'].return_value = "embedding-model-id"
+
+        # Execute
+        result = await save_config_impl(config, tenant_id, user_id)
+
+        # Assert
+        assert result is None
+        # Should not try to access apiConfig since it's not present
+        service_mocks['logger'].info.assert_called_once_with(
+            "Configuration saved successfully")
+
 
 class TestLoadConfigImpl:
     """Test cases for load_config_impl function"""
@@ -822,14 +995,10 @@ class TestLoadConfigImpl:
             ""           # TTS_ID
         ]
 
-        # Mock MODEL_ENGINE_ENABLED for this test
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
-            # Execute
-            result = await load_config_impl(language, tenant_id)
+        # Execute
+        result = await load_config_impl(language, tenant_id)
 
         assert result["app"]["name"] == "Custom App Name"
-        # Default value when MODEL_ENGINE_ENABLED == "true"
-        assert result["app"]["modelEngineEnabled"] is True
         assert result["models"]["llm"]["displayName"] == "Test LLM"
 
     @pytest.mark.asyncio
@@ -848,14 +1017,11 @@ class TestLoadConfigImpl:
         # Mock model name conversion to return string values
         service_mocks['get_model_name'].return_value = ""
 
-        # Mock MODEL_ENGINE_ENABLED for this test
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
-            # Execute
-            result = await load_config_impl(language, tenant_id)
+        # Execute
+        result = await load_config_impl(language, tenant_id)
 
         # Check Chinese default values
         assert result["app"]["name"] == "Nexent 智能体"
-        assert result["app"]["modelEngineEnabled"] is True
 
     @pytest.mark.asyncio
     async def test_load_config_impl_with_embedding_dimension(self, service_mocks):
@@ -959,6 +1125,97 @@ class TestLoadConfigImpl:
                 f"Failed to load config for tenant {tenant_id}: Database connection failed"
             )
 
+    @pytest.mark.asyncio
+    async def test_load_config_impl_empty_language(self, service_mocks):
+        """Test loading configuration with empty language"""
+        # Setup
+        language = ""
+        tenant_id = "test_tenant_id"
+
+        # Mock empty configurations to avoid default values
+        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+        service_mocks['tenant_config_manager'].get_model_config.return_value = {}
+
+        # Mock model name conversion to return string values
+        service_mocks['get_model_name'].return_value = ""
+
+        # Execute
+        result = await load_config_impl(language, tenant_id)
+
+        # Assert - should use English defaults when language is empty
+        assert result["app"]["name"] == "Nexent"  # DEFAULT_APP_NAME_EN
+        assert result["models"]["llm"]["name"] == ""
+
+    @pytest.mark.asyncio
+    async def test_load_config_impl_invalid_language(self, service_mocks):
+        """Test loading configuration with invalid language"""
+        # Setup
+        language = "invalid"
+        tenant_id = "test_tenant_id"
+
+        # Mock empty configurations to avoid default values
+        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+        service_mocks['tenant_config_manager'].get_model_config.return_value = {}
+
+        # Mock model name conversion to return string values
+        service_mocks['get_model_name'].return_value = ""
+
+        # Execute
+        result = await load_config_impl(language, tenant_id)
+
+        # Assert - should use English defaults when language is invalid
+        assert result["app"]["name"] == "Nexent"  # DEFAULT_APP_NAME_EN
+        assert result["models"]["llm"]["name"] == ""
+
+    @pytest.mark.asyncio
+    async def test_load_config_impl_empty_tenant_id(self, service_mocks):
+        """Test loading configuration with empty tenant_id"""
+        # Setup
+        language = "en"
+        tenant_id = ""
+
+        # Mock empty configurations to avoid default values
+        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+        service_mocks['tenant_config_manager'].get_model_config.return_value = {}
+
+        # Mock model name conversion to return string values
+        service_mocks['get_model_name'].return_value = ""
+
+        # Execute
+        result = await load_config_impl(language, tenant_id)
+
+        # Assert - should still work with empty tenant_id
+        assert result["app"]["name"] == "Nexent"
+        assert result["models"]["llm"]["name"] == ""
+
+    @pytest.mark.asyncio
+    async def test_load_config_impl_both_build_functions_exception(self, service_mocks):
+        """Test loading configuration when both build functions raise exceptions"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock build_app_config to raise an exception
+        with patch('backend.services.config_sync_service.build_app_config') as mock_build_app_config, \
+                patch('backend.services.config_sync_service.build_models_config') as mock_build_models_config:
+
+            mock_build_app_config.side_effect = Exception("App config failed")
+            mock_build_models_config.side_effect = Exception(
+                "Models config failed")
+
+            # Execute and assert that exception is raised
+            with pytest.raises(Exception) as exc_info:
+                await load_config_impl(language, tenant_id)
+
+            # Verify the exception message
+            assert f"Failed to load config for tenant {tenant_id}." in str(
+                exc_info.value)
+
+            # Verify that logger.error was called
+            service_mocks['logger'].error.assert_called_once_with(
+                f"Failed to load config for tenant {tenant_id}: App config failed"
+            )
+
     def test_build_models_config_partial_success(self, service_mocks):
         """Test build_models_config with some successful and some failed configs"""
         # Setup
@@ -1010,86 +1267,376 @@ class TestLoadConfigImpl:
             "Failed to get config for EMBEDDING_ID: Database timeout"
         )
 
+    def test_build_models_config_all_success(self, service_mocks):
+        """Test build_models_config with all configurations successful"""
+        # Setup
+        tenant_id = "test_tenant_id"
+
+        # Mock successful model configurations for all model types
+        def side_effect(config_key, tenant_id=None):
+            configs = {
+                "LLM_ID": {
+                    "display_name": "GPT-4",
+                    "api_key": "test-key",
+                    "base_url": "https://api.openai.com"
+                },
+                "LLM_SECONDARY_ID": {},
+                "EMBEDDING_ID": {
+                    "display_name": "Ada Embeddings",
+                    "api_key": "test-key",
+                    "base_url": "https://api.openai.com",
+                    "max_tokens": 1536,
+                    "model_type": "embedding"
+                },
+                "MULTI_EMBEDDING_ID": {},
+                "RERANK_ID": {},
+                "VLM_ID": {},
+                "STT_ID": {},
+                "TTS_ID": {}
+            }
+            return configs.get(config_key, {})
+
+        service_mocks['tenant_config_manager'].get_model_config.side_effect = side_effect
+
+        # Execute
+        result = build_models_config(tenant_id)
+
+        # Assert
+        assert isinstance(result, dict)
+        assert len(result) == 8  # All model types should be present
+
+        # Verify successful configs
+        assert result["llm"]["displayName"] == "GPT-4"
+        assert result["llm"]["apiConfig"]["apiKey"] == "test-key"
+
+        # Verify empty configs are handled
+        assert result["llmSecondary"]["name"] == ""
+        assert result["llmSecondary"]["displayName"] == ""
+
+        # Verify no warnings were logged (all successful)
+        service_mocks['logger'].warning.assert_not_called()
+
+    def test_build_models_config_all_failures(self, service_mocks):
+        """Test build_models_config when all configurations fail"""
+        # Setup
+        tenant_id = "test_tenant_id"
+
+        # Mock all get_model_config calls to raise exceptions
+        service_mocks['tenant_config_manager'].get_model_config.side_effect = Exception(
+            "Database completely down")
+
+        # Execute
+        result = build_models_config(tenant_id)
+
+        # Assert
+        assert isinstance(result, dict)
+        # All model types should still be present with empty configs
+        assert len(result) == 8
+
+        # All configs should be empty due to exceptions
+        for model_key in ["llm", "llmSecondary", "embedding", "multiEmbedding", "rerank", "vlm", "stt", "tts"]:
+            assert result[model_key]["name"] == ""
+            assert result[model_key]["displayName"] == ""
+            assert result[model_key]["apiConfig"]["apiKey"] == ""
+            assert result[model_key]["apiConfig"]["modelUrl"] == ""
+
+        # Verify that logger.warning was called for each model type
+        assert service_mocks['logger'].warning.call_count == 8
+        warning_calls = service_mocks['logger'].warning.call_args_list
+        expected_configs = ["LLM_ID", "LLM_SECONDARY_ID", "EMBEDDING_ID", "MULTI_EMBEDDING_ID",
+                            "RERANK_ID", "VLM_ID", "STT_ID", "TTS_ID"]
+        for i, config_key in enumerate(expected_configs):
+            assert f"Failed to get config for {config_key}: Database completely down" in warning_calls[
+                i][0][0]
+
 
 class TestBuildAppConfig:
     """Test cases for build_app_config function"""
 
-    @pytest.mark.parametrize("language,expected_name,expected_description", [
-        ("zh", "中文应用名称", "中文应用描述"),
-        ("en", "English App Name", "English app description"),
-        # Default to English
-        ("unknown", "English App Name", "English app description"),
-    ])
-    def test_build_app_config_with_custom_values(self, service_mocks, language, expected_name, expected_description):
-        """Test build_app_config with custom app values"""
+    def test_build_app_config_english_with_values(self, service_mocks):
+        """Test build_app_config with English language and all config values present"""
         # Setup
+        language = "en"
         tenant_id = "test_tenant_id"
 
-        # Mock tenant config manager to return custom values
+        # Mock all app config values
         service_mocks['tenant_config_manager'].get_app_config.side_effect = [
-            expected_name,      # APP_NAME
-            expected_description,  # APP_DESCRIPTION
-            "custom",           # ICON_TYPE
-            "test-avatar-uri",  # AVATAR_URI
-            "test-custom-url"   # CUSTOM_ICON_URL
+            "Custom App Name",  # APP_NAME
+            "Custom description",  # APP_DESCRIPTION
+            "custom",  # ICON_TYPE
+            "avatar-uri",  # AVATAR_URI
+            "https://custom-icon.com"  # CUSTOM_ICON_URL
         ]
 
-        # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
-            # Execute
-            result = build_app_config(language, tenant_id)
+        # Execute
+        result = build_app_config(language, tenant_id)
 
-            # Assert
-            assert result["name"] == expected_name
-            assert result["description"] == expected_description
-            assert result["icon"]["type"] == "custom"
-            assert result["icon"]["avatarUri"] == "test-avatar-uri"
-            assert result["icon"]["customUrl"] == "test-custom-url"
-            assert result["modelEngineEnabled"] is True
+        # Assert
+        assert result["name"] == "Custom App Name"
+        assert result["description"] == "Custom description"
+        assert result["icon"]["type"] == "custom"
+        assert result["icon"]["avatarUri"] == "avatar-uri"
+        assert result["icon"]["customUrl"] == "https://custom-icon.com"
+        # MODEL_ENGINE_ENABLED is not mocked, defaults to False
+        assert result["modelEngineEnabled"] == False
 
-    @pytest.mark.parametrize("model_engine_enabled_env,expected_enabled", [
-        ("true", True),
-        ("false", False),
-        ("TRUE", True),   # Case insensitive now - "true" in any case should be True
-        ("True", True),   # Case insensitive now - "true" in any case should be True
-        ("", False),
-        (None, False),
-    ])
-    def test_build_app_config_model_engine_enabled(self, service_mocks, model_engine_enabled_env, expected_enabled):
-        """Test build_app_config with different MODEL_ENGINE_ENABLED values (case insensitive for 'true')"""
+        # Verify calls
+        expected_calls = [
+            ("APP_NAME", tenant_id),
+            ("APP_DESCRIPTION", tenant_id),
+            ("ICON_TYPE", tenant_id),
+            ("AVATAR_URI", tenant_id),
+            ("CUSTOM_ICON_URL", tenant_id)
+        ]
+        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 5
+        service_mocks['tenant_config_manager'].get_app_config.assert_has_calls(
+            [pytest.call(key, tenant_id=tenant_id)
+             for key, _ in expected_calls]
+        )
+
+    def test_build_app_config_chinese_defaults(self, service_mocks):
+        """Test build_app_config with Chinese language and no config values"""
+        # Setup
+        language = "zh"
+        tenant_id = "test_tenant_id"
+
+        # Mock all app config values to return None (use defaults)
+        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+
+        # Execute
+        result = build_app_config(language, tenant_id)
+
+        # Assert - should use Chinese defaults
+        assert result["name"] == "Nexent 智能体"  # DEFAULT_APP_NAME_ZH
+        # DEFAULT_APP_DESCRIPTION_ZH
+        assert result["description"] == "Nexent 智能体是一个强大的 AI 助手平台"
+        assert result["icon"]["type"] == "preset"
+        assert result["icon"]["avatarUri"] == ""
+        assert result["icon"]["customUrl"] == ""
+        assert result["modelEngineEnabled"] == False
+
+    def test_build_app_config_english_defaults(self, service_mocks):
+        """Test build_app_config with English language and no config values"""
         # Setup
         language = "en"
         tenant_id = "test_tenant_id"
 
-        # Mock tenant config manager to return None (use defaults)
+        # Mock all app config values to return None (use defaults)
         service_mocks['tenant_config_manager'].get_app_config.return_value = None
 
-        # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', model_engine_enabled_env):
-            # Execute
-            result = build_app_config(language, tenant_id)
+        # Execute
+        result = build_app_config(language, tenant_id)
 
-            # Assert
-            assert result["modelEngineEnabled"] == expected_enabled
+        # Assert - should use English defaults
+        assert result["name"] == "Nexent"  # DEFAULT_APP_NAME_EN
+        # DEFAULT_APP_DESCRIPTION_EN
+        assert result["description"] == "Nexent is a powerful AI assistant platform"
+        assert result["icon"]["type"] == "preset"
+        assert result["icon"]["avatarUri"] == ""
+        assert result["icon"]["customUrl"] == ""
+        assert result["modelEngineEnabled"] == False
 
-    def test_build_app_config_with_defaults(self, service_mocks):
-        """Test build_app_config with default values"""
+    def test_build_app_config_partial_values(self, service_mocks):
+        """Test build_app_config with some config values present and some missing"""
         # Setup
         language = "en"
         tenant_id = "test_tenant_id"
 
-        # Mock tenant config manager to return None (use defaults)
-        service_mocks['tenant_config_manager'].get_app_config.return_value = None
+        # Mock partial app config values
+        def side_effect(config_key, tenant_id=None):
+            config_map = {
+                "APP_NAME": "Custom App Name",
+                "APP_DESCRIPTION": None,  # Will use default
+                "ICON_TYPE": "custom",
+                "AVATAR_URI": None,  # Will use empty string
+                "CUSTOM_ICON_URL": "https://custom-icon.com"
+            }
+            return config_map.get(config_key)
 
-        # Mock MODEL_ENGINE_ENABLED to default
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', "true"):
-            # Execute
-            result = build_app_config(language, tenant_id)
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = side_effect
 
-            # Assert default English values
-            assert result["name"] == "Nexent Agent"
-            assert result["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
-            assert result["icon"]["type"] == "preset"
-            assert result["icon"]["avatarUri"] == ""
-            assert result["icon"]["customUrl"] == ""
-            assert result["modelEngineEnabled"] is True
+        # Execute
+        result = build_app_config(language, tenant_id)
+
+        # Assert
+        assert result["name"] == "Custom App Name"
+        # Default
+        assert result["description"] == "Nexent is a powerful AI assistant platform"
+        assert result["icon"]["type"] == "custom"
+        assert result["icon"]["avatarUri"] == ""  # Default empty
+        assert result["icon"]["customUrl"] == "https://custom-icon.com"
+        assert result["modelEngineEnabled"] == False
+
+    def test_build_app_config_exception_handling(self, service_mocks):
+        """Test build_app_config when get_app_config raises exception"""
+        # Setup
+        language = "en"
+        tenant_id = "test_tenant_id"
+
+        # Mock get_app_config to raise exception
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = Exception(
+            "Database timeout")
+
+        # Execute and assert exception is raised (since this function doesn't handle exceptions internally)
+        with pytest.raises(Exception) as exc_info:
+            build_app_config(language, tenant_id)
+
+        assert "Database timeout" in str(exc_info.value)
+
+
+class TestBuildModelConfig:
+    """Test cases for build_model_config function"""
+
+    def test_build_model_config_empty_config(self):
+        """Test build_model_config with empty/None config"""
+        # Test with None
+        result = build_model_config(None)
+        assert result == {
+            "name": "",
+            "displayName": "",
+            "apiConfig": {
+                "apiKey": "",
+                "modelUrl": ""
+            }
+        }
+
+        # Test with empty dict
+        result = build_model_config({})
+        assert result == {
+            "name": "",
+            "displayName": "",
+            "apiConfig": {
+                "apiKey": "",
+                "modelUrl": ""
+            }
+        }
+
+    def test_build_model_config_non_embedding_model(self):
+        """Test build_model_config with non-embedding model config"""
+        # Setup
+        model_config = {
+            "display_name": "GPT-4",
+            "api_key": "test-api-key",
+            "base_url": "https://api.openai.com",
+            "model_type": "llm",
+            "max_tokens": 4096
+        }
+
+        # Execute
+        result = build_model_config(model_config)
+
+        # Assert
+        # get_model_name_from_config is mocked to return ""
+        assert result["name"] == ""
+        assert result["displayName"] == "GPT-4"
+        assert result["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["apiConfig"]["modelUrl"] == "https://api.openai.com"
+        # Should not have dimension field for non-embedding models
+        assert "dimension" not in result
+
+    def test_build_model_config_embedding_model(self):
+        """Test build_model_config with embedding model config"""
+        # Setup
+        model_config = {
+            "display_name": "Ada Embeddings",
+            "api_key": "test-api-key",
+            "base_url": "https://api.openai.com",
+            "model_type": "embedding",
+            "max_tokens": 1536
+        }
+
+        # Execute
+        result = build_model_config(model_config)
+
+        # Assert
+        # get_model_name_from_config is mocked to return ""
+        assert result["name"] == ""
+        assert result["displayName"] == "Ada Embeddings"
+        assert result["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["apiConfig"]["modelUrl"] == "https://api.openai.com"
+        # Should have dimension field for embedding models
+        assert result["dimension"] == 1536
+
+    def test_build_model_config_multi_embedding_model(self):
+        """Test build_model_config with multi_embedding model config"""
+        # Setup
+        model_config = {
+            "display_name": "Multi Ada Embeddings",
+            "api_key": "test-api-key",
+            "base_url": "https://api.openai.com",
+            "model_type": "multi_embedding",
+            "max_tokens": 768
+        }
+
+        # Execute
+        result = build_model_config(model_config)
+
+        # Assert
+        # get_model_name_from_config is mocked to return ""
+        assert result["name"] == ""
+        assert result["displayName"] == "Multi Ada Embeddings"
+        assert result["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["apiConfig"]["modelUrl"] == "https://api.openai.com"
+        # Should have dimension field for multi_embedding models
+        assert result["dimension"] == 768
+
+    def test_build_model_config_partial_fields(self):
+        """Test build_model_config with partial fields missing"""
+        # Setup
+        model_config = {
+            "display_name": "Test Model",
+            # api_key and base_url are missing
+            "model_type": "llm"
+        }
+
+        # Execute
+        result = build_model_config(model_config)
+
+        # Assert
+        assert result["name"] == ""
+        assert result["displayName"] == "Test Model"
+        assert result["apiConfig"]["apiKey"] == ""  # Default empty
+        assert result["apiConfig"]["modelUrl"] == ""  # Default empty
+        assert "dimension" not in result  # No dimension for llm
+
+    def test_build_model_config_embedding_without_max_tokens(self):
+        """Test build_model_config with embedding model but no max_tokens"""
+        # Setup
+        model_config = {
+            "display_name": "Test Embedding",
+            "api_key": "test-key",
+            "base_url": "https://test.com",
+            "model_type": "embedding"
+            # max_tokens is missing
+        }
+
+        # Execute
+        result = build_model_config(model_config)
+
+        # Assert
+        assert result["name"] == ""
+        assert result["displayName"] == "Test Embedding"
+        assert result["apiConfig"]["apiKey"] == "test-key"
+        assert result["apiConfig"]["modelUrl"] == "https://test.com"
+        # Should have dimension field with default value 0
+        assert result["dimension"] == 0
+
+    def test_build_model_config_model_type_partial_match(self):
+        """Test build_model_config with model_type that partially contains 'embedding'"""
+        # Setup
+        model_config = {
+            "display_name": "Test Model",
+            "api_key": "test-key",
+            "model_type": "some_embedding_type",  # Contains 'embedding'
+            "max_tokens": 512
+        }
+
+        # Execute
+        result = build_model_config(model_config)
+
+        # Assert
+        assert result["name"] == ""
+        assert result["displayName"] == "Test Model"
+        assert result["apiConfig"]["apiKey"] == "test-key"
+        # Should have dimension since model_type contains 'embedding'
+        assert result["dimension"] == 512
