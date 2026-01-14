@@ -16,11 +16,6 @@ class VectorDatabaseType(str, Enum):
     ELASTICSEARCH = "elasticsearch"
 
 
-# ModelEngine Configuration
-MODEL_ENGINE_HOST = os.getenv('MODEL_ENGINE_HOST')
-MODEL_ENGINE_APIKEY = os.getenv('MODEL_ENGINE_APIKEY')
-
-
 # Elasticsearch Configuration
 ES_HOST = os.getenv("ELASTICSEARCH_HOST")
 ES_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
@@ -129,8 +124,10 @@ DISABLE_RAY_DASHBOARD = os.getenv(
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
-NEXENT_MCP_DOCKER_IMAGE = os.getenv("NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
-ENABLE_UPLOAD_IMAGE = os.getenv("ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
+NEXENT_MCP_DOCKER_IMAGE = os.getenv(
+    "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
+ENABLE_UPLOAD_IMAGE = os.getenv(
+    "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 
 
 # Celery Configuration
@@ -285,6 +282,9 @@ LLM_SLOW_TOKEN_RATE_THRESHOLD = float(
 DEFAULT_ZH_TITLE = "新对话"
 DEFAULT_EN_TITLE = "New Conversation"
 
+
+# Model Engine Configuration
+MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
 APP_VERSION = "v1.7.9.1"
