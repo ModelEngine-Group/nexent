@@ -25,7 +25,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
-  const editable = !!(currentAgentId || isCreatingMode);
+  const editable = currentAgentId || isCreatingMode;
 
   // Save guard hook
   const saveGuard = useSaveGuard();
