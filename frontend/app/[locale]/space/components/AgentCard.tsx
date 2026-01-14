@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useRouter } from "next/navigation";
 import { App } from "antd";
 import {
   Trash2,
@@ -25,30 +26,20 @@ import { generateAvatarFromName } from "@/lib/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { USER_ROLES } from "@/const/modelConfig";
+import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
-
-interface Agent {
-  id: string;
-  name: string;
-  display_name: string;
-  description: string;
-  author?: string;
-  is_available: boolean;
-  enabled?: boolean;
-}
 
 interface AgentCardProps {
   agent: Agent;
   onRefresh: () => void;
-  onChat: (agentId: string) => void;
-  onEdit?: () => void;
 }
 
-export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCardProps) {
+export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user, isSpeedMode } = useAuth();
   const { confirm } = useConfirmModal();
+  const router = useRouter();
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -132,14 +123,12 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
 
   // Handle chat
   const handleChat = () => {
-    onChat(agent.id);
+    router.push("/chat");
   };
 
   // Handle edit - navigate to agents view
   const handleEdit = () => {
-    if (onEdit) {
-      onEdit();
-    }
+    router.push("/agent");
   };
 
   // Handle view detail
@@ -198,7 +187,10 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
           </h3>
           {agent.author ? (
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-              {t("market.by", { defaultValue: "By {{author}}", author: agent.author })}
+              {t("market.by", {
+                defaultValue: "By {{author}}",
+                author: agent.author,
+              })}
             </p>
           ) : (
             <div className="h-4 mb-2" aria-hidden />
@@ -275,7 +267,11 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
                 ? "hover:bg-green-50 dark:hover:bg-green-900/20 text-slate-400 hover:text-green-600 dark:hover:text-green-400"
                 : "text-slate-300 dark:text-slate-600 cursor-not-allowed"
             }`}
-            title={agent.is_available ? t("space.actions.chat", "Chat") : t("space.status.unavailable", "Unavailable")}
+            title={
+              agent.is_available
+                ? t("space.actions.chat", "Chat")
+                : t("space.status.unavailable", "Unavailable")
+            }
           >
             <MessageSquare className="h-4 w-4" />
           </button>
@@ -300,4 +296,3 @@ export default function AgentCard({ agent, onRefresh, onChat, onEdit }: AgentCar
     </>
   );
 }
-

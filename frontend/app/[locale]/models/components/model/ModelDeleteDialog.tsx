@@ -865,7 +865,7 @@ export const ModelDeleteDialog = ({
           ),
       ]}
       width={520}
-      destroyOnClose
+      destroyOnHidden
     >
       {!deletingModelType ? (
         <div className="space-y-4">
@@ -1375,7 +1375,7 @@ export const ModelDeleteDialog = ({
         onOk={handleSettingsSave}
         cancelText={t("common.button.cancel")}
         okText={t("common.button.save")}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="space-y-3">
           <div>
@@ -1409,7 +1409,7 @@ export const ModelDeleteDialog = ({
         cancelText={t("common.button.cancel")}
         okText={t("common.button.save")}
         confirmLoading={savingEmbeddingConfig}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="space-y-4">
           {/* Chunk Size Range */}

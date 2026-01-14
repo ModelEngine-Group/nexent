@@ -182,7 +182,7 @@ def search_tools_for_sub_agent(agent_id, tenant_id):
             ToolInstance.agent_id == agent_id,
             ToolInstance.tenant_id == tenant_id,
             ToolInstance.delete_flag != 'Y',
-            ToolInstance.enabled == True
+            ToolInstance.enabled
         )
 
         tool_instances = query.all()

@@ -8,7 +8,6 @@ import { Tabs, Input, Spin, Empty, Pagination, App } from "antd";
 import log from "@/lib/logger";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { ConnectionStatus } from "@/const/modelConfig";
 import {
   MarketAgentListItem,
   MarketCategory,
@@ -22,41 +21,17 @@ import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ImportAgentData } from "@/hooks/useAgentImport";
 import MarketErrorState from "./components/MarketErrorState";
 
-interface MarketContentProps {
-  /** Connection status */
-  connectionStatus?: ConnectionStatus;
-  /** Is checking connection */
-  isCheckingConnection?: boolean;
-  /** Check connection callback */
-  onCheckConnection?: () => void;
-  /** Callback to expose connection status */
-  onConnectionStatusChange?: (status: ConnectionStatus) => void;
-}
-
 /**
  * MarketContent - Agent marketplace page
  * Browse and download pre-built agents from the marketplace
  */
-export default function MarketContent({
-  connectionStatus: externalConnectionStatus,
-  isCheckingConnection: externalIsCheckingConnection,
-  onCheckConnection: externalOnCheckConnection,
-  onConnectionStatusChange,
-}: MarketContentProps) {
+export default function MarketContent() {
   const { t, i18n } = useTranslation("common");
   const { message } = App.useApp();
   const isZh = i18n.language === "zh" || i18n.language === "zh-CN";
 
   // Use custom hook for common setup flow logic
-  const { canAccessProtectedData, pageVariants, pageTransition } = useSetupFlow(
-    {
-    requireAdmin: false, // Market accessible to all users
-    externalConnectionStatus,
-    externalIsCheckingConnection,
-    onCheckConnection: externalOnCheckConnection,
-    onConnectionStatusChange,
-    }
-  );
+  const { pageVariants, pageTransition } = useSetupFlow();
 
   // State management
   const [categories, setCategories] = useState<MarketCategory[]>([]);
@@ -107,7 +82,7 @@ export default function MarketContent({
       setCategories(data);
     } catch (error) {
       log.error("Failed to load market categories:", error);
-      
+
       if (error instanceof MarketApiError) {
         setErrorType(error.type);
       } else {
@@ -143,13 +118,13 @@ export default function MarketContent({
       setTotalAgents(data.pagination.total);
     } catch (error) {
       log.error("Failed to load market agents:", error);
-      
+
       if (error instanceof MarketApiError) {
         setErrorType(error.type);
       } else {
         setErrorType("unknown");
       }
-      
+
       setAgents([]);
       setTotalAgents(0);
     } finally {
@@ -195,7 +170,9 @@ export default function MarketContent({
       setSelectedAgent(agentDetail);
     } catch (error) {
       log.error("Failed to load agent detail:", error);
-      message.error(t("market.error.loadAgents", "Failed to load agent details"));
+      message.error(
+        t("market.error.loadAgents", "Failed to load agent details")
+      );
       setDetailModalVisible(false);
     } finally {
       setIsLoadingDetail(false);
@@ -268,7 +245,7 @@ export default function MarketContent({
 
   return (
     <>
-      {canAccessProtectedData ? (
+      <div className="w-full h-full">
         <motion.div
           initial="initial"
           animate="in"
@@ -281,7 +258,7 @@ export default function MarketContent({
             <div className="max-w-7xl mx-auto">
               {/* Page header */}
               <div className="flex items-center justify-between mb-6">
-            <motion.div
+                <motion.div
                   initial={{ opacity: 0, y: -20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5 }}
@@ -302,12 +279,12 @@ export default function MarketContent({
                       </p>
                     </div>
                   </div>
-            </motion.div>
+                </motion.div>
 
                 {/* Refresh button */}
                 <motion.div
                   initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
+                  animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, delay: 0.1 }}
                 >
                   <button
@@ -465,8 +442,7 @@ export default function MarketContent({
             agentDescription={installAgent?.description}
           />
         </motion.div>
-      ) : null}
+      </div>
     </>
   );
 }
-

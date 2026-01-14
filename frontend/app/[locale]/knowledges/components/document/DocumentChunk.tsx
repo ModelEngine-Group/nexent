@@ -776,7 +776,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       </div>
       <Modal
         centered
-        destroyOnClose
+        destroyOnHidden
         open={isChunkModalOpen}
         title={
           chunkModalMode === "create"

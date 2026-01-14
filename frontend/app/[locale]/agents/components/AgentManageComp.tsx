@@ -1,17 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import {
-  App,
-  Row,
-  Col,
-  Flex,
-  Tooltip,
-  Badge,
-  Divider,
-  Upload,
-  theme,
-} from "antd";
+import { App, Row, Col, Flex, Tooltip, Badge, Divider } from "antd";
 import { FileInput, Plus, X } from "lucide-react";
 
 import { Agent } from "@/types/agentConfig";
@@ -25,14 +15,10 @@ import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import log from "@/lib/logger";
 import { useState, useEffect } from "react";
+import { ImportAgentData } from "@/hooks/useAgentImport";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
 
-interface AgentManageCompProps {
-  onImportAgent?: () => void;
-}
-
-export default function AgentManageComp({
-  onImportAgent,
-}: AgentManageCompProps) {
+export default function AgentManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
@@ -69,6 +55,11 @@ export default function AgentManageComp({
   // State for selected agent info loading
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
 
+  // Import wizard state
+  const [importWizardVisible, setImportWizardVisible] = useState(false);
+  const [importWizardData, setImportWizardData] =
+    useState<ImportAgentData | null>(null);
+
   const {
     data: agentDetail,
     isLoading: agentInfoLoading,
@@ -79,6 +70,50 @@ export default function AgentManageComp({
     mutationFn: (agentData: any) => importAgent(agentData),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
   });
+
+  // Handle import agent for space view - open wizard instead of direct import
+  const handleImportAgent = () => {
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".json";
+    fileInput.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      if (!file.name.endsWith(".json")) {
+        message.error(t("businessLogic.config.error.invalidFileType"));
+        return;
+      }
+
+      try {
+        // Read and parse file
+        const fileContent = await file.text();
+        let agentData: ImportAgentData;
+
+        try {
+          agentData = JSON.parse(fileContent);
+        } catch (parseError) {
+          message.error(t("businessLogic.config.error.invalidFileType"));
+          return;
+        }
+
+        // Validate structure
+        if (!agentData.agent_id || !agentData.agent_info) {
+          message.error(t("businessLogic.config.error.invalidFileType"));
+          return;
+        }
+
+        // Open wizard with parsed data
+        setImportWizardData(agentData);
+        setImportWizardVisible(true);
+      } catch (error) {
+        log.error("Failed to read import file:", error);
+        message.error(t("businessLogic.config.error.agentImportFailed"));
+      }
+    };
+
+    fileInput.click();
+  };
 
   // Handle agent detail loading completion
   useEffect(() => {
@@ -206,7 +241,7 @@ export default function AgentManageComp({
             <Tooltip title={t("subAgentPool.description.importAgent")}>
               <div
                 className="rounded-md p-3 cursor-pointer transition-all duration-200 bg-white hover:bg-green-50 hover:shadow-sm"
-                onClick={onImportAgent}
+                onClick={handleImportAgent}
               >
                 <Flex align="center" gap={12} className="text-green-600">
                   <Flex
@@ -247,6 +282,21 @@ export default function AgentManageComp({
           />
         </div>
       </Flex>
+
+      {/* Import Wizard Modal */}
+      <AgentImportWizard
+        visible={importWizardVisible}
+        onCancel={() => {
+          setImportWizardVisible(false);
+          setImportWizardData(null);
+        }}
+        initialData={importWizardData}
+        onImportComplete={() => {
+          setImportWizardVisible(false);
+          setImportWizardData(null);
+          refetch(); // Refresh the agent list
+        }}
+      />
     </>
   );
 }

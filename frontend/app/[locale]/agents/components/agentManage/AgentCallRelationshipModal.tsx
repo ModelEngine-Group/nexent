@@ -406,7 +406,7 @@ export default function AgentCallRelationshipModal({
         onCancel={onClose}
         footer={null}
         width={1800}
-        destroyOnClose
+        destroyOnHidden
         centered
         style={{ top: 20 }}
       >

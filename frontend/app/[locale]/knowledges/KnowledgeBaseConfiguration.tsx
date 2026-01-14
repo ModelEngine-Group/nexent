@@ -5,7 +5,11 @@ import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { App, Modal, Row, Col, theme } from "antd";
-import { ExclamationCircleFilled, WarningFilled, InfoCircleFilled } from "@ant-design/icons";
+import {
+  ExclamationCircleFilled,
+  WarningFilled,
+  InfoCircleFilled,
+} from "@ant-design/icons";
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
@@ -784,7 +788,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   if (showEmbeddingWarning) {
     return (
       <div
-        className="w-full mx-auto relative"
+        className="w-full h-full mx-auto relative"
         style={{
           maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
           padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
@@ -817,7 +821,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   return (
     <>
       <div
-        className="w-full mx-auto relative"
+        className="w-full h-full mx-auto relative"
         style={{
           maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
           padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
@@ -827,37 +831,9 @@ function DataConfig({ isActive }: DataConfigProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <Modal
-          open={showAutoDeselectModal}
-          title={null}
-          onOk={() => setShowAutoDeselectModal(false)}
-          onCancel={() => setShowAutoDeselectModal(false)}
-          okText={t("common.confirm")}
-          cancelButtonProps={{ style: { display: "none" } }}
-          centered
-          okButtonProps={{ type: "primary", danger: true }}
-          getContainer={() => contentRef.current || document.body}
-        >
-          <div className="flex items-start gap-4">
-            <ExclamationCircleFilled 
-              style={{
-                color: token.colorWarning,
-                fontSize: '22px',
-                marginTop: '2px'
-              }}
-            />
-            <div className="flex-1">
-              <div className="text-base font-medium mb-3">
-                {t("embedding.knowledgeBaseAutoDeselectModal.title")}
-              </div>
-              <div className="text-sm leading-6">
-                {t("embedding.knowledgeBaseAutoDeselectModal.content")}
-              </div>
-            </div>
-          </div>
-        </Modal>
-        <Row gutter={TWO_COLUMN_LAYOUT.GUTTER} className="h-full">
+        <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
           <Col
+            className="h-full"
             xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
             md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
             lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
@@ -883,6 +859,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           </Col>
 
           <Col
+            className="h-full"
             xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
             md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
             lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
@@ -942,13 +919,9 @@ function DataConfig({ isActive }: DataConfigProps) {
               />
             ) : (
               <div
-                className={STANDARD_CARD.BASE_CLASSES}
+                className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
                 style={{
-                  height: SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT,
                   padding: STANDARD_CARD.PADDING,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
                 }}
               >
                 <EmptyState
@@ -966,6 +939,36 @@ function DataConfig({ isActive }: DataConfigProps) {
           </Col>
         </Row>
       </div>
+
+      <Modal
+        open={showAutoDeselectModal}
+        title={null}
+        onOk={() => setShowAutoDeselectModal(false)}
+        onCancel={() => setShowAutoDeselectModal(false)}
+        okText={t("common.confirm")}
+        cancelButtonProps={{ style: { display: "none" } }}
+        centered
+        okButtonProps={{ type: "primary", danger: true }}
+        getContainer={() => contentRef.current || document.body}
+      >
+        <div className="flex items-start gap-4">
+          <ExclamationCircleFilled
+            style={{
+              color: token.colorWarning,
+              fontSize: "22px",
+              marginTop: "2px",
+            }}
+          />
+          <div className="flex-1">
+            <div className="text-base font-medium mb-3">
+              {t("embedding.knowledgeBaseAutoDeselectModal.title")}
+            </div>
+            <div className="text-sm leading-6">
+              {t("embedding.knowledgeBaseAutoDeselectModal.content")}
+            </div>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

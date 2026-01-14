@@ -404,7 +404,7 @@ export const AppConfigSection: React.FC = () => {
               {t("common.confirm")}
             </Button>,
           ]}
-          destroyOnClose={true}
+          destroyOnHidden={true}
           width={520}
           centered
         >
