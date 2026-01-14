@@ -20,7 +20,7 @@ import MarketAgentDetailModal from "./components/MarketAgentDetailModal";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { ImportAgentData } from "@/hooks/useAgentImport";
 import MarketErrorState from "./components/MarketErrorState";
-import styles from "./MarketContent.module.css";
+import "./MarketContent.css";
 
 /**
  * MarketContent - Agent marketplace page
@@ -438,7 +438,7 @@ export default function MarketContent() {
                             <div
                               id="featured-row"
                               ref={featuredRowRef}
-                              className={`flex gap-4 overflow-x-auto ${styles.noScrollbar} pt-2 pb-2`}
+                              className={`flex gap-4 overflow-x-auto noScrollbar pt-2 pb-2`}
                             >
                               {featuredItems.map((agent, index) => (
                                 <div
