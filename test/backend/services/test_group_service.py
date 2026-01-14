@@ -34,12 +34,7 @@ from backend.services.group_service import (
     get_group_user_count,
     add_user_to_groups
 )
-from backend.database.group_db import (
-    query_groups_by_tenant,
-    query_groups_by_user,
-    query_group_ids_by_user,
-    check_user_in_group
-)
+# These imports are used in the patch decorators, not directly in the test functions
 
 
 @pytest.fixture
@@ -86,6 +81,69 @@ def test_get_group_info_not_found(mock_query_groups):
         get_group_info(123)
 
 
+@patch('backend.services.group_service.query_groups')
+def test_get_group_info_multiple_groups(mock_query_groups):
+    """Test getting multiple groups by list of IDs"""
+    mock_groups = [
+        {"group_id": 1, "group_name": "Group 1", "group_description": "Desc 1"},
+        {"group_id": 2, "group_name": "Group 2", "group_description": "Desc 2"}
+    ]
+    mock_query_groups.return_value = mock_groups
+
+    result = get_group_info([1, 2])
+
+    assert len(result) == 2
+    assert result[0]["group_id"] == 1
+    assert result[0]["group_name"] == "Group 1"
+    assert result[0]["group_description"] == "Desc 1"
+    assert result[1]["group_id"] == 2
+    assert result[1]["group_name"] == "Group 2"
+    assert result[1]["group_description"] == "Desc 2"
+    mock_query_groups.assert_called_once_with([1, 2])
+
+
+@patch('backend.services.group_service.query_groups')
+def test_get_group_info_string_group_ids(mock_query_groups):
+    """Test getting groups by comma-separated string of IDs"""
+    mock_groups = [
+        {"group_id": 1, "group_name": "Group 1", "group_description": "Desc 1"}
+    ]
+    mock_query_groups.return_value = mock_groups
+
+    result = get_group_info("1")
+
+    assert len(result) == 1
+    assert result[0]["group_id"] == 1
+    assert result[0]["group_name"] == "Group 1"
+    assert result[0]["group_description"] == "Desc 1"
+    mock_query_groups.assert_called_once_with("1")
+
+
+@patch('backend.services.group_service.query_groups_by_tenant')
+def test_get_groups_by_tenant_success(mock_query_groups_by_tenant):
+    """Test getting groups by tenant with pagination"""
+    mock_result = {
+        "groups": [
+            {"group_id": 1, "group_name": "Group 1", "group_description": "Desc 1"},
+            {"group_id": 2, "group_name": "Group 2", "group_description": "Desc 2"}
+        ],
+        "total": 2
+    }
+    mock_query_groups_by_tenant.return_value = mock_result
+
+    result = get_groups_by_tenant("test_tenant", page=1, page_size=10)
+
+    assert result["total"] == 2
+    assert len(result["groups"]) == 2
+    assert result["groups"][0]["group_id"] == 1
+    assert result["groups"][0]["group_name"] == "Group 1"
+    assert result["groups"][0]["group_description"] == "Desc 1"
+    assert result["groups"][1]["group_id"] == 2
+    assert result["groups"][1]["group_name"] == "Group 2"
+    assert result["groups"][1]["group_description"] == "Desc 2"
+    mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10)
+
+
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
@@ -119,6 +177,19 @@ def test_create_group_unauthorized(mock_get_user, mock_user_info):
     mock_get_user.return_value = mock_user_info
 
     with pytest.raises(UnauthorizedError, match="not authorized to create groups"):
+        create_group(
+            tenant_id="test_tenant",
+            group_name="Test Group",
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_create_group_user_not_found(mock_get_user):
+    """Test creating group when user doesn't exist"""
+    mock_get_user.return_value = None
+
+    with pytest.raises(NotFoundException, match="User test_user not found"):
         create_group(
             tenant_id="test_tenant",
             group_name="Test Group",
@@ -165,6 +236,33 @@ def test_update_group_not_found(mock_query_groups, mock_get_user, mock_user_info
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_update_group_user_not_found(mock_get_user):
+    """Test updating group when user doesn't exist"""
+    mock_get_user.return_value = None
+
+    with pytest.raises(NotFoundException, match="User test_user not found"):
+        update_group(
+            group_id=123,
+            updates={"group_name": "Updated Group"},
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_update_group_unauthorized_role(mock_get_user, mock_user_info):
+    """Test updating group with insufficient user permissions"""
+    mock_user_info["user_role"] = "USER"
+    mock_get_user.return_value = mock_user_info
+
+    with pytest.raises(UnauthorizedError, match="not authorized to update groups"):
+        update_group(
+            group_id=123,
+            updates={"group_name": "Updated Group"},
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
 @patch('backend.services.group_service.query_groups')
 @patch('backend.services.group_service.remove_group')
 def test_delete_group_success(mock_remove_group, mock_query_groups, mock_get_user, mock_user_info, mock_group_info):
@@ -183,6 +281,45 @@ def test_delete_group_success(mock_remove_group, mock_query_groups, mock_get_use
         group_id=123,
         updated_by="test_user"
     )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_delete_group_user_not_found(mock_get_user):
+    """Test deleting group when user doesn't exist"""
+    mock_get_user.return_value = None
+
+    with pytest.raises(NotFoundException, match="User test_user not found"):
+        delete_group(
+            group_id=123,
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_delete_group_unauthorized_role(mock_get_user, mock_user_info):
+    """Test deleting group with insufficient user permissions"""
+    mock_user_info["user_role"] = "USER"
+    mock_get_user.return_value = mock_user_info
+
+    with pytest.raises(UnauthorizedError, match="not authorized to delete groups"):
+        delete_group(
+            group_id=123,
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.query_groups')
+def test_delete_group_group_not_found(mock_query_groups, mock_get_user, mock_user_info):
+    """Test deleting non-existent group"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_groups.return_value = None
+
+    with pytest.raises(NotFoundException, match="Group 123 not found"):
+        delete_group(
+            group_id=123,
+            user_id="test_user"
+        )
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
@@ -230,6 +367,34 @@ def test_add_user_to_single_group_already_member(mock_check_user, mock_query_gro
     assert result["group_id"] == 123
 
 
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_add_user_to_single_group_current_user_not_found(mock_get_user):
+    """Test adding user to group when current user doesn't exist"""
+    mock_get_user.return_value = None
+
+    with pytest.raises(UnauthorizedError, match="User test_user not found"):
+        add_user_to_single_group(
+            group_id=123,
+            user_id="member_user",
+            current_user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.query_groups')
+def test_add_user_to_single_group_group_not_found(mock_query_groups, mock_get_user, mock_user_info):
+    """Test adding user to non-existent group"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_groups.return_value = None
+
+    with pytest.raises(NotFoundException, match="Group 123 not found"):
+        add_user_to_single_group(
+            group_id=123,
+            user_id="member_user",
+            current_user_id="test_user"
+        )
+
+
 @patch('backend.services.group_service.query_groups')
 @patch('backend.services.group_service.query_group_users')
 def test_get_group_users_success(mock_query_users, mock_query_groups, mock_group_info):
@@ -258,6 +423,15 @@ def test_get_group_user_count_success(mock_count_users, mock_query_groups, mock_
     mock_count_users.assert_called_once_with(123)
 
 
+@patch('backend.services.group_service.query_groups')
+def test_get_group_user_count_group_not_found(mock_query_groups):
+    """Test getting user count for non-existent group"""
+    mock_query_groups.return_value = None
+
+    with pytest.raises(NotFoundException, match="Group 123 not found"):
+        get_group_user_count(123)
+
+
 @patch('backend.services.group_service.add_user_to_single_group')
 def test_add_user_to_groups(mock_add_user):
     """Test adding user to multiple groups"""
@@ -271,6 +445,23 @@ def test_add_user_to_groups(mock_add_user):
     assert len(result) == 2
     assert result[0]["group_id"] == 1
     assert result[1]["group_id"] == 2
+
+
+@patch('backend.services.group_service.add_user_to_single_group')
+def test_add_user_to_groups_with_exception(mock_add_user):
+    """Test adding user to multiple groups with exception handling"""
+    mock_add_user.side_effect = [
+        {"group_id": 1, "user_id": "user_123", "already_member": False},
+        Exception("Group not found")  # Simulate exception for second group
+    ]
+
+    result = add_user_to_groups("user_123", [1, 2], "admin_user")
+
+    assert len(result) == 2
+    assert result[0]["group_id"] == 1
+    assert result[0]["already_member"] is False
+    assert result[1]["group_id"] == 2
+    assert result[1]["error"] == "Group not found"
 
 
 @patch('backend.services.group_service.get_tenant_info')
@@ -388,6 +579,21 @@ def test_set_tenant_default_group_id_update_failure(mock_update_config, mock_get
     result = set_tenant_default_group_id("test_tenant", 123, "user_123")
 
     assert result is False
+
+
+@patch('backend.services.group_service.get_tenant_info')
+@patch('backend.services.group_service.query_groups')
+@patch('backend.services.group_service.get_single_config_info')
+@patch('backend.services.group_service.insert_config')
+def test_set_tenant_default_group_id_exception_handling(mock_insert_config, mock_get_config, mock_query_groups, mock_get_tenant_info):
+    """Test exception handling in set_tenant_default_group_id"""
+    mock_get_tenant_info.return_value = {"tenant_id": "test_tenant"}
+    mock_query_groups.return_value = {"tenant_id": "test_tenant"}
+    mock_get_config.return_value = None  # No existing config
+    mock_insert_config.side_effect = Exception("Database connection failed")
+
+    with pytest.raises(ValidationError, match="Failed to set default group: Database connection failed"):
+        set_tenant_default_group_id("test_tenant", 123, "user_123")
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
