@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+import unittest
 import sys
 import os
 
@@ -745,6 +746,112 @@ class TestDataValidation:
             }
         )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+class TestGetRolePermissions(unittest.TestCase):
+    """Test get role permissions endpoint"""
+
+    @patch('apps.user_management_app.get_permissions_by_role')
+    def test_get_role_permissions_success(self, mock_get_permissions):
+        """Test successfully getting role permissions"""
+        # Setup mock data
+        mock_permissions_data = {
+            "user_role": "USER",
+            "permissions": [
+                {
+                    "role_permission_id": 1,
+                    "permission_category": "KNOWLEDGE_BASE",
+                    "permission_type": "KNOWLEDGE",
+                    "permission_subtype": "READ"
+                },
+                {
+                    "role_permission_id": 2,
+                    "permission_category": "AGENT_MANAGEMENT",
+                    "permission_type": "AGENT",
+                    "permission_subtype": "READ"
+                }
+            ],
+            "total_permissions": 2,
+            "message": "Successfully retrieved 2 permissions for role USER"
+        }
+        mock_get_permissions.return_value = mock_permissions_data
+
+        # Execute
+        response = client.get("/user/role_permissions/USER")
+
+        # Assert
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Successfully retrieved 2 permissions for role USER"
+        assert data["data"]["user_role"] == "USER"
+        assert len(data["data"]["permissions"]) == 2
+        assert data["data"]["total_permissions"] == 2
+        mock_get_permissions.assert_called_once_with("USER")
+
+    @patch('apps.user_management_app.get_permissions_by_role')
+    def test_get_role_permissions_admin_role(self, mock_get_permissions):
+        """Test getting permissions for ADMIN role"""
+        # Setup mock data for ADMIN role
+        mock_permissions_data = {
+            "user_role": "ADMIN",
+            "permissions": [
+                {
+                    "role_permission_id": 3,
+                    "permission_category": "USER_MANAGEMENT",
+                    "permission_type": "USER",
+                    "permission_subtype": "CRUD"
+                }
+            ],
+            "total_permissions": 1,
+            "message": "Successfully retrieved 1 permissions for role ADMIN"
+        }
+        mock_get_permissions.return_value = mock_permissions_data
+
+        # Execute
+        response = client.get("/user/role_permissions/ADMIN")
+
+        # Assert
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"]["user_role"] == "ADMIN"
+        assert data["data"]["total_permissions"] == 1
+        mock_get_permissions.assert_called_once_with("ADMIN")
+
+    @patch('apps.user_management_app.get_permissions_by_role')
+    def test_get_role_permissions_empty_result(self, mock_get_permissions):
+        """Test getting permissions for role with no permissions"""
+        # Setup mock data for role with no permissions
+        mock_permissions_data = {
+            "user_role": "NEW_ROLE",
+            "permissions": [],
+            "total_permissions": 0,
+            "message": "Successfully retrieved 0 permissions for role NEW_ROLE"
+        }
+        mock_get_permissions.return_value = mock_permissions_data
+
+        # Execute
+        response = client.get("/user/role_permissions/NEW_ROLE")
+
+        # Assert
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["data"]["user_role"] == "NEW_ROLE"
+        assert len(data["data"]["permissions"]) == 0
+        assert data["data"]["total_permissions"] == 0
+
+    @patch('apps.user_management_app.get_permissions_by_role')
+    def test_get_role_permissions_error(self, mock_get_permissions):
+        """Test error handling for role permissions endpoint"""
+        # Setup mock to raise exception
+        mock_get_permissions.side_effect = Exception("Database connection failed")
+
+        # Execute
+        response = client.get("/user/role_permissions/USER")
+
+        # Assert
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to retrieve permissions for role USER" in data["detail"]
 
 
 if __name__ == "__main__":

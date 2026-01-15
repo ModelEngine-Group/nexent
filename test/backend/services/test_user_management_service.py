@@ -57,6 +57,7 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         get_session_by_authorization,
         revoke_regular_user,
         get_user_info,
+        get_permissions_by_role,
     )
 
 # Functions to test
@@ -1110,6 +1111,69 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
 
         # Assert
         assert result is None
+
+
+class TestGetRolePermissionsByRole(unittest.IsolatedAsyncioTestCase):
+    """Test get_permissions_by_role function"""
+
+    @patch('backend.services.user_management_service.get_role_permissions')
+    async def test_get_permissions_by_role_success(self, mock_get_permissions):
+        """Test successfully getting role permissions"""
+        # Setup mock data
+        mock_permissions = [
+            {
+                "role_permission_id": 1,
+                "user_role": "USER",
+                "permission_category": "KNOWLEDGE_BASE",
+                "permission_type": "KNOWLEDGE",
+                "permission_subtype": "READ"
+            },
+            {
+                "role_permission_id": 2,
+                "user_role": "USER",
+                "permission_category": "AGENT_MANAGEMENT",
+                "permission_type": "AGENT",
+                "permission_subtype": "READ"
+            }
+        ]
+        mock_get_permissions.return_value = mock_permissions
+
+        # Execute
+        result = await get_permissions_by_role("USER")
+
+        # Assert
+        assert result["user_role"] == "USER"
+        assert len(result["permissions"]) == 2
+        assert result["total_permissions"] == 2
+        assert "Successfully retrieved 2 permissions" in result["message"]
+        mock_get_permissions.assert_called_once_with("USER")
+
+    @patch('backend.services.user_management_service.get_role_permissions')
+    async def test_get_permissions_by_role_empty_result(self, mock_get_permissions):
+        """Test getting role permissions with empty result"""
+        # Setup mock to return empty list
+        mock_get_permissions.return_value = []
+
+        # Execute
+        result = await get_permissions_by_role("NONEXISTENT_ROLE")
+
+        # Assert
+        assert result["user_role"] == "NONEXISTENT_ROLE"
+        assert len(result["permissions"]) == 0
+        assert result["total_permissions"] == 0
+        assert "Successfully retrieved 0 permissions" in result["message"]
+
+    @patch('backend.services.user_management_service.get_role_permissions')
+    async def test_get_permissions_by_role_exception_handling(self, mock_get_permissions):
+        """Test exception handling in get_permissions_by_role"""
+        # Setup mock to raise exception
+        mock_get_permissions.side_effect = Exception("Database connection failed")
+
+        # Execute and assert
+        with self.assertRaises(Exception) as context:
+            await get_permissions_by_role("USER")
+
+        assert "Failed to retrieve permissions for role USER" in str(context.exception)
 
 
 class TestIntegrationScenarios(unittest.IsolatedAsyncioTestCase):

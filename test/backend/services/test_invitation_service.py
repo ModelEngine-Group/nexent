@@ -22,6 +22,7 @@ from backend.services.invitation_service import (
     use_invitation_code,
     update_invitation_code_status,
     get_invitations_list,
+    delete_invitation_code,
     _generate_unique_invitation_code,
     _normalize_invitation_data,
     get_invitation_by_code,
@@ -402,17 +403,20 @@ def test_normalize_invitation_data_group_ids_conversion():
     assert result["group_ids"] == [4, 5, 6]
 
 
+@patch('backend.services.invitation_service.count_invitation_usage')
 @patch('backend.services.invitation_service.query_invitation_by_code')
-def test_get_invitation_by_code_success(mock_query_invitation_by_code):
+def test_get_invitation_by_code_success(mock_query_invitation_by_code, mock_count_usage):
     """Test get_invitation_by_code function success case (lines 217-218)"""
     mock_data = {
         "invitation_id": 123,
         "invitation_code": "ABC123",
         "code_type": "ADMIN_INVITE",
         "group_ids": "1,2,3",  # Comma-separated string format from database
-        "capacity": 5
+        "capacity": 5,
+        "status": "IN_USE"
     }
     mock_query_invitation_by_code.return_value = mock_data
+    mock_count_usage.return_value = 2  # Less than capacity, so status should remain IN_USE
 
     result = get_invitation_by_code("ABC123")
 
@@ -420,7 +424,9 @@ def test_get_invitation_by_code_success(mock_query_invitation_by_code):
     assert result["invitation_id"] == 123
     assert result["invitation_code"] == "ABC123"
     assert result["group_ids"] == [1, 2, 3]  # Should be normalized
+    assert result["status"] == "IN_USE"  # Should maintain status
     mock_query_invitation_by_code.assert_called_once_with("ABC123")
+    mock_count_usage.assert_called_once_with(123)
 
 
 @patch('backend.services.invitation_service.query_invitation_by_code')
@@ -808,5 +814,53 @@ def test_get_invitations_list_unauthorized_user_role_all_tenants(mock_get_user, 
             tenant_id=None,  # Requesting all tenants
             page=1,
             page_size=10,
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('backend.services.invitation_service.remove_invitation')
+def test_delete_invitation_code_success(mock_remove_invitation, mock_query_invitation, mock_get_user, mock_user_info):
+    """Test deleting invitation code successfully"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_invitation.return_value = {"invitation_id": 123}
+    mock_remove_invitation.return_value = True
+
+    result = delete_invitation_code(
+        invitation_id=123,
+        user_id="test_user"
+    )
+
+    assert result is True
+    mock_remove_invitation.assert_called_once_with(
+        invitation_id=123,
+        updated_by="test_user"
+    )
+
+
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+def test_delete_invitation_code_unauthorized_user_role(mock_get_user, mock_user_info):
+    """Test deleting invitation code with insufficient permissions"""
+    mock_user_info["user_role"] = "USER"
+    mock_get_user.return_value = mock_user_info
+
+    with pytest.raises(UnauthorizedError, match="not authorized to delete invitation codes"):
+        delete_invitation_code(
+            invitation_id=123,
+            user_id="test_user"
+        )
+
+
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('backend.services.invitation_service.query_invitation_by_id')
+def test_delete_invitation_code_not_found(mock_query_invitation, mock_get_user, mock_user_info):
+    """Test deleting non-existent invitation code"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_invitation.return_value = None
+
+    with pytest.raises(NotFoundException, match="Invitation 123 not found"):
+        delete_invitation_code(
+            invitation_id=123,
             user_id="test_user"
         )

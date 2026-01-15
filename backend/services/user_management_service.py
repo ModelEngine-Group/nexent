@@ -20,6 +20,7 @@ from database.user_tenant_db import insert_user_tenant, soft_delete_user_tenant_
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from database.group_db import query_group_ids_by_user
+from database.role_permission_db import get_role_permissions
 from utils.memory_utils import build_memory_config
 from nexent.memory.memory_service import clear_memory
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
@@ -539,3 +540,31 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         logging.error(
             f"Failed to get user info for user {user_id}: {str(e)}")
         return None
+
+
+async def get_permissions_by_role(user_role: str) -> Dict[str, Any]:
+    """
+    Get all permissions for a specific user role.
+
+    This method retrieves role permissions from the database and returns them
+    in a structured format suitable for API responses.
+
+    Args:
+        user_role (str): User role to query permissions for (SU, ADMIN, DEV, USER)
+
+    Returns:
+        Dict[str, Any]: Response containing permissions data and metadata
+    """
+    try:
+        permissions = get_role_permissions(user_role)
+
+        return {
+            "user_role": user_role,
+            "permissions": permissions,
+            "total_permissions": len(permissions),
+            "message": f"Successfully retrieved {len(permissions)} permissions for role {user_role}"
+        }
+    except Exception as e:
+        logging.error(
+            f"Failed to get role permissions for role {user_role}: {str(e)}")
+        raise Exception(f"Failed to retrieve permissions for role {user_role}")

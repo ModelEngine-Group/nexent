@@ -537,14 +537,22 @@ class ElasticSearchService:
             # Check permission based on user role
             permission = None
 
-            if user_role == "SU":
+            # Fallback logic: if user_id equals tenant_id, treat as legacy admin user
+            # even if user_role is None or empty
+            effective_user_role = user_role
+            if user_id == tenant_id:
+                effective_user_role = "ADMIN"
+                logger.debug(
+                    f"User {user_id} identified as legacy admin (user_id equals tenant_id)")
+
+            if effective_user_role == "SU":
                 # SU can see all knowledgebases
                 permission = "EDIT"
-            elif user_role == "ADMIN":
+            elif effective_user_role == "ADMIN":
                 # ADMIN can see all knowledgebases in their tenant
                 if record.get("tenant_id") == user_tenant_id:
                     permission = "EDIT"
-            elif user_role in ["USER", "DEV"]:
+            elif effective_user_role in ["USER", "DEV"]:
                 # USER/DEV need group-based permission checking
                 kb_group_ids_str = record.get("group_ids")
                 kb_group_ids = convert_string_to_list(kb_group_ids_str or "")

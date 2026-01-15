@@ -681,6 +681,64 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("index1", result["indices"])
         self.assertIn("index2", result["indices"])
 
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_fallback_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test the fallback admin logic when user_id equals tenant_id.
+
+        This test verifies that:
+        1. When user_id equals tenant_id, user is treated as legacy admin regardless of user_role
+        2. Legacy admin gets EDIT permission on all knowledgebases in their tenant
+        3. Debug log is recorded for legacy admin identification
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "tenant_id": "legacy_admin_user"  # Same as user_id
+            },
+            {
+                "index_name": "index2",
+                "embedding_model_name": "test-model",
+                "group_ids": "3",
+                "tenant_id": "legacy_admin_user"  # Same as user_id
+            }
+        ]
+        # user_role is None to test fallback logic
+        mock_get_user_tenant.return_value = {
+            "user_role": None, "tenant_id": "legacy_admin_user"}
+        mock_get_group_ids.return_value = []
+
+        # Execute
+        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+            result = ElasticSearchService.list_indices(
+                pattern="*",
+                include_stats=True,  # Need stats to see permissions
+                tenant_id="legacy_admin_user",
+                user_id="legacy_admin_user",  # user_id equals tenant_id
+                vdb_core=self.mock_vdb_core
+            )
+
+        # Assert
+        self.assertEqual(len(result["indices"]), 2)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(len(result["indices_info"]), 2)
+
+        # Both knowledgebases should have EDIT permission due to legacy admin fallback
+        for kb_info in result["indices_info"]:
+            self.assertEqual(kb_info["permission"], "EDIT")
+
+        # Verify debug log was called (once for each index)
+        mock_logger.debug.assert_has_calls([
+            ((f"User legacy_admin_user identified as legacy admin (user_id equals tenant_id)",), {})
+            for _ in range(2)
+        ])
+
     def test_vectorize_documents_success(self):
         """
         Test successful document indexing.
