@@ -10,10 +10,13 @@ from consts.const import (
     DEFAULT_APP_DESCRIPTION_ZH,
     DEFAULT_APP_NAME_EN,
     DEFAULT_APP_NAME_ZH,
+    DEFAULT_GROUP_ID,
     ICON_TYPE,
+    LANGUAGE,
     MODEL_CONFIG_MAPPING,
     LANGUAGE,
-    MODEL_ENGINE_ENABLED
+    MODEL_ENGINE_ENABLED,
+    TENANT_NAME
 )
 from database.model_management_db import get_model_id_by_display_name
 from utils.config_utils import (
@@ -132,6 +135,8 @@ def build_app_config(language: str, tenant_id: str) -> dict:
         "name": tenant_config_manager.get_app_config(APP_NAME, tenant_id=tenant_id) or default_app_name,
         "description": tenant_config_manager.get_app_config(APP_DESCRIPTION,
                                                             tenant_id=tenant_id) or default_app_description,
+        "tenantName": tenant_config_manager.get_app_config(TENANT_NAME, tenant_id=tenant_id) or "",
+        "defaultGroupId": tenant_config_manager.get_app_config(DEFAULT_GROUP_ID, tenant_id=tenant_id) or "",
         "icon": {
             "type": tenant_config_manager.get_app_config(ICON_TYPE, tenant_id=tenant_id) or "preset",
             "avatarUri": tenant_config_manager.get_app_config(AVATAR_URI, tenant_id=tenant_id) or "",

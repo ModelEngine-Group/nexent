@@ -35,9 +35,13 @@ from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
 )
+from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
 from services.redis_service import get_redis_service
+from services.group_service import get_tenant_default_group_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import get_all_files_status, get_file_size
+from utils.str_utils import convert_string_to_list
 
 
 def _update_progress(task_id: str, processed: int, total: int):
@@ -480,8 +484,18 @@ class ElasticSearchService:
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
     ):
         """
-        List all indices that the current user has permissions to access.
-        async PG database to sync ES, remove the data that is not in ES
+        List all indices that the current user has permissions to access based on role and group permissions.
+
+        Permission logic:
+        - SU: All knowledgebases visible, all editable
+        - ADMIN: Knowledgebases from same tenant visible, all editable
+        - USER/DEV: Knowledgebases where user belongs to intersecting groups, permission determined by:
+            * If user is creator: editable
+            * If ingroup_permission=EDIT: editable
+            * If ingroup_permission=READ_ONLY: read-only
+            * If ingroup_permission=PRIVATE: not visible
+
+        Also syncs PG database with ES, removing data that is not in ES.
 
         Args:
             pattern: Pattern to match index names
@@ -491,33 +505,105 @@ class ElasticSearchService:
             vdb_core: VectorDatabaseCore instance
 
         Returns:
-            Dict[str, Any]: A dictionary containing the list of indices and the count.
+            Dict[str, Any]: A dictionary containing the list of visible knowledgebases with permissions.
         """
-        all_indices_list = vdb_core.get_user_indices(pattern)
+        # Get user tenant information for permission checking
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant:
+            return {"indices": [], "count": 0}
 
-        db_record = get_knowledge_info_by_tenant_id(tenant_id=tenant_id)
+        user_role = user_tenant.get("user_role")
+        user_tenant_id = user_tenant.get("tenant_id")
+        # Get user group IDs from tenant_group_user_t table
+        user_group_ids = query_group_ids_by_user(user_id)
 
-        # Build mapping from index_name to user-facing knowledge_name (fallback to index_name)
-        index_to_display_name = {
-            record["index_name"]: record.get(
-                "knowledge_name") or record["index_name"]
-            for record in db_record
-        }
+        # Get all indices from Elasticsearch
+        es_indices_list = vdb_core.get_user_indices(pattern)
 
-        filtered_indices_list = []
+        # Get all knowledgebase records from database (for cleanup and permission checking)
+        all_db_records = get_knowledge_info_by_tenant_id(user_tenant_id)
+
+        # Filter visible knowledgebases based on user role and permissions
+        visible_knowledgebases = []
         model_name_is_none_list = []
-        for record in db_record:
-            # async PG database to sync ES, remove the data that is not in ES
-            if record["index_name"] not in all_indices_list:
-                delete_knowledge_record(
-                    {"index_name": record["index_name"], "user_id": user_id})
-                continue
-            if record["embedding_model_name"] is None:
-                model_name_is_none_list.append(record["index_name"])
-            filtered_indices_list.append(record["index_name"])
 
-        indices = [info.get("index") if isinstance(
-            info, dict) else info for info in filtered_indices_list]
+        for record in all_db_records:
+            index_name = record["index_name"]
+
+            # Check if index exists in Elasticsearch (skip if not found)
+            if index_name not in es_indices_list:
+                continue
+
+            # Check permission based on user role
+            permission = None
+
+            if user_role == "SU":
+                # SU can see all knowledgebases
+                permission = "EDIT"
+            elif user_role == "ADMIN":
+                # ADMIN can see all knowledgebases in their tenant
+                if record.get("tenant_id") == user_tenant_id:
+                    permission = "EDIT"
+            elif user_role in ["USER", "DEV"]:
+                # USER/DEV need group-based permission checking
+                kb_group_ids_str = record.get("group_ids")
+                kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
+                kb_created_by = record.get("created_by")
+                kb_ingroup_permission = record.get("ingroup_permission") or "READ_ONLY"
+
+                # Check if user belongs to any of the knowledgebase groups
+                # Compatibility logic for legacy data:
+                # - If both kb_group_ids and user_group_ids are effectively empty (None or empty lists),
+                #   consider them intersecting (backward compatibility)
+                # - If either side has groups but they don't intersect, no intersection
+                kb_groups_empty = kb_group_ids_str is None or (isinstance(
+                    kb_group_ids_str, str) and kb_group_ids_str.strip() == "") or len(kb_group_ids) == 0
+                user_groups_empty = len(user_group_ids) == 0
+
+                if kb_groups_empty and user_groups_empty:
+                    # Both are empty/None - consider intersecting for backward compatibility
+                    has_group_intersection = True
+                else:
+                    # Normal intersection check
+                    has_group_intersection = bool(set(user_group_ids) & set(kb_group_ids))
+
+                if has_group_intersection:
+                    # Determine permission level
+                    permission = "READ_ONLY"  # Default
+
+                    # User is creator: creator permission
+                    if kb_created_by == user_id:
+                        permission = "CREATOR"
+                    # Group permission allows editing
+                    elif kb_ingroup_permission == "EDIT":
+                        permission = "EDIT"
+                    # Group permission is read-only: already set
+                    elif kb_ingroup_permission == "READ_ONLY":
+                        permission = "READ_ONLY"
+                    # Group permission is private: not visible
+                    elif kb_ingroup_permission == "PRIVATE":
+                        permission = None
+
+            # Add to visible list if permission is granted
+            if permission:
+                record_with_permission = dict(record)
+                record_with_permission["permission"] = permission
+                # Convert group_ids string to list for easier client consumption
+                if record.get("group_ids"):
+                    record_with_permission["group_ids"] = convert_string_to_list(
+                        record["group_ids"])
+                else:
+                    # If no group_ids specified, use tenant default group
+                    default_group_id = get_tenant_default_group_id(record.get("tenant_id"))
+                    record_with_permission["group_ids"] = [default_group_id] if default_group_id else []
+                visible_knowledgebases.append(record_with_permission)
+
+                # Track records with missing embedding model for stats update
+                if record.get("embedding_model_name") is None:
+                    model_name_is_none_list.append(index_name)
+
+        # Build response
+        indices = [record["index_name"] for record in visible_knowledgebases]
 
         response = {
             "indices": indices,
@@ -526,22 +612,34 @@ class ElasticSearchService:
 
         if include_stats:
             stats_info = []
-            if filtered_indices_list:
-                indice_stats = vdb_core.get_indices_detail(filtered_indices_list)
-                for index_name in filtered_indices_list:
+            if visible_knowledgebases:
+                index_names = [record["index_name"]
+                               for record in visible_knowledgebases]
+                indice_stats = vdb_core.get_indices_detail(index_names)
+
+                for record in visible_knowledgebases:
+                    index_name = record["index_name"]
                     index_stats = indice_stats.get(index_name, {})
                     stats_info.append({
                         # Internal index name (used as ID)
                         "name": index_name,
                         # User-facing knowledge base name from PostgreSQL (fallback to index_name)
-                        "display_name": index_to_display_name.get(index_name, index_name),
+                        "display_name": record.get("knowledge_name", index_name),
+                        "permission": record["permission"],
+                        "group_ids": record["group_ids"],
                         "stats": index_stats,
                     })
+
+                    # Update model name if missing
                     if index_name in model_name_is_none_list:
-                        update_model_name_by_index_name(index_name,
-                                                        index_stats.get("base_info", {}).get(
-                                                            "embedding_model", ""),
-                                                        tenant_id, user_id)
+                        update_model_name_by_index_name(
+                            index_name,
+                            index_stats.get("base_info", {}).get(
+                                "embedding_model", ""),
+                            record.get("tenant_id", tenant_id),
+                            user_id
+                        )
+
             response["indices_info"] = stats_info
 
         return response
