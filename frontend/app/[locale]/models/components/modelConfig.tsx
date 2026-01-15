@@ -837,34 +837,21 @@ export const ModelConfigSection = forwardRef<
           }}
         >
           <Row gutter={[8, 8]} style={{ width: "100%" }}>
-            {modelEngineEnable && (
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  onClick={handleSyncModels}
-                  style={{ width: "100%" }}
-                  block
-                >
-                  <RefreshCw className="mr-1" size={16} />
-                  <span style={{ marginLeft: 4 }}>
-                    <span className="hidden xl:inline button-text-full">
-                      {t("modelConfig.button.syncModelEngine")}
-                    </span>
-                    <span className="xl:hidden button-text-short">
-                      {t("modelConfig.button.sync")}
-                    </span>
-                  </span>
-                </Button>
-              </Col>
-            )}
-            <Col
-              xs={24}
-              sm={12}
-              md={modelEngineEnable ? 6 : 8}
-              lg={modelEngineEnable ? 6 : 8}
-              xl={modelEngineEnable ? 6 : 8}
-            >
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Button
+                type="primary"
+                size="middle"
+                onClick={handleSyncModels}
+                style={{ width: "100%" }}
+                icon={<RefreshCw size={16} />}
+                block
+              >
+                <span className="button-text-full">
+                  {t("modelConfig.button.syncModelEngine")}
+                </span>
+              </Button>
+            </Col>
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
               <Button
                 type="primary"
                 size="middle"
@@ -876,21 +863,12 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full">
+                <span className="button-text-full">
                   {t("modelConfig.button.addCustomModel")}
-                </span>
-                <span className="xl:hidden button-text-short">
-                  {t("modelConfig.button.add")}
                 </span>
               </Button>
             </Col>
-            <Col
-              xs={24}
-              sm={12}
-              md={modelEngineEnable ? 6 : 8}
-              lg={modelEngineEnable ? 6 : 8}
-              xl={modelEngineEnable ? 6 : 8}
-            >
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
               <Button
                 type="primary"
                 size="middle"
@@ -899,11 +877,8 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full">
+                <span className="button-text-full">
                   {t("modelConfig.button.editCustomModel")}
-                </span>
-                <span className="xl:hidden button-text-short">
-                  {t("modelConfig.button.edit")}
                 </span>
               </Button>
             </Col>
@@ -917,11 +892,8 @@ export const ModelConfigSection = forwardRef<
                 style={{ width: "100%" }}
                 block
               >
-                <span className="hidden xl:inline button-text-full">
+                <span className="button-text-full">
                   {t("modelConfig.button.checkConnectivity")}
-                </span>
-                <span className="xl:hidden button-text-short">
-                  {t("modelConfig.button.check")}
                 </span>
               </Button>
             </Col>
