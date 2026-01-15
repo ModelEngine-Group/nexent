@@ -167,6 +167,7 @@
   scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
 }
 
+
 /* Tool Pool Tabs scroll fix */
 .tool-pool-tabs .ant-tabs-content-holder {
   overflow: hidden;

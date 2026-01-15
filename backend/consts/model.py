@@ -32,6 +32,7 @@ class UserSignUpRequest(BaseModel):
     password: str = Field(..., min_length=6)
     is_admin: Optional[bool] = False
     invite_code: Optional[str] = None
+    with_new_invitation: Optional[bool] = False
 
 
 class UserSignInRequest(BaseModel):
@@ -105,6 +106,7 @@ class AppConfig(BaseModel):
     iconType: str
     customIconUrl: Optional[str] = None
     avatarUri: Optional[str] = None
+    modelEngineEnabled: bool = True
 
 
 class GlobalConfig(BaseModel):
@@ -456,3 +458,124 @@ class MCPConfigRequest(BaseModel):
     """Request model for adding MCP servers from configuration"""
     mcpServers: Dict[str, MCPServerConfig] = Field(
         ..., description="Dictionary of MCP server configurations")
+
+
+# Tenant Management Data Models
+# ---------------------------------------------------------------------------
+class TenantCreateRequest(BaseModel):
+    """Request model for creating a tenant"""
+    tenant_name: str = Field(..., min_length=1,
+                             description="Tenant display name")
+
+
+class TenantUpdateRequest(BaseModel):
+    """Request model for updating tenant information"""
+    tenant_name: str = Field(..., min_length=1,
+                             description="New tenant display name")
+
+
+class TenantResponse(BaseModel):
+    """Response model for tenant information"""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    tenant_name: str = Field(..., description="Tenant display name")
+    default_group_id: Optional[int] = Field(
+        None, description="Default group ID for the tenant")
+
+
+# Group Management Data Models
+# ---------------------------------------------------------------------------
+class GroupCreateRequest(BaseModel):
+    """Request model for creating a group"""
+    tenant_id: str = Field(..., min_length=1,
+                           description="Tenant ID where the group belongs")
+    group_name: str = Field(..., min_length=1,
+                            description="Group display name")
+    group_description: Optional[str] = Field(
+        None, description="Optional group description")
+
+
+class GroupUpdateRequest(BaseModel):
+    """Request model for updating group information"""
+    group_name: Optional[str] = Field(None, description="New group name")
+    group_description: Optional[str] = Field(
+        None, description="New group description")
+
+
+class GroupListRequest(BaseModel):
+    """Request model for listing groups"""
+    tenant_id: str = Field(..., description="Tenant ID to filter groups")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(
+        20, ge=1, le=100, description="Number of items per page")
+
+
+class GroupUserRequest(BaseModel):
+    """Request model for adding/removing user from group"""
+    user_id: str = Field(..., min_length=1,
+                         description="User ID to add/remove")
+    group_ids: Optional[List[int]] = Field(
+        None, description="List of group IDs (for batch operations)")
+
+
+class SetDefaultGroupRequest(BaseModel):
+    """Request model for setting tenant's default group"""
+    default_group_id: int = Field(..., ge=1,
+                                  description="Group ID to set as default for the tenant")
+
+
+# Invitation Management Data Models
+# ---------------------------------------------------------------------------
+class InvitationCreateRequest(BaseModel):
+    """Request model for creating invitation code"""
+    code_type: str = Field(
+        ..., description="Invitation code type (ADMIN_INVITE, DEV_INVITE, USER_INVITE)")
+    invitation_code: Optional[str] = Field(
+        None, description="Custom invitation code (auto-generated if not provided)")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Associated group IDs")
+    capacity: int = Field(
+        default=1, ge=1, description="Maximum usage capacity")
+    expiry_date: Optional[str] = Field(
+        None, description="Expiry date in ISO format")
+
+
+class InvitationUpdateRequest(BaseModel):
+    """Request model for updating invitation code"""
+    capacity: Optional[int] = Field(None, ge=1, description="New capacity")
+    expiry_date: Optional[str] = Field(None, description="New expiry date")
+    group_ids: Optional[List[int]] = Field(None, description="New group IDs")
+
+
+class InvitationResponse(BaseModel):
+    """Response model for invitation information"""
+    invitation_id: int = Field(..., description="Invitation ID")
+    invitation_code: str = Field(..., description="Invitation code")
+    code_type: str = Field(..., description="Code type")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Associated group IDs")
+    capacity: int = Field(..., description="Usage capacity")
+    expiry_date: Optional[str] = Field(None, description="Expiry date")
+    status: str = Field(..., description="Current status")
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(
+        None, description="Last update timestamp")
+
+
+class InvitationListRequest(BaseModel):
+    """Request model for listing invitation codes"""
+    tenant_id: Optional[str] = Field(
+        None, description="Tenant ID to filter by (optional)")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(
+        20, ge=1, le=100, description="Number of items per page")
+
+
+class InvitationUseResponse(BaseModel):
+    """Response model for invitation usage"""
+    invitation_record_id: int = Field(..., description="Usage record ID")
+    invitation_code: str = Field(..., description="Used invitation code")
+    user_id: str = Field(..., description="User who used the code")
+    invitation_id: int = Field(..., description="Invitation ID")
+    code_type: str = Field(..., description="Code type")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Associated group IDs")
