@@ -482,22 +482,23 @@ def test_get_knowledge_record_found(monkeypatch, mock_session):
 def test_get_knowledge_record_not_found(monkeypatch, mock_session):
     """Test retrieving non-existent knowledge record"""
     session, query = mock_session
-    
+
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_filter  # Support chaining
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
+
     test_query = {
         "index_name": "nonexistent_knowledge"
     }
-    
+
     result = get_knowledge_record(test_query)
-    
+
     assert result == {}
 
 
@@ -549,34 +550,40 @@ def test_get_knowledge_record_exception(monkeypatch, mock_session):
 def test_get_knowledge_record_with_none_query(monkeypatch, mock_session):
     """Test get_knowledge_record with None query raises TypeError"""
     session, query = mock_session
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
-    # When query is None, accessing query['index_name'] will raise TypeError
-    with pytest.raises(TypeError, match="'NoneType' object is not subscriptable"):
+
+    # When query is None, checking 'index_name' in query will raise TypeError
+    with pytest.raises(TypeError, match="argument of type 'NoneType' is not iterable"):
         get_knowledge_record(None)
 
 
 def test_get_knowledge_record_without_index_name_key(monkeypatch, mock_session):
-    """Test get_knowledge_record with query missing index_name key raises KeyError"""
+    """Test get_knowledge_record with query missing index_name and knowledge_name keys"""
     session, query = mock_session
-    
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_filter  # Support chaining
+    query.filter.return_value = mock_filter
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
-    # When query doesn't have 'index_name' key, accessing query['index_name'] will raise KeyError
+
+    # When query doesn't have 'index_name' or 'knowledge_name' key, no specific filter is applied
     test_query = {
         "tenant_id": "test_tenant"
-        # Missing index_name key
+        # Missing index_name and knowledge_name keys
     }
-    
-    with pytest.raises(KeyError):
-        get_knowledge_record(test_query)
+
+    result = get_knowledge_record(test_query)
+
+    assert result == {}
 
 
 def test_get_knowledge_info_by_knowledge_ids_success(monkeypatch, mock_session):
@@ -1030,6 +1037,7 @@ def test_get_knowledge_record_by_knowledge_name_not_found(monkeypatch, mock_sess
 
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_filter  # Support chaining
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()

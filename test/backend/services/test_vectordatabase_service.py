@@ -3,7 +3,7 @@ import sys
 import os
 import time
 import unittest
-from unittest.mock import MagicMock, ANY, AsyncMock
+from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
 import numpy as np
@@ -733,9 +733,11 @@ class TestElasticSearchService(unittest.TestCase):
         for kb_info in result["indices_info"]:
             self.assertEqual(kb_info["permission"], "EDIT")
 
-        # Verify info log was called once for legacy admin identification
-        mock_logger.info.assert_called_once_with(
-            "User legacy_admin_user identified as legacy admin")
+        # Verify info log was called once for each index for legacy admin identification
+        mock_logger.info.assert_has_calls([
+            call("User legacy_admin_user identified as legacy admin"),
+            call("User legacy_admin_user identified as legacy admin")
+        ])
 
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
@@ -789,9 +791,11 @@ class TestElasticSearchService(unittest.TestCase):
         for kb_info in result["indices_info"]:
             self.assertEqual(kb_info["permission"], "EDIT")
 
-        # Verify info log was called once for SPEED version admin identification
-        mock_logger.info.assert_called_once_with(
-            "User under SPEED version is treated as admin")
+        # Verify info log was called once for each index for SPEED version admin identification
+        mock_logger.info.assert_has_calls([
+            call("User under SPEED version is treated as admin"),
+            call("User under SPEED version is treated as admin")
+        ])
 
     def test_vectorize_documents_success(self):
         """
