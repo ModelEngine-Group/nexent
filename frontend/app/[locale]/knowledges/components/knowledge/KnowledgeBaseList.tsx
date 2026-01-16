@@ -1,57 +1,58 @@
-import React from 'react'
-import { useTranslation } from 'react-i18next'
+import React from "react";
+import { useTranslation } from "react-i18next";
 
-import { Button, Checkbox, ConfigProvider } from 'antd'
-import { SyncOutlined, PlusOutlined } from '@ant-design/icons'
+import { Button, Checkbox, ConfigProvider } from "antd";
+import { SyncOutlined, PlusOutlined } from "@ant-design/icons";
 
-import { KnowledgeBase } from '@/types/knowledgeBase'
+import { KnowledgeBase } from "@/types/knowledgeBase";
 
 // Knowledge base layout constants configuration
 const KB_LAYOUT = {
   // Knowledge base row height configuration
-  ROW_PADDING: 'py-4', // Row vertical padding
-  HEADER_PADDING: 'p-3', // List header padding
-  BUTTON_PADDING: 'p-2', // Create button area padding
-  TAG_SPACING: 'gap-0.5', // Spacing between tags
-  TAG_MARGIN: 'mt-2.5', // Tag container top margin
+  ROW_PADDING: "py-4", // Row vertical padding
+  HEADER_PADDING: "p-3", // List header padding
+  BUTTON_PADDING: "p-2", // Create button area padding
+  TAG_SPACING: "gap-0.5", // Spacing between tags
+  TAG_MARGIN: "mt-2.5", // Tag container top margin
   // Tag related configuration
-  TAG_PADDING: 'px-1.5 py-0.5', // Tag padding
-  TAG_TEXT: 'text-xs font-medium', // Tag text style
-  TAG_ROUNDED: 'rounded-md', // Tag rounded corners
+  TAG_PADDING: "px-1.5 py-0.5", // Tag padding
+  TAG_TEXT: "text-xs font-medium", // Tag text style
+  TAG_ROUNDED: "rounded-md", // Tag rounded corners
   // Line break related configuration
-  TAG_BREAK_HEIGHT: 'h-0.5', // Line break interval height
-  SECOND_ROW_TAG_MARGIN: 'mt-0.5', // Second row tag top margin
+  TAG_BREAK_HEIGHT: "h-0.5", // Line break interval height
+  SECOND_ROW_TAG_MARGIN: "mt-0.5", // Second row tag top margin
   // Other layout configuration
-  TITLE_MARGIN: 'ml-2', // Title left margin
-  EMPTY_STATE_PADDING: 'py-4', // Empty state padding
+  TITLE_MARGIN: "ml-2", // Title left margin
+  EMPTY_STATE_PADDING: "py-4", // Empty state padding
   // Title related configuration
-  TITLE_TEXT: 'text-xl font-bold', // Title text style
-  KB_NAME_TEXT: 'text-lg font-medium', // Knowledge base name text style
+  TITLE_TEXT: "text-xl font-bold", // Title text style
+  KB_NAME_TEXT: "text-lg font-medium", // Knowledge base name text style
   // Knowledge base name configuration
-  KB_NAME_MAX_WIDTH: '220px', // Knowledge base name max width
-  KB_NAME_OVERFLOW: {        // Knowledge base name overflow style
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    display: 'block'
-  }
-}
+  KB_NAME_MAX_WIDTH: "220px", // Knowledge base name max width
+  KB_NAME_OVERFLOW: {
+    // Knowledge base name overflow style
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    display: "block",
+  },
+};
 
 interface KnowledgeBaseListProps {
-  knowledgeBases: KnowledgeBase[]
-  selectedIds: string[]
-  activeKnowledgeBase: KnowledgeBase | null
-  currentEmbeddingModel: string | null
-  isLoading?: boolean
-  onSelect: (id: string) => void
-  onClick: (kb: KnowledgeBase) => void
-  onDelete: (id: string) => void
-  onSync: () => void
-  onCreateNew: () => void
-  isSelectable: (kb: KnowledgeBase) => boolean
-  getModelDisplayName: (modelId: string) => string
-  containerHeight?: string // Container total height, consistent with DocumentList
-  onKnowledgeBaseChange?: () => void // New: callback function when knowledge base switches
+  knowledgeBases: KnowledgeBase[];
+  selectedIds: string[];
+  activeKnowledgeBase: KnowledgeBase | null;
+  currentEmbeddingModel: string | null;
+  isLoading?: boolean;
+  onSelect: (id: string) => void;
+  onClick: (kb: KnowledgeBase) => void;
+  onDelete: (id: string) => void;
+  onSync: () => void;
+  onCreateNew: () => void;
+  isSelectable: (kb: KnowledgeBase) => boolean;
+  getModelDisplayName: (modelId: string) => string;
+  containerHeight?: string; // Container total height, consistent with DocumentList
+  onKnowledgeBaseChange?: () => void; // New: callback function when knowledge base switches
 }
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
@@ -67,8 +68,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   onCreateNew,
   isSelectable,
   getModelDisplayName,
-  containerHeight = '70vh', // Default container height consistent with DocumentList
-  onKnowledgeBaseChange // New: callback function when knowledge base switches
+  containerHeight = "70vh", // Default container height consistent with DocumentList
+  onKnowledgeBaseChange, // New: callback function when knowledge base switches
 }) => {
   const { t } = useTranslation();
 
@@ -103,10 +104,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   });
 
   return (
-    <div
-      className="w-full bg-white border border-gray-200 rounded-md flex flex-col"
-      style={{ height: containerHeight }}
-    >
+    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col">
       {/* Fixed header area */}
       <div
         className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}

@@ -26,10 +26,13 @@ sys.modules['consts.const'] = consts_mock.const
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
+utils_mock.str_utils = MagicMock()
+utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.str_utils'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -78,6 +81,8 @@ class MockKnowledgeRecord:
         self.knowledge_sources = kwargs.get('knowledge_sources', 'elasticsearch')
         self.tenant_id = kwargs.get('tenant_id', 'test_tenant')
         self.embedding_model_name = kwargs.get('embedding_model_name', 'test_model')
+        self.group_ids = kwargs.get('group_ids', '1,2,3')  # New field
+        self.ingroup_permission = kwargs.get('ingroup_permission', 'READ_ONLY')  # New field, corrected name
         self.delete_flag = kwargs.get('delete_flag', 'N')
         self.update_time = kwargs.get('update_time', "2023-01-01 00:00:00")
         
@@ -91,6 +96,8 @@ class MockKnowledgeRecord:
     knowledge_sources = MagicMock(name="knowledge_sources_column")
     tenant_id = MagicMock(name="tenant_id_column")
     embedding_model_name = MagicMock(name="embedding_model_name_column")
+    group_ids = MagicMock(name="group_ids_column")  # New field
+    ingroup_permission = MagicMock(name="ingroup_permission_column")  # New field, corrected name
     delete_flag = MagicMock(name="delete_flag_column")
     update_time = MagicMock(name="update_time_column")
 
@@ -146,7 +153,9 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "user_id": "test_user",
         "tenant_id": "test_tenant",
         "embedding_model_name": "test_model",
-        "knowledge_name": "test_knowledge"
+        "knowledge_name": "test_knowledge",
+        "group_ids": [1, 2, 3],
+        "ingroup_permission": "READ_ONLY"
     }
     
     # Mock KnowledgeRecord constructor
@@ -158,6 +167,51 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "index_name": "test_knowledge",
         "knowledge_name": "test_knowledge",
     }
+    session.add.assert_called_once_with(mock_record)
+    assert session.flush.call_count == 1
+    session.commit.assert_called_once()
+
+
+def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
+    """Test successful creation of knowledge record with group IDs as list"""
+    session, _ = mock_session
+
+    # Create mock knowledge record
+    mock_record = MockKnowledgeRecord(knowledge_name="test_knowledge")
+    mock_record.knowledge_id = 123
+    mock_record.index_name = "test_knowledge"
+
+    # Mock database session context
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    # Prepare test data with group_ids as list
+    test_query = {
+        "index_name": "test_knowledge",
+        "knowledge_describe": "Test knowledge description",
+        "user_id": "test_user",
+        "tenant_id": "test_tenant",
+        "embedding_model_name": "test_model",
+        "knowledge_name": "test_knowledge",
+        "group_ids": [1, 2, 3],
+        "ingroup_permission": "READ_ONLY"
+    }
+
+    # Mock KnowledgeRecord constructor
+    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record) as mock_constructor:
+        result = create_knowledge_record(test_query)
+
+    assert result == {
+        "knowledge_id": 123,
+        "index_name": "test_knowledge",
+        "knowledge_name": "test_knowledge",
+    }
+    # Verify KnowledgeRecord was called with group_ids converted to string
+    mock_constructor.assert_called_once()
+    call_kwargs = mock_constructor.call_args[1]  # Get kwargs from the call
+    assert call_kwargs["group_ids"] == "1,2,3"  # Should be converted to comma-separated string
     session.add.assert_called_once_with(mock_record)
     assert session.flush.call_count == 1
     session.commit.assert_called_once()
@@ -428,22 +482,23 @@ def test_get_knowledge_record_found(monkeypatch, mock_session):
 def test_get_knowledge_record_not_found(monkeypatch, mock_session):
     """Test retrieving non-existent knowledge record"""
     session, query = mock_session
-    
+
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_filter  # Support chaining
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
+
     test_query = {
         "index_name": "nonexistent_knowledge"
     }
-    
+
     result = get_knowledge_record(test_query)
-    
+
     assert result == {}
 
 
@@ -495,34 +550,40 @@ def test_get_knowledge_record_exception(monkeypatch, mock_session):
 def test_get_knowledge_record_with_none_query(monkeypatch, mock_session):
     """Test get_knowledge_record with None query raises TypeError"""
     session, query = mock_session
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
-    # When query is None, accessing query['index_name'] will raise TypeError
-    with pytest.raises(TypeError, match="'NoneType' object is not subscriptable"):
+
+    # When query is None, checking 'index_name' in query will raise TypeError
+    with pytest.raises(TypeError, match="argument of type 'NoneType' is not iterable"):
         get_knowledge_record(None)
 
 
 def test_get_knowledge_record_without_index_name_key(monkeypatch, mock_session):
-    """Test get_knowledge_record with query missing index_name key raises KeyError"""
+    """Test get_knowledge_record with query missing index_name and knowledge_name keys"""
     session, query = mock_session
-    
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_filter  # Support chaining
+    query.filter.return_value = mock_filter
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
-    # When query doesn't have 'index_name' key, accessing query['index_name'] will raise KeyError
+
+    # When query doesn't have 'index_name' or 'knowledge_name' key, no specific filter is applied
     test_query = {
         "tenant_id": "test_tenant"
-        # Missing index_name key
+        # Missing index_name and knowledge_name keys
     }
-    
-    with pytest.raises(KeyError):
-        get_knowledge_record(test_query)
+
+    result = get_knowledge_record(test_query)
+
+    assert result == {}
 
 
 def test_get_knowledge_info_by_knowledge_ids_success(monkeypatch, mock_session):
@@ -906,32 +967,92 @@ def test_delete_knowledge_record_without_user_id(monkeypatch, mock_session):
 def test_get_knowledge_record_with_tenant_id_none(monkeypatch, mock_session):
     """Test get_knowledge_record with tenant_id explicitly set to None"""
     session, query = mock_session
-    
+
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_id = 123
-    
+
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-    
+
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    
+
     expected_result = {"knowledge_id": 123}
     monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda x: expected_result)
-    
+
     test_query = {
         "index_name": "test_knowledge",
         "tenant_id": None  # Explicitly None
     }
-    
+
     result = get_knowledge_record(test_query)
-    
+
     assert result == expected_result
     # Should not add tenant_id filter when tenant_id is None
     assert query.filter.call_count >= 1
+
+
+def test_get_knowledge_record_by_knowledge_name_success(monkeypatch, mock_session):
+    """Test successfully retrieving knowledge record by knowledge_name"""
+    session, query = mock_session
+
+    # Create mock knowledge record
+    mock_record = MockKnowledgeRecord()
+    mock_record.knowledge_id = 123
+    mock_record.knowledge_name = "test_kb"
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = mock_record
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    # Mock as_dict function
+    expected_result = {
+        "knowledge_id": 123,
+        "knowledge_name": "test_kb",
+        "index_name": "test_index"
+    }
+    monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda x: expected_result)
+
+    test_query = {
+        "knowledge_name": "test_kb",
+        "tenant_id": "test_tenant"
+    }
+
+    result = get_knowledge_record(test_query)
+
+    assert result == expected_result
+
+
+def test_get_knowledge_record_by_knowledge_name_not_found(monkeypatch, mock_session):
+    """Test retrieving knowledge record by knowledge_name when not found"""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_filter  # Support chaining
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    test_query = {
+        "knowledge_name": "nonexistent_kb",
+        "tenant_id": "test_tenant"
+    }
+
+    result = get_knowledge_record(test_query)
+
+    assert result == {}
 
 
 def test_get_knowledge_info_by_knowledge_ids_empty_list(monkeypatch, mock_session):

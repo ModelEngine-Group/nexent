@@ -653,7 +653,7 @@ export const ModelAddDialog = ({
       open={isOpen}
       onCancel={onClose}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="space-y-4">
         {/* Batch Import Switch */}
@@ -1248,7 +1248,7 @@ export const ModelAddDialog = ({
         onOk={handleSettingsSave}
         cancelText={t("common.cancel")}
         okText={t("common.confirm")}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="space-y-3">
           <div>

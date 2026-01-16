@@ -3,6 +3,7 @@ from typing import Any, Dict
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from consts.const import TENANT_ID
 from database.client import get_db_session
 from database.db_models import TenantConfig
 
@@ -137,3 +138,19 @@ def update_config_by_tenant_config_id_and_data(tenant_config_id: int, insert_dat
             session.rollback()
             logger.error(f"update config by tenant config id and data failed, error: {e}")
             return False
+
+
+def get_all_tenant_ids():
+    """
+    Get all tenant IDs that have tenant configurations
+
+    Returns:
+        List[str]: List of tenant IDs
+    """
+    with get_db_session() as session:
+        result = session.query(TenantConfig.tenant_id).filter(
+            TenantConfig.config_key == TENANT_ID,
+            TenantConfig.delete_flag == "N"
+        ).distinct().all()
+
+        return [row[0] for row in result]

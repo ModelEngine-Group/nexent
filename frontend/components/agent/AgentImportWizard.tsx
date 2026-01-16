@@ -108,14 +108,14 @@ export default function AgentImportWizard({
   const [currentStep, setCurrentStep] = useState(0);
   const [llmModels, setLlmModels] = useState<ModelOption[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  
+
   // Model selection mode: "unified" (one model for all) or "individual" (separate model for each agent)
   const [modelSelectionMode, setModelSelectionMode] = useState<"unified" | "individual">("unified");
-  
+
   // Unified mode: single model for all agents
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [selectedModelName, setSelectedModelName] = useState<string>("");
-  
+
   // Individual mode: model for each agent
   const [selectedModelsByAgent, setSelectedModelsByAgent] = useState<Record<string, { modelId: number | null; modelName: string }>>({});
 
@@ -216,13 +216,13 @@ export default function AgentImportWizard({
   // Initialize model selection for individual mode
   const initializeModelSelection = () => {
     if (!initialData?.agent_info) return;
-    
+
     const initialModels: Record<string, { modelId: number | null; modelName: string }> = {};
-    
+
     Object.keys(initialData.agent_info).forEach(agentKey => {
       initialModels[agentKey] = { modelId: null, modelName: "" };
     });
-    
+
     setSelectedModelsByAgent(initialModels);
   };
 
@@ -288,7 +288,7 @@ export default function AgentImportWizard({
       });
 
       setAgentNameConflicts(conflicts);
-      
+
       // Update successfully renamed agents based on initial check
       // Only add to successfullyRenamedAgents if there was a conflict that was resolved
       // For initial check, we don't add anything since no renaming has happened yet
@@ -327,7 +327,7 @@ export default function AgentImportWizard({
       const hasDisplayNameConflict = checkResult?.display_name_conflict || false;
       const hasConflict = hasNameConflict || hasDisplayNameConflict;
       const conflictAgentsRaw = Array.isArray(checkResult?.conflict_agents) ? checkResult.conflict_agents : [];
-      
+
       // Deduplicate by name/display_name
       const seen = new Set<string>();
       const conflictAgents = conflictAgentsRaw.reduce((acc: Array<{ name?: string; display_name?: string }>, curr: any) => {
@@ -457,7 +457,7 @@ export default function AgentImportWizard({
     try {
       const models = await modelService.getLLMModels();
       setLlmModels(models.filter(m => m.connect_status === "available"));
-      
+
       // Auto-select first available model
       if (models.length > 0 && models[0].connect_status === "available") {
         setSelectedModelId(models[0].id);
@@ -656,11 +656,11 @@ export default function AgentImportWizard({
       // Check each MCP server from mcp_info
       const serversToInstall: McpServerToInstall[] = initialData.mcp_info.map((mcp: any) => {
         const isUrlConfigNeeded = needsConfig(mcp.mcp_url);
-        
+
         // Check if already installed (match by both name and url)
         const isInstalled = !isUrlConfigNeeded && existing.some(
-          (existingMcp: McpServer) => 
-            existingMcp.service_name === mcp.mcp_server_name && 
+          (existingMcp: McpServer) =>
+            existingMcp.service_name === mcp.mcp_server_name &&
             existingMcp.mcp_url === mcp.mcp_url
         );
 
@@ -773,7 +773,7 @@ export default function AgentImportWizard({
     try {
       // Prepare the data structure for import
       const importData = prepareImportData();
-      
+
       if (!importData) {
         message.error(t("market.install.error.invalidData", "Invalid agent data"));
         return;
@@ -784,9 +784,7 @@ export default function AgentImportWizard({
       setIsImporting(true);
       // Import using agentConfigService directly
       const result = await importAgent(importData, { forceImport: false });
-      
       if (result.success) {
-        message.success(t("market.install.success", "Agent installed successfully!"));
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         onImportComplete?.();
         handleCancel(); // Close wizard after success
@@ -825,7 +823,7 @@ export default function AgentImportWizard({
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
         agentInfo.model_id = selectedModelId;
         agentInfo.model_name = selectedModelName;
-        
+
         // Clear business logic model fields
         agentInfo.business_logic_model_id = null;
         agentInfo.business_logic_model_name = null;
@@ -837,7 +835,7 @@ export default function AgentImportWizard({
         if (modelSelection && modelSelection.modelId && modelSelection.modelName) {
           agentInfo.model_id = modelSelection.modelId;
           agentInfo.model_name = modelSelection.modelName;
-          
+
           // Clear business logic model fields
           agentInfo.business_logic_model_id = null;
           agentInfo.business_logic_model_name = null;
@@ -957,7 +955,7 @@ export default function AgentImportWizard({
     }
 
     const currentStepKey = steps[currentStep]?.key;
-    
+
     if (currentStepKey === "rename") {
       return true;
     } else if (currentStepKey === "tools") {
@@ -978,13 +976,13 @@ export default function AgentImportWizard({
       return configFields.every(field => configValues[field.valueKey]?.trim());
     } else if (currentStepKey === "mcp") {
       // All non-editable MCPs should be installed or have edited URLs
-      return mcpServers.every(mcp => 
-        mcp.isInstalled || 
+      return mcpServers.every(mcp =>
+        mcp.isInstalled ||
         (mcp.isUrlEditable && mcp.editedUrl && mcp.editedUrl.trim() !== "") ||
         (!mcp.isUrlEditable && mcp.mcp_url && mcp.mcp_url.trim() !== "")
       );
     }
-    
+
     return true;
   };
 
@@ -1384,7 +1382,7 @@ export default function AgentImportWizard({
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                   {t("market.install.model.description.unified", "Select a model from your configured models. This model will be applied to all agents (main agent and sub-agents).")}
                 </p>
-                
+
                 <div className="flex items-center gap-3">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                     {t("market.install.model.label", "Model")}
@@ -1446,11 +1444,11 @@ export default function AgentImportWizard({
                         const currentSelection = selectedModelsByAgent[agentKey] || { modelId: null, modelName: "" };
 
                         return (
-                          <div 
-                            key={agentKey} 
+                          <div
+                            key={agentKey}
                             className={`border rounded-lg p-4 ${
-                              isMainAgent 
-                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800" 
+                              isMainAgent
+                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
                                 : "border-gray-200 dark:border-gray-700"
                             }`}
                           >
@@ -1651,7 +1649,7 @@ export default function AgentImportWizard({
                         <Input
                           value={mcp.editedUrl || ""}
                           onChange={(e) => handleMcpUrlChange(index, e.target.value)}
-                          placeholder={mcp.isUrlEditable 
+                          placeholder={mcp.isUrlEditable
                             ? t("market.install.mcp.urlPlaceholder", "Enter MCP server URL")
                             : mcp.mcp_url
                           }
@@ -1731,7 +1729,7 @@ export default function AgentImportWizard({
                 loading={isImporting}
                 icon={<Download size={16} />}
               >
-                {isImporting 
+                {isImporting
                   ? t("market.install.button.installing", "Installing...")
                   : t("market.install.button.install", "Install")}
               </Button>

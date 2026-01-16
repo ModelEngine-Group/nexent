@@ -58,6 +58,12 @@ class TimeoutException(Exception):
     pass
 
 
+
+class ValidationError(Exception):
+    """Raised when validation fails."""
+    pass
+
+
 class NotFoundException(Exception):
     """Raised when not found exception occurs."""
     pass

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Row, Col, Flex, Badge, Divider, Button, Drawer, App } from "antd";
 import { Bug, Save, Info } from "lucide-react";
@@ -25,7 +25,8 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
-  const editable = !!(currentAgentId || isCreatingMode);
+  const editable =
+    (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
 
   // Save guard hook
   const saveGuard = useSaveGuard();
@@ -84,7 +85,13 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
               <Button
                 type="primary"
                 icon={<Bug size={16} />}
-                onClick={() => setIsDebugDrawerOpen(true)}
+                onClick={() =>
+                  saveGuard.saveWithModal().then((success) => {
+                    if (success) {
+                      setIsDebugDrawerOpen(true);
+                    }
+                  })
+                }
                 size="middle"
               >
                 {t("systemPrompt.button.debug")}

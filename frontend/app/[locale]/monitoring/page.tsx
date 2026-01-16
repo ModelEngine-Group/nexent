@@ -3,46 +3,21 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Puzzle } from "lucide-react";
+import { Activity } from "lucide-react";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { ConnectionStatus } from "@/const/modelConfig";
-
-interface McpToolsContentProps {
-  /** Connection status */
-  connectionStatus?: ConnectionStatus;
-  /** Is checking connection */
-  isCheckingConnection?: boolean;
-  /** Check connection callback */
-  onCheckConnection?: () => void;
-  /** Callback to expose connection status */
-  onConnectionStatusChange?: (status: ConnectionStatus) => void;
-}
 
 /**
- * McpToolsContent - MCP tools management coming soon page
- * This will allow admins to manage MCP servers and tools
+ * MonitoringContent - Agent monitoring and operations coming soon page
+ * This will allow admins to monitor and operate agents (health, logs, alerts)
  */
-export default function McpToolsContent({
-  connectionStatus: externalConnectionStatus,
-  isCheckingConnection: externalIsCheckingConnection,
-  onCheckConnection: externalOnCheckConnection,
-  onConnectionStatusChange,
-}: McpToolsContentProps) {
+export default function MonitoringContent({}) {
   const { t } = useTranslation("common");
-
   // Use custom hook for common setup flow logic
-  const { canAccessProtectedData, pageVariants, pageTransition } = useSetupFlow({
-    requireAdmin: true,
-    externalConnectionStatus,
-    externalIsCheckingConnection,
-    onCheckConnection: externalOnCheckConnection,
-    onConnectionStatusChange,
-  });
-
+  const { pageVariants, pageTransition } = useSetupFlow();
   return (
     <>
-      {canAccessProtectedData ? (
+      <div className="w-full h-full">
         <motion.div
           initial="initial"
           animate="in"
@@ -57,9 +32,9 @@ export default function McpToolsContent({
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="w-24 h-24 rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg"
+              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-sky-600 flex items-center justify-center shadow-lg"
             >
-              <Puzzle className="h-12 w-12 text-white" />
+              <Activity className="h-12 w-12 text-white" />
             </motion.div>
 
             {/* Title */}
@@ -69,7 +44,7 @@ export default function McpToolsContent({
               transition={{ delay: 0.3 }}
               className="text-3xl font-bold text-slate-800 dark:text-slate-100"
             >
-              {t("mcpTools.comingSoon.title")}
+              {t("monitoring.comingSoon.title")}
             </motion.h1>
 
             {/* Description */}
@@ -79,7 +54,7 @@ export default function McpToolsContent({
               transition={{ delay: 0.4 }}
               className="text-lg text-slate-600 dark:text-slate-400"
             >
-              {t("mcpTools.comingSoon.description")}
+              {t("monitoring.comingSoon.description")}
             </motion.p>
 
             {/* Feature list */}
@@ -90,21 +65,21 @@ export default function McpToolsContent({
               className="text-left space-y-2 w-full"
             >
               <li className="flex items-start space-x-2">
-                <span className="text-sky-500 mt-1">✓</span>
+                <span className="text-emerald-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("mcpTools.comingSoon.feature1")}
+                  {t("monitoring.comingSoon.feature1")}
                 </span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-sky-500 mt-1">✓</span>
+                <span className="text-emerald-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("mcpTools.comingSoon.feature2")}
+                  {t("monitoring.comingSoon.feature2")}
                 </span>
               </li>
               <li className="flex items-start space-x-2">
-                <span className="text-sky-500 mt-1">✓</span>
+                <span className="text-emerald-500 mt-1">✓</span>
                 <span className="text-slate-600 dark:text-slate-400">
-                  {t("mcpTools.comingSoon.feature3")}
+                  {t("monitoring.comingSoon.feature3")}
                 </span>
               </li>
             </motion.ul>
@@ -114,15 +89,13 @@ export default function McpToolsContent({
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.6 }}
-              className="px-4 py-2 bg-gradient-to-r from-sky-500 to-indigo-600 text-white rounded-full text-sm font-medium shadow-md"
+              className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-sky-600 text-white rounded-full text-sm font-medium shadow-md"
             >
-              {t("mcpTools.comingSoon.badge")}
+              {t("monitoring.comingSoon.badge")}
             </motion.div>
           </div>
         </motion.div>
-      ) : null}
+      </div>
     </>
   );
 }
-
-
