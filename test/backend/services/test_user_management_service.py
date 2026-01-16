@@ -711,6 +711,132 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("is not available", str(context.exception))
 
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    async def test_signup_user_with_invite_code_uppercase_conversion(self, mock_check_available, mock_get_invite_code):
+        """Test invitation code is converted to uppercase (line 183)"""
+        # Mock invitation code validation
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "invitation_id": 1,
+            "code_type": "USER_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant_id"
+        }
+
+        with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
+             patch('backend.services.user_management_service.insert_user_tenant'), \
+             patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
+             patch('backend.services.user_management_service.use_invitation_code'):
+
+            mock_user = MagicMock()
+            mock_user.id = "user-123"
+            mock_response = MagicMock()
+            mock_response.user = mock_user
+            mock_client = MagicMock()
+            mock_client.auth.sign_up.return_value = mock_response
+            mock_get_client.return_value = mock_client
+            mock_parse.return_value = {"user": "data"}
+
+            # Use lowercase invite code
+            result = await signup_user_with_invitation("test@example.com", "password123", invite_code="lowercase")
+
+            # Verify the code was converted to uppercase in the check
+            mock_check_available.assert_called_with("LOWERCASE")
+            mock_get_invite_code.assert_called_with("LOWERCASE")
+
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    async def test_signup_user_with_invite_code_not_found_after_check(self, mock_check_available, mock_get_invite_code):
+        """Test when invitation code passes availability check but get_invitation_by_code returns None (lines 191-194)"""
+        # Mock invitation code availability check passes but get_invitation_by_code returns None
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = None
+
+        with self.assertRaises(IncorrectInviteCodeException) as context:
+            await signup_user_with_invitation("test@example.com", "password123", invite_code="NONEXISTENT")
+
+        self.assertIn("not found", str(context.exception))
+
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    async def test_signup_user_with_admin_invite_role_assignment(self, mock_check_available, mock_get_invite_code):
+        """Test ADMIN role assignment from ADMIN_INVITE code type (lines 198-199)"""
+        # Mock invitation code validation
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "invitation_id": 1,
+            "code_type": "ADMIN_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant_id"
+        }
+
+        with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
+             patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
+             patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
+             patch('backend.services.user_management_service.use_invitation_code'), \
+             patch('backend.services.user_management_service.generate_tts_stt_4_admin') as mock_generate_tts:
+
+            mock_user = MagicMock()
+            mock_user.id = "user-123"
+            mock_response = MagicMock()
+            mock_response.user = mock_user
+            mock_client = MagicMock()
+            mock_client.auth.sign_up.return_value = mock_response
+            mock_get_client.return_value = mock_client
+            mock_parse.return_value = {"user": "data"}
+
+            result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
+
+            # Verify ADMIN role was assigned and TTS/STT generation was called
+            mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN")
+            mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
+            mock_parse.assert_called_with(False, mock_response, "ADMIN")
+
+    @patch('backend.services.user_management_service.get_invitation_by_code')
+    @patch('backend.services.user_management_service.check_invitation_available')
+    async def test_signup_user_with_dev_invite_role_assignment(self, mock_check_available, mock_get_invite_code):
+        """Test DEV role assignment from DEV_INVITE code type (lines 200-201)"""
+        # Mock invitation code validation
+        mock_check_available.return_value = True
+        mock_get_invite_code.return_value = {
+            "invitation_id": 1,
+            "code_type": "DEV_INVITE",
+            "group_ids": [],
+            "tenant_id": "tenant_id"
+        }
+
+        with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
+             patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
+             patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
+             patch('backend.services.user_management_service.use_invitation_code'):
+
+            mock_user = MagicMock()
+            mock_user.id = "user-123"
+            mock_response = MagicMock()
+            mock_response.user = mock_user
+            mock_client = MagicMock()
+            mock_client.auth.sign_up.return_value = mock_response
+            mock_get_client.return_value = mock_client
+            mock_parse.return_value = {"user": "data"}
+
+            result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV123")
+
+            # Verify DEV role was assigned and TTS/STT generation was NOT called
+            mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="DEV")
+            mock_parse.assert_called_with(False, mock_response, "DEV")
+
+    @patch('backend.services.user_management_service.check_invitation_available')
+    async def test_signup_user_with_invite_code_validation_exception_conversion(self, mock_check_available):
+        """Test that other exceptions during invitation validation are converted to IncorrectInviteCodeException (line 208)"""
+        # Mock check_invitation_available to raise a generic exception
+        mock_check_available.side_effect = Exception("Database connection failed")
+
+        with self.assertRaises(IncorrectInviteCodeException) as context:
+            await signup_user_with_invitation("test@example.com", "password123", invite_code="TEST123")
+
+        self.assertIn("Invalid invitation code: Database connection failed", str(context.exception))
+
 
 class TestParseSupabaseResponse(unittest.IsolatedAsyncioTestCase):
     """Test parse_supabase_response"""

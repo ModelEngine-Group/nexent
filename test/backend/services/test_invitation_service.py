@@ -679,6 +679,159 @@ def test_update_invitation_code_status_no_change(mock_count_invitation_usage, mo
     mock_count_invitation_usage.assert_called_once_with(123)
 
 
+def test_calculate_current_status_empty_invitation_data():
+    """Test _calculate_current_status with empty invitation_data (line 276-277)"""
+    from backend.services.invitation_service import _calculate_current_status
+
+    # Test with None input
+    result = _calculate_current_status(None)
+    assert result is None
+
+    # Test with empty dict input
+    result = _calculate_current_status({})
+    assert result == {}
+
+
+def test_calculate_current_status_missing_invitation_id():
+    """Test _calculate_current_status with missing invitation_id (lines 279-281)"""
+    from backend.services.invitation_service import _calculate_current_status
+
+    # Test with invitation_data missing invitation_id
+    input_data = {
+        "code_type": "ADMIN_INVITE",
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should return unchanged data since no invitation_id
+    assert result == input_data
+    assert result["code_type"] == "ADMIN_INVITE"
+    assert result["capacity"] == 5
+    assert result["status"] == "IN_USE"
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_datetime_expiry_date(mock_count_usage):
+    """Test _calculate_current_status with datetime object expiry_date (lines 296-297)"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 2
+
+    # Test with datetime object expiry_date
+    past_datetime = datetime.now().replace(year=datetime.now().year - 1)  # Expired
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": past_datetime,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should set status to EXPIRE due to expired datetime
+    assert result["status"] == "EXPIRE"
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_string_expiry_date(mock_count_usage):
+    """Test _calculate_current_status with string expiry_date conversion (lines 299-300)"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 1
+
+    # Test with ISO string expiry_date (expired) - use format without timezone
+    past_date_str = "2020-01-01T00:00:00"
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": past_date_str,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should set status to EXPIRE due to expired date string
+    assert result["status"] == "EXPIRE"
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_expired_check_logic(mock_count_usage):
+    """Test _calculate_current_status expiry check logic (lines 301-302)"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 1
+
+    # Test with future expiry date (should not expire)
+    future_datetime = datetime.now().replace(year=datetime.now().year + 1)
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": future_datetime,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should keep original status since not expired
+    assert result["status"] == "IN_USE"
+
+
+@patch('backend.services.invitation_service.logger')
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_invalid_expiry_date_format(mock_count_usage, mock_logger):
+    """Test _calculate_current_status with invalid expiry_date format (lines 303-304)"""
+    from backend.services.invitation_service import _calculate_current_status
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 1
+
+    # Test with invalid expiry_date format
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": "invalid-date-format",
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should keep original status and log warning
+    assert result["status"] == "IN_USE"
+    mock_logger.warning.assert_called_once_with("Invalid expiry_date format for invitation 123: invalid-date-format")
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_capacity_check(mock_count_usage):
+    """Test _calculate_current_status capacity check logic (lines 307-308)"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime
+
+    # Mock usage count at capacity
+    mock_count_usage.return_value = 5
+
+    # Test with capacity reached
+    future_datetime = datetime.now().replace(year=datetime.now().year + 1)  # Not expired
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": future_datetime,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should set status to RUN_OUT due to capacity exceeded
+    assert result["status"] == "RUN_OUT"
+
+
 @patch('backend.services.invitation_service.query_invitation_by_code')
 def test_generate_unique_invitation_code(mock_query_invitation_by_code):
     """Test generating unique invitation code"""
@@ -837,6 +990,25 @@ def test_delete_invitation_code_success(mock_remove_invitation, mock_query_invit
         invitation_id=123,
         updated_by="test_user"
     )
+
+
+@patch('backend.services.invitation_service.logger')
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('backend.services.invitation_service.remove_invitation')
+def test_delete_invitation_code_success_logging(mock_remove_invitation, mock_query_invitation, mock_get_user, mock_logger, mock_user_info):
+    """Test that successful deletion logs the appropriate message (line 205-207)"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_invitation.return_value = {"invitation_id": 123}
+    mock_remove_invitation.return_value = True
+
+    result = delete_invitation_code(
+        invitation_id=123,
+        user_id="test_user"
+    )
+
+    assert result is True
+    mock_logger.info.assert_called_once_with("Deleted invitation code 123 by user test_user")
 
 
 @patch('backend.services.invitation_service.get_user_tenant_by_user_id')
