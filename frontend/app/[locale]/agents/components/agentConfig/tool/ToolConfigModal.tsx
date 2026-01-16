@@ -2,26 +2,25 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Input,
-  Switch,
-  InputNumber,
-  Tag,
-  App,
-  Tooltip
-} from "antd";
+import { Modal, Input, Switch, InputNumber, Tag, Form, message } from "antd";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import { useModalPosition } from "@/hooks/useModalPosition";
 import ToolTestPanel from "./ToolTestPanel";
+import { updateToolConfig } from "@/services/agentConfigService";
+
 export interface ToolConfigModalProps {
   isOpen: boolean;
   onCancel: () => void;
-  onSave: (params: ToolParam[]) => void; // 修改：返回参数数组
-  tool?: Tool;
-  initialParams: ToolParam[]; // 修改：变为必需，移除currentAgentId
+  onSave?: (params: ToolParam[]) => void;
+  tool: Tool;
+  initialParams: ToolParam[];
+  selectedTool?: Tool | null;
+  isCreatingMode?: boolean;
+  currentAgentId?: number;
 }
 
 export default function ToolConfigModal({
@@ -30,109 +29,125 @@ export default function ToolConfigModal({
   onSave,
   tool,
   initialParams,
+  selectedTool,
+  isCreatingMode,
+  currentAgentId,
 }: ToolConfigModalProps) {
   const [currentParams, setCurrentParams] = useState<ToolParam[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
-  const { message } = App.useApp();
+  const [form] = Form.useForm();
+  const queryClient = useQueryClient();
+  const updateTools = useAgentConfigStore((state) => state.updateTools);
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
-  const { windowWidth, mainModalTop, mainModalRight } =
-    useModalPosition(isOpen);
-
-  // Apply transform to modal when test panel is visible
-  // Move main modal to the left to center both panels together
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const testPanelWidth = 500;
-    const gap = windowWidth * 0.05;
-    // Move left by half of (test panel width + gap) to center both panels
-    const offsetX = testPanelVisible
-      ? -(testPanelWidth + gap) / 2
-      : 0;
-
-    // Find the modal wrap element (Ant Design renders Modal in a wrap container)
-    // Use a small delay to ensure Modal is rendered
-    const timer = setTimeout(() => {
-      const modalContent = document.querySelector(
-        ".tool-config-modal-content"
-      );
-      if (modalContent) {
-        const modalWrap = modalContent.closest(".ant-modal-wrap") as HTMLElement;
-        if (modalWrap) {
-          modalWrap.style.transform = `translateX(${offsetX}px)`;
-          modalWrap.style.transition = "transform 0.3s ease-in-out";
-        }
-      }
-    }, 0);
-
-    return () => {
-      clearTimeout(timer);
-      const modalContent = document.querySelector(
-        ".tool-config-modal-content"
-      );
-      if (modalContent) {
-        const modalWrap = modalContent.closest(".ant-modal-wrap") as HTMLElement;
-        if (modalWrap) {
-          modalWrap.style.transform = "";
-          modalWrap.style.transition = "";
-        }
-      }
-    };
-  }, [testPanelVisible, isOpen, windowWidth]);
-
   // Initialize with provided params
   useEffect(() => {
-    if (isOpen && tool && initialParams) {
-      setCurrentParams(initialParams);
-      setIsLoading(false);
-    } else {
-      setCurrentParams([]);
+    // Initialize form values
+    setCurrentParams(initialParams);
+    const formValues: Record<string, any> = {};
+    initialParams.forEach((param, index) => {
+      formValues[`param_${index}`] = param.value;
+    });
+    form.setFieldsValue(formValues);
+  }, [initialParams]);
+
+  // Watch all form values and sync to currentParams
+  const formValues = Form.useWatch([], form);
+  useEffect(() => {
+    if (formValues) {
+      const newParams = [...currentParams];
+      Object.entries(formValues).forEach(([fieldName, value]) => {
+        const index = parseInt(fieldName.replace("param_", ""));
+        if (!isNaN(index) && newParams[index]) {
+          newParams[index] = { ...newParams[index], value };
+        }
+      });
+      setCurrentParams(newParams);
     }
-  }, [tool, initialParams, isOpen]);
+  }, [formValues]);
 
-  // check required fields
-  const checkRequiredFields = () => {
-    if (!tool) return false;
+  const handleSave = async () => {
+    try {
+      await form.validateFields();
+      if (!selectedTool) return;
 
-    const missingRequiredFields = currentParams
-      .filter(
-        (param) =>
-          param.required &&
-          (param.value === undefined ||
-            param.value === "" ||
-            param.value === null)
-      )
-      .map((param) => param.name);
-
-    if (missingRequiredFields.length > 0) {
-      message.error(
-        `${t("toolConfig.message.requiredFields")}${missingRequiredFields.join(
-          ", "
-        )}`
+      // Convert params to backend format
+      const paramsObj = currentParams.reduce(
+        (acc, param) => {
+          acc[param.name] = param.value;
+          return acc;
+        },
+        {} as Record<string, any>
       );
-      return false;
+
+      // Update local state: Add tool to selected tools with updated params
+      const updatedTool = { ...selectedTool, initParams: currentParams };
+      const currentTools = useAgentConfigStore.getState().editedAgent.tools;
+
+      // Check if tool already exists, if so replace it, otherwise add it
+      const existingToolIndex = currentTools.findIndex(
+        (t) => parseInt(t.id) === parseInt(updatedTool.id)
+      );
+
+      let newSelectedTools;
+      if (existingToolIndex >= 0) {
+        // Replace existing tool
+        newSelectedTools = [...currentTools];
+        newSelectedTools[existingToolIndex] = updatedTool;
+      } else {
+        // Add new tool
+        newSelectedTools = [...currentTools, updatedTool];
+      }
+
+      if (isCreatingMode) {
+        // In creating mode, just update local state
+        updateTools(newSelectedTools);
+        message.success(t("toolConfig.message.saveSuccess"));
+        handleClose(); // Close modal
+      } else if (currentAgentId) {
+        try {
+          const isEnabled = true; //  New tool is enabled by default
+          const result = await updateToolConfig(
+            parseInt(selectedTool.id),
+            currentAgentId,
+            paramsObj,
+            isEnabled
+          );
+
+          if (result.success) {
+            // Update local state and invalidate queries
+            updateTools(newSelectedTools);
+            queryClient.invalidateQueries({
+              queryKey: ["toolInfo", parseInt(selectedTool.id), currentAgentId],
+            });
+            message.success(t("toolConfig.message.saveSuccess"));
+            handleClose(); // Close modal
+          } else {
+            message.error(result.message || t("toolConfig.message.saveError"));
+          }
+        } catch (error) {
+          message.error(t("toolConfig.message.saveError"));
+        }
+      }
+
+      // Call original onSave if provided
+      if (onSave) {
+        onSave(currentParams);
+      }
+    } catch (error) {
+      // Form validation failed, error will be shown by antd Form
+      message.error("Form validation failed:");
     }
-    return true;
   };
 
-  const handleParamChange = (index: number, value: any) => {
-    const newParams = [...currentParams];
-    newParams[index] = { ...newParams[index], value };
-    setCurrentParams(newParams);
+  const handleClose = () => {
+    setTestPanelVisible(false);
+    onCancel();
   };
-
-
-  const handleSave = () => {
-    if (!checkRequiredFields()) return;
-    onSave(currentParams);
-  };
-
   // Handle tool testing - open test panel
   const handleTestTool = () => {
-    if (!tool || !checkRequiredFields()) return;
     setTestPanelVisible(true);
   };
 
@@ -142,99 +157,38 @@ export default function ToolConfigModal({
   };
 
   const renderParamInput = (param: ToolParam, index: number) => {
-    switch (param.type) {
-      case TOOL_PARAM_TYPES.STRING:
-        const stringValue = param.value as string;
-        // if string length is greater than 15, use TextArea
-        if (stringValue && stringValue.length > 15) {
+    const inputComponent = (() => {
+      switch (param.type) {
+        case TOOL_PARAM_TYPES.NUMBER:
+          return (
+            <InputNumber
+              placeholder={t("toolConfig.input.string.placeholder", {
+                name: param.description,
+              })}
+            />
+          );
+
+        case TOOL_PARAM_TYPES.BOOLEAN:
+          return <Switch />;
+
+        case TOOL_PARAM_TYPES.STRING:
+        case TOOL_PARAM_TYPES.ARRAY:
+        case TOOL_PARAM_TYPES.OBJECT:
+        default:
+          // Default TextArea for all text-like types and unknown types
           return (
             <Input.TextArea
-              value={stringValue}
-              onChange={(e) => handleParamChange(index, e.target.value)}
-              placeholder={t("toolConfig.input.string.placeholder", {
+              placeholder={t(`toolConfig.input.${param.type}.placeholder`, {
                 name: param.description,
               })}
               autoSize={{ minRows: 1, maxRows: 8 }}
               style={{ resize: "vertical" }}
             />
           );
-        }
-        return (
-          <Input
-            value={stringValue}
-            onChange={(e) => handleParamChange(index, e.target.value)}
-            placeholder={t("toolConfig.input.string.placeholder", {
-              name: param.description,
-            })}
-          />
-        );
-      case TOOL_PARAM_TYPES.NUMBER:
-        return (
-          <InputNumber
-            value={param.value as number}
-            onChange={(value) => handleParamChange(index, value)}
-            placeholder={t("toolConfig.input.string.placeholder", {
-              name: param.description,
-            })}
-            className="w-full"
-          />
-        );
-      case TOOL_PARAM_TYPES.BOOLEAN:
-        return (
-          <Switch
-            checked={param.value as boolean}
-            onChange={(checked) => handleParamChange(index, checked)}
-          />
-        );
-      case TOOL_PARAM_TYPES.ARRAY:
-        const arrayValue = Array.isArray(param.value)
-          ? JSON.stringify(param.value, null, 2)
-          : (param.value as string);
-        return (
-          <Input.TextArea
-            value={arrayValue}
-            onChange={(e) => {
-              try {
-                const value = JSON.parse(e.target.value);
-                handleParamChange(index, value);
-              } catch {
-                handleParamChange(index, e.target.value);
-              }
-            }}
-            placeholder={t("toolConfig.input.array.placeholder")}
-            autoSize={{ minRows: 1, maxRows: 8 }}
-            style={{ resize: "vertical" }}
-          />
-        );
-      case TOOL_PARAM_TYPES.OBJECT:
-        const objectValue =
-          typeof param.value === "object"
-            ? JSON.stringify(param.value, null, 2)
-            : (param.value as string);
-        return (
-          <Input.TextArea
-            value={objectValue}
-            onChange={(e) => {
-              try {
-                const value = JSON.parse(e.target.value);
-                handleParamChange(index, value);
-              } catch {
-                handleParamChange(index, e.target.value);
-              }
-            }}
-            placeholder={t("toolConfig.input.object.placeholder")}
-            autoSize={{ minRows: 1, maxRows: 8 }}
-            style={{ resize: "vertical" }}
-          />
-        );
-      default:
-        return (
-          <Input
-            value={param.value as string}
-            onChange={(e) => handleParamChange(index, e.target.value)}
-          />
-        );
-    }
+      }
+    })();
+
+    return inputComponent;
   };
 
   if (!tool) return null;
@@ -251,15 +205,15 @@ export default function ToolConfigModal({
                   tool?.source === "mcp"
                     ? "blue"
                     : tool?.source === "langchain"
-                    ? "orange"
-                    : "green"
+                      ? "orange"
+                      : "green"
                 }
               >
                 {tool?.source === "mcp"
                   ? t("toolPool.tag.mcp")
                   : tool?.source === "langchain"
-                  ? t("toolPool.tag.langchain")
-                  : t("toolPool.tag.local")}
+                    ? t("toolPool.tag.langchain")
+                    : t("toolPool.tag.local")}
               </Tag>
             </div>
           </div>
@@ -272,9 +226,20 @@ export default function ToolConfigModal({
         width={600}
         confirmLoading={isLoading}
         className="tool-config-modal-content"
+        style={
+          testPanelVisible
+            ? {
+                top: 100,
+                left: -320,
+                zIndex: 1100, // 设置相同的z-index
+              }
+            : {
+                zIndex: 1100, // 设置相同的z-index
+              }
+        }
         footer={
           <div className="flex justify-end items-center">
-            {(
+            {
               <button
                 onClick={handleTestTool}
                 disabled={!tool}
@@ -282,10 +247,10 @@ export default function ToolConfigModal({
               >
                 {t("toolConfig.button.testTool")}
               </button>
-            )}
+            }
             <div className="flex gap-2">
               <button
-                onClick={onCancel}
+                onClick={handleClose}
                 className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
               >
                 {t("common.button.cancel")}
@@ -309,58 +274,117 @@ export default function ToolConfigModal({
             {t("toolConfig.title.paramConfig")}
           </div>
           <div style={{ maxHeight: "500px", overflow: "auto" }}>
-            <div className="space-y-4 pr-2">
-              {currentParams.map((param, index) => (
-                <div
-                  key={param.name}
-                  className="border-b pb-4 mb-4 last:border-b-0 last:mb-0"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="flex-[0.3] pt-1">
-                      {param.name ? (
-                        <div className="text-sm text-gray-600">
+            <Form
+              form={form}
+              layout="horizontal"
+              labelAlign="right"
+              labelCol={{ span: 6 }}
+              wrapperCol={{ span: 18 }}
+            >
+              <div className="pr-2 mt-3">
+                {currentParams.map((param, index) => {
+                  const fieldName = `param_${index}`;
+                  const rules: any[] = [];
+
+                  // Add required validation rule
+                  if (param.required) {
+                    rules.push({
+                      required: true,
+                      message: t("toolConfig.validation.required", {
+                        name: param.name,
+                      }),
+                    });
+                  }
+
+                  // Add type-specific validation rules
+                  switch (param.type) {
+                    case TOOL_PARAM_TYPES.ARRAY:
+                      rules.push({
+                        validator: (_: any, value: any) => {
+                          if (!value) return Promise.resolve();
+                          try {
+                            const parsed =
+                              typeof value === "string"
+                                ? JSON.parse(value)
+                                : value;
+                            if (!Array.isArray(parsed)) {
+                              return Promise.reject(
+                                t("toolConfig.validation.array.invalid")
+                              );
+                            }
+                          } catch {
+                            return Promise.reject(
+                              t("toolConfig.validation.array.invalid")
+                            );
+                          }
+                        },
+                      });
+                      break;
+                    case TOOL_PARAM_TYPES.OBJECT:
+                      rules.push({
+                        validator: (_: any, value: any) => {
+                          if (!value) return Promise.resolve();
+                          try {
+                            const parsed =
+                              typeof value === "string"
+                                ? JSON.parse(value)
+                                : value;
+                            if (
+                              typeof parsed !== "object" ||
+                              Array.isArray(parsed)
+                            ) {
+                              return Promise.reject(
+                                t("toolConfig.validation.object.invalid")
+                              );
+                            }
+                            return Promise.resolve();
+                          } catch {
+                            return Promise.reject(
+                              t("toolConfig.validation.object.invalid")
+                            );
+                          }
+                        },
+                      });
+                      break;
+                  }
+
+                  return (
+                    <Form.Item
+                      key={param.name}
+                      label={
+                        <span
+                          className="inline-block w-full truncate"
+                          title={param.name}
+                        >
                           {param.name}
-                          {param.required && (
-                            <span className="text-red-500 ml-1">*</span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-600">
-                          {param.name}
-                          {param.required && (
-                            <span className="text-red-500 ml-1">*</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-[0.7]">
-                      <Tooltip
-                        title={param.description}
-                        placement="topLeft"
-                        styles={{ root: { maxWidth: 400 } }}
-                      >
-                        {renderParamInput(param, index)}
-                      </Tooltip>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                        </span>
+                      }
+                      name={fieldName}
+                      rules={rules}
+                      tooltip={{
+                        title: param.description,
+                        placement: "topLeft",
+                        styles: { root: { maxWidth: 400 } },
+                      }}
+                    >
+                      {renderParamInput(param, index)}
+                    </Form.Item>
+                  );
+                })}
+              </div>
+            </Form>
           </div>
         </div>
       </Modal>
-
       {/* Tool Test Panel */}
-      <ToolTestPanel
-        visible={testPanelVisible}
-        tool={tool}
-        currentParams={currentParams}
-        mainModalTop={mainModalTop}
-        mainModalRight={mainModalRight}
-        windowWidth={windowWidth}
-        onClose={handleCloseTestPanel}
-        onVisibilityChange={(visible) => setTestPanelVisible(visible)}
-      />
+      {testPanelVisible && (
+        <ToolTestPanel
+          visible={testPanelVisible}
+          tool={tool}
+          currentParams={currentParams}
+          onClose={handleCloseTestPanel}
+        />
+      )}
     </>
   );
 }
