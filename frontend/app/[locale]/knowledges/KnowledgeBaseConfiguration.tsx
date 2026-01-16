@@ -4,7 +4,7 @@ import type React from "react";
 import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal, Row, Col, theme } from "antd";
+import { App, Modal, Row, Col, theme, Button, Input, Form } from "antd";
 import {
   ExclamationCircleFilled,
   WarningFilled,
@@ -126,7 +126,58 @@ function DataConfig({ isActive }: DataConfigProps) {
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
     localStorage.removeItem("kb_cache");
+
+    // Load DataMate URL configuration
+    loadDataMateConfig();
   }, []);
+
+  // Load DataMate URL configuration
+  const loadDataMateConfig = async () => {
+    try {
+      const response = await fetch(API_ENDPOINTS.config.load, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const config = result.config;
+        console.log("Loaded config:", config);
+        // DataMate URL would be in the app config section
+        if (
+          config &&
+          config.app &&
+          typeof config.app.datamateUrl === "string"
+        ) {
+          console.log("Setting DataMate URL to:", config.app.datamateUrl);
+          setDataMateUrl(config.app.datamateUrl);
+        } else {
+          console.log("No DataMate URL found in config, setting to empty");
+          setDataMateUrl("");
+        }
+
+        // Set modelEngineEnabled from config
+        if (
+          config &&
+          config.app &&
+          typeof config.app.modelEngineEnabled === "boolean"
+        ) {
+          console.log(
+            "Setting modelEngineEnabled to:",
+            config.app.modelEngineEnabled
+          );
+          setModelEngineEnabled(config.app.modelEngineEnabled);
+        } else {
+          console.log(
+            "No modelEngineEnabled found in config, setting to false"
+          );
+          setModelEngineEnabled(false);
+        }
+      }
+    } catch (error) {
+      log.error("Failed to load DataMate configuration:", error);
+    }
+  };
 
   // Get context values
   const {
@@ -137,7 +188,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     selectKnowledgeBase,
     setActiveKnowledgeBase,
     isKnowledgeBaseSelectable,
+    hasKnowledgeBaseModelMismatch,
     refreshKnowledgeBaseData,
+    refreshKnowledgeBaseDataWithDataMate,
     loadUserSelectedKnowledgeBases,
     saveUserSelectedKnowledgeBases,
     dispatch: kbDispatch,
@@ -152,6 +205,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   } = useDocumentContext();
 
   const { state: uiState, setDragging, dispatch: uiDispatch } = useUIContext();
+
+  // Check if ModelEngine is enabled (from config API)
+  const [modelEngineEnabled, setModelEngineEnabled] = useState(false);
 
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
@@ -177,7 +233,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         setIsCreatingMode(false);
         setHasClickedUpload(false);
         setActiveKnowledgeBase(knowledgeBase);
-        fetchDocuments(knowledgeBase.id);
+        fetchDocuments(knowledgeBase.id, false, knowledgeBase.source);
       }
     };
 
@@ -275,9 +331,20 @@ function DataConfig({ isActive }: DataConfigProps) {
       // When component unmounts, if previously active and user has interacted, execute save
       if (prevIsActiveRef.current === true && hasUserInteractedRef.current) {
         // Use saved state instead of current potentially cleared state
-        const selectedKbNames = savedKnowledgeBasesRef.current
-          .filter((kb) => savedSelectedIdsRef.current.includes(kb.id))
-          .map((kb) => kb.id);
+        const selectedKnowledgeBases = savedKnowledgeBasesRef.current.filter(
+          (kb) => savedSelectedIdsRef.current.includes(kb.id)
+        );
+
+        // Group knowledge bases by source
+        const knowledgeBySource: { nexent?: string[]; datamate?: string[] } =
+          {};
+        selectedKnowledgeBases.forEach((kb) => {
+          const source = kb.source as keyof typeof knowledgeBySource;
+          if (!knowledgeBySource[source]) {
+            knowledgeBySource[source] = [];
+          }
+          knowledgeBySource[source]!.push(kb.id);
+        });
 
         try {
           // Use fetch with keepalive to ensure request can be sent during page unload
@@ -287,7 +354,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               "Content-Type": "application/json",
               ...getAuthHeaders(),
             },
-            body: JSON.stringify(selectedKbNames),
+            body: JSON.stringify(knowledgeBySource),
             keepalive: true,
           }).catch((error) => {
             log.error("卸载时保存失败:", error);
@@ -358,6 +425,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     const filtered = currentSelected.filter((id) => {
       const kb = kbState.knowledgeBases.find((k) => k.id === id);
       if (!kb) return false;
+      // DataMate knowledge bases are always allowed (skip model check)
+      if (kb.source === "datamate") return true;
       return allowedModels.has(kb.embeddingModel);
     });
 
@@ -375,7 +444,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   }, [
     isActive,
     kbState.isLoading,
-    kbState.selectedIds,
     kbState.knowledgeBases,
     modelConfig?.embedding?.modelName,
     modelConfig?.multiEmbedding?.modelName,
@@ -443,7 +511,10 @@ function DataConfig({ isActive }: DataConfigProps) {
       });
 
       // Get latest document data
-      const documents = await knowledgeBaseService.getAllFiles(kb.id);
+      const documents = await knowledgeBaseService.getAllFiles(
+        kb.id,
+        kb.source
+      );
 
       // Trigger document update event
       knowledgeBasePollingService.triggerDocumentsUpdate(kb.id, documents);
@@ -521,20 +592,95 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   };
 
-  // Handle knowledge base sync
-  const handleSync = () => {
-    // When manually syncing, force fetch latest data from server
-    refreshKnowledgeBaseData(true)
-      .then(() => {
-        message.success(t("knowledgeBase.message.syncSuccess"));
-      })
-      .catch((error) => {
-        message.error(
-          t("knowledgeBase.message.syncError", {
-            error: error.message || t("common.unknownError"),
-          })
-        );
+  // Handle knowledge base sync (includes both indices and DataMate sync and create records)
+  const handleSync = async () => {
+    // Set sync loading state
+    kbDispatch({
+      type: KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING,
+      payload: true,
+    });
+
+    try {
+      // Check if ModelEngine is enabled to determine sync behavior
+      if (modelEngineEnabled) {
+        // When ModelEngine is enabled, sync both local and DataMate knowledge bases
+        await refreshKnowledgeBaseDataWithDataMate();
+      } else {
+        // When ModelEngine is disabled, only sync local knowledge bases
+        await refreshKnowledgeBaseData(true);
+      }
+
+      // Use unified success message
+      message.success(t("knowledgeBase.message.syncSuccess"));
+    } catch (error) {
+      // Use unified error message
+      message.error(
+        t("knowledgeBase.message.syncError", {
+          error: (error as Error)?.message || t("common.unknownError"),
+        })
+      );
+    } finally {
+      // Clear sync loading state
+      kbDispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING,
+        payload: false,
       });
+    }
+  };
+
+  // Handle DataMate configuration
+  const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
+  const [dataMateUrl, setDataMateUrl] = useState("");
+
+  const handleDataMateConfig = () => {
+    setShowDataMateConfigModal(true);
+  };
+
+  const handleDataMateConfigSave = async () => {
+    try {
+      console.log("🔄 Saving DataMate URL:", dataMateUrl);
+
+      const response = await fetch(API_ENDPOINTS.config.saveDataMateUrl, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ datamate_url: dataMateUrl }),
+      });
+
+      console.log("📡 Save response status:", response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("❌ Save failed:", response.status, errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const responseData = await response.json();
+      console.log("✅ Save response data:", responseData);
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to save DataMate URL: ${response.status} ${response.statusText}`
+        );
+      }
+
+      message.success(t("knowledgeBase.message.dataMateConfigSaved"));
+
+      // Add a small delay to ensure database transaction is committed
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Reload DataMate configuration
+      console.log("Reloading DataMate configuration after save...");
+      await loadDataMateConfig();
+      console.log("DataMate URL after reload:", dataMateUrl);
+
+      // Trigger knowledge base sync with the new configuration
+      await handleSync();
+
+      setShowDataMateConfigModal(false);
+    } catch (error) {
+      log.error("Failed to save DataMate configuration:", error);
+      message.error(t("knowledgeBase.message.dataMateConfigError"));
+    }
   };
 
   // Handle new knowledge base creation
@@ -846,11 +992,14 @@ function DataConfig({ isActive }: DataConfigProps) {
               activeKnowledgeBase={kbState.activeKnowledgeBase}
               currentEmbeddingModel={kbState.currentEmbeddingModel}
               isLoading={kbState.isLoading}
+              syncLoading={kbState.syncLoading}
               onSelect={handleSelectKnowledgeBase}
               onClick={handleKnowledgeBaseClick}
               onDelete={handleDelete}
               onSync={handleSync}
               onCreateNew={handleCreateNew}
+              onDataMateConfig={handleDataMateConfig}
+              showDataMateConfig={modelEngineEnabled}
               isSelectable={isKnowledgeBaseSelectable}
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
@@ -891,13 +1040,13 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onDelete={handleDeleteDocument}
                 knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
-                modelMismatch={
-                  !isKnowledgeBaseSelectable(kbState.activeKnowledgeBase)
-                }
+                modelMismatch={hasKnowledgeBaseModelMismatch(
+                  kbState.activeKnowledgeBase
+                )}
                 currentModel={kbState.currentEmbeddingModel || ""}
                 knowledgeBaseModel={kbState.activeKnowledgeBase.embeddingModel}
                 embeddingModelInfo={
-                  !isKnowledgeBaseSelectable(kbState.activeKnowledgeBase)
+                  hasKnowledgeBaseModelMismatch(kbState.activeKnowledgeBase)
                     ? t("document.modelMismatch.withModels", {
                         currentModel: kbState.currentEmbeddingModel || "",
                         knowledgeBaseModel:
@@ -967,6 +1116,39 @@ function DataConfig({ isActive }: DataConfigProps) {
               {t("embedding.knowledgeBaseAutoDeselectModal.content")}
             </div>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={showDataMateConfigModal}
+        title={t("knowledgeBase.modal.dataMateConfig.title")}
+        onOk={handleDataMateConfigSave}
+        onCancel={() => {
+          setShowDataMateConfigModal(false);
+          // Reload config to ensure we have the latest values
+          loadDataMateConfig();
+        }}
+        okText={t("common.save")}
+        cancelText={t("common.cancel")}
+        centered
+        getContainer={() => contentRef.current || document.body}
+        confirmLoading={kbState.syncLoading}
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-gray-600">
+            {t("knowledgeBase.modal.dataMateConfig.description")}
+          </div>
+          <Form layout="vertical">
+            <Form.Item label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}>
+              <Input
+                value={dataMateUrl}
+                onChange={(e) => setDataMateUrl(e.target.value)}
+                placeholder={t(
+                  "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
+                )}
+              />
+            </Form.Item>
+          </Form>
         </div>
       </Modal>
     </>

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -244,7 +244,7 @@ class KnowledgeRecord(TableBase):
     __tablename__ = "knowledge_record_t"
     __table_args__ = {"schema": "nexent"}
 
-    knowledge_id = Column(Integer, Sequence("knowledge_record_t_knowledge_id_seq", schema="nexent"),
+    knowledge_id = Column(BigInteger, Sequence("knowledge_record_t_knowledge_id_seq", schema="nexent"),
                           primary_key=True, nullable=False, doc="Knowledge base ID, unique primary key")
     index_name = Column(String(100), doc="Internal Elasticsearch index name")
     knowledge_name = Column(String(100), doc="User-facing knowledge base name")

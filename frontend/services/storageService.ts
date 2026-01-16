@@ -1,7 +1,7 @@
-import { API_ENDPOINTS } from './api';
-import { StorageUploadResult } from '../types/chat';
+import { API_ENDPOINTS } from "./api";
+import { StorageUploadResult } from "../types/chat";
 
-import { fetchWithAuth } from '@/lib/auth';
+import { fetchWithAuth } from "@/lib/auth";
 // @ts-ignore
 const fetch = fetchWithAuth;
 
@@ -23,23 +23,23 @@ export function extractObjectNameFromUrl(url: string): string | null {
       // Remove s3:// prefix
       const withoutProtocol = url.replace(/^s3:\/\//, "");
       const parts = withoutProtocol.split("/").filter(Boolean);
-      
+
       // Find attachments in path
       const attachmentsIndex = parts.indexOf("attachments");
       if (attachmentsIndex >= 0) {
         return parts.slice(attachmentsIndex).join("/");
       }
-      
+
       // If no attachments found but has bucket and path, return the path after bucket
       if (parts.length > 1) {
         return parts.slice(1).join("/");
       }
-      
+
       // If only one part, return it as object_name
       if (parts.length === 1) {
         return parts[0];
       }
-      
+
       return null;
     }
 
@@ -113,7 +113,7 @@ export function convertImageUrlToApiUrl(url: string): string {
     // Use backend proxy to fetch external images (avoids CORS and hotlink protection)
     return API_ENDPOINTS.proxy.image(url);
   }
-  
+
   const objectName = extractObjectNameFromUrl(url);
   if (objectName) {
     // Use the same download endpoint with stream mode for images
@@ -137,7 +137,9 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
 };
 
 const fetchBase64ViaStorage = async (objectName: string) => {
-  const response = await fetch(API_ENDPOINTS.storage.file(objectName, "base64"));
+  const response = await fetch(
+    API_ENDPOINTS.storage.file(objectName, "base64")
+  );
   if (!response.ok) {
     throw new Error(`Failed to resolve S3 URL via storage: ${response.status}`);
   }
@@ -155,7 +157,9 @@ const fetchBase64ViaStorage = async (objectName: string) => {
 const s3ResolutionCache = new Map<string, Promise<string | null>>();
 
 // Internal helper: for s3:// URLs, resolve directly via storage download endpoint.
-async function resolveS3UrlToDataUrlInternal(url: string): Promise<string | null> {
+async function resolveS3UrlToDataUrlInternal(
+  url: string
+): Promise<string | null> {
   const objectName = extractObjectNameFromUrl(url);
   if (!objectName) {
     return null;
@@ -165,7 +169,9 @@ async function resolveS3UrlToDataUrlInternal(url: string): Promise<string | null
   return `data:${contentType};base64,${base64}`;
 }
 
-export async function resolveS3UrlToDataUrl(url: string): Promise<string | null> {
+export async function resolveS3UrlToDataUrl(
+  url: string
+): Promise<string | null> {
   if (!url || !url.startsWith("s3://")) {
     return null;
   }
@@ -194,32 +200,34 @@ export const storageService = {
    */
   async uploadFiles(
     files: File[],
-    folder: string = 'attachments'
+    folder: string = "attachments"
   ): Promise<StorageUploadResult> {
     // Create FormData object
     const formData = new FormData();
-    
+
     // Add files
-    files.forEach(file => {
-      formData.append('files', file);
+    files.forEach((file) => {
+      formData.append("files", file);
     });
-    
+
     // Add folder parameter
-    formData.append('folder', folder);
-    
+    formData.append("folder", folder);
+
     // Send request
     const response = await fetch(API_ENDPOINTS.storage.upload, {
-      method: 'POST',
+      method: "POST",
       body: formData,
     });
-    
+
     if (!response.ok) {
-      throw new Error(`Failed to upload files to Minio: ${response.statusText}`);
+      throw new Error(
+        `Failed to upload files to Minio: ${response.statusText}`
+      );
     }
-    
+
     return await response.json();
   },
-  
+
   /**
    * Get the URL of a single file
    * @param objectName File object name
@@ -227,15 +235,17 @@ export const storageService = {
    */
   async getFileUrl(objectName: string): Promise<string> {
     const response = await fetch(API_ENDPOINTS.storage.file(objectName));
-    
+
     if (!response.ok) {
-      throw new Error(`Failed to get file URL from Minio: ${response.statusText}`);
+      throw new Error(
+        `Failed to get file URL from Minio: ${response.statusText}`
+      );
     }
-    
+
     const data = await response.json();
     return data.url;
   },
-  
+
   /**
    * Download file directly using backend API (faster, browser handles download)
    * @param objectName File object name
@@ -247,8 +257,12 @@ export const storageService = {
       // Use direct link download for better performance
       // Browser will handle the download stream directly
       // Pass filename to backend so it can set the correct Content-Disposition header
-      const downloadUrl = API_ENDPOINTS.storage.file(objectName, "stream", filename);
-      
+      const downloadUrl = API_ENDPOINTS.storage.file(
+        objectName,
+        "stream",
+        filename
+      );
+
       // Create download link and trigger download
       // Using direct link allows browser to handle download stream efficiently
       const link = document.createElement("a");
@@ -257,19 +271,21 @@ export const storageService = {
       link.download = filename || objectName.split("/").pop() || "download";
       link.style.display = "none";
       document.body.appendChild(link);
-      
+
       // Trigger download
       link.click();
-      
+
       // Clean up after a short delay to ensure download starts
       setTimeout(() => {
         document.body.removeChild(link);
       }, 100);
     } catch (error) {
-      throw new Error(`Failed to download file: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to download file: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   },
-  
+
   /**
    * Download file from Datamate knowledge base via HTTP URL
    * @param url HTTP URL of the file to download
@@ -283,6 +299,17 @@ export const storageService = {
     fileId?: string;
     filename?: string;
   }): Promise<void> {
+    // Check if ModelEngine is enabled before calling DataMate APIs
+    const modelEngineEnabled =
+      (typeof window !== "undefined" &&
+        window.__ENV__?.MODEL_ENGINE_ENABLED) === "true";
+
+    if (!modelEngineEnabled) {
+      throw new Error(
+        "DataMate download not available: MODEL_ENGINE_ENABLED is not true"
+      );
+    }
+
     try {
       const downloadUrl = API_ENDPOINTS.storage.datamateDownload(options);
       const link = document.createElement("a");
@@ -300,7 +327,9 @@ export const storageService = {
         document.body.removeChild(link);
       }, 100);
     } catch (error) {
-      throw new Error(`Failed to download datamate file: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to download datamate file: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
-  }
-}; 
+  },
+};

@@ -23,8 +23,9 @@ from fastapi.responses import StreamingResponse
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
+from consts.const import DATAMATE_URL, DEFAULT_TENANT_ID, DEFAULT_USER_ID, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -90,12 +91,14 @@ logger = logging.getLogger("vectordatabase_service")
 
 def get_vector_db_core(
     db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH,
+    tenant_id: Optional[str] = None,
 ) -> VectorDatabaseCore:
     """
     Return a VectorDatabaseCore implementation based on the requested type.
 
     Args:
         db_type: Target vector database provider. Defaults to Elasticsearch.
+        tenant_id: Tenant ID for configuration lookup (required for DataMate).
 
     Returns:
         VectorDatabaseCore: Concrete vector database implementation.
@@ -110,6 +113,17 @@ def get_vector_db_core(
             verify_certs=False,
             ssl_show_warn=False,
         )
+
+    if db_type == VectorDatabaseType.DATAMATE:
+        if tenant_id:
+            datamate_url = tenant_config_manager.get_app_config(
+                DATAMATE_URL, tenant_id=tenant_id)
+            if not datamate_url:
+                raise ValueError(
+                    f"DataMate URL not configured for tenant {tenant_id}")
+            return DataMateCore(base_url=datamate_url)
+        else:
+            raise ValueError("tenant_id must be provided for DataMate")
 
     raise ValueError(f"Unsupported vector database type: {db_type}")
 
@@ -486,9 +500,13 @@ class ElasticSearchService:
 
         for record in all_db_records:
             index_name = record["index_name"]
-
+            if record['knowledge_sources'] == 'datamate':
+                continue
             # Check if index exists in Elasticsearch (skip if not found)
             if index_name not in es_indices_list:
+                # # async PG database to sync ES, remove the data that is not in ES
+                # delete_knowledge_record(
+                #     {"index_name": record["index_name"], "user_id": user_id})
                 continue
 
             # Check permission based on user role
@@ -528,7 +546,8 @@ class ElasticSearchService:
                     has_group_intersection = True
                 else:
                     # Normal intersection check
-                    has_group_intersection = bool(set(user_group_ids) & set(kb_group_ids))
+                    has_group_intersection = bool(
+                        set(user_group_ids) & set(kb_group_ids))
 
                 if has_group_intersection:
                     # Determine permission level
@@ -557,8 +576,10 @@ class ElasticSearchService:
                         record["group_ids"])
                 else:
                     # If no group_ids specified, use tenant default group
-                    default_group_id = get_tenant_default_group_id(record.get("tenant_id"))
-                    record_with_permission["group_ids"] = [default_group_id] if default_group_id else []
+                    default_group_id = get_tenant_default_group_id(
+                        record.get("tenant_id"))
+                    record_with_permission["group_ids"] = [
+                        default_group_id] if default_group_id else []
                 visible_knowledgebases.append(record_with_permission)
 
                 # Track records with missing embedding model for stats update
@@ -1060,7 +1081,8 @@ class ElasticSearchService:
                                      ..., description="Name of the index to get documents from"),
                                  batch_size: int = Query(
                                      1000, description="Number of documents to retrieve per batch"),
-                                 vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+                                 vdb_core: VectorDatabaseCore = Depends(
+                                     get_vector_db_core),
                                  user_id: Optional[str] = Body(
                                      None, description="ID of the user delete the knowledge base"),
                                  tenant_id: Optional[str] = Body(
@@ -1091,7 +1113,8 @@ class ElasticSearchService:
         """
         try:
             if not tenant_id:
-                raise Exception("Tenant ID is required for summary generation.")
+                raise Exception(
+                    "Tenant ID is required for summary generation.")
 
             from utils.document_vector_utils import (
                 process_documents_for_clustering,
@@ -1101,7 +1124,8 @@ class ElasticSearchService:
             )
 
             # Use new Map-Reduce approach
-            sample_count = min(batch_size // 5, 200)  # Sample reasonable number of documents
+            # Sample reasonable number of documents
+            sample_count = min(batch_size // 5, 200)
 
             # Define a helper function to run all blocking operations in a thread pool
             def _generate_summary_sync():
@@ -1160,7 +1184,8 @@ class ElasticSearchService:
             )
 
         except Exception as e:
-            logger.error(f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
+            logger.error(
+                f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate summary: {str(e)}")
 
     @staticmethod

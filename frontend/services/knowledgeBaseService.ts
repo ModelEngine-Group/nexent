@@ -41,64 +41,137 @@ class KnowledgeBaseService {
     }
   }
 
-  // Get knowledge bases with stats (very slow, don't use it)
+  // Sync DataMate knowledge bases and create local records
+  async syncDataMateAndCreateRecords(): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+    created_records: any[];
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.datamate.syncDatamateKnowledges,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail ||
+            "Failed to sync DataMate knowledge bases and create records"
+        );
+      }
+
+      return data;
+    } catch (error) {
+      log.error(
+        "Failed to sync DataMate knowledge bases and create records:",
+        error
+      );
+      throw error;
+    }
+  }
+
+  // Get knowledge bases with stats from all sources (very slow, don't use it)
   async getKnowledgeBasesInfo(
     skipHealthCheck = false
   ): Promise<KnowledgeBase[]> {
     try {
-      // First check Elasticsearch health (unless skipped)
-      if (!skipHealthCheck) {
-        const isElasticsearchHealthy = await this.checkHealth();
-        if (!isElasticsearchHealthy) {
-          log.warn("Elasticsearch service unavailable");
-          return [];
-        }
-      }
-
-      let knowledgeBases: KnowledgeBase[] = [];
+      const knowledgeBases: KnowledgeBase[] = [];
 
       // Get knowledge bases from Elasticsearch
       try {
-        const response = await fetch(
-          `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
-          {
-            headers: getAuthHeaders(),
+        // First check Elasticsearch health (unless skipped)
+        if (!skipHealthCheck) {
+          const isElasticsearchHealthy = await this.checkHealth();
+          if (!isElasticsearchHealthy) {
+            log.warn("Elasticsearch service unavailable");
+          } else {
+            const response = await fetch(
+              `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
+              {
+                headers: getAuthHeaders(),
+              }
+            );
+            const data = await response.json();
+
+            if (data.indices && data.indices_info) {
+              // Convert Elasticsearch indices to knowledge base format
+              const esKnowledgeBases = data.indices_info.map(
+                (indexInfo: any) => {
+                  const stats = indexInfo.stats?.base_info || {};
+                  // Backend now returns:
+                  // - name: internal index_name
+                  // - display_name: user-facing knowledge_name (fallback to index_name)
+                  const kbId = indexInfo.name;
+                  const kbName = indexInfo.display_name || indexInfo.name;
+
+                  return {
+                    id: kbId,
+                    name: kbName,
+                    description: "Elasticsearch index",
+                    documentCount: stats.doc_count || 0,
+                    chunkCount: stats.chunk_count || 0,
+                    createdAt: stats.creation_date || null,
+                    updatedAt: stats.update_date || stats.creation_date || null,
+                    embeddingModel: stats.embedding_model || "unknown",
+                    avatar: "",
+                    chunkNum: 0,
+                    language: "",
+                    nickname: "",
+                    parserId: "",
+                    permission: "",
+                    tokenNum: 0,
+                    source: "nexent",
+                  };
+                }
+              );
+              knowledgeBases.push(...esKnowledgeBases);
+            }
           }
-        );
-        const data = await response.json();
-
-        if (data.indices && data.indices_info) {
-          // Convert Elasticsearch indices to knowledge base format
-          knowledgeBases = data.indices_info.map((indexInfo: any) => {
-            const stats = indexInfo.stats?.base_info || {};
-            // Backend now returns:
-            // - name: internal index_name
-            // - display_name: user-facing knowledge_name (fallback to index_name)
-            const kbId = indexInfo.name;
-            const kbName = indexInfo.display_name || indexInfo.name;
-
-            return {
-              id: kbId,
-              name: kbName,
-              description: "Elasticsearch index",
-              documentCount: stats.doc_count || 0,
-              chunkCount: stats.chunk_count || 0,
-              createdAt: stats.creation_date || null,
-              updatedAt: stats.update_date || stats.creation_date || null,
-              embeddingModel: stats.embedding_model || "unknown",
-              avatar: "",
-              chunkNum: 0,
-              language: "",
-              nickname: "",
-              parserId: "",
-              permission: "",
-              tokenNum: 0,
-              source: "elasticsearch",
-            };
-          });
         }
       } catch (error) {
         log.error("Failed to get Elasticsearch indices:", error);
+      }
+
+      // Sync DataMate knowledge bases and get the synced data
+      try {
+        const syncResult = await this.syncDataMateAndCreateRecords();
+        if (syncResult.indices_info) {
+          // Convert synced DataMate indices to knowledge base format
+          const datamateKnowledgeBases: KnowledgeBase[] =
+            syncResult.indices_info.map((indexInfo: any) => {
+              const stats = indexInfo.stats?.base_info || {};
+              const kbId = indexInfo.name;
+              const kbName = indexInfo.display_name || indexInfo.name;
+
+              return {
+                id: kbId,
+                name: kbName,
+                description: "DataMate knowledge base",
+                documentCount: stats.doc_count || 0,
+                chunkCount: stats.chunk_count || 0,
+                createdAt: stats.creation_date || null,
+                updatedAt: stats.update_date || stats.creation_date || null,
+                embeddingModel: stats.embedding_model || "unknown",
+                avatar: "",
+                chunkNum: 0,
+                language: "",
+                nickname: "",
+                parserId: "",
+                permission: "",
+                tokenNum: 0,
+                source: "datamate",
+              };
+            });
+          knowledgeBases.push(...datamateKnowledgeBases);
+        }
+      } catch (error) {
+        log.error("Failed to sync DataMate knowledge bases:", error);
       }
 
       return knowledgeBases;
@@ -256,15 +329,25 @@ class KnowledgeBaseService {
   }
 
   // Get all files from a knowledge base, regardless of the existence of index
-  async getAllFiles(kbId: string): Promise<Document[]> {
+  async getAllFiles(kbId: string, kbSource?: string): Promise<Document[]> {
     try {
-      const response = await fetch(
-        API_ENDPOINTS.knowledgeBase.listFiles(kbId),
-        {
+      let response: Response;
+      let result: any;
+
+      // Determine which API to call based on knowledge base source
+      if (kbSource === "datamate") {
+        // Call DataMate files API
+        response = await fetch(API_ENDPOINTS.datamate.files(kbId), {
           headers: getAuthHeaders(),
-        }
-      );
-      const result = await response.json();
+        });
+        result = await response.json();
+      } else {
+        // Call Elasticsearch files API (default behavior)
+        response = await fetch(API_ENDPOINTS.knowledgeBase.listFiles(kbId), {
+          headers: getAuthHeaders(),
+        });
+        result = await response.json();
+      }
 
       if (result.status !== "success") {
         throw new Error("Failed to get file list");
