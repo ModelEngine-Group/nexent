@@ -49,23 +49,37 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
             return groups
 
 
-def query_groups_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     """
-    Query all groups for a tenant
+    Query groups for a tenant with pagination
 
     Args:
         tenant_id (str): Tenant ID
+        page (int): Page number (1-based)
+        page_size (int): Number of items per page
 
     Returns:
-        List[Dict[str, Any]]: List of group records
+        Dict[str, Any]: Dictionary containing groups list and total count
     """
+    offset = (page - 1) * page_size
+
     with get_db_session() as session:
+        # Get total count
+        total = session.query(TenantGroupInfo).filter(
+            TenantGroupInfo.tenant_id == tenant_id,
+            TenantGroupInfo.delete_flag == "N"
+        ).count()
+
+        # Get paginated results
         result = session.query(TenantGroupInfo).filter(
             TenantGroupInfo.tenant_id == tenant_id,
             TenantGroupInfo.delete_flag == "N"
-        ).all()
+        ).offset(offset).limit(page_size).all()
 
-        return [as_dict(record) for record in result]
+        return {
+            "groups": [as_dict(record) for record in result],
+            "total": total
+        }
 
 
 def add_group(tenant_id: str, group_name: str, group_description: Optional[str] = None,

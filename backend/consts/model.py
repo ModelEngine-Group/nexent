@@ -527,6 +527,8 @@ class SetDefaultGroupRequest(BaseModel):
 # ---------------------------------------------------------------------------
 class InvitationCreateRequest(BaseModel):
     """Request model for creating invitation code"""
+    tenant_id: str = Field(
+        ..., min_length=1, description="Tenant ID where the invitation belongs")
     code_type: str = Field(
         ..., description="Invitation code type (ADMIN_INVITE, DEV_INVITE, USER_INVITE)")
     invitation_code: Optional[str] = Field(

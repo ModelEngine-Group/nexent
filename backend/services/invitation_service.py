@@ -14,7 +14,8 @@ from database.invitation_db import (
     modify_invitation,
     add_invitation_record,
     count_invitation_usage,
-    query_invitations_with_pagination
+    query_invitations_with_pagination,
+    remove_invitation
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
@@ -167,6 +168,47 @@ def update_invitation_code(
     return success
 
 
+def delete_invitation_code(invitation_id: int, user_id: str) -> bool:
+    """
+    Delete invitation code (soft delete).
+
+    Args:
+        invitation_id (int): Invitation ID to delete
+        user_id (str): Current user ID for permission checks
+
+    Returns:
+        bool: Whether deletion was successful
+
+    Raises:
+        UnauthorizedError: When user doesn't have permission to delete
+        NotFoundException: When invitation not found
+    """
+    # Check user permission
+    user_info = get_user_tenant_by_user_id(user_id)
+    if not user_info:
+        raise UnauthorizedError(f"User {user_id} not found")
+
+    user_role = user_info.get("user_role", "USER")
+    if user_role not in ["SU", "ADMIN"]:
+        raise UnauthorizedError(
+            f"User role {user_role} not authorized to delete invitation codes")
+
+    # Check if invitation exists
+    invitation_info = query_invitation_by_id(invitation_id)
+    if not invitation_info:
+        raise NotFoundException(f"Invitation {invitation_id} not found")
+
+    # Delete invitation code
+    success = remove_invitation(
+        invitation_id=invitation_id, updated_by=user_id)
+
+    if success:
+        logger.info(
+            f"Deleted invitation code {invitation_id} by user {user_id}")
+
+    return success
+
+
 def _normalize_invitation_data(invitation_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize invitation data types for consistent API responses.
@@ -215,7 +257,59 @@ def get_invitation_by_code(invitation_code: str) -> Optional[Dict[str, Any]]:
         Optional[Dict[str, Any]]: Invitation code information or None if not found
     """
     invitation_data = query_invitation_by_code(invitation_code)
+    if invitation_data:
+        # Calculate current status to ensure expiry and capacity checks are current
+        invitation_data = _calculate_current_status(invitation_data)
     return _normalize_invitation_data(invitation_data) if invitation_data else None
+
+
+def _calculate_current_status(invitation_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculate the current status of an invitation based on expiry and usage.
+
+    Args:
+        invitation_data: Raw invitation data from database
+
+    Returns:
+        Updated invitation data with current status
+    """
+    if not invitation_data:
+        return invitation_data
+
+    invitation_id = invitation_data.get("invitation_id")
+    if not invitation_id:
+        return invitation_data
+
+    current_time = datetime.now()
+    expiry_date = invitation_data.get("expiry_date")
+    capacity = int(invitation_data.get("capacity", 1))
+
+    # Get usage count
+    usage_count = count_invitation_usage(invitation_id)
+    current_status = invitation_data.get("status", "IN_USE")
+
+    new_status = current_status
+
+    # Check expiry
+    if expiry_date:
+        try:
+            if isinstance(expiry_date, datetime):
+                expiry_datetime = expiry_date
+            else:
+                expiry_datetime = datetime.fromisoformat(
+                    str(expiry_date).replace('Z', '+00:00'))
+            if current_time > expiry_datetime:
+                new_status = "EXPIRE"
+        except (ValueError, AttributeError, TypeError):
+            logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
+
+    # Check capacity
+    if usage_count >= capacity:
+        new_status = "RUN_OUT"
+
+    # Update status in the data dict
+    invitation_data["status"] = new_status
+    return invitation_data
 
 
 def check_invitation_available(invitation_code: str) -> bool:

@@ -24,7 +24,7 @@ from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEm
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 
-from consts.const import ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
+from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -131,12 +131,12 @@ def _rethrow_or_plain(exc: Exception) -> None:
     raise Exception(msg)
 
 
-def check_knowledge_base_exist_impl(index_name: str, vdb_core: VectorDatabaseCore, user_id: str, tenant_id: str) -> dict:
+def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabaseCore, user_id: str, tenant_id: str) -> dict:
     """
     Check knowledge base existence and handle orphan cases
 
     Args:
-        index_name: Name of the index to check
+        knowledge_name: Name of the knowledge base to check
         vdb_core: Elasticsearch core instance
         user_id: Current user ID
         tenant_id: Current tenant ID
@@ -144,59 +144,16 @@ def check_knowledge_base_exist_impl(index_name: str, vdb_core: VectorDatabaseCor
     Returns:
         dict: Status information about the knowledge base
     """
-    # 1. Check index existence in ES and corresponding record in PG
-    es_exists = vdb_core.check_index_exists(index_name)
-    pg_record = get_knowledge_record({"index_name": index_name})
+    # 1. Check if knowledge_name exists in PG for the current tenant
+    pg_record = get_knowledge_record(
+        {"knowledge_name": knowledge_name, "tenant_id": tenant_id})
 
-    # Case A: Orphan in ES only (exists in ES, missing in PG)
-    if es_exists and not pg_record:
-        logger.warning(
-            f"Detected orphan knowledge base '{index_name}' – present in ES, absent in PG. Deleting ES index only.")
-        try:
-            vdb_core.delete_index(index_name)
-            # Clean up Redis records related to this index to avoid stale tasks
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup = redis_service.delete_knowledgebase_records(
-                    index_name)
-                logger.debug(
-                    f"Redis cleanup for orphan index '{index_name}': {redis_cleanup['total_deleted']} records removed")
-            except Exception as redis_error:
-                logger.warning(
-                    f"Redis cleanup failed for orphan index '{index_name}': {str(redis_error)}")
-            return {
-                "status": "error_cleaning_orphans",
-                "action": "cleaned_es"
-            }
-        except Exception as e:
-            logger.error(
-                f"Failed to delete orphan ES index '{index_name}': {str(e)}")
-            # Still return orphan status so frontend knows it requires attention
-            return {"status": "error_cleaning_orphans", "error": True}
-
-    # Case B: Orphan in PG only (missing in ES, present in PG)
-    if not es_exists and pg_record:
-        logger.warning(
-            f"Detected orphan knowledge base '{index_name}' – present in PG, absent in ES. Deleting PG record only.")
-        try:
-            delete_knowledge_record(
-                {"index_name": index_name, "user_id": user_id})
-            return {"status": "error_cleaning_orphans", "action": "cleaned_pg"}
-        except Exception as e:
-            logger.error(
-                f"Failed to delete orphan PG record for '{index_name}': {str(e)}")
-            return {"status": "error_cleaning_orphans", "error": True}
-
-    # Case C: Index/record both absent -> name is available
-    if not es_exists and not pg_record:
-        return {"status": "available"}
-
-    # Case D: Index and record both exist – check tenant ownership
-    record_tenant_id = pg_record.get('tenant_id') if pg_record else None
-    if str(record_tenant_id) == str(tenant_id):
+    # Case A: Knowledge base name already exists in the same tenant
+    if pg_record:
         return {"status": "exists_in_tenant"}
-    else:
-        return {"status": "exists_in_other_tenant"}
+
+    # Case B: Name is available in this tenant
+    return {"status": "available"}
 
 
 def get_embedding_model(tenant_id: str):
@@ -537,14 +494,20 @@ class ElasticSearchService:
             # Check permission based on user role
             permission = None
 
-            if user_role == "SU":
+            # Fallback logic: if user_id equals tenant_id, treat as legacy admin user
+            # even if user_role is None or empty
+            effective_user_role = user_role
+            if user_id == tenant_id:
+                effective_user_role = "ADMIN"
+                logger.info(f"User {user_id} identified as legacy admin")
+            elif user_id == DEFAULT_USER_ID and tenant_id == DEFAULT_TENANT_ID:
+                effective_user_role = "ADMIN"
+                logger.info("User under SPEED version is treated as admin")
+
+            if effective_user_role in ["SU", "ADMIN"] :
                 # SU can see all knowledgebases
                 permission = "EDIT"
-            elif user_role == "ADMIN":
-                # ADMIN can see all knowledgebases in their tenant
-                if record.get("tenant_id") == user_tenant_id:
-                    permission = "EDIT"
-            elif user_role in ["USER", "DEV"]:
+            elif effective_user_role in ["USER", "DEV"]:
                 # USER/DEV need group-based permission checking
                 kb_group_ids_str = record.get("group_ids")
                 kb_group_ids = convert_string_to_list(kb_group_ids_str or "")

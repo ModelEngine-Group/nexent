@@ -3,7 +3,7 @@ import sys
 import os
 import time
 import unittest
-from unittest.mock import MagicMock, ANY, AsyncMock
+from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
 from unittest.mock import patch
 import numpy as np
@@ -680,6 +680,122 @@ class TestElasticSearchService(unittest.TestCase):
         # When include_stats=True, indices_info contains the detailed info with permissions
         self.assertIn("index1", result["indices"])
         self.assertIn("index2", result["indices"])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_fallback_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test the fallback admin logic when user_id equals tenant_id.
+
+        This test verifies that:
+        1. When user_id equals tenant_id, user is treated as legacy admin regardless of user_role
+        2. Legacy admin gets EDIT permission on all knowledgebases in their tenant
+        3. Debug log is recorded for legacy admin identification
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "tenant_id": "legacy_admin_user"  # Same as user_id
+            },
+            {
+                "index_name": "index2",
+                "embedding_model_name": "test-model",
+                "group_ids": "3",
+                "tenant_id": "legacy_admin_user"  # Same as user_id
+            }
+        ]
+        # user_role is None to test fallback logic
+        mock_get_user_tenant.return_value = {
+            "user_role": None, "tenant_id": "legacy_admin_user"}
+        mock_get_group_ids.return_value = []
+
+        # Execute
+        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+            result = ElasticSearchService.list_indices(
+                pattern="*",
+                include_stats=True,  # Need stats to see permissions
+                tenant_id="legacy_admin_user",
+                user_id="legacy_admin_user",  # user_id equals tenant_id
+                vdb_core=self.mock_vdb_core
+            )
+
+        # Assert
+        self.assertEqual(len(result["indices"]), 2)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(len(result["indices_info"]), 2)
+
+        # Both knowledgebases should have EDIT permission due to legacy admin fallback
+        for kb_info in result["indices_info"]:
+            self.assertEqual(kb_info["permission"], "EDIT")
+
+        # Verify info log was called once for each index for legacy admin identification
+        mock_logger.info.assert_has_calls([
+            call("User legacy_admin_user identified as legacy admin"),
+            call("User legacy_admin_user identified as legacy admin")
+        ])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_speed_version_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test the SPEED version admin logic when user is default user and tenant is default tenant.
+
+        This test verifies that:
+        1. When user_id equals DEFAULT_USER_ID and tenant_id equals DEFAULT_TENANT_ID, user is treated as admin
+        2. SPEED version admin gets EDIT permission on all knowledgebases in their tenant
+        3. Info log is recorded for SPEED version admin identification
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "tenant_id": "tenant_id"  # DEFAULT_TENANT_ID
+            },
+            {
+                "index_name": "index2",
+                "embedding_model_name": "test-model",
+                "group_ids": "3",
+                "tenant_id": "tenant_id"  # DEFAULT_TENANT_ID
+            }
+        ]
+        # user_role is USER but should be overridden by SPEED logic
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "tenant_id"}  # DEFAULT_TENANT_ID
+        mock_get_group_ids.return_value = []
+
+        # Execute
+        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+            result = ElasticSearchService.list_indices(
+                pattern="*",
+                include_stats=True,  # Need stats to see permissions
+                tenant_id="tenant_id",  # DEFAULT_TENANT_ID
+                user_id="user_id",  # DEFAULT_USER_ID
+                vdb_core=self.mock_vdb_core
+            )
+
+        # Assert
+        self.assertEqual(len(result["indices"]), 2)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(len(result["indices_info"]), 2)
+
+        # Both knowledgebases should have EDIT permission due to SPEED version admin logic
+        for kb_info in result["indices_info"]:
+            self.assertEqual(kb_info["permission"], "EDIT")
+
+        # Verify info log was called once for each index for SPEED version admin identification
+        mock_logger.info.assert_has_calls([
+            call("User under SPEED version is treated as admin"),
+            call("User under SPEED version is treated as admin")
+        ])
 
     def test_vectorize_documents_success(self):
         """
@@ -2361,187 +2477,54 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         mock_get_record.assert_called_once_with({'index_name': 'test_index'})
 
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_check_kb_exist_orphan_in_es(self, mock_get_knowledge, mock_get_redis_service):
-        """Test handling of orphaned knowledge base existing only in Elasticsearch."""
-        # Setup: ES index exists, PG record missing
-        self.mock_vdb_core.check_index_exists.return_value = True
-        mock_get_knowledge.return_value = None
-
-        # Mock Redis service
-        mock_redis_service = MagicMock()
-        mock_redis_service.delete_knowledgebase_records.return_value = {
-            "total_deleted": 1}
-        mock_get_redis_service.return_value = mock_redis_service
-
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            index_name="test_index",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert
-        self.mock_vdb_core.delete_index.assert_called_once_with("test_index")
-        mock_redis_service.delete_knowledgebase_records.assert_called_once_with(
-            "test_index")
-        self.assertEqual(result["status"], "error_cleaning_orphans")
-        self.assertEqual(result["action"], "cleaned_es")
-
-    @patch('backend.services.vectordatabase_service.delete_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_check_kb_exist_orphan_in_pg(self, mock_get_knowledge, mock_delete_record):
-        """Test handling of orphaned knowledge base existing only in PostgreSQL."""
-        # Setup: ES index missing, PG record exists
-        self.mock_vdb_core.check_index_exists.return_value = False
-        mock_get_knowledge.return_value = {
-            "index_name": "test_index", "tenant_id": "tenant1"}
-        mock_delete_record.return_value = True
-
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            index_name="test_index",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert
-        mock_delete_record.assert_called_once()
-        self.assertEqual(result["status"], "error_cleaning_orphans")
-        self.assertEqual(result["action"], "cleaned_pg")
-
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     def test_check_kb_exist_available(self, mock_get_knowledge):
-        """Test knowledge base name availability when neither ES nor PG has the record."""
-        # Setup: ES index missing, PG record missing
-        self.mock_vdb_core.check_index_exists.return_value = False
+        """Test knowledge base name availability when not found in tenant."""
+        # Setup: knowledge_name not found in tenant
         mock_get_knowledge.return_value = None
 
         # Execute
         result = check_knowledge_base_exist_impl(
-            index_name="test_index",
+            knowledge_name="test_kb",
             vdb_core=self.mock_vdb_core,
             user_id="test_user",
             tenant_id="tenant1"
         )
 
         # Assert
+        mock_get_knowledge.assert_called_once_with({
+            "knowledge_name": "test_kb",
+            "tenant_id": "tenant1"
+        })
         self.assertEqual(result["status"], "available")
 
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     def test_check_kb_exist_exists_in_tenant(self, mock_get_knowledge):
         """Test detection when knowledge base exists within the same tenant."""
-        # Setup: ES index exists, PG record exists with same tenant_id
-        self.mock_vdb_core.check_index_exists.return_value = True
+        # Setup: knowledge_name exists in tenant
         mock_get_knowledge.return_value = {
-            "index_name": "test_index", "tenant_id": "tenant1"}
+            "knowledge_name": "test_kb", "tenant_id": "tenant1"}
 
         # Execute
         result = check_knowledge_base_exist_impl(
-            index_name="test_index",
+            knowledge_name="test_kb",
             vdb_core=self.mock_vdb_core,
             user_id="test_user",
             tenant_id="tenant1"
         )
 
         # Assert
+        mock_get_knowledge.assert_called_once_with({
+            "knowledge_name": "test_kb",
+            "tenant_id": "tenant1"
+        })
         self.assertEqual(result["status"], "exists_in_tenant")
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_check_kb_exist_exists_in_other_tenant(self, mock_get_knowledge):
-        """Test detection when knowledge base exists in a different tenant."""
-        # Setup: ES index exists, PG record exists with different tenant_id
-        self.mock_vdb_core.check_index_exists.return_value = True
-        mock_get_knowledge.return_value = {
-            "index_name": "test_index", "tenant_id": "other_tenant"}
 
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            index_name="test_index",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
 
-        # Assert
-        self.assertEqual(result["status"], "exists_in_other_tenant")
 
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_check_kb_exist_orphan_in_es_redis_failure(self, mock_get_knowledge, mock_get_redis_service):
-        """Test orphan ES case when Redis cleanup raises an exception."""
-        # Setup: ES index exists, PG record missing
-        self.mock_vdb_core.check_index_exists.return_value = True
-        mock_get_knowledge.return_value = None
 
-        # Mock Redis service that raises an exception
-        mock_redis_service = MagicMock()
-        mock_redis_service.delete_knowledgebase_records.side_effect = Exception(
-            "Redis error")
-        mock_get_redis_service.return_value = mock_redis_service
 
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            index_name="test_index",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert: ES index deletion attempted, Redis cleanup attempted and exception handled
-        self.mock_vdb_core.delete_index.assert_called_once_with("test_index")
-        mock_redis_service.delete_knowledgebase_records.assert_called_once_with(
-            "test_index")
-        self.assertEqual(result["status"], "error_cleaning_orphans")
-        self.assertEqual(result["action"], "cleaned_es")
-
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_check_kb_exist_orphan_in_es_delete_failure(self, mock_get_knowledge):
-        """Test failure when deleting orphan ES index raises an exception."""
-        # Setup: ES index exists, PG record missing, delete_index raises
-        self.mock_vdb_core.check_index_exists.return_value = True
-        mock_get_knowledge.return_value = None
-        self.mock_vdb_core.delete_index.side_effect = Exception(
-            "Delete index failed")
-
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            index_name="test_index",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert
-        self.mock_vdb_core.delete_index.assert_called_once_with("test_index")
-        self.assertEqual(result["status"], "error_cleaning_orphans")
-        self.assertTrue(result.get("error"))
-
-    @patch('backend.services.vectordatabase_service.delete_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    def test_check_kb_exist_orphan_in_pg_delete_failure(self, mock_get_knowledge, mock_delete_record):
-        """Test failure when deleting orphan PG record raises an exception."""
-        # Setup: ES index missing, PG record exists, deletion raises
-        self.mock_vdb_core.check_index_exists.return_value = False
-        mock_get_knowledge.return_value = {
-            "index_name": "test_index", "tenant_id": "tenant1"}
-        mock_delete_record.side_effect = Exception("Delete PG record failed")
-
-        # Execute
-        result = check_knowledge_base_exist_impl(
-            index_name="test_index",
-            vdb_core=self.mock_vdb_core,
-            user_id="test_user",
-            tenant_id="tenant1"
-        )
-
-        # Assert
-        mock_delete_record.assert_called_once()
-        self.assertEqual(result["status"], "error_cleaning_orphans")
-        self.assertTrue(result.get("error"))
 
     # Note: generate_knowledge_summary_stream function has been removed
     # These tests are no longer relevant as the function was replaced with summary_index_name

@@ -10,8 +10,8 @@ from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
-    check_auth_service_health, signup_user, signin_user, refresh_user_token, \
-    get_session_by_authorization, revoke_regular_user
+    check_auth_service_health, signup_user, signup_user_with_invitation, signin_user, refresh_user_token, \
+    get_session_by_authorization, revoke_regular_user, get_user_info, get_permissions_by_role
 from consts.exceptions import UnauthorizedError
 from utils.auth_utils import get_current_user_id
 
@@ -41,10 +41,15 @@ async def service_health():
 async def signup(request: UserSignUpRequest):
     """User registration"""
     try:
-        user_data = await signup_user(email=request.email,
-                          password=request.password,
-                          is_admin=request.is_admin,
-                          invite_code=request.invite_code)
+        if request.with_new_invitation:
+            user_data = await signup_user_with_invitation(email=request.email,
+                                                          password=request.password,
+                                                          invite_code=request.invite_code)
+        else:
+            user_data = await signup_user(email=request.email,
+                                          password=request.password,
+                                          is_admin=request.is_admin,
+                                          invite_code=request.invite_code)
         if request.is_admin:
             success_message = "🎉 Admin account registered successfully! You now have system management permissions."
         else:
@@ -167,6 +172,43 @@ async def get_session(request: Request):
                             detail="Get user session failed")
 
 
+@router.get("/current_user_info")
+async def get_user_information(request: Request):
+    """Get current user information including user ID, group IDs, tenant ID, and role"""
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        # Treat as not logged in when missing token
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "User not logged in",
+                                     "data": None})
+
+    try:
+        # Use the unified token validation function to get user ID
+        is_valid, user = validate_token(authorization)
+        if not is_valid or not user:
+            raise UnauthorizedError("User not logged in or session invalid")
+
+        user_id = user.id
+
+        # Get user information
+        user_info = await get_user_info(user_id)
+        if not user_info:
+            raise UnauthorizedError("User information not found")
+
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Success",
+                                     "data": user_info})
+
+    except UnauthorizedError as e:
+        logging.error(f"Get user information unauthorized: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="User not logged in or session invalid")
+    except Exception as e:
+        logging.error(f"Get user information failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Get user information failed")
+
+
 @router.get("/current_user_id")
 async def get_user_id(request: Request):
     """Get current user ID, return None if not logged in"""
@@ -195,7 +237,7 @@ async def get_user_id(request: Request):
     except ValueError as e:
         logging.error(f"Get user ID failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                            detail="User not logged in or session invalid")     
+                            detail="User not logged in or session invalid")
     except Exception as e:
         logging.error(f"Get user ID failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -245,3 +287,32 @@ async def revoke_user_account(request: Request):
         logging.error(f"User revoke failed: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")
+
+
+@router.get("/role_permissions/{user_role}")
+async def get_role_permissions(user_role: str):
+    """
+    Get all permissions for a specific user role.
+
+    Args:
+        user_role (str): User role to query permissions for (SU, ADMIN, DEV, USER)
+
+    Returns:
+        JSONResponse: Permissions data with success message
+    """
+    try:
+        permissions_data = await get_permissions_by_role(user_role)
+
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": permissions_data["message"],
+            "data": {
+                "user_role": permissions_data["user_role"],
+                "permissions": permissions_data["permissions"],
+                "total_permissions": permissions_data["total_permissions"]
+            }
+        })
+    except Exception as e:
+        logging.error(
+            f"Failed to get role permissions for role {user_role}: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to retrieve permissions for role {user_role}")
