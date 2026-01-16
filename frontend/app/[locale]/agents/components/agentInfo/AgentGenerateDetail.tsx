@@ -64,7 +64,6 @@ export default function AgentGenerateDetail({
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
 
-
   const userManuallySwitchedTabRef = useRef(false);
 
   const stylesObject: TabsProps["styles"] = {
@@ -93,8 +92,6 @@ export default function AgentGenerateDetail({
     businessLogicModelName: "",
     businessLogicModelId: 0,
   });
-
-  
 
   // Initialize form values when component mounts or currentAgentId changes
   useEffect(() => {
@@ -613,8 +610,8 @@ export default function AgentGenerateDetail({
               />
 
               {/* Control area */}
-              <Flex justify="space-between" align="center">
-                <div>
+              <Row style={{ width: "100%" }} justify="space-between">
+                <Col xs={24} sm={14} md={14} lg={14} xl={14}>
                   <span className="text-xs text-gray-600 mr-3">
                     {t("model.type.llm")}:
                   </span>
@@ -628,20 +625,24 @@ export default function AgentGenerateDetail({
                     size="middle"
                     disabled={!editable || isGenerating}
                   />
-                </div>
-
-                <button
-                  onClick={handleGenerateAgent}
-                  disabled={!editable || loadingModels || isGenerating}
-                  className="px-3 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ border: "none" }}
-                >
-                  <Zap size={16} className="mr-1" />
-                  {isGenerating
-                    ? t("businessLogic.config.button.generating")
-                    : t("businessLogic.config.button.generatePrompt")}
-                </button>
-              </Flex>
+                </Col>
+                <Col xs={24} sm={10} md={10} lg={10} xl={10}>
+                  <Button
+                    type="primary"
+                    size="middle"
+                    onClick={handleGenerateAgent}
+                    disabled={!editable || loadingModels || isGenerating}
+                    icon={<Zap size={16} />}
+                    style={{ width: "100%" }}
+                  >
+                    <span className="button-text-full">
+                      {isGenerating
+                        ? t("businessLogic.config.button.generating")
+                        : t("businessLogic.config.button.generatePrompt")}
+                    </span>
+                  </Button>
+                </Col>
+              </Row>
             </Card>
           </Flex>
         </Col>
