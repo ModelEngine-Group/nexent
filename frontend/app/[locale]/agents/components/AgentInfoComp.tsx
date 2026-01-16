@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Row, Col, Flex, Badge, Divider, Button, Drawer, App } from "antd";
 import { Bug, Save, Info } from "lucide-react";
@@ -25,7 +25,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
-  const editable = currentAgentId !== null;
+  const editable = currentAgentId || isCreatingMode;
 
   // Save guard hook
   const saveGuard = useSaveGuard();
