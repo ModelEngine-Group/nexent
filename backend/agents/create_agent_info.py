@@ -257,7 +257,18 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
                 "vlm_model": get_vlm_model(tenant_id=tenant_id),
                 "storage_client": minio_client,
             }
-
+        elif tool_config.class_name == "AnalyzeExcelIcdTool":
+            tool_config.metadata = {
+                "storage_client": minio_client
+            }
+        elif tool_config.class_name == "AnalyzeExcelTool":
+            tool_config.metadata = {
+                "storage_client": minio_client
+            }
+        elif tool_config.class_name == "SaveExcelTool":
+            tool_config.metadata = {
+                "storage_client": minio_client
+            }
         tool_config_list.append(tool_config)
 
     return tool_config_list

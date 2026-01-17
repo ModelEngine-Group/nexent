@@ -97,45 +97,45 @@ def _resolve_model_with_fallback(
 ) -> str | None:
     """
     Resolve model_id from model_display_name with fallback to quick config LLM model.
-    
+
     Args:
         model_display_name: Display name of the model to lookup
         exported_model_id: Original model_id from export (for logging only)
         model_label: Label for logging (e.g., "Model", "Business logic model")
         tenant_id: Tenant ID for model lookup
-    
+
     Returns:
         Resolved model_id or None if not found and no fallback available
     """
     if not model_display_name:
         return None
-    
+
     # Try to find model by display name in current tenant
     resolved_id = get_model_id_by_display_name(model_display_name, tenant_id)
-    
+
     if resolved_id:
         logger.info(
             f"{model_label} '{model_display_name}' found in tenant {tenant_id}, "
             f"mapped to model_id: {resolved_id} (exported model_id was: {exported_model_id})")
         return resolved_id
-    
+
     # Model not found, try fallback to quick config LLM model
     logger.warning(
         f"{model_label} '{model_display_name}' (exported model_id: {exported_model_id}) "
         f"not found in tenant {tenant_id}, falling back to quick config LLM model.")
-    
+
     quick_config_model = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id
     )
-    
+
     if quick_config_model:
         fallback_id = quick_config_model.get("model_id")
         logger.info(
             f"Using quick config LLM model for {model_label.lower()}: "
             f"{quick_config_model.get('display_name')} (model_id: {fallback_id})")
         return fallback_id
-    
+
     logger.warning(f"No quick config LLM model found for tenant {tenant_id}")
     return None
 
@@ -998,7 +998,8 @@ async def export_agent_by_agent_id(agent_id: int, tenant_id: str, user_id: str) 
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
-        if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool"]:
+        if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool",
+                               "AnalyzeExcelIcdTool", "AnalyzeExcelTool", "SaveExcelTool"]:
             tool.metadata = {}
 
     # Get model_id and model display name from agent_info
@@ -1132,7 +1133,7 @@ async def import_agent_by_agent_id(
     if not import_agent_info.name.isidentifier():
         raise ValueError(
             f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name.")
-    
+
     # Resolve model IDs with fallback
     # Note: We use model_display_name for cross-tenant compatibility
     # The exported model_id is kept for reference/debugging only
@@ -1142,7 +1143,7 @@ async def import_agent_by_agent_id(
         model_label="Model",
         tenant_id=tenant_id
     )
-    
+
     business_logic_model_id = _resolve_model_with_fallback(
         model_display_name=import_agent_info.business_logic_model_name,
         exported_model_id=import_agent_info.business_logic_model_id,
@@ -1344,28 +1345,28 @@ def check_agent_availability(
 ) -> tuple[bool, list[str]]:
     """
     Check if an agent is available based on its tools and model configuration.
-    
+
     Args:
         agent_id: The agent ID to check
         tenant_id: The tenant ID
         agent_info: Optional pre-fetched agent info (to avoid duplicate DB queries)
         model_cache: Optional model cache for performance optimization
-        
+
     Returns:
         tuple: (is_available: bool, unavailable_reasons: list[str])
     """
     unavailable_reasons: list[str] = []
-    
+
     if model_cache is None:
         model_cache = {}
-    
+
     # Fetch agent info if not provided
     if agent_info is None:
         agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
-    
+
     if not agent_info:
         return False, ["agent_not_found"]
-    
+
     # Check tool availability
     tool_info = search_tools_for_sub_agent(agent_id=agent_id, tenant_id=tenant_id)
     tool_id_list = [tool["tool_id"] for tool in tool_info if tool.get("tool_id") is not None]
@@ -1373,7 +1374,7 @@ def check_agent_availability(
         tool_statuses = check_tool_is_available(tool_id_list)
         if not all(tool_statuses):
             unavailable_reasons.append("tool_unavailable")
-    
+
     # Check model availability
     model_reasons = _collect_model_availability_reasons(
         agent=agent_info,
@@ -1381,7 +1382,7 @@ def check_agent_availability(
         model_cache=model_cache
     )
     unavailable_reasons.extend(model_reasons)
-    
+
     is_available = len(unavailable_reasons) == 0
     return is_available, unavailable_reasons
 

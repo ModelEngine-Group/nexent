@@ -15,17 +15,20 @@ from .list_directory_tool import ListDirectoryTool
 from .terminal_tool import TerminalTool
 from .analyze_text_file_tool import AnalyzeTextFileTool
 from .analyze_image_tool import AnalyzeImageTool
+from .analyze_excel_icd_tool import AnalyzeExcelIcdTool
+from .analyze_excel_tool import AnalyzeExcelTool
+from .save_excel_tool import SaveExcelTool
 
 __all__ = [
     "ExaSearchTool",
     "KnowledgeBaseSearchTool",
     "DataMateSearchTool",
-    "SendEmailTool", 
-    "GetEmailTool", 
-    "TavilySearchTool", 
+    "SendEmailTool",
+    "GetEmailTool",
+    "TavilySearchTool",
     "LinkupSearchTool",
     "CreateFileTool",
-    "ReadFileTool", 
+    "ReadFileTool",
     "DeleteFileTool",
     "CreateDirectoryTool",
     "DeleteDirectoryTool",
@@ -33,5 +36,8 @@ __all__ = [
     "ListDirectoryTool",
     "TerminalTool",
     "AnalyzeTextFileTool",
-    "AnalyzeImageTool"
+    "AnalyzeImageTool",
+    "AnalyzeExcelIcdTool",
+    "AnalyzeExcelTool",
+    "SaveExcelTool"
 ]

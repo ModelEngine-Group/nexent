@@ -502,7 +502,7 @@ def _validate_local_tool(
         user_id: User ID for knowledge base tools (optional)
 
     Returns:
-        Dict[str, Any]: The actual result returned by the tool's forward method, 
+        Dict[str, Any]: The actual result returned by the tool's forward method,
                        serving as proof that the tool works correctly
 
     Raises:
@@ -592,6 +592,30 @@ def _validate_local_tool(
                 'llm_model': long_text_to_text_model,
                 'storage_client': minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "analyze_excel_icd":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+            params = {
+                **instantiation_params,
+                'storage_client': minio_client
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "analyze_excel":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+            params = {
+                **instantiation_params,
+                'storage_client': minio_client
+            }
+            tool_instance = tool_class(**params)
+        elif tool_name == "save_excel":
+            if not tenant_id or not user_id:
+                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+            params = {
+                **instantiation_params,
+                'storage_client': minio_client
             }
             tool_instance = tool_class(**params)
         else:

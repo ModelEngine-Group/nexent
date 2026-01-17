@@ -100,6 +100,19 @@ class NexentAgent:
                                        vlm_model=tool_config.metadata.get("vlm_model", []),
                                        storage_client=tool_config.metadata.get("storage_client", []),
                                        **params)
+            elif class_name == "AnalyzeExcelIcdTool":
+                tools_obj = tool_class(observer=self.observer,
+                                       storage_client=tool_config.metadata.get("storage_client", []),
+                                       api_base_url=tool_config.metadata.get("api_base_url", "http://localhost:5024"),
+                                       **params)
+            elif class_name == "AnalyzeExcelTool":
+                tools_obj = tool_class(observer=self.observer,
+                                       storage_client=tool_config.metadata.get("storage_client", []),
+                                       **params)
+            elif class_name == "SaveExcelTool":
+                tools_obj = tool_class(observer=self.observer,
+                                       storage_client=tool_config.metadata.get("storage_client", []),
+                                       **params)
             else:
                 tools_obj = tool_class(**params)
                 if hasattr(tools_obj, 'observer'):

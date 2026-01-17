@@ -222,6 +222,10 @@ def detect_content_type_from_bytes(bytes_data: bytes) -> str:
     if len(bytes_data) >= 4 and header[:4] == b"%PDF":
         return "application/pdf"
 
+    # Excel (XLSX): 50 4B 03 04 (PK..) - ZIP file format
+    if len(bytes_data) >= 4 and header[:4] == b"PK\x03\x04":
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
     # MP4: 00 00 00 ?? 66 74 79 70 (ftyp)
     if len(bytes_data) >= 8:
         # Check for ftyp at offset 4
@@ -308,6 +312,7 @@ def guess_extension_from_content_type(content_type: str) -> str:
         "audio/ogg": ".ogg",
         "audio/flac": ".flac",
         "application/pdf": ".pdf",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
         "text/plain": ".txt",
         "application/json": ".json",
     }
