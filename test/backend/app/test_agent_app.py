@@ -529,8 +529,8 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     # Mock return values
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.return_value = [
-        {"agent_id": 1, "name": "Agent 1", "display_name": "Display Agent 1"},
-        {"agent_id": 2, "name": "Agent 2", "display_name": "Display Agent 2"}
+        {"agent_id": 1, "name": "Agent 1", "display_name": "Display Agent 1", "group_ids": []},
+        {"agent_id": 2, "name": "Agent 2", "display_name": "Display Agent 2", "group_ids": [1, 2, 3]}
     ]
 
     # Test the endpoint
@@ -546,8 +546,10 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     assert len(response.json()) == 2
     assert response.json()[0]["agent_id"] == 1
     assert response.json()[0]["display_name"] == "Display Agent 1"
+    assert response.json()[0]["group_ids"] == []
     assert response.json()[1]["name"] == "Agent 2"
     assert response.json()[1]["display_name"] == "Display Agent 2"
+    assert response.json()[1]["group_ids"] == [1, 2, 3]
 
 
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):

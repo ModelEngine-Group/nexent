@@ -26,13 +26,14 @@ interface ToolManagementProps {
  */
 export default function ToolManagement({
   toolGroups,
-  isCreatingMode = true,
+  isCreatingMode,
   currentAgentId,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
-  const editable = currentAgentId !== null || isCreatingMode;
+  const editable = currentAgentId || isCreatingMode;
+  console.log("editable", editable, currentAgentId, isCreatingMode);
   // Get state from store
   const usedTools = useAgentConfigStore((state) => state.editedAgent.tools);
   const updateTools = useAgentConfigStore((state) => state.updateTools);

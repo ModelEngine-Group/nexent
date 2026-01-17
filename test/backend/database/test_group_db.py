@@ -280,9 +280,33 @@ def test_get_groups_by_tenant_success(monkeypatch, mock_session):
     mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
     mock_group2 = MockTenantGroupInfo(group_id=2, group_name="group2")
 
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = [mock_group1, mock_group2]
-    query.filter.return_value = mock_filter
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 2
+    query.filter.return_value = mock_count_filter
+
+    # Create a separate mock for the paginated query
+    mock_paginated_filter = MagicMock()
+    mock_paginated_filter.offset.return_value = mock_paginated_filter
+    mock_paginated_filter.limit.return_value = mock_paginated_filter
+    mock_paginated_filter.all.return_value = [mock_group1, mock_group2]
+
+    # Mock session.query to return different objects for different calls
+    original_query = session.query
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -292,9 +316,10 @@ def test_get_groups_by_tenant_success(monkeypatch, mock_session):
 
     result = query_groups_by_tenant("test_tenant")
 
-    assert len(result) == 2
-    assert result[0]["group_name"] == "group1"
-    assert result[1]["group_name"] == "group2"
+    assert result["total"] == 2
+    assert len(result["groups"]) == 2
+    assert result["groups"][0]["group_name"] == "group1"
+    assert result["groups"][1]["group_name"] == "group2"
 
 
 def test_create_group_success(monkeypatch, mock_session):
@@ -559,6 +584,187 @@ def test_get_group_user_count_success(monkeypatch, mock_session):
     result = count_group_users(123)
 
     assert result == 5
+
+
+def test_query_groups_by_tenant_with_pagination(monkeypatch, mock_session):
+    """Test retrieving groups by tenant with pagination"""
+    session, query = mock_session
+
+    mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
+    mock_group2 = MockTenantGroupInfo(group_id=2, group_name="group2")
+
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 2
+
+    # Mock the paginated query chain
+    mock_limit = MagicMock()
+    mock_limit.all.return_value = [mock_group1, mock_group2]
+
+    mock_offset = MagicMock()
+    mock_offset.limit.return_value = mock_limit
+
+    mock_paginated_filter = MagicMock()
+    mock_paginated_filter.offset.return_value = mock_offset
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", page=2, page_size=10)
+
+    # Verify pagination parameters were used correctly
+    mock_paginated_filter.offset.assert_called_with(10)  # (page-1) * page_size = (2-1) * 10 = 10
+    mock_offset.limit.assert_called_with(10)
+
+    assert result["total"] == 2
+    assert len(result["groups"]) == 2
+    assert result["groups"][0]["group_name"] == "group1"
+    assert result["groups"][1]["group_name"] == "group2"
+
+
+def test_modify_group_no_updates_provided(monkeypatch, mock_session):
+    """Test modifying group with no updates provided"""
+    session, query = mock_session
+
+    mock_update = MagicMock()
+    mock_update.return_value = 1
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = modify_group(group_id=123, updates={})
+
+    assert result is True
+
+
+def test_modify_group_no_rows_affected(monkeypatch, mock_session):
+    """Test modifying group when no rows are affected"""
+    session, query = mock_session
+
+    mock_update = MagicMock()
+    mock_update.return_value = 0  # No rows affected
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = modify_group(group_id=999, updates={"group_name": "new_name"})
+
+    assert result is False
+
+
+def test_remove_group_no_rows_affected(monkeypatch, mock_session):
+    """Test removing group when no rows are affected"""
+    session, query = mock_session
+
+    mock_update = MagicMock()
+    mock_update.return_value = 0  # No rows affected
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_group(group_id=999, updated_by="test_user")
+
+    assert result is False
+
+
+def test_remove_user_from_group_no_rows_affected(monkeypatch, mock_session):
+    """Test removing user from group when no rows are affected"""
+    session, query = mock_session
+
+    mock_update = MagicMock()
+    mock_update.return_value = 0  # No rows affected
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_user_from_group(group_id=999, user_id="nonexistent_user", updated_by="test_user")
+
+    assert result is False
+
+
+def test_query_groups_by_user_no_groups(monkeypatch, mock_session):
+    """Test retrieving groups for user when user has no groups"""
+    session, query = mock_session
+
+    mock_join = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = []
+    mock_join.filter.return_value = mock_filter
+    query.join.return_value = mock_join
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_user("user_with_no_groups")
+
+    assert result == []
+
+
+def test_query_group_ids_by_user_no_groups(monkeypatch, mock_session):
+    """Test retrieving group IDs for user when user has no groups"""
+    session, _ = mock_session
+
+    # Create a mock query that returns empty result
+    mock_specific_query = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = []
+    mock_specific_query.filter.return_value = mock_filter
+
+    def mock_query_func(*args, **kwargs):
+        return mock_specific_query
+
+    session.query = mock_query_func
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = query_group_ids_by_user("user_with_no_groups")
+
+    assert result == []
 
 
 def test_database_error_handling(monkeypatch, mock_session):

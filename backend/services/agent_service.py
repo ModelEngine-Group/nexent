@@ -53,6 +53,8 @@ from database.tool_db import (
     query_tool_instances_by_id,
     search_tools_for_sub_agent
 )
+from database.group_db import query_group_ids_by_user
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
 from utils.auth_utils import get_current_user_info, get_user_language
@@ -87,6 +89,26 @@ def _resolve_user_tenant_language(
         return get_current_user_info(authorization, http_request)
     else:
         return user_id, tenant_id, get_user_language(http_request)
+
+
+def _get_user_group_ids(user_id: str, tenant_id: str) -> str:
+    """
+    Get user's group IDs as a comma-separated string.
+
+    Args:
+        user_id: User ID
+        tenant_id: Tenant ID
+
+    Returns:
+        Comma-separated string of group IDs
+    """
+    try:
+        group_ids = query_group_ids_by_user(user_id)
+        return convert_list_to_string(group_ids)
+    except Exception as e:
+        logger.warning(
+            f"Failed to get user groups for user {user_id}: {str(e)}")
+        return ""
 
 
 def _resolve_model_with_fallback(
@@ -775,7 +797,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     agent_id: Optional[int] = request.agent_id
     try:
         if agent_id is None:
-            # Create agent
+            # Create agent - automatically set group_ids to current user's groups
+            user_group_ids = _get_user_group_ids(user_id, tenant_id)
             created = create_agent(agent_info={
                 "name": request.name,
                 "display_name": request.display_name,
@@ -791,7 +814,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
-                "enabled": request.enabled if request.enabled is not None else True
+                "enabled": request.enabled if request.enabled is not None else True,
+                "group_ids": user_group_ids
             }, tenant_id=tenant_id, user_id=user_id)
             agent_id = created["agent_id"]
         else:
@@ -1154,7 +1178,8 @@ async def import_agent_by_agent_id(
     agent_name = import_agent_info.name
     agent_display_name = import_agent_info.display_name
 
-    # create a new agent
+    # create a new agent - use current user's groups instead of imported group_ids
+    user_group_ids = _get_user_group_ids(user_id, tenant_id)
     new_agent = create_agent(agent_info={"name": agent_name,
                                          "display_name": agent_display_name,
                                          "description": import_agent_info.description,
@@ -1169,7 +1194,8 @@ async def import_agent_by_agent_id(
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,
-                                         "enabled": import_agent_info.enabled},
+                                         "enabled": import_agent_info.enabled,
+                                         "group_ids": user_group_ids},
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
@@ -1249,7 +1275,8 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
                 "description": agent["description"],
                 "author": agent.get("author"),
                 "is_available": len(unavailable_reasons) == 0,
-                "unavailable_reasons": unavailable_reasons
+                "unavailable_reasons": unavailable_reasons,
+                "group_ids": convert_string_to_list(agent.get("group_ids"))
             })
 
         return simple_agent_list

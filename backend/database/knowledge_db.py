@@ -172,8 +172,13 @@ def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, An
         with get_db_session() as session:
             db_query = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.delete_flag != 'Y',
-                KnowledgeRecord.index_name == query['index_name'],
             )
+
+            # Support both index_name and knowledge_name queries
+            if 'index_name' in query:
+                db_query = db_query.filter(KnowledgeRecord.index_name == query['index_name'])
+            elif 'knowledge_name' in query:
+                db_query = db_query.filter(KnowledgeRecord.knowledge_name == query['knowledge_name'])
 
             # Add tenant_id filter only if it is provided in the query
             if 'tenant_id' in query and query['tenant_id'] is not None:

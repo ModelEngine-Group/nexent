@@ -155,10 +155,14 @@ class KnowledgeBaseService {
   ): Promise<{ status: string; action?: string }> {
     try {
       const response = await fetch(
-        API_ENDPOINTS.knowledgeBase.checkName(name),
+        API_ENDPOINTS.knowledgeBase.checkName,
         {
-          method: "GET",
-          headers: getAuthHeaders(),
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ knowledge_name: name }),
         }
       );
       if (!response.ok) {

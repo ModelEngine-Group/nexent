@@ -121,7 +121,7 @@ export const API_ENDPOINTS = {
     // Elasticsearch service
     health: `${API_BASE_URL}/indices/health`,
     indices: `${API_BASE_URL}/indices`,
-    checkName: (name: string) => `${API_BASE_URL}/indices/check_exist/${name}`,
+    checkName: `${API_BASE_URL}/indices/check_exist`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
