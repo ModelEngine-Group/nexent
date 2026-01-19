@@ -1,3 +1,9 @@
+from consts.model import UpdateKnowledgeListRequest
+from backend.services.tenant_config_service import (
+    get_selected_knowledge_list,
+    update_selected_knowledge,
+    delete_selected_knowledge_by_index_name,
+)
 import sys
 import types
 import unittest
@@ -8,13 +14,6 @@ fake_client.as_dict = lambda x: x
 fake_client.get_db_session = MagicMock()
 fake_client.MinioClient = MagicMock()  # 避免真实连接 MinIO
 sys.modules["database.client"] = fake_client
-
-from backend.services.tenant_config_service import (
-    get_selected_knowledge_list,
-    update_selected_knowledge,
-    delete_selected_knowledge_by_index_name,
-)
-from consts.model import UpdateKnowledgeListRequest
 
 
 class TestTenantConfigService(unittest.TestCase):
@@ -43,7 +42,8 @@ class TestTenantConfigService(unittest.TestCase):
         self, mock_get_knowledge_info, mock_get_config
     ):
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id,
+                "tenant_config_id": self.tenant_config_id}
         ]
         mock_get_knowledge_info.return_value = [
             {"knowledge_id": self.knowledge_id, "name": "Test Knowledge"}
@@ -52,7 +52,8 @@ class TestTenantConfigService(unittest.TestCase):
         result = get_selected_knowledge_list(self.tenant_id, self.user_id)
 
         self.assertEqual(
-            result, [{"knowledge_id": self.knowledge_id, "name": "Test Knowledge"}]
+            result, [{"knowledge_id": self.knowledge_id,
+                      "name": "Test Knowledge"}]
         )
         mock_get_knowledge_info.assert_called_once_with([self.knowledge_id])
 
@@ -87,13 +88,15 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = []
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id,
+                "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = True
         mock_get_list.return_value = []
 
         request = UpdateKnowledgeListRequest()
-        result = update_selected_knowledge(self.tenant_id, self.user_id, request)
+        result = update_selected_knowledge(
+            self.tenant_id, self.user_id, request)
         self.assertIsNotNone(result)
         mock_insert.assert_not_called()
         mock_delete.assert_called_once_with(self.tenant_config_id)
@@ -108,14 +111,16 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = ["knowledge_id_2"]
         mock_get_config.return_value = [
-            {"config_value": "knowledge_id_1", "tenant_config_id": "tenant_config_id_1"}
+            {"config_value": "knowledge_id_1",
+                "tenant_config_id": "tenant_config_id_1"}
         ]
         mock_insert.return_value = True
         mock_delete.return_value = True
         mock_get_list.return_value = []
 
         request = UpdateKnowledgeListRequest(nexent=["new_index"])
-        result = update_selected_knowledge(self.tenant_id, self.user_id, request)
+        result = update_selected_knowledge(
+            self.tenant_id, self.user_id, request)
         self.assertIsNotNone(result)
         mock_insert.assert_called_once()
         mock_delete.assert_called_once_with("tenant_config_id_1")
@@ -149,12 +154,14 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = []
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id,
+                "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = False
 
         request = UpdateKnowledgeListRequest()
-        result = update_selected_knowledge(self.tenant_id, self.user_id, request)
+        result = update_selected_knowledge(
+            self.tenant_id, self.user_id, request)
         self.assertIsNone(result)
         mock_delete.assert_called_once_with(self.tenant_config_id)
 
@@ -166,7 +173,8 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = [self.knowledge_id]
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id,
+                "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = True
 
@@ -184,7 +192,8 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = ["different_id"]
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id,
+                "tenant_config_id": self.tenant_config_id}
         ]
 
         result = delete_selected_knowledge_by_index_name(
@@ -201,7 +210,8 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = [self.knowledge_id]
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id,
+                "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = False
 
