@@ -770,6 +770,74 @@ export default function AgentImportWizard({
   };
 
   const handleImport = async () => {
+    // Check for potential issues that could make the agent unusable
+    const issues: string[] = [];
+
+    // Check for unresolved agent name conflicts
+    const unresolvedConflicts = Object.values(agentNameConflicts).filter(conflict => conflict.hasConflict);
+    if (unresolvedConflicts.length > 0) {
+      issues.push(t("market.install.warning.nameConflict", "Unresolved name conflicts exist"));
+    }
+
+    // Check for uninstalled MCP servers
+    const uninstalledMcpServers = mcpServers.filter(mcp => !mcp.isInstalled);
+    if (uninstalledMcpServers.length > 0) {
+      const serverNames = uninstalledMcpServers.map(mcp => mcp.mcp_server_name);
+      issues.push(`${t("market.install.warning.mcpNotInstalled", "Uninstalled MCP services exist")} : ${serverNames.join("、")}`);
+    }
+
+    // If there are issues, show confirmation dialog
+    if (issues.length > 0) {
+      Modal.confirm({
+        title: t("market.install.warning.title", "Agent May Be Unusable"),
+        content: (
+          <div className="space-y-4">
+            {/* Warning header - similar to rename step */}
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-3">
+              <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+                {t("market.install.warning.description", "The following issues may make the agent unusable:")}
+              </p>
+              <div className="space-y-2">
+                {issues.map((issue, index) => (
+                  <div key={index} className="flex items-start gap-2">
+                    <CircleX className="text-red-500 flex-shrink-0 mt-0.5" size={14} />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{issue}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Question */}
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              {t("market.install.warning.question", "Do you want to continue with the installation anyway?")}
+            </p>
+          </div>
+        ),
+        okText: t("market.install.warning.continue", "Continue Anyway"),
+        cancelText: t("market.install.warning.goBack", "Go Back to Configure"),
+        okButtonProps: {
+          className: "bg-blue-600 hover:bg-blue-700 border-blue-600 hover:border-blue-700 text-white",
+        },
+        onOk: async () => {
+          await performImport();
+        },
+        onCancel: () => {
+          // Go back to the appropriate step
+          if (unresolvedConflicts.length > 0) {
+            setCurrentStep(steps.findIndex(step => step.key === "rename"));
+          } else if (uninstalledMcpServers.length > 0) {
+            setCurrentStep(steps.findIndex(step => step.key === "mcp"));
+          }
+        },
+      });
+      return;
+    }
+
+    // No issues found, proceed with import
+    await performImport();
+  };
+
+  const performImport = async () => {
     try {
       // Prepare the data structure for import
       const importData = prepareImportData();
@@ -1511,58 +1579,47 @@ export default function AgentImportWizard({
         </div>
       );
     } else if (currentStepKey === "config") {
-      // Group config fields by agent
-      const fieldsByAgent = configFields.reduce((acc, field) => {
+      // Group config fields by agent first, then by tool within each agent
+      const groupedFields = configFields.reduce((acc, field) => {
         if (!acc[field.agentKey]) {
           acc[field.agentKey] = {
             agentDisplayName: field.agentDisplayName,
-            fields: [],
+            tools: {} as Record<string, { toolName: string; fields: ConfigField[] }>,
+            basicFields: [] as ConfigField[]
           };
         }
-        acc[field.agentKey].fields.push(field);
-        return acc;
-      }, {} as Record<string, { agentDisplayName: string; fields: ConfigField[] }>);
 
-      const collapseItems = Object.entries(fieldsByAgent).map(([agentKey, { agentDisplayName, fields }]) => ({
-        key: agentKey,
-        label: (
-          <span className="font-medium">
-            {agentDisplayName}
-            <span className="text-gray-500 text-sm ml-2">
-              ({fields.length} {t("market.install.config.fields", "fields")})
-            </span>
-          </span>
-        ),
-        children: (
-          <Form layout="vertical" className="mt-2">
-            {fields.map((field) => (
-              <Form.Item
-                key={field.valueKey}
-                label={
-                  <span>
-                    {field.fieldLabel.replace(`${agentDisplayName} - `, "")}
-                    <span className="text-red-500 ml-1">*</span>
-                  </span>
-                }
-                required={false}
-              >
-                <Input.TextArea
-                  value={configValues[field.valueKey] || ""}
-                  onChange={(e) => {
-                    setConfigValues(prev => ({
-                      ...prev,
-                      [field.valueKey]: e.target.value,
-                    }));
-                  }}
-                  placeholder={field.promptHint || t("market.install.config.placeholder", "Enter configuration value")}
-                  rows={3}
-                  size="large"
-                />
-              </Form.Item>
-            ))}
-          </Form>
-        ),
-      }));
+        // Parse fieldPath to determine if it's a tool parameter or basic field
+        const toolMatch = field.fieldPath.match(/^tools\[(\d+)\]\.params\.(.+)$/);
+
+        if (toolMatch) {
+          // It's a tool parameter
+          const toolIndex = parseInt(toolMatch[1]);
+          const toolKey = `tool_${toolIndex}`;
+
+          // Get tool info from agent data
+          const agentInfo = initialData?.agent_info?.[field.agentKey];
+          const tool = agentInfo?.tools?.[toolIndex];
+          const toolName = tool?.name || tool?.class_name || `Tool ${toolIndex}`;
+
+          if (!acc[field.agentKey].tools[toolKey]) {
+            acc[field.agentKey].tools[toolKey] = {
+              toolName,
+              fields: []
+            };
+          }
+          acc[field.agentKey].tools[toolKey].fields.push(field);
+        } else {
+          // It's a basic field
+          acc[field.agentKey].basicFields.push(field);
+        }
+
+        return acc;
+      }, {} as Record<string, {
+        agentDisplayName: string;
+        tools: Record<string, { toolName: string; fields: ConfigField[] }>;
+        basicFields: ConfigField[];
+      }>);
 
       return (
         <div className="space-y-4">
@@ -1570,12 +1627,126 @@ export default function AgentImportWizard({
             {t("market.install.config.description", "Please configure the following required fields for this agent and its sub-agents.")}
           </p>
 
-          {collapseItems.length > 0 ? (
-            <Collapse
-              items={collapseItems}
-              defaultActiveKey={Object.keys(fieldsByAgent)}
-              className="agent-config-collapse"
-            />
+          {Object.keys(groupedFields).length > 0 ? (
+            <div className="space-y-6">
+              {Object.entries(groupedFields).map(([agentKey, agentGroup]) => (
+                <div
+                  key={agentKey}
+                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4"
+                >
+                  {/* Agent Header */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                      {agentKey === String(initialData?.agent_id) && (
+                        <span className="text-purple-600 dark:text-purple-400 mr-2">
+                          {t("market.install.agent.main", "Main")}
+                        </span>
+                      )}
+                      {agentGroup.agentDisplayName}
+                    </h4>
+                  </div>
+
+                  {/* Basic Fields */}
+                  {agentGroup.basicFields.length > 0 && (
+                    <>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          {t("market.install.config.basicFields", "Basic Configuration")}
+                        </span>
+                      </div>
+                      <div className="space-y-3 ml-4">
+                        {agentGroup.basicFields.map((field) => {
+                          const paramLabel = field.fieldLabel.replace(`${agentGroup.agentDisplayName} - `, "");
+                          return (
+                            <div key={field.valueKey}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                  {paramLabel}:
+                                </span>
+                                <Input
+                                  value={configValues[field.valueKey] || ""}
+                                  onChange={(e) => {
+                                    setConfigValues(prev => ({
+                                      ...prev,
+                                      [field.valueKey]: e.target.value,
+                                    }));
+                                  }}
+                                  placeholder={`输入 ${paramLabel}`}
+                                  size="middle"
+                                  style={{ flex: 1 }}
+                                  className={needsConfig(field.currentValue) ? "bg-gray-50 dark:bg-gray-800" : ""}
+                                />
+                              </div>
+                              {/* Show hint with clickable links if available */}
+                              {field.promptHint && (
+                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                                  <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
+                                    {parseMarkdownLinks(field.promptHint)}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Tools */}
+                  {Object.entries(agentGroup.tools).map(([toolKey, toolGroup]) => (
+                    <div key={toolKey} className="space-y-3">
+                      {/* Tool Header */}
+                      <div className="flex items-center gap-2">
+                        <Wrench className="h-4 w-4 text-blue-500" />
+                        <span className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          {toolGroup.toolName}
+                        </span>
+                      </div>
+
+                      {/* Tool Parameters */}
+                      <div className="space-y-3 ml-6">
+                        {toolGroup.fields.map((field) => {
+                          const toolMatch = field.fieldPath.match(/^tools\[\d+\]\.params\.(.+)$/);
+                          const paramKey = toolMatch ? toolMatch[1] : field.fieldPath;
+                          const paramLabel = paramKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+                          return (
+                            <div key={field.valueKey}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                  {paramLabel}:
+                                </span>
+                                <Input
+                                  value={configValues[field.valueKey] || ""}
+                                  onChange={(e) => {
+                                    setConfigValues(prev => ({
+                                      ...prev,
+                                      [field.valueKey]: e.target.value,
+                                    }));
+                                  }}
+                                  placeholder={`输入 ${paramLabel}`}
+                                  size="middle"
+                                  style={{ flex: 1 }}
+                                  className={needsConfig(field.currentValue) ? "bg-gray-50 dark:bg-gray-800" : ""}
+                                />
+                              </div>
+                              {/* Show hint with clickable links if available */}
+                              {field.promptHint && (
+                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                                  <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
+                                    {parseMarkdownLinks(field.promptHint)}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
           ) : (
             <p className="text-sm text-gray-500 text-center py-4">
               {t("market.install.config.noFields", "No configuration fields required.")}
