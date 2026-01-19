@@ -231,6 +231,7 @@ export default function ToolTestPanel({
 
   return (
     <Modal
+    destroyOnClose={true}
       title={
         <div className="flex justify-between items-center w-full pr-8">
           <span>{`${tool?.name}`}</span>
@@ -247,7 +248,7 @@ export default function ToolTestPanel({
       }}
       mask={false}
       maskClosable={false}
-      wrapProps={{ style: { pointerEvents: "none", zIndex: 1040 } }} // do not block pointer events outside modal content
+      wrapProps={{ style: { pointerEvents: "none", zIndex: 1100 } }} // do not block pointer events outside modal content
       footer={<div></div>}
     >
       <div className="mb-4" style={{ pointerEvents: "auto" }}>
@@ -446,11 +447,6 @@ export default function ToolTestPanel({
                           }}
                         >
                           <Text style={{ minWidth: 100 }}>{paramName}</Text>
-                          <Tooltip
-                            title={description}
-                            placement="topLeft"
-                            styles={{ root: { maxWidth: 400 } }}
-                          >
                             <Input
                               placeholder={description}
                               value={paramValues[paramName] || ""}
@@ -462,7 +458,6 @@ export default function ToolTestPanel({
                               }}
                               style={{ flex: 1 }}
                             />
-                          </Tooltip>
                         </div>
                       );
                     })}

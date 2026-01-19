@@ -697,7 +697,7 @@ export default function AgentGenerateDetail({
               />
 
               {/* Control area */}
-              <Flex className="agent-generate-control" style={{ width: "100%" }} align="center">
+              <Flex style={{ width: "100%" }} align="center">
                 <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
                   <span className="text-xs text-gray-600 mr-3">
                     {t("model.type.llm")}:

@@ -231,12 +231,11 @@ export default function ToolConfigModal({
             ? {
                 top: 100,
                 left: -320,
-                zIndex: 1100, // 设置相同的z-index
               }
             : {
-                zIndex: 1100, // 设置相同的z-index
               }
         }
+        wrapProps={{ style: { pointerEvents: "none", zIndex: 1100 } }} 
         footer={
           <div className="flex justify-end items-center">
             {
