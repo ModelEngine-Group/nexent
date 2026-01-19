@@ -610,8 +610,8 @@ export default function AgentGenerateDetail({
               />
 
               {/* Control area */}
-              <Row style={{ width: "100%" }} justify="space-between">
-                <Col xs={24} sm={14} md={14} lg={14} xl={14}>
+              <Flex className="agent-generate-control" style={{ width: "100%" }} align="center">
+                <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
                   <span className="text-xs text-gray-600 mr-3">
                     {t("model.type.llm")}:
                   </span>
@@ -620,20 +620,26 @@ export default function AgentGenerateDetail({
                     onChange={handleModelChange}
                     loading={loadingModels}
                     placeholder={t("model.select.placeholder")}
-                    style={{ width: 200 }}
                     options={modelSelectOptions}
                     size="middle"
                     disabled={!editable || isGenerating}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      maxWidth: '300px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
                   />
-                </Col>
-                <Col xs={24} sm={10} md={10} lg={10} xl={10}>
-                  <Button
+                </div>
+                <div style={{ marginLeft: 12 }}>
+                   <Button
                     type="primary"
                     size="middle"
                     onClick={handleGenerateAgent}
                     disabled={!editable || loadingModels || isGenerating}
                     icon={<Zap size={16} />}
-                    style={{ width: "100%" }}
                   >
                     <span className="button-text-full">
                       {isGenerating
