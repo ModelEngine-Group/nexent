@@ -3,13 +3,22 @@ Unit tests for attachment_utils.py
 Tests the convert_image_to_text and convert_long_text_to_text functions
 """
 import pytest
-from unittest.mock import MagicMock
+import sys
+from unittest.mock import patch, MagicMock
 from io import BytesIO
 
-from backend.utils.attachment_utils import (
-    convert_image_to_text,
-    convert_long_text_to_text
-)
+# Setup common mocks
+from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
+
+# Initialize common mocks
+mocks = setup_common_mocks()
+
+# Patch storage factory before importing
+with patch_minio_client_initialization():
+    from backend.utils.attachment_utils import (
+        convert_image_to_text,
+        convert_long_text_to_text
+    )
 
 
 # Note: nexent.core mocks are handled by conftest.py global_mocks fixture
@@ -41,8 +50,8 @@ class TestConvertImageToText:
             }
         }
 
-        mock_model_instance = MagicMock()
-        mock_model_instance.analyze_image.return_value = MagicMock(
+        mock_model_instance = mocker.MagicMock()
+        mock_model_instance.analyze_image.return_value = mocker.MagicMock(
             content="Image description")
         mock_vlm_model.return_value = mock_model_instance
 
@@ -90,8 +99,8 @@ class TestConvertImageToText:
             }
         }
 
-        mock_model_instance = MagicMock()
-        mock_model_instance.analyze_image.return_value = MagicMock(
+        mock_model_instance = mocker.MagicMock()
+        mock_model_instance.analyze_image.return_value = mocker.MagicMock(
             content="Binary image description")
         mock_vlm_model.return_value = mock_model_instance
 
@@ -131,9 +140,9 @@ class TestConvertLongTextToText:
             }
         }
 
-        mock_model_instance = MagicMock()
+        mock_model_instance = mocker.MagicMock()
         mock_model_instance.analyze_long_text.return_value = (
-            MagicMock(content="Summarized text"), "0")
+            mocker.MagicMock(content="Summarized text"), "0")
         mock_long_context_model.return_value = mock_model_instance
 
         # Execute
@@ -171,9 +180,9 @@ class TestConvertLongTextToText:
             }
         }
 
-        mock_model_instance = MagicMock()
+        mock_model_instance = mocker.MagicMock()
         mock_model_instance.analyze_long_text.return_value = (
-            MagicMock(content="Truncated summary"), "50")
+            mocker.MagicMock(content="Truncated summary"), "50")
         mock_long_context_model.return_value = mock_model_instance
 
         # Execute
@@ -219,9 +228,9 @@ class TestConvertLongTextToText:
             }
         }
 
-        mock_model_instance = MagicMock()
+        mock_model_instance = mocker.MagicMock()
         mock_model_instance.analyze_long_text.return_value = (
-            MagicMock(content="English summary"), "0")
+            mocker.MagicMock(content="English summary"), "0")
         mock_long_context_model.return_value = mock_model_instance
 
         # Execute with English language
@@ -258,7 +267,7 @@ class TestErrorHandling:
             }
         }
 
-        mock_model_instance = MagicMock()
+        mock_model_instance = mocker.MagicMock()
         mock_model_instance.analyze_image.side_effect = Exception(
             "Model error")
         mock_vlm_model.return_value = mock_model_instance
@@ -293,7 +302,7 @@ class TestErrorHandling:
             }
         }
 
-        mock_model_instance = MagicMock()
+        mock_model_instance = mocker.MagicMock()
         mock_model_instance.analyze_long_text.side_effect = Exception(
             "Model error")
         mock_long_context_model.return_value = mock_model_instance

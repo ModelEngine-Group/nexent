@@ -1,16 +1,23 @@
 import pytest
 import json
+import sys
 from unittest.mock import patch
 
-# Note: Global mocks are handled by conftest.py global_mocks fixture
+# Setup common mocks
+from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
 
-from backend.utils.config_utils import (
-    safe_value,
-    safe_list,
-    get_env_key,
-    get_model_name_from_config,
-    TenantConfigManager
-)
+# Initialize common mocks
+mocks = setup_common_mocks()
+
+# Patch storage factory before importing
+with patch_minio_client_initialization():
+    from backend.utils.config_utils import (
+        safe_value,
+        safe_list,
+        get_env_key,
+        get_model_name_from_config,
+        TenantConfigManager
+    )
 
 
 class TestSafeValue:

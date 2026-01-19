@@ -5,9 +5,9 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock
 
-from test.common.env_test_utils import bootstrap_env
+from test.common.test_mocks import bootstrap_test_env
 
-env_state = bootstrap_env()
+env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
 TEST_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = TEST_ROOT.parent

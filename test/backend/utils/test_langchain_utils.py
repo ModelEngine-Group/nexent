@@ -1,6 +1,13 @@
+import pytest
 from unittest.mock import MagicMock
 
 from backend.utils.langchain_utils import discover_langchain_modules, _is_langchain_tool
+
+
+@pytest.fixture
+def mock_logger():
+    """Fixture to provide a mock logger"""
+    return MagicMock()
 
 
 class TestLangchainUtils:

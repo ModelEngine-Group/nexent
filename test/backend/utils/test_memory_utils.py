@@ -1,6 +1,44 @@
 import pytest
+import sys
+from unittest.mock import patch, MagicMock
 
-from backend.utils.memory_utils import build_memory_config
+# Setup common mocks
+from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization, mock_constants
+
+# Initialize common mocks
+mocks = setup_common_mocks()
+
+# Patch storage factory before importing
+with patch_minio_client_initialization():
+    from backend.utils.memory_utils import build_memory_config
+
+
+@pytest.fixture
+def mock_model_configs():
+    """Fixture to provide mock model configurations"""
+    llm_config = {
+        "model_name": "gpt-4",
+        "model_repo": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "test-llm-key"
+    }
+    embedding_config = {
+        "model_name": "text-embedding-ada-002",
+        "model_repo": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "test-embed-key",
+        "max_tokens": 1536
+    }
+    return {
+        "llm_config": llm_config,
+        "embedding_config": embedding_config
+    }
+
+
+@pytest.fixture
+def mock_tenant_config_manager():
+    """Fixture to provide mock tenant config manager"""
+    return MagicMock()
 
 
 class TestMemoryUtils:
