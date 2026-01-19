@@ -79,7 +79,6 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "knowledge_name": new_record.knowledge_name,
             }
     except SQLAlchemyError as e:
-        session.rollback()
         raise e
 
 
@@ -132,7 +131,6 @@ def upsert_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 return create_knowledge_record(query)
 
     except SQLAlchemyError as e:
-        session.rollback()
         raise e
 
 
@@ -168,7 +166,6 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             session.commit()
             return True
     except SQLAlchemyError as e:
-        session.rollback()
         raise e
 
 
@@ -205,7 +202,6 @@ def delete_knowledge_record(query: Dict[str, Any]) -> bool:
             session.commit()
             return True
     except SQLAlchemyError as e:
-        session.rollback()
         raise e
 
 

@@ -1,15 +1,18 @@
-import types
-import unittest
-import json
 import sys
-import asyncio
-import os
-from datetime import datetime
-from unittest.mock import patch, MagicMock
-import types as _types
-import importlib
+import types
+from unittest.mock import patch
 
-from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
+# Mock storage client factory and MinIO config before any imports that would initialize MinIO
+from unittest.mock import MagicMock
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+
+# Mock boto3 before any imports
+boto3_mock = types.SimpleNamespace()
+sys.modules['boto3'] = boto3_mock
 
 def _stub_nexent_openai_model():
     # Provide a simple OpenAIModel stub for import-time safety
@@ -49,86 +52,16 @@ observer_mod = types.ModuleType("nexent.core.utils.observer")
 observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
 observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
 sys.modules["nexent.core.utils.observer"] = observer_mod
+
+# Stub nexent.core.models.embedding_model to avoid import errors
+embedding_mod = types.ModuleType("nexent.core.models.embedding_model")
+embedding_mod.BaseEmbedding = object
+embedding_mod.OpenAICompatibleEmbedding = object
+embedding_mod.JinaEmbedding = object
+sys.modules["nexent.core.models.embedding_model"] = embedding_mod
 #
 # Stub consts.model to avoid pydantic/email-validator heavy imports during tests.
 consts_model_mod = types.ModuleType("consts.model")
-
-# Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
-
-# Mock boto3 and minio client before importing the module under test
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-# Ensure minimal `nexent.storage` stubs exist so `patch('nexent.storage...')` doesn't
-# trigger importing the installed `nexent` package which may have heavy imports.
-if 'nexent' not in sys.modules:
-
-    _nexent_mod = _types.ModuleType('nexent')
-    _nexent_storage = _types.ModuleType('nexent.storage')
-    _storage_factory = _types.ModuleType('nexent.storage.storage_client_factory')
-    # provide a simple factory function that returns our storage_client_mock
-    _storage_factory.create_storage_client_from_config = lambda cfg: storage_client_mock
-    _minio_conf = _types.ModuleType('nexent.storage.minio_config')
-    class _MinIOStorageConfigStub:
-        def __init__(self, endpoint=None, access_key=None, secret_key=None, region=None, default_bucket=None, secure=None, **kwargs):
-            # Store constructor parameters to mimic real config object attributes
-            self.endpoint = endpoint
-            self.access_key = access_key
-            self.secret_key = secret_key
-            self.region = region
-            self.default_bucket = default_bucket
-            self.secure = secure
-
-        def validate(self):
-            return None
-    _minio_conf.MinIOStorageConfig = _MinIOStorageConfigStub
-    # Also expose MinIOStorageConfig on the storage_client_factory module
-    _storage_factory.MinIOStorageConfig = _MinIOStorageConfigStub
-    # attach hierarchy and register in sys.modules
-    _nexent_mod.storage = _nexent_storage
-    _nexent_storage.storage_client_factory = _storage_factory
-    _nexent_storage.minio_config = _minio_conf
-    sys.modules['nexent'] = _nexent_mod
-    sys.modules['nexent.storage'] = _nexent_storage
-    sys.modules['nexent.storage.storage_client_factory'] = _storage_factory
-    sys.modules['nexent.storage.minio_config'] = _minio_conf
-
-# Now safe to patch (patch will import from sys.modules instead of site-packages)
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-
-importlib.import_module("backend.database.client")
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
-
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
-    from backend.services.conversation_management_service import (
-        save_message,
-        save_conversation_user,
-        save_conversation_assistant,
-        extract_user_messages,
-        call_llm_for_title,
-        update_conversation_title,
-        create_new_conversation,
-        get_conversation_list_service,
-        rename_conversation_service,
-        delete_conversation_service,
-        get_conversation_history_service,
-        get_sources_service,
-        generate_conversation_title_service,
-        update_message_opinion_service,
-        get_message_id_by_index_impl
-    )
-
-
 class AgentRequest:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -212,6 +145,35 @@ def test_call_llm_for_title_flattening(monkeypatch):
     # Call with some content; expect OpenAIModel.generate to receive flattened messages
     title = call_llm_for_title("some conversation content", tenant_id="t", language="zh")
     assert title == "The Title"
+
+from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
+import unittest
+import json
+import asyncio
+import os
+from datetime import datetime
+from unittest.mock import patch, MagicMock
+
+# Environment variables are now configured in conftest.py
+
+with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
+    from backend.services.conversation_management_service import (
+        save_message,
+        save_conversation_user,
+        save_conversation_assistant,
+        extract_user_messages,
+        call_llm_for_title,
+        update_conversation_title,
+        create_new_conversation,
+        get_conversation_list_service,
+        rename_conversation_service,
+        delete_conversation_service,
+        get_conversation_history_service,
+        get_sources_service,
+        generate_conversation_title_service,
+        update_message_opinion_service,
+        get_message_id_by_index_impl
+    )
 
 
 class TestConversationManagementService(unittest.TestCase):

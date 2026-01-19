@@ -16,7 +16,7 @@ logger = logging.getLogger("datamate_app")
 
 
 @router.post("/sync_datamate_knowledges")
-async def 同步datamate记录(
+async def sync_datamate_knowledges(
     authorization: Optional[str] = Header(None)
 ):
     """Sync DataMate knowledge bases and create knowledge records in local database."""

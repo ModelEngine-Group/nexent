@@ -14,21 +14,10 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', '..')))
 
-# Mock environment variables before imports
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
-
 # Mock consts module
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-consts_mock.const.MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', 'http://localhost:9000')
-consts_mock.const.MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', 'minioadmin')
-consts_mock.const.MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', 'minioadmin')
-consts_mock.const.MINIO_REGION = os.environ.get('MINIO_REGION', 'us-east-1')
-consts_mock.const.MINIO_DEFAULT_BUCKET = os.environ.get('MINIO_DEFAULT_BUCKET', 'test-bucket')
+# Environment variables are now configured in conftest.py
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const

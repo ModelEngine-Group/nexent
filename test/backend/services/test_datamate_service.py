@@ -1,6 +1,34 @@
+import sys
 import pytest
+from unittest.mock import MagicMock
 
-from backend.services import datamate_service
+# Setup common mocks
+from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
+
+# Initialize common mocks
+mocks = setup_common_mocks()
+
+# Mock the specific database modules that datamate_service imports
+knowledge_db_mock = MagicMock()
+knowledge_db_mock.upsert_knowledge_record = MagicMock()
+knowledge_db_mock.get_knowledge_info_by_tenant_and_source = MagicMock()
+knowledge_db_mock.delete_knowledge_record = MagicMock()
+
+# Mock the nexent modules
+datamate_core_mock = MagicMock()
+
+sys.modules['database.knowledge_db'] = knowledge_db_mock
+sys.modules['nexent.vector_database.datamate_core'] = datamate_core_mock
+
+# Patch storage factory before importing the module under test
+with patch_minio_client_initialization():
+    from backend.services.datamate_service import (
+        fetch_datamate_knowledge_base_files,
+        fetch_datamate_knowledge_base_file_list,
+        sync_datamate_knowledge_bases_and_create_records,
+        _get_datamate_core,
+        _create_datamate_knowledge_records
+    )
 
 
 class FakeClient:
@@ -17,27 +45,369 @@ class FakeClient:
         return {"success": True, "knowledge_bases": [{"id": "kb1"}], "total_count": 1}
 
 
-
-
 @pytest.mark.asyncio
 async def test_fetch_datamate_knowledge_base_files_success(monkeypatch):
-    monkeypatch.setattr(datamate_service, "_get_datamate_client", lambda: FakeClient())
-    files = await datamate_service.fetch_datamate_knowledge_base_files("kb1")
+    # Mock the _get_datamate_core function to return our fake core
+    fake_core = MagicMock()
+    fake_core.get_index_chunks.return_value = {
+        "chunks": [{"name": "file1", "size": 123, "knowledge_base_id": "kb1"}]
+    }
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+    files = await fetch_datamate_knowledge_base_files("kb1", "tenant1")
     assert isinstance(files, list)
     assert files[0]["knowledge_base_id"] == "kb1"
 
 
 @pytest.mark.asyncio
 async def test_fetch_datamate_knowledge_base_files_failure(monkeypatch):
-    class BadClient(FakeClient):
-        def get_knowledge_base_files(self, knowledge_base_id):
-            raise Exception("boom")
+    # Mock the _get_datamate_core function to return a core that raises an exception
+    fake_core = MagicMock()
+    fake_core.get_index_chunks.side_effect = Exception("boom")
 
-    monkeypatch.setattr(datamate_service, "_get_datamate_client", lambda: BadClient())
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
     with pytest.raises(RuntimeError) as excinfo:
-        await datamate_service.fetch_datamate_knowledge_base_files("kb1")
+        await fetch_datamate_knowledge_base_files("kb1", "tenant1")
     assert "Failed to fetch files for knowledge base kb1" in str(excinfo.value)
 
 
+def test_get_datamate_core_success(monkeypatch):
+    """Test _get_datamate_core function with valid configuration."""
+    # Mock DATAMATE_URL constant in the service module
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DATAMATE_URL", "DATAMATE_URL"
+    )
+
+    # Mock tenant_config_manager
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+
+    # Mock DataMateCore
+    mock_datamate_core = MagicMock()
+    datamate_core_class = MagicMock(return_value=mock_datamate_core)
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager)
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DataMateCore", datamate_core_class)
+
+    result = _get_datamate_core("tenant1")
+
+    assert result == mock_datamate_core
+    mock_config_manager.get_app_config.assert_called_once_with(
+        "DATAMATE_URL", tenant_id="tenant1")
+    datamate_core_class.assert_called_once_with(
+        base_url="http://datamate.example.com")
 
 
+def test_get_datamate_core_missing_config(monkeypatch):
+    """Test _get_datamate_core function with missing configuration."""
+    # Mock DATAMATE_URL constant in the service module
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DATAMATE_URL", "DATAMATE_URL"
+    )
+
+    # Mock tenant_config_manager to return None
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = None
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager)
+
+    with pytest.raises(ValueError) as excinfo:
+        _get_datamate_core("tenant1")
+
+    assert "DataMate URL not configured for tenant tenant1" in str(
+        excinfo.value)
+    mock_config_manager.get_app_config.assert_called_once_with(
+        "DATAMATE_URL", tenant_id="tenant1")
+
+
+@pytest.mark.asyncio
+async def test_fetch_datamate_knowledge_base_file_list_success(monkeypatch):
+    """Test fetch_datamate_knowledge_base_file_list function with successful response."""
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+    fake_core.get_documents_detail.return_value = [
+        {"name": "doc1.pdf", "size": 1234, "upload_date": "2023-01-01"},
+        {"name": "doc2.txt", "size": 5678, "upload_date": "2023-01-02"}
+    ]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+
+    result = await fetch_datamate_knowledge_base_file_list("kb1", "tenant1")
+
+    expected_result = {
+        "status": "success",
+        "files": [
+            {"name": "doc1.pdf", "size": 1234, "upload_date": "2023-01-01"},
+            {"name": "doc2.txt", "size": 5678, "upload_date": "2023-01-02"}
+        ]
+    }
+
+    assert result == expected_result
+    fake_core.get_documents_detail.assert_called_once_with("kb1")
+
+
+@pytest.mark.asyncio
+async def test_fetch_datamate_knowledge_base_file_list_failure(monkeypatch):
+    """Test fetch_datamate_knowledge_base_file_list function with error."""
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+    fake_core.get_documents_detail.side_effect = Exception("API error")
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await fetch_datamate_knowledge_base_file_list("kb1", "tenant1")
+
+    assert "Failed to fetch file list for knowledge base kb1" in str(
+        excinfo.value)
+    fake_core.get_documents_detail.assert_called_once_with("kb1")
+
+
+@pytest.mark.asyncio
+async def test_create_datamate_knowledge_records_success(monkeypatch):
+    """Test _create_datamate_knowledge_records function with successful record creation."""
+    # Reset mock state from previous tests
+    knowledge_db_mock.upsert_knowledge_record.side_effect = None
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+
+    # Mock upsert_knowledge_record
+    mock_created_record = {"id": "record1", "index_name": "kb1"}
+    knowledge_db_mock.upsert_knowledge_record.return_value = mock_created_record
+
+    result = await _create_datamate_knowledge_records(
+        knowledge_base_ids=["kb1", "kb2"],
+        knowledge_base_names=["Knowledge Base 1", "Knowledge Base 2"],
+        embedding_model_names=["embedding1", "embedding2"],
+        tenant_id="tenant1",
+        user_id="user1"
+    )
+
+    assert len(result) == 2
+    assert result[0] == mock_created_record
+    assert result[1] == mock_created_record
+
+    # Verify upsert_knowledge_record was called twice
+    assert knowledge_db_mock.upsert_knowledge_record.call_count == 2
+
+    # Check the call arguments for first record
+    first_call_args = knowledge_db_mock.upsert_knowledge_record.call_args_list[0][0][0]
+    assert first_call_args["index_name"] == "kb1"
+    assert first_call_args["knowledge_name"] == "Knowledge Base 1"
+    assert first_call_args["tenant_id"] == "tenant1"
+    assert first_call_args["user_id"] == "user1"
+    assert first_call_args["embedding_model_name"] == "embedding1"
+
+
+@pytest.mark.asyncio
+async def test_create_datamate_knowledge_records_partial_failure(monkeypatch):
+    """Test _create_datamate_knowledge_records function with partial failure."""
+    # Reset mock state from previous tests
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+
+    # Mock upsert_knowledge_record to fail on second call
+    knowledge_db_mock.upsert_knowledge_record.side_effect = [
+        {"id": "record1", "index_name": "kb1"},  # First call succeeds
+        Exception("Database error")  # Second call fails
+    ]
+
+    result = await _create_datamate_knowledge_records(
+        knowledge_base_ids=["kb1", "kb2"],
+        knowledge_base_names=["Knowledge Base 1", "Knowledge Base 2"],
+        embedding_model_names=["embedding1", "embedding2"],
+        tenant_id="tenant1",
+        user_id="user1"
+    )
+
+    # Should only return the successful record
+    assert len(result) == 1
+    assert result[0]["id"] == "record1"
+
+    # Verify upsert_knowledge_record was called twice (second failed but didn't crash)
+    assert knowledge_db_mock.upsert_knowledge_record.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_create_datamate_knowledge_records_empty_names(monkeypatch):
+    """Test _create_datamate_knowledge_records function when names list is shorter than ids."""
+    # Reset any previous side_effect from other tests
+    knowledge_db_mock.upsert_knowledge_record.side_effect = None
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+
+    mock_created_record = {"id": "record1", "index_name": "kb1"}
+    knowledge_db_mock.upsert_knowledge_record.return_value = mock_created_record
+
+    result = await _create_datamate_knowledge_records(
+        knowledge_base_ids=["kb1", "kb2"],
+        knowledge_base_names=["Knowledge Base 1"],  # Only one name provided
+        embedding_model_names=["embedding1", "embedding2"],
+        tenant_id="tenant1",
+        user_id="user1"
+    )
+
+    assert len(result) == 2
+
+    # First record should use the provided name
+    first_call_args = knowledge_db_mock.upsert_knowledge_record.call_args_list[0][0][0]
+    assert first_call_args["knowledge_name"] == "Knowledge Base 1"
+
+    # Second record should use the kb_id as fallback
+    second_call_args = knowledge_db_mock.upsert_knowledge_record.call_args_list[1][0][0]
+    assert second_call_args["knowledge_name"] == "kb2"
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_success(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records with successful sync."""
+    # Reset mock state from previous tests
+    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+    knowledge_db_mock.delete_knowledge_record.reset_mock()
+
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+
+    # Mock core methods
+    fake_core.get_user_indices.return_value = ["kb1", "kb2"]
+    fake_core.get_indices_detail.return_value = (
+        {
+            "kb1": {"base_info": {"embedding_model": "embedding1"}},
+            "kb2": {"base_info": {"embedding_model": "embedding2"}}
+        },
+        ["Knowledge Base 1", "Knowledge Base 2"]
+    )
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+
+    # Mock database functions that are imported directly
+    monkeypatch.setattr(
+        "backend.services.datamate_service.get_knowledge_info_by_tenant_and_source",
+        MagicMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "backend.services.datamate_service.delete_knowledge_record",
+        MagicMock(return_value=True)
+    )
+
+    # Mock _create_datamate_knowledge_records to return a coroutine
+    async def mock_create_records(*args, **kwargs):
+        return [{"id": "record1"}, {"id": "record2"}]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._create_datamate_knowledge_records",
+        mock_create_records
+    )
+
+    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    assert result["indices"] == ["Knowledge Base 1", "Knowledge Base 2"]
+    assert result["count"] == 2
+    assert "indices_info" in result
+    assert len(result["indices_info"]) == 2
+
+    fake_core.get_user_indices.assert_called_once()
+    fake_core.get_indices_detail.assert_called_once_with(["kb1", "kb2"])
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_no_indices(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records when no knowledge bases exist."""
+    # Reset mock state from previous tests
+    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+    knowledge_db_mock.delete_knowledge_record.reset_mock()
+
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+    fake_core.get_user_indices.return_value = []  # No indices
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+
+    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    assert result["indices"] == []
+    assert result["count"] == 0
+    assert "indices_info" not in result  # Should not be present when no indices
+
+    fake_core.get_user_indices.assert_called_once()
+    # get_indices_detail should not be called when no indices
+    fake_core.get_indices_detail.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records with soft deletions."""
+    # Reset mock state from previous tests
+    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+    knowledge_db_mock.delete_knowledge_record.reset_mock()
+
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+
+    # Mock core methods - only kb1 exists in API now
+    fake_core.get_user_indices.return_value = ["kb1"]
+    fake_core.get_indices_detail.return_value = (
+        {"kb1": {"base_info": {"embedding_model": "embedding1"}}},
+        ["Knowledge Base 1"]
+    )
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+
+    # Mock database functions that are imported directly - kb1 and kb2 exist in DB, but kb2 was deleted from API
+    mock_get_knowledge_info = MagicMock(return_value=[
+        {"index_name": "kb1"},
+        {"index_name": "kb2"}  # This should be deleted
+    ])
+    mock_delete_record = MagicMock(return_value=True)
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service.get_knowledge_info_by_tenant_and_source",
+        mock_get_knowledge_info
+    )
+    monkeypatch.setattr(
+        "backend.services.datamate_service.delete_knowledge_record",
+        mock_delete_record
+    )
+
+    # Mock _create_datamate_knowledge_records to return a coroutine
+    async def mock_create_records(*args, **kwargs):
+        return [{"id": "record1"}]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._create_datamate_knowledge_records",
+        mock_create_records
+    )
+
+    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    # kb2 should be deleted
+    mock_delete_record.assert_called_once_with({
+        "index_name": "kb2",
+        "user_id": "user1"
+    })
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_error_handling(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records with error handling."""
+    # Mock the _get_datamate_core function to raise an exception
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core",
+        MagicMock(side_effect=Exception("API connection failed"))
+    )
+
+    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    # Should return empty result on error
+    assert result["indices"] == []
+    assert result["count"] == 0
