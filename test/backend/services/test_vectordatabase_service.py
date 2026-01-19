@@ -404,8 +404,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2"},
-            {"index_name": "index2", "embedding_model_name": "test-model", "group_ids": ""}
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model",
+                "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -446,8 +447,9 @@ class TestElasticSearchService(unittest.TestCase):
         }
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2"},
-            {"index_name": "index2", "embedding_model_name": "test-model", "group_ids": ""}
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model",
+                "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -486,7 +488,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["es_index"]
         mock_get_info.return_value = [
             {"index_name": "dangling_index",
-                "embedding_model_name": "model-A", "group_ids": "1"}
+                "embedding_model_name": "model-A", "group_ids": "1", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "tenant-1"}
@@ -513,7 +515,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A", "group_ids": "1,2"}
+            {"index_name": "index1", "embedding_model_name": "model-A",
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {}
         mock_get_user_tenant.return_value = {
@@ -542,7 +545,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": None}
+            {"index_name": "index1", "embedding_model_name": None,
+                "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
             "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
@@ -574,7 +578,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A", "group_ids": "1,2"}
+            {"index_name": "index1", "embedding_model_name": "model-A",
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.side_effect = Exception(
             "503 Service Unavailable"
@@ -603,7 +608,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A", "group_ids": "1,2"}
+            {"index_name": "index1", "embedding_model_name": "model-A",
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
         ]
         detailed_stats = {
             "index1": {
@@ -652,7 +658,8 @@ class TestElasticSearchService(unittest.TestCase):
                 "group_ids": "1",
                 "created_by": "test_user",  # User is creator
                 "ingroup_permission": "READ_ONLY",
-                "tenant_id": "test_tenant"
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
             },
             {
                 "index_name": "index2",
@@ -660,7 +667,8 @@ class TestElasticSearchService(unittest.TestCase):
                 "group_ids": "1",
                 "created_by": "other_user",  # User is not creator
                 "ingroup_permission": "EDIT",
-                "tenant_id": "test_tenant"
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
             }
         ]
         mock_get_user_tenant.return_value = {
@@ -704,13 +712,15 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index1",
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
-                "tenant_id": "legacy_admin_user"  # Same as user_id
+                "tenant_id": "legacy_admin_user",  # Same as user_id
+                "knowledge_sources": "elasticsearch"
             },
             {
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
-                "tenant_id": "legacy_admin_user"  # Same as user_id
+                "tenant_id": "legacy_admin_user",  # Same as user_id
+                "knowledge_sources": "elasticsearch"
             }
         ]
         # user_role is None to test fallback logic
@@ -762,13 +772,15 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index1",
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
-                "tenant_id": "tenant_id"  # DEFAULT_TENANT_ID
+                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "knowledge_sources": "elasticsearch"
             },
             {
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
-                "tenant_id": "tenant_id"  # DEFAULT_TENANT_ID
+                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "knowledge_sources": "elasticsearch"
             }
         ]
         # user_role is USER but should be overridden by SPEED logic
@@ -2243,8 +2255,9 @@ class TestElasticSearchService(unittest.TestCase):
         mock_response.status_code = 200
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2"},
-            {"index_name": "index2", "embedding_model_name": "test-model", "group_ids": ""}
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model",
+                "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -2524,12 +2537,6 @@ class TestElasticSearchService(unittest.TestCase):
             "tenant_id": "tenant1"
         })
         self.assertEqual(result["status"], "exists_in_tenant")
-
-
-
-
-
-
 
     # Note: generate_knowledge_summary_stream function has been removed
     # These tests are no longer relevant as the function was replaced with summary_index_name
