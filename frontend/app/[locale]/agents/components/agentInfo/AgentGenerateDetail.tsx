@@ -16,7 +16,7 @@ import {
   App,
 } from "antd";
 import type { TabsProps } from "antd";
-import { Zap } from "lucide-react";
+import { Zap, Maximize2 } from "lucide-react";
 
 import log from "@/lib/logger";
 import { EditableAgent } from "@/stores/agentConfigStore";
@@ -32,6 +32,7 @@ import {
 import { generatePromptStream } from "@/services/promptService";
 import { useAuth } from "@/hooks/useAuth";
 import { useModelList } from "@/hooks/model/useModelList";
+import ExpandEditModal from "./ExpandEditModal";
 
 const { TextArea } = Input;
 
@@ -63,6 +64,10 @@ export default function AgentGenerateDetail({
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Modal states
+  const [expandModalOpen, setExpandModalOpen] = useState(false);
+  const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
 
   const userManuallySwitchedTabRef = useRef(false);
 
@@ -142,6 +147,61 @@ export default function AgentGenerateDetail({
       business_logic_model_id: selectedModel?.id || 0,
       business_logic_model_name: modelName,
     });
+  };
+
+  // Handle expand modal functions
+  const handleOpenExpandModal = (type: 'duty' | 'constraint' | 'few-shots') => {
+    setExpandModalType(type);
+    setExpandModalOpen(true);
+  };
+
+  const handleCloseExpandModal = () => {
+    setExpandModalOpen(false);
+    setExpandModalType(null);
+  };
+
+  const handleSaveExpandModal = (content: string) => {
+    switch (expandModalType) {
+      case 'duty':
+        form.setFieldsValue({ dutyPrompt: content });
+        onUpdateProfile({ duty_prompt: content });
+        break;
+      case 'constraint':
+        form.setFieldsValue({ constraintPrompt: content });
+        onUpdateProfile({ constraint_prompt: content });
+        break;
+      case 'few-shots':
+        form.setFieldsValue({ fewShotsPrompt: content });
+        onUpdateProfile({ few_shots_prompt: content });
+        break;
+    }
+    handleCloseExpandModal();
+  };
+
+  const getExpandModalTitle = () => {
+    switch (expandModalType) {
+      case 'duty':
+        return t("systemPrompt.card.duty.title");
+      case 'constraint':
+        return t("systemPrompt.card.constraint.title");
+      case 'few-shots':
+        return t("systemPrompt.card.fewShots.title");
+      default:
+        return "";
+    }
+  };
+
+  const getExpandModalContent = () => {
+    switch (expandModalType) {
+      case 'duty':
+        return form.getFieldValue("dutyPrompt") || "";
+      case 'constraint':
+        return form.getFieldValue("constraintPrompt") || "";
+      case 'few-shots':
+        return form.getFieldValue("fewShotsPrompt") || "";
+      default:
+        return "";
+    }
   };
 
   // Custom validator for agent name uniqueness
@@ -470,7 +530,16 @@ export default function AgentGenerateDetail({
       key: "duty",
       label: t("systemPrompt.card.duty.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full relative">
+          <div className="absolute top-2 right-2 z-10">
+            <Button
+              onClick={() => handleOpenExpandModal('duty')}
+              title={t("systemPrompt.button.expand")}
+              icon={<Maximize2 size={12} />}
+              size="small"
+              type="text"
+            />
+          </div>
           <Form
             form={form}
             layout="vertical"
@@ -501,7 +570,16 @@ export default function AgentGenerateDetail({
       key: "constraint",
       label: t("systemPrompt.card.constraint.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full relative">
+          <div className="absolute top-2 right-2 z-10">
+            <Button
+              onClick={() => handleOpenExpandModal('constraint')}
+              title={t("systemPrompt.button.expand")}
+              icon={<Maximize2 size={12} />}
+              size="small"
+              type="text"
+            />
+          </div>
           <Form
             form={form}
             layout="vertical"
@@ -534,7 +612,16 @@ export default function AgentGenerateDetail({
       key: "few-shots",
       label: t("systemPrompt.card.fewShots.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full relative">
+          <div className="absolute top-2 right-2 z-10">
+            <Button
+              onClick={() => handleOpenExpandModal('few-shots')}
+              title={t("systemPrompt.button.expand")}
+              icon={<Maximize2 size={12} />}
+              size="small"
+              type="text"
+            />
+          </div>
           <Form
             form={form}
             layout="vertical"
@@ -647,8 +734,8 @@ export default function AgentGenerateDetail({
                         : t("businessLogic.config.button.generatePrompt")}
                     </span>
                   </Button>
-                </Col>
-              </Row>
+                </div>
+              </Flex>
             </Card>
           </Flex>
         </Col>
@@ -749,6 +836,15 @@ export default function AgentGenerateDetail({
           height: 100% !important;
         }
       `}</style>
+
+      {/* Expand Edit Modal */}
+      <ExpandEditModal
+        open={expandModalOpen}
+        title={getExpandModalTitle()}
+        content={getExpandModalContent()}
+        onClose={handleCloseExpandModal}
+        onSave={handleSaveExpandModal}
+      />
     </Flex>
   );
 }
