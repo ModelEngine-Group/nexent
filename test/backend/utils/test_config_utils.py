@@ -1,11 +1,8 @@
 import pytest
 import json
-import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-# Mock the database modules that config_utils uses
-sys.modules['database.tenant_config_db'] = MagicMock()
-sys.modules['database.model_management_db'] = MagicMock()
+# Note: Global mocks are handled by conftest.py global_mocks fixture
 
 from backend.utils.config_utils import (
     safe_value,
