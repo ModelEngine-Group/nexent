@@ -8,7 +8,6 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
-import { useModalPosition } from "@/hooks/useModalPosition";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 
@@ -146,9 +145,9 @@ export default function ToolConfigModal({
     setTestPanelVisible(false);
     onCancel();
   };
-  // Handle tool testing - open test panel
+  // Handle tool testing - toggle test panel
   const handleTestTool = () => {
-    setTestPanelVisible(true);
+    setTestPanelVisible(!testPanelVisible);
   };
 
   // Close test panel
@@ -196,6 +195,8 @@ export default function ToolConfigModal({
   return (
     <>
       <Modal
+        mask={true}
+        maskClosable={false}
         title={
           <div className="flex justify-between items-center w-full pr-8">
             <span>{`${tool?.name}`}</span>
@@ -226,16 +227,7 @@ export default function ToolConfigModal({
         width={600}
         confirmLoading={isLoading}
         className="tool-config-modal-content"
-        style={
-          testPanelVisible
-            ? {
-                top: 100,
-                left: -320,
-              }
-            : {
-              }
-        }
-        wrapProps={{ style: { pointerEvents: "none", zIndex: 1100 } }} 
+        wrapProps={{ style: { pointerEvents: "auto" } }} 
         footer={
           <div className="flex justify-end items-center">
             {
@@ -244,7 +236,7 @@ export default function ToolConfigModal({
                 disabled={!tool}
                 className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8 mr-auto"
               >
-                {t("toolConfig.button.testTool")}
+                {testPanelVisible ? t("toolConfig.button.closeTest") : t("toolConfig.button.testTool")}
               </button>
             }
             <div className="flex gap-2">
@@ -276,7 +268,7 @@ export default function ToolConfigModal({
             <Form
               form={form}
               layout="horizontal"
-              labelAlign="right"
+              labelAlign="left"
               labelCol={{ span: 6 }}
               wrapperCol={{ span: 18 }}
             >
@@ -373,17 +365,19 @@ export default function ToolConfigModal({
               </div>
             </Form>
           </div>
+          <div>
+            {testPanelVisible && (
+              <ToolTestPanel
+                visible={testPanelVisible}
+                tool={tool}
+                onClose={handleCloseTestPanel}
+                configParams={currentParams}
+              />
+            )}
+          </div>
         </div>
       </Modal>
-      {/* Tool Test Panel */}
-      {testPanelVisible && (
-        <ToolTestPanel
-          visible={testPanelVisible}
-          tool={tool}
-          currentParams={currentParams}
-          onClose={handleCloseTestPanel}
-        />
-      )}
+
     </>
   );
 }

@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
-import { Input, Button, Card, Typography, Tooltip, Modal } from "antd";
+import { Input, Button, Card, Typography, Tooltip, Modal, Form } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
 
-import { ToolParam, Tool } from "@/types/agentConfig";
+import { Tool, ToolParam } from "@/types/agentConfig";
 import {
   validateTool,
   parseToolInputs,
@@ -23,7 +22,7 @@ export interface ToolTestPanelProps {
   /** Tool to test */
   tool: Tool | null;
   /** Current configuration parameters */
-  currentParams: ToolParam[];
+  configParams: ToolParam[];
   /** Callback when panel is closed */
   onClose: () => void;
 }
@@ -31,22 +30,20 @@ export interface ToolTestPanelProps {
 export default function ToolTestPanel({
   visible,
   tool,
-  currentParams,
+  configParams,
   onClose,
 }: ToolTestPanelProps) {
   const { t } = useTranslation("common");
+  const [form] = Form.useForm();
 
   // Tool test related state
   const [testExecuting, setTestExecuting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<string>("");
   const [parsedInputs, setParsedInputs] = useState<Record<string, any>>({});
-  const [paramValues, setParamValues] = useState<Record<string, string>>({});
-  const [dynamicInputParams, setDynamicInputParams] = useState<string[]>([]);
+  const [parameterValues, setParameterValues] = useState<Record<string, any>>({});
   const [isManualInputMode, setIsManualInputMode] = useState(false);
   const [manualJsonInput, setManualJsonInput] = useState<string>("");
   const [isParseSuccessful, setIsParseSuccessful] = useState<boolean>(false);
-
-  const modalRef = useRef<HTMLDivElement>(null);
 
   // Initialize test panel when opened
   useEffect(() => {
@@ -54,30 +51,29 @@ export default function ToolTestPanel({
       // Reset state when closed
       setTestResult("");
       setParsedInputs({});
-      setParamValues({});
-      setDynamicInputParams([]);
+      setParameterValues({});
       setTestExecuting(false);
       setIsManualInputMode(false);
       setManualJsonInput("");
       setIsParseSuccessful(false);
+      form.resetFields();
       return;
     }
 
     // Parse inputs definition from tool inputs field
     try {
       const parsedInputs = parseToolInputs(tool.inputs || "");
-      const paramNames = extractParameterNames(parsedInputs);
       // Check if parsing was successful (not empty object)
       const isSuccessful = Object.keys(parsedInputs).length > 0;
       setIsParseSuccessful(isSuccessful);
       if (isSuccessful) {
         setParsedInputs(parsedInputs);
-        setDynamicInputParams(paramNames);
 
-        // Initialize parameter values with appropriate defaults based on type
-        const initialValues: Record<string, string> = {};
-        paramNames.forEach((paramName) => {
-          const paramInfo = parsedInputs[paramName];
+        // Initialize parameter values and form values from parsed inputs
+        const parameterValues: Record<string, any> = {};
+        const formValues: Record<string, any> = {};
+
+        Object.entries(parsedInputs).forEach(([paramName, paramInfo]) => {
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
           if (
@@ -85,42 +81,49 @@ export default function ToolTestPanel({
             typeof paramInfo === "object" &&
             paramInfo.default != null
           ) {
-            // Use provided default value, convert to string for UI display
+            // Store actual default value
+            parameterValues[paramName] = paramInfo.default;
+
+            // Convert to string for form display
             switch (paramType) {
               case "boolean":
-                initialValues[paramName] = paramInfo.default ? "true" : "false";
+                formValues[`param_${paramName}`] = paramInfo.default ? "true" : "false";
                 break;
               case "array":
               case "object":
                 // JSON.stringify with indentation of 2 spaces for better readability
-                initialValues[paramName] = JSON.stringify(
+                formValues[`param_${paramName}`] = JSON.stringify(
                   paramInfo.default,
                   null,
                   2
                 );
                 break;
               default:
-                initialValues[paramName] = String(paramInfo.default);
+                formValues[`param_${paramName}`] = String(paramInfo.default);
             }
+          } else {
+            parameterValues[paramName] = "";
+            formValues[`param_${paramName}`] = "";
           }
         });
-        setParamValues(initialValues);
+
+        setParameterValues(parameterValues);
+        form.setFieldsValue(formValues);
         // Reset to parsed mode when parsing succeeds
         setIsManualInputMode(false);
-        setManualJsonInput("");
+        // Set manual input to current parsed values as default
+        setManualJsonInput(JSON.stringify(parameterValues, null, 2));
       } else {
         // Parsing returned empty object, treat as failed
         setParsedInputs({});
-        setParamValues({});
-        setDynamicInputParams([]);
+        setParameterValues({});
         setIsManualInputMode(true);
         setManualJsonInput("{}");
       }
     } catch (error) {
       log.error("Parameter parsing error:", error);
       setParsedInputs({});
-      setParamValues({});
-      setDynamicInputParams([]);
+      setParameterValues({});
       setIsParseSuccessful(false);
       // When parsing fails, automatically switch to manual input mode
       setIsManualInputMode(true);
@@ -154,9 +157,10 @@ export default function ToolTestPanel({
           return;
         }
       } else {
-        // Use parsed parameters
-        dynamicInputParams.forEach((paramName) => {
-          const value = paramValues[paramName];
+        // Use parsed parameters from form
+        const formValues = form.getFieldsValue();
+        Object.keys(parameterValues).forEach((paramName) => {
+          const value = formValues[`param_${paramName}`];
           const paramInfo = parsedInputs[paramName];
           const paramType = paramInfo?.type || DEFAULT_TYPE;
 
@@ -190,9 +194,9 @@ export default function ToolTestPanel({
         });
       }
 
-      // Prepare configuration parameters from current params
-      const configParams = currentParams.reduce(
-        (acc, param) => {
+      // Prepare configuration parameters from currentParams
+      const configs = (configParams || []).reduce(
+        (acc: Record<string, any>, param: ToolParam) => {
           acc[param.name] = param.value;
           return acc;
         },
@@ -205,7 +209,7 @@ export default function ToolTestPanel({
         tool.source, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
-        configParams // tool configuration parameters
+        configs // tool configuration parameters
       );
 
       // Format the JSON string response
@@ -230,205 +234,150 @@ export default function ToolTestPanel({
   if (!tool) return null;
 
   return (
-    <Modal
-    destroyOnClose={true}
-      title={
-        <div className="flex justify-between items-center w-full pr-8">
-          <span>{`${tool?.name}`}</span>
-        </div>
-      }
-      open={visible}
-      onCancel={onClose}
-      width={600}
-      className="tool-config-modal-content"
-      style={{
-        top: 100,
-        left: 320,
-        zIndex: 1040, // lower than ToolConfigModal so it won't block clicks
-      }}
-      mask={false}
-      maskClosable={false}
-      wrapProps={{ style: { pointerEvents: "none", zIndex: 1100 } }} // do not block pointer events outside modal content
-      footer={<div></div>}
-    >
-      <div className="mb-4" style={{ pointerEvents: "auto" }}>
-        <p className="text-sm text-gray-500 mb-4">{tool?.description}</p>
-        <div>
-          {currentParams.length > 0 && (
-            <>
-              <Text strong style={{ display: "block", marginBottom: 8 }}>
-                {t("toolConfig.toolTest.configParams")}
-              </Text>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  marginBottom: 15,
-                }}
-              >
-                {currentParams.map((param) => (
-                  <div
-                    key={param.name}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <Text style={{ minWidth: 100 }}>{param.name}</Text>
-                    <Tooltip
-                      title={param.description}
-                      placement="topLeft"
-                      styles={{ root: { maxWidth: 400 } }}
-                    >
-                      <Input
-                        placeholder={param.description || param.name}
-                        value={String(param.value || "")}
-                        readOnly
-                        style={{ flex: 1, backgroundColor: "#f5f5f5" }}
-                      />
-                    </Tooltip>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <div>
-          {/* Input parameters section with conditional toggle */}
-          {dynamicInputParams.length > 0 && (
-            <>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 8,
-                }}
-              >
-                <Text strong style={{ display: "block", marginBottom: 8 }}>
-                  {t("toolConfig.toolTest.inputParams")}
-                </Text>
-                {/* Only show toggle button if parsing was successful */}
-                {isParseSuccessful && (
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={
-                      isManualInputMode ? (
-                        <Settings size={16} />
-                      ) : (
-                        <PenLine size={16} />
-                      )
-                    }
-                    onClick={() => {
-                      setIsManualInputMode(!isManualInputMode);
-                      if (!isManualInputMode) {
-                        const currentParamsJson: Record<string, any> = {};
-                        dynamicInputParams.forEach((paramName) => {
-                          const value = paramValues[paramName];
-                          if (value && value.trim() !== "") {
-                            const paramInfo = parsedInputs[paramName];
-                            const paramType = paramInfo?.type || DEFAULT_TYPE;
 
-                            try {
-                              switch (paramType) {
-                                case "integer":
-                                case "number":
-                                  currentParamsJson[paramName] = Number(
-                                    value.trim()
-                                  );
-                                  break;
-                                case "boolean":
-                                  currentParamsJson[paramName] =
-                                    value.trim().toLowerCase() === "true";
-                                  break;
-                                case "array":
-                                case "object":
-                                  currentParamsJson[paramName] = JSON.parse(
-                                    value.trim()
-                                  );
-                                  break;
-                                default:
-                                  currentParamsJson[paramName] = value.trim();
-                              }
-                            } catch {
-                              currentParamsJson[paramName] = value.trim();
+    <div className="mb-4" >
+      <div>
+        {/* Input parameters section with conditional toggle */}
+        {Object.keys(parameterValues).length > 0 && (
+          <>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <Text strong style={{ display: "block", marginBottom: 8 }}>
+                {t("toolConfig.toolTest.inputParams")}
+              </Text>
+              {/* Only show toggle button if parsing was successful */}
+              {isParseSuccessful && (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={
+                    isManualInputMode ? (
+                      <Settings size={16} />
+                    ) : (
+                      <PenLine size={16} />
+                    )
+                  }
+                  onClick={() => {
+                    const newMode = !isManualInputMode;
+                    setIsManualInputMode(newMode);
+
+                    if (newMode) {
+                      // Switching to manual mode - get values from form
+                      const currentFormValues = form.getFieldsValue();
+                      const currentParamsJson: Record<string, any> = {};
+
+                      Object.keys(parameterValues).forEach((paramName) => {
+                        const formValue = currentFormValues[`param_${paramName}`];
+                        if (formValue && formValue.trim() !== "") {
+                          const paramInfo = parsedInputs[paramName];
+                          const paramType = paramInfo?.type || DEFAULT_TYPE;
+
+                          try {
+                            switch (paramType) {
+                              case "integer":
+                              case "number":
+                                currentParamsJson[paramName] = Number(
+                                  formValue.trim()
+                                );
+                                break;
+                              case "boolean":
+                                currentParamsJson[paramName] =
+                                  formValue.trim().toLowerCase() === "true";
+                                break;
+                              case "array":
+                              case "object":
+                                currentParamsJson[paramName] = JSON.parse(
+                                  formValue.trim()
+                                );
+                                break;
+                              default:
+                                currentParamsJson[paramName] = formValue.trim();
                             }
+                          } catch {
+                            currentParamsJson[paramName] = formValue.trim();
+                          }
+                        }
+                      });
+                      setManualJsonInput(
+                        JSON.stringify(currentParamsJson, null, 2)
+                      );
+                    } else {
+                      // Switching to parsed mode - parse manual JSON and set to form
+                      try {
+                        const manualParams = JSON.parse(manualJsonInput);
+                        const formValues: Record<string, any> = {};
+
+                        Object.keys(parameterValues).forEach((paramName) => {
+                          const manualValue = manualParams[paramName];
+                          const paramInfo = parsedInputs[paramName];
+                          const paramType = paramInfo?.type || DEFAULT_TYPE;
+
+                          if (manualValue !== undefined) {
+                            // Convert to string for display based on parameter type
+                            switch (paramType) {
+                              case "boolean":
+                                formValues[`param_${paramName}`] = manualValue
+                                  ? "true"
+                                  : "false";
+                                break;
+                              case "array":
+                              case "object":
+                                formValues[`param_${paramName}`] =
+                                  JSON.stringify(manualValue, null, 2);
+                                break;
+                              default:
+                                formValues[`param_${paramName}`] =
+                                  String(manualValue);
+                            }
+                          } else {
+                            formValues[`param_${paramName}`] = "";
                           }
                         });
-                        setManualJsonInput(
-                          JSON.stringify(currentParamsJson, null, 2)
+                        form.setFieldsValue(formValues);
+                      } catch (error) {
+                        log.error(
+                          "Failed to sync manual input to parsed mode:",
+                          error
                         );
-                      } else {
-                        // From manual input mode to parsed mode
-                        try {
-                          const manualParams = JSON.parse(manualJsonInput);
-                          const updatedParamValues: Record<string, string> = {};
-                          dynamicInputParams.forEach((paramName) => {
-                            const manualValue = manualParams[paramName];
-                            const paramInfo = parsedInputs[paramName];
-                            const paramType = paramInfo?.type || DEFAULT_TYPE;
-
-                            if (manualValue !== undefined) {
-                              // Convert to string for display based on parameter type
-                              switch (paramType) {
-                                case "boolean":
-                                  updatedParamValues[paramName] = manualValue
-                                    ? "true"
-                                    : "false";
-                                  break;
-                                case "array":
-                                case "object":
-                                  updatedParamValues[paramName] =
-                                    JSON.stringify(manualValue, null, 2);
-                                  break;
-                                default:
-                                  updatedParamValues[paramName] =
-                                    String(manualValue);
-                              }
-                            }
-                          });
-                          setParamValues(updatedParamValues);
-                        } catch (error) {
-                          log.error(
-                            "Failed to sync manual input to parsed mode:",
-                            error
-                          );
-                        }
                       }
-                    }}
-                  >
-                    {isManualInputMode
-                      ? t("toolConfig.toolTest.parseMode")
-                      : t("toolConfig.toolTest.manualInput")}
-                  </Button>
-                )}
-              </div>
+                    }
+                  }}
+                >
+                  {isManualInputMode
+                    ? t("toolConfig.toolTest.parseMode")
+                    : t("toolConfig.toolTest.manualInput")}
+                </Button>
+              )}
+            </div>
 
+            <Form
+              form={form}
+              layout="horizontal"
+              labelAlign="left"
+              labelCol={{ span: 6 }}
+              wrapperCol={{ span: 18 }}
+            >
               {isManualInputMode ? (
                 // Manual JSON input mode
-                <div style={{ marginBottom: 15 }}>
-                  <Input.TextArea
-                    value={manualJsonInput}
-                    onChange={(e) => setManualJsonInput(e.target.value)}
-                    rows={6}
-                    style={{ fontFamily: "monospace" }}
-                  />
-                </div>
+              <Form.Item className="w-full" wrapperCol={{ span: 24 }}>
+                <Input.TextArea
+                  value={manualJsonInput}
+                  onChange={(e) => setManualJsonInput(e.target.value)}
+                  rows={6}
+                  style={{ fontFamily: "monospace", width: "100%" }}
+                />
+              </Form.Item>
               ) : (
                 // Parsed parameters mode
-                dynamicInputParams.length > 0 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                      marginBottom: 15,
-                    }}
-                  >
-                    {dynamicInputParams.map((paramName) => {
+                Object.keys(parameterValues).length > 0 && (
+                  <>
+                    {Object.keys(parameterValues).map((paramName) => {
                       const paramInfo = parsedInputs[paramName];
                       const description =
                         paramInfo &&
@@ -437,64 +386,120 @@ export default function ToolTestPanel({
                           ? paramInfo.description
                           : paramName;
 
+                      const fieldName = `param_${paramName}`;
+                      const rules: any[] = [];
+
+                      // Add type-specific validation rules
+                      switch (paramInfo?.type || DEFAULT_TYPE) {
+                        case "array":
+                          rules.push({
+                            validator: (_: any, value: any) => {
+                              if (!value) return Promise.resolve();
+                              try {
+                                const parsed =
+                                  typeof value === "string"
+                                    ? JSON.parse(value)
+                                    : value;
+                                if (!Array.isArray(parsed)) {
+                                  return Promise.reject(
+                                    t("toolConfig.validation.array.invalid")
+                                  );
+                                }
+                              } catch {
+                                return Promise.reject(
+                                  t("toolConfig.validation.array.invalid")
+                                );
+                              }
+                            },
+                          });
+                          break;
+                        case "object":
+                          rules.push({
+                            validator: (_: any, value: any) => {
+                              if (!value) return Promise.resolve();
+                              try {
+                                const parsed =
+                                  typeof value === "string"
+                                    ? JSON.parse(value)
+                                    : value;
+                                if (
+                                  typeof parsed !== "object" ||
+                                  Array.isArray(parsed)
+                                ) {
+                                  return Promise.reject(
+                                    t("toolConfig.validation.object.invalid")
+                                  );
+                                }
+                                return Promise.resolve();
+                              } catch {
+                                return Promise.reject(
+                                  t("toolConfig.validation.object.invalid")
+                                );
+                              }
+                            },
+                          });
+                          break;
+                      }
+
                       return (
-                        <div
+                        <Form.Item
                           key={paramName}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
+                          label={
+                            <span
+                              style={{ width: "100%" }}
+                              title={paramName}
+                            >
+                              {paramName}
+                            </span>
+                          }
+                          name={fieldName}
+                          rules={rules}
+                          tooltip={{
+                            title: description,
+                            placement: "topLeft",
+                            styles: { root: { maxWidth: 400 } },
                           }}
                         >
-                          <Text style={{ minWidth: 100 }}>{paramName}</Text>
-                            <Input
-                              placeholder={description}
-                              value={paramValues[paramName] || ""}
-                              onChange={(e) => {
-                                setParamValues((prev) => ({
-                                  ...prev,
-                                  [paramName]: e.target.value,
-                                }));
-                              }}
-                              style={{ flex: 1 }}
-                            />
-                        </div>
+                          <Input
+                            placeholder={description}
+                          />
+                        </Form.Item>
                       );
                     })}
-                  </div>
+                  </>
                 )
               )}
-            </>
-          )}
+            </Form>
+          </>
+        )}
 
-          <Button
-            type="primary"
-            onClick={executeTest}
-            loading={testExecuting}
-            disabled={testExecuting}
-            style={{ width: "100%" }}
-          >
-            {testExecuting
-              ? t("toolConfig.toolTest.executing")
-              : t("toolConfig.toolTest.execute")}
-          </Button>
-        </div>
-        {/* Test result */}
-        <div className="mt-3">
-          <Text strong style={{ display: "block", marginBottom: 8 }}>
-            {t("toolConfig.toolTest.result")}
-          </Text>
-          <Input.TextArea
-            value={testResult}
-            readOnly
-            rows={8}
-            style={{
-              backgroundColor: "#f5f5f5",
-              resize: "none",
-            }}
-          />
-        </div>
+        <Button
+          type="primary"
+          onClick={executeTest}
+          loading={testExecuting}
+          disabled={testExecuting}
+          style={{ width: "100%" }}
+        >
+          {testExecuting
+            ? t("toolConfig.toolTest.executing")
+            : t("toolConfig.toolTest.execute")}
+        </Button>
       </div>
-    </Modal>
+      {/* Test result */}
+      <div className="mt-3">
+        <Text strong style={{ display: "block", marginBottom: 8 }}>
+          {t("toolConfig.toolTest.result")}
+        </Text>
+        <Input.TextArea
+          value={testResult}
+          readOnly
+          rows={8}
+          style={{
+            backgroundColor: "#f5f5f5",
+            resize: "none",
+          }}
+        />
+      </div>
+    </div>
   );
 }
