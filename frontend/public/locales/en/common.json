@@ -1275,6 +1275,7 @@
   "market.install.agent.defaultName": "Agent",
   "market.install.agent.main": "Main",
   "market.install.config.placeholder": "Enter configuration value",
+  "market.install.config.placeholderWithParam": "Enter {{param}}",
   "market.install.mcp.description": "This agent requires the following MCP servers. Please install or configure them.",
   "market.install.mcp.installed": "Installed",
   "market.install.mcp.notInstalled": "Not Installed",

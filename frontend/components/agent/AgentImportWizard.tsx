@@ -1683,7 +1683,7 @@ export default function AgentImportWizard({
                                       [field.valueKey]: e.target.value,
                                     }));
                                   }}
-                                  placeholder={`输入 ${paramLabel}`}
+                                  placeholder={t("market.install.config.placeholderWithParam", { param: paramLabel })}
                                   size="middle"
                                   style={{ flex: 1 }}
                                   className={needsConfig(field.currentValue) ? "bg-gray-50 dark:bg-gray-800" : ""}
@@ -1736,7 +1736,7 @@ export default function AgentImportWizard({
                                       [field.valueKey]: e.target.value,
                                     }));
                                   }}
-                                  placeholder={`输入 ${paramLabel}`}
+                                  placeholder={t("market.install.config.placeholderWithParam", { param: paramLabel })}
                                   size="middle"
                                   style={{ flex: 1 }}
                                   className={needsConfig(field.currentValue) ? "bg-gray-50 dark:bg-gray-800" : ""}

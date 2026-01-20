@@ -1254,6 +1254,7 @@
   "market.install.agent.defaultName": "智能体",
   "market.install.agent.main": "主",
   "market.install.config.placeholder": "输入配置值",
+  "market.install.config.placeholderWithParam": "输入 {{param}}",
   "market.install.mcp.description": "该智能体需要以下 MCP 服务器。请安装或配置它们。",
   "market.install.mcp.installed": "已安装",
   "market.install.mcp.notInstalled": "未安装",
