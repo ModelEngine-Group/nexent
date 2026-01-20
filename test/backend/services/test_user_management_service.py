@@ -1188,9 +1188,11 @@ class TestRevokeRegularUser(unittest.IsolatedAsyncioTestCase):
 class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
     """Test get_user_info function"""
 
+    @patch('backend.services.user_management_service.get_role_permissions')
+    @patch('backend.services.user_management_service.format_role_permissions')
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.query_group_ids_by_user')
-    async def test_get_user_info_success(self, mock_query_group_ids, mock_get_user_tenant):
+    async def test_get_user_info_success(self, mock_query_group_ids, mock_get_user_tenant, mock_format_permissions, mock_get_permissions):
         """Test getting user information successfully"""
         # Setup mocks
         mock_get_user_tenant.return_value = {
@@ -1198,19 +1200,32 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
             "user_role": "ADMIN"
         }
         mock_query_group_ids.return_value = [1, 2, 3]
+        mock_permissions = [
+            {"permission_category": "RESOURCE", "permission_type": "agent", "permission_subtype": "create"},
+            {"permission_type": "LEFT_NAV_MENU", "permission_subtype": "chat"}
+        ]
+        mock_get_permissions.return_value = mock_permissions
+        mock_format_permissions.return_value = {
+            "permissions": ["agent:create"],
+            "accessibleRoutes": ["chat"]
+        }
 
         # Execute
         result = await get_user_info("test_user")
 
         # Assert
         assert result is not None
-        assert result["user_id"] == "test_user"
-        assert result["tenant_id"] == "test_tenant"
-        assert result["user_role"] == "ADMIN"
-        assert result["group_ids"] == [1, 2, 3]
+        assert result["user"]["user_id"] == "test_user"
+        assert result["user"]["group_ids"] == [1, 2, 3]
+        assert result["user"]["tenant_id"] == "test_tenant"
+        assert result["user"]["user_role"] == "ADMIN"
+        assert result["user"]["permissions"] == ["agent:create"]
+        assert result["user"]["accessibleRoutes"] == ["chat"]
 
         mock_get_user_tenant.assert_called_once_with("test_user")
         mock_query_group_ids.assert_called_once_with("test_user")
+        mock_get_permissions.assert_called_once_with("ADMIN")
+        mock_format_permissions.assert_called_once_with(mock_permissions)
 
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     async def test_get_user_info_user_not_found(self, mock_get_user_tenant):
@@ -1239,67 +1254,98 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
         assert result is None
 
 
-class TestGetRolePermissionsByRole(unittest.IsolatedAsyncioTestCase):
-    """Test get_permissions_by_role function"""
+class TestFormatRolePermissions(unittest.TestCase):
+    """Test format_role_permissions function"""
 
-    @patch('backend.services.user_management_service.get_role_permissions')
-    async def test_get_permissions_by_role_success(self, mock_get_permissions):
-        """Test successfully getting role permissions"""
-        # Setup mock data
-        mock_permissions = [
+    def test_format_role_permissions_resource_only(self):
+        """Test formatting with only RESOURCE permissions"""
+        permissions = [
             {
-                "role_permission_id": 1,
-                "user_role": "USER",
-                "permission_category": "KNOWLEDGE_BASE",
-                "permission_type": "KNOWLEDGE",
-                "permission_subtype": "READ"
+                "permission_category": "RESOURCE",
+                "permission_type": "agent",
+                "permission_subtype": "create"
             },
             {
-                "role_permission_id": 2,
-                "user_role": "USER",
-                "permission_category": "AGENT_MANAGEMENT",
-                "permission_type": "AGENT",
-                "permission_subtype": "READ"
+                "permission_category": "RESOURCE",
+                "permission_type": "agent",
+                "permission_subtype": "read"
             }
         ]
-        mock_get_permissions.return_value = mock_permissions
 
-        # Execute
-        result = await get_permissions_by_role("USER")
+        result = format_role_permissions(permissions)
 
-        # Assert
-        assert result["user_role"] == "USER"
-        assert len(result["permissions"]) == 2
-        assert result["total_permissions"] == 2
-        assert "Successfully retrieved 2 permissions" in result["message"]
-        mock_get_permissions.assert_called_once_with("USER")
+        assert result["permissions"] == ["agent:create", "agent:read"]
+        assert result["accessibleRoutes"] == []
 
-    @patch('backend.services.user_management_service.get_role_permissions')
-    async def test_get_permissions_by_role_empty_result(self, mock_get_permissions):
-        """Test getting role permissions with empty result"""
-        # Setup mock to return empty list
-        mock_get_permissions.return_value = []
+    def test_format_role_permissions_LEFT_NAV_MENU_only(self):
+        """Test formatting with only LEFT_NAV_MENU permissions"""
+        permissions = [
+            {
+                "permission_type": "LEFT_NAV_MENU",
+                "permission_subtype": "chat"
+            },
+            {
+                "permission_type": "LEFT_NAV_MENU",
+                "permission_subtype": "agents"
+            }
+        ]
 
-        # Execute
-        result = await get_permissions_by_role("NONEXISTENT_ROLE")
+        result = format_role_permissions(permissions)
 
-        # Assert
-        assert result["user_role"] == "NONEXISTENT_ROLE"
-        assert len(result["permissions"]) == 0
-        assert result["total_permissions"] == 0
-        assert "Successfully retrieved 0 permissions" in result["message"]
+        assert result["permissions"] == []
+        assert result["accessibleRoutes"] == ["chat", "agents"]
 
-    @patch('backend.services.user_management_service.get_role_permissions')
-    async def test_get_permissions_by_role_exception_handling(self, mock_get_permissions):
-        """Test exception handling in get_permissions_by_role"""
-        # Setup mock to raise exception
-        mock_get_permissions.side_effect = Exception("Database connection failed")
+    def test_format_role_permissions_mixed(self):
+        """Test formatting with mixed permission types"""
+        permissions = [
+            {
+                "permission_category": "RESOURCE",
+                "permission_type": "agent",
+                "permission_subtype": "create"
+            },
+            {
+                "permission_type": "LEFT_NAV_MENU",
+                "permission_subtype": "chat"
+            },
+            {
+                "permission_category": "OTHER",
+                "permission_type": "SOME_TYPE",
+                "permission_subtype": "ignored"
+            }
+        ]
 
-        # Execute and assert
-        with self.assertRaises(Exception) as context:
-            await get_permissions_by_role("USER")
+        result = format_role_permissions(permissions)
 
-        assert "Failed to retrieve permissions for role USER" in str(context.exception)
+        assert result["permissions"] == ["agent:create"]
+        assert result["accessibleRoutes"] == ["chat"]
+
+    def test_format_role_permissions_empty(self):
+        """Test formatting with empty permissions list"""
+        permissions = []
+
+        result = format_role_permissions(permissions)
+
+        assert result["permissions"] == []
+        assert result["accessibleRoutes"] == []
+
+    def test_format_role_permissions_missing_fields(self):
+        """Test formatting with missing fields"""
+        permissions = [
+            {
+                "permission_category": "RESOURCE",
+                "permission_type": "agent"
+                # missing permission_subtype
+            },
+            {
+                "permission_type": "LEFT_NAV_MENU"
+                # missing permission_subtype
+            }
+        ]
+
+        result = format_role_permissions(permissions)
+
+        assert result["permissions"] == []
+        assert result["accessibleRoutes"] == []
 
 
 class TestIntegrationScenarios(unittest.IsolatedAsyncioTestCase):

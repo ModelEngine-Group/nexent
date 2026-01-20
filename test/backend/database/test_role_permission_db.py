@@ -91,7 +91,6 @@ sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now we can safely import the module under test
 from backend.database.role_permission_db import (
-    get_role_permissions,
     get_all_role_permissions,
     check_role_permission,
     get_permissions_by_category
@@ -106,42 +105,6 @@ def mock_session():
     mock_session.query.return_value = mock_query
     return mock_session, mock_query
 
-
-def test_get_role_permissions_success(monkeypatch, mock_session):
-    """Test successfully retrieving role permissions"""
-    session, query = mock_session
-
-    mock_permission1 = MockRolePermission(
-        role_permission_id=1,
-        user_role="USER",
-        permission_category="KNOWLEDGE_BASE",
-        permission_type="KNOWLEDGE",
-        permission_subtype="READ"
-    )
-    mock_permission2 = MockRolePermission(
-        role_permission_id=2,
-        user_role="USER",
-        permission_category="AGENT_MANAGEMENT",
-        permission_type="AGENT",
-        permission_subtype="READ"
-    )
-
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = [mock_permission1, mock_permission2]
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.role_permission_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.role_permission_db.as_dict", lambda obj: obj.__dict__)
-
-    result = get_role_permissions("USER")
-
-    assert len(result) == 2
-    assert result[0]["user_role"] == "USER"
-    assert result[0]["permission_category"] == "KNOWLEDGE_BASE"
-    assert result[1]["permission_category"] == "AGENT_MANAGEMENT"
 
 
 def test_get_all_role_permissions_success(monkeypatch, mock_session):

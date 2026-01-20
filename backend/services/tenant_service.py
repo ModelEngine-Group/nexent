@@ -34,7 +34,7 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
     if not name_config:
-        raise NotFoundException("The name of tenant not found.")
+        logging.warning(f"The name of tenant {tenant_id} not found.")
 
     group_config = get_single_config_info(tenant_id, DEFAULT_GROUP_ID)
 
@@ -62,9 +62,8 @@ def get_all_tenants() -> List[Dict[str, Any]]:
             tenant_info = get_tenant_info(tenant_id)
             tenants.append(tenant_info)
         except NotFoundException:
-            # Skip tenants that can't be found (shouldn't happen but being defensive)
-            logging.warning(f"Tenant info of {tenant_id} not found. Which is not expected to happend. Continue anyway.")
-            continue
+            # Skip tenants that can't be found
+            logging.warning(f"Tenant info of {tenant_id} not found.")
 
     return tenants
 
