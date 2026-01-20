@@ -239,7 +239,9 @@ def get_db_session(db_session=None):
 
 
 def as_dict(obj):
-    if isinstance(obj, TableBase):
+
+    # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
+    if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
         return {c.key: getattr(obj, c.key) for c in class_mapper(obj.__class__).columns}
 
     # noinspection PyProtectedMember

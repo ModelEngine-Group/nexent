@@ -4,6 +4,10 @@ from sqlalchemy.sql import func
 
 SCHEMA = "nexent"
 
+# Base class for tables without audit fields
+class SimpleTableBase(DeclarativeBase):
+    pass
+
 
 class TableBase(DeclarativeBase):
     create_time = Column(TIMESTAMP(timezone=False),
@@ -428,9 +432,10 @@ class TenantGroupUser(TableBase):
     user_id = Column(String(100), nullable=False, doc="User ID, foreign key")
 
 
-class RolePermission(TableBase):
+class RolePermission(SimpleTableBase):
     """
     Role permission configuration table
+    Note: This table does not have audit fields (create_time, update_time, etc.)
     """
     __tablename__ = "role_permission_t"
     __table_args__ = {"schema": SCHEMA}

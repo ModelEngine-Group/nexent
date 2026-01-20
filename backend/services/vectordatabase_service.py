@@ -24,7 +24,7 @@ from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEm
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 
-from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
+from consts.const import ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -500,12 +500,11 @@ class ElasticSearchService:
             if user_id == tenant_id:
                 effective_user_role = "ADMIN"
                 logger.info(f"User {user_id} identified as legacy admin")
-            elif user_id == DEFAULT_USER_ID and tenant_id == DEFAULT_TENANT_ID:
-                effective_user_role = "ADMIN"
-                logger.info("User under SPEED version is treated as admin")
+            elif IS_SPEED_MODE:
+                effective_user_role = "SPEED"
 
-            if effective_user_role in ["SU", "ADMIN"] :
-                # SU can see all knowledgebases
+            if effective_user_role in ["SU", "ADMIN", "SPEED"]:
+                # SU, ADMIN and SPEED roles can see all knowledgebases
                 permission = "EDIT"
             elif effective_user_role in ["USER", "DEV"]:
                 # USER/DEV need group-based permission checking
