@@ -250,7 +250,6 @@ export const API_ENDPOINTS = {
     delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
     // Group members
     members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
-    updateMembers: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
@@ -266,6 +265,12 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
     mcpServers: (agentId: number) =>
       `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
+  },
+  invitations: {
+    list: `${API_BASE_URL}/invitations/list`,
+    create: `${API_BASE_URL}/invitations`,
+    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
   },
 };
 
