@@ -32,7 +32,8 @@ from backend.services.group_service import (
     remove_user_from_single_group,
     get_group_users,
     get_group_user_count,
-    add_user_to_groups
+    add_user_to_groups,
+    update_group_members
 )
 # These imports are used in the patch decorators, not directly in the test functions
 
@@ -682,5 +683,79 @@ def test_remove_user_from_single_group_group_not_found(mock_query_groups, mock_g
         remove_user_from_single_group(
             group_id=123,
             user_id="member_user",
+            current_user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.query_groups')
+@patch('backend.services.group_service.get_group_users')
+@patch('backend.services.group_service.add_user_to_single_group')
+@patch('backend.services.group_service.remove_user_from_single_group')
+def test_update_group_members_success(
+    mock_remove_user,
+    mock_add_user,
+    mock_get_members,
+    mock_query_groups,
+    mock_get_user,
+    mock_user_info
+):
+    """Test successfully updating group members"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_groups.return_value = {"group_id": 123, "group_name": "Test Group"}
+
+    # Current members: user1, user2
+    mock_get_members.return_value = [
+        {"id": "user1", "username": "User 1"},
+        {"id": "user2", "username": "User 2"}
+    ]
+
+    # Target members: user2, user3 (remove user1, add user3)
+    mock_remove_user.return_value = True
+    mock_add_user.return_value = {"group_user_id": 1, "group_id": 123, "user_id": "user3"}
+
+    result = update_group_members(
+        group_id=123,
+        user_ids=["user2", "user3"],
+        current_user_id="test_user"
+    )
+
+    assert result == {
+        "group_id": 123,
+        "added_count": 1,
+        "removed_count": 1,
+        "total_members": 2
+    }
+
+    # Should add user3
+    mock_add_user.assert_called_once_with(123, "user3", "test_user")
+    # Should remove user1
+    mock_remove_user.assert_called_once_with(123, "user1", "test_user")
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+def test_update_group_members_unauthorized_user_not_found(mock_get_user):
+    """Test updating group members when current user doesn't exist"""
+    mock_get_user.return_value = None
+
+    with pytest.raises(UnauthorizedError, match="User test_user not found"):
+        update_group_members(
+            group_id=123,
+            user_ids=["user1", "user2"],
+            current_user_id="test_user"
+        )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.query_groups')
+def test_update_group_members_group_not_found(mock_query_groups, mock_get_user, mock_user_info):
+    """Test updating group members when group doesn't exist"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_groups.return_value = None
+
+    with pytest.raises(NotFoundException, match="Group 123 not found"):
+        update_group_members(
+            group_id=123,
+            user_ids=["user1", "user2"],
             current_user_id="test_user"
         )

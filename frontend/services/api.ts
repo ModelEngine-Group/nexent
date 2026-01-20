@@ -244,6 +244,7 @@ export const API_ENDPOINTS = {
     delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
     // Group members
     members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    updateMembers: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,

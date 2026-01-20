@@ -537,6 +537,11 @@ class GroupUserRequest(BaseModel):
         None, description="List of group IDs (for batch operations)")
 
 
+class GroupMembersUpdateRequest(BaseModel):
+    """Request model for batch updating group members"""
+    user_ids: List[str] = Field(..., description="List of user IDs to set as group members")
+
+
 class SetDefaultGroupRequest(BaseModel):
     """Request model for setting tenant's default group"""
     default_group_id: int = Field(..., ge=1,
