@@ -393,6 +393,7 @@
   "toolConfig.toolTest.execute": "执行测试",
   "toolConfig.toolTest.result": "测试结果",
   "toolConfig.button.testTool": "工具测试",
+  "toolConfig.button.closeTest": "关闭工具测试",
   "toolConfig.toolTest.manualInput": "手动输入",
   "toolConfig.toolTest.parseMode": "解析模式",
   "toolPool.title": "选择 Agent 的工具",

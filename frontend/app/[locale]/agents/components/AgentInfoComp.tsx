@@ -56,7 +56,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
                 gap={8}
                 style={{ marginBottom: "4px" }}
               >
-                <Badge count={1} color="blue" />
+                <Badge count={3} color="blue" />
                 <h2 className="text-lg font-medium">
                   {t("guide.steps.describeBusinessLogic.title")}
                 </h2>
