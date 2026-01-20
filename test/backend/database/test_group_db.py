@@ -127,6 +127,7 @@ from backend.database.group_db import (
     remove_group,
     add_user_to_group,
     remove_user_from_group,
+    remove_user_from_all_groups,
     query_group_users,
     query_groups_by_user,
     query_group_ids_by_user,
@@ -765,6 +766,87 @@ def test_query_group_ids_by_user_no_groups(monkeypatch, mock_session):
     result = query_group_ids_by_user("user_with_no_groups")
 
     assert result == []
+
+
+def test_remove_user_from_all_groups_success(monkeypatch, mock_session):
+    """Test successfully removing user from all groups"""
+    session, query = mock_session
+
+    # Setup query.filter().update() chain for TenantGroupUser
+    mock_update = MagicMock()
+    mock_update.return_value = 3  # 3 group memberships removed
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_user_from_all_groups(
+        user_id="test_user",
+        removed_by="admin_user"
+    )
+
+    assert result == 3
+    # Verify the filter was called
+    query.filter.assert_called_once()
+    # Verify update was called with correct parameters
+    mock_update.assert_called_once_with({
+        "delete_flag": "Y",
+        "updated_by": "admin_user",
+        "update_time": "NOW()"
+    })
+
+
+def test_remove_user_from_all_groups_no_memberships(monkeypatch, mock_session):
+    """Test removing user from all groups when user has no group memberships"""
+    session, query = mock_session
+
+    # Setup query.filter().update() chain
+    mock_update = MagicMock()
+    mock_update.return_value = 0  # No rows affected
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_user_from_all_groups(
+        user_id="user_with_no_groups",
+        removed_by="admin_user"
+    )
+
+    assert result == 0
+    # Verify update was still called even with 0 affected rows
+    mock_update.assert_called_once_with({
+        "delete_flag": "Y",
+        "updated_by": "admin_user",
+        "update_time": "NOW()"
+    })
+
+
+def test_remove_user_from_all_groups_database_error(monkeypatch, mock_session):
+    """Test database error handling for remove_user_from_all_groups"""
+    session, query = mock_session
+
+    # Setup query.filter() to raise an error
+    query.filter.side_effect = MockSQLAlchemyError("Database connection failed")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
+        remove_user_from_all_groups(
+            user_id="test_user",
+            removed_by="admin_user"
+        )
 
 
 def test_database_error_handling(monkeypatch, mock_session):

@@ -83,13 +83,16 @@ def get_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20) -> 
     # Get paginated results and total count
     result = query_groups_by_tenant(tenant_id, page, page_size)
 
-    # Filter to only return required fields for each group
+    # Filter to only return required fields for each group and add user count
     filtered_groups = []
     for group in result["groups"]:
+        group_id = group.get("group_id")
+        user_count = count_group_users(group_id) if group_id else 0
         filtered_groups.append({
             "group_id": group.get("group_id"),
             "group_name": group.get("group_name"),
-            "group_description": group.get("group_description")
+            "group_description": group.get("group_description"),
+            "user_count": user_count
         })
 
     return {
@@ -410,13 +413,13 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
 
 def get_group_users(group_id: int) -> List[Dict[str, Any]]:
     """
-    Get all users in a group.
+    Get all users in a group with their details.
 
     Args:
         group_id (int): Group ID
 
     Returns:
-        List[Dict[str, Any]]: List of group user records
+        List[Dict[str, Any]]: List of group user records with user details
 
     Raises:
         NotFoundException: When group not found
@@ -426,15 +429,21 @@ def get_group_users(group_id: int) -> List[Dict[str, Any]]:
     if not group:
         raise NotFoundException(f"Group {group_id} not found")
 
-    users = query_group_users(group_id)
+    # Get group membership records
+    group_memberships = query_group_users(group_id)
 
     filtered_users = []
-    for user in users:
-        filtered_users.append({
-            "group_user_id": user.get("group_user_id"),
-            "group_id": user.get("group_id"),
-            "user_id": user.get("user_id")
-        })
+    for membership in group_memberships:
+        user_id = membership.get("user_id")
+        if user_id:
+            # Get user details from user_tenant table
+            user_info = get_user_tenant_by_user_id(user_id)
+            if user_info:
+                filtered_users.append({
+                    "id": user_id,  # Keep user_id as string
+                    "username": user_info.get("user_email", ""),
+                    "role": user_info.get("user_role", "")
+                })
 
     return filtered_users
 

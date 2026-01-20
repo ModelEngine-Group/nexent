@@ -149,7 +149,7 @@ async def signup_user(email: EmailStr,
         tenant_id = user_id if is_admin else "tenant_id"
 
         # Create user tenant relationship
-        insert_user_tenant(user_id=user_id, tenant_id=tenant_id)
+        insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_email=email)
 
         logging.info(
             f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}")
@@ -230,7 +230,7 @@ async def signup_user_with_invitation(email: EmailStr,
         # Create user tenant relationship
         logging.debug(f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
         insert_user_tenant(
-            user_id=user_id, tenant_id=tenant_id, user_role=user_role)
+            user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
         logging.debug(f"User tenant relationship created successfully for user {user_id}")
 
         # Use invitation code now that we have the real user_id

@@ -11,9 +11,10 @@ from database.tenant_config_db import (
     update_config_by_tenant_config_id,
     get_all_tenant_ids
 )
+from database.user_tenant_db import get_users_by_tenant_id
 from database.group_db import add_group
 from consts.const import TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID
-from consts.exceptions import NotFoundException, ValidationError
+from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,14 @@ def get_all_tenants() -> List[Dict[str, Any]]:
             tenant_info = get_tenant_info(tenant_id)
             tenants.append(tenant_info)
         except NotFoundException:
-            # Skip tenants that can't be found
-            logging.warning(f"Tenant info of {tenant_id} not found.")
+            # Return tenant with basic info but empty name for frontend to show as "unnamed tenant"
+            logging.warning(f"Tenant info of {tenant_id} not found. Returning basic tenant structure.")
+            tenant_info = {
+                "tenant_id": tenant_id,
+                "tenant_name": "",
+                "default_group_id": ""
+            }
+            tenants.append(tenant_info)
 
     return tenants
 
@@ -170,7 +177,7 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
     """
     # Check if tenant exists and get current name config
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
-    if not name_config: 
+    if not name_config:
         raise NotFoundException(f"Tenant {tenant_id} not found")
 
     # Validate tenant name

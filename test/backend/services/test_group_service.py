@@ -119,8 +119,9 @@ def test_get_group_info_string_group_ids(mock_query_groups):
     mock_query_groups.assert_called_once_with("1")
 
 
+@patch('backend.services.group_service.count_group_users')
 @patch('backend.services.group_service.query_groups_by_tenant')
-def test_get_groups_by_tenant_success(mock_query_groups_by_tenant):
+def test_get_groups_by_tenant_success(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant with pagination"""
     mock_result = {
         "groups": [
@@ -130,6 +131,8 @@ def test_get_groups_by_tenant_success(mock_query_groups_by_tenant):
         "total": 2
     }
     mock_query_groups_by_tenant.return_value = mock_result
+    # Mock count_group_users to return 3 for each group
+    mock_count_users.return_value = 3
 
     result = get_groups_by_tenant("test_tenant", page=1, page_size=10)
 
@@ -138,10 +141,14 @@ def test_get_groups_by_tenant_success(mock_query_groups_by_tenant):
     assert result["groups"][0]["group_id"] == 1
     assert result["groups"][0]["group_name"] == "Group 1"
     assert result["groups"][0]["group_description"] == "Desc 1"
+    assert result["groups"][0]["user_count"] == 3  # Check user count
     assert result["groups"][1]["group_id"] == 2
     assert result["groups"][1]["group_name"] == "Group 2"
     assert result["groups"][1]["group_description"] == "Desc 2"
+    assert result["groups"][1]["user_count"] == 3  # Check user count
     mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10)
+    # count_group_users should be called for each group
+    assert mock_count_users.call_count == 2
 
 
 
@@ -395,19 +402,37 @@ def test_add_user_to_single_group_group_not_found(mock_query_groups, mock_get_us
         )
 
 
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
 @patch('backend.services.group_service.query_groups')
 @patch('backend.services.group_service.query_group_users')
-def test_get_group_users_success(mock_query_users, mock_query_groups, mock_group_info):
+def test_get_group_users_success(mock_query_users, mock_query_groups, mock_get_user, mock_group_info):
     """Test getting group users successfully"""
     mock_query_groups.return_value = mock_group_info
     mock_users = [{"user_id": "user1"}, {"user_id": "user2"}]
     mock_query_users.return_value = mock_users
 
+    # Mock get_user_tenant_by_user_id to return user info for each user
+    def mock_user_info(user_id):
+        if user_id == "user1":
+            return {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER"}
+        elif user_id == "user2":
+            return {"user_id": "user2", "user_email": "user2@example.com", "user_role": "ADMIN"}
+        return None
+
+    mock_get_user.side_effect = mock_user_info
+
     result = get_group_users(123)
 
     assert len(result) == 2
-    assert result[0]["user_id"] == "user1"
+    assert result[0]["id"] == "user1"
+    assert result[0]["username"] == "user1@example.com"
+    assert result[0]["role"] == "USER"
+    assert result[1]["id"] == "user2"
+    assert result[1]["username"] == "user2@example.com"
+    assert result[1]["role"] == "ADMIN"
     mock_query_users.assert_called_once_with(123)
+    # get_user_tenant_by_user_id should be called for each user
+    assert mock_get_user.call_count == 2
 
 
 @patch('backend.services.group_service.query_groups')
