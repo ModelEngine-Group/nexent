@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Modal, Steps, Button, Select, Input, Form, Tag, Space, Spin, App, Collapse, Radio } from "antd";
-import { Download, CircleCheck, CircleX, Plus, Wrench } from "lucide-react";
+import { Download, CircleCheck, CircleX, Plus, Wrench, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
@@ -787,30 +787,42 @@ export default function AgentImportWizard({
     }
 
     // If there are issues, show confirmation dialog
-    if (issues.length > 0) {
+      if (issues.length > 0) {
       Modal.confirm({
-        title: t("market.install.warning.title", "Agent May Be Unusable"),
+        width: 460,
+        icon: null,
+        title: (
+          <div className="flex items-center gap-2 ml-3">
+            <AlertTriangle className="text-yellow-600" size={18} />
+            <span className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              {t("market.install.warning.title", "Agent May Be Unusable")}
+            </span>
+          </div>
+        ),
         content: (
-          <div className="space-y-4">
-            {/* Warning header - similar to rename step */}
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-3">
+          // Use full width inside modal and rely on modal width for overall sizing
+          <div className="w-full space-y-4">
+            {/* Slight right indent for warning and question */}
+            <div className="ml-3">
+              {/* Warning header - similar to rename step */}
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-3 w-full">
               <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
                 {t("market.install.warning.description", "The following issues may make the agent unusable:")}
               </p>
               <div className="space-y-2">
-                {issues.map((issue, index) => (
-                  <div key={index} className="flex items-start gap-2">
-                    <CircleX className="text-red-500 flex-shrink-0 mt-0.5" size={14} />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{issue}</span>
-                  </div>
-                ))}
+                <ul className="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                  {issues.map((issue, index) => (
+                    <li key={index}>{issue}</li>
+                  ))}
+                </ul>
               </div>
-            </div>
+              </div>
 
-            {/* Question */}
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              {t("market.install.warning.question", "Do you want to continue with the installation anyway?")}
-            </p>
+              {/* Question */}
+              <p className="text-sm text-gray-700 dark:text-gray-300 mt-2 ml-1">
+                {t("market.install.warning.question", "Do you want to continue with the installation anyway?")}
+              </p>
+            </div>
           </div>
         ),
         okText: t("market.install.warning.continue", "Continue Anyway"),
