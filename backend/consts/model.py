@@ -41,6 +41,18 @@ class UserSignInRequest(BaseModel):
     password: str
 
 
+class UserUpdateRequest(BaseModel):
+    """User update request model"""
+    username: Optional[str] = Field(None, min_length=1, max_length=50)
+    email: Optional[EmailStr] = None
+    role: Optional[str] = Field(None, pattern="^(SUPER_ADMIN|ADMIN|DEV|USER)$")
+
+
+class UserDeleteRequest(BaseModel):
+    """User delete request model"""
+    new_owner_id: Optional[str] = None
+
+
 # Response models for model management
 class ModelResponse(BaseModel):
     code: int = 200
@@ -513,6 +525,14 @@ class GroupUpdateRequest(BaseModel):
 class GroupListRequest(BaseModel):
     """Request model for listing groups"""
     tenant_id: str = Field(..., description="Tenant ID to filter groups")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(
+        20, ge=1, le=100, description="Number of items per page")
+
+
+class UserListRequest(BaseModel):
+    """Request model for listing users"""
+    tenant_id: str = Field(..., description="Tenant ID to filter users")
     page: int = Field(1, ge=1, description="Page number for pagination")
     page_size: int = Field(
         20, ge=1, le=100, description="Number of items per page")
