@@ -541,6 +541,14 @@ class UserListRequest(BaseModel):
     sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
 
 
+class UserListRequest(BaseModel):
+    """Request model for listing users"""
+    tenant_id: str = Field(..., description="Tenant ID to filter users")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(
+        20, ge=1, le=100, description="Number of items per page")
+
+
 class GroupUserRequest(BaseModel):
     """Request model for adding/removing user from group"""
     user_id: str = Field(..., min_length=1,
