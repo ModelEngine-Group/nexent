@@ -22,7 +22,7 @@ def dify_tool(mock_observer: MessageObserver) -> DifyKnowledgeBaseSearchTool:
     return DifyKnowledgeBaseSearchTool(
         dify_api_base="https://api.dify.ai/v1",
         api_key="test_api_key",
-        dataset_ids=["dataset1", "dataset2"],
+        dataset_ids='["dataset1", "dataset2"]',
         top_k=3,
         observer=mock_observer,
     )
@@ -64,7 +64,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
         tool = DifyKnowledgeBaseSearchTool(
             dify_api_base="https://api.dify.ai/v1",
             api_key="test_key",
-            dataset_ids=["ds1", "ds2"],
+            dataset_ids='["ds1", "ds2"]',
             top_k=5,
             observer=mock_observer,
         )
@@ -82,7 +82,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
         tool = DifyKnowledgeBaseSearchTool(
             dify_api_base="https://api.dify.ai/v1/",
             api_key="test_key",
-            dataset_ids="single_dataset",
+            dataset_ids='["single_dataset"]',
             observer=mock_observer,
         )
 
@@ -120,7 +120,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
             DifyKnowledgeBaseSearchTool(
                 dify_api_base=dify_api_base,
                 api_key="test_key",
-                dataset_ids=["ds1"],
+                dataset_ids='["ds1"]',
             )
         assert expected_error in str(excinfo.value)
 
@@ -133,13 +133,14 @@ class TestDifyKnowledgeBaseSearchToolInit:
             DifyKnowledgeBaseSearchTool(
                 dify_api_base="https://api.dify.ai/v1",
                 api_key=api_key,
-                dataset_ids=["ds1"],
+                dataset_ids='["ds1"]',
             )
         assert expected_error in str(excinfo.value)
 
     @pytest.mark.parametrize("dataset_ids,expected_error", [
-        ([], "dataset_ids is required and cannot be empty"),
-        (None, "dataset_ids is required and cannot be empty"),
+        ("[]", "dataset_ids must be a non-empty JSON array of strings"),
+        ("", "dataset_ids is required and must be a non-empty JSON string array"),
+        (None, "dataset_ids is required and must be a non-empty JSON string array"),
     ])
     def test_init_invaliddataset_ids(self, dataset_ids, expected_error):
         with pytest.raises(ValueError) as excinfo:
@@ -421,7 +422,7 @@ class TestForward:
         tool = DifyKnowledgeBaseSearchTool(
             dify_api_base="https://api.dify.ai/v1",
             api_key="test_api_key",
-            dataset_ids=["dataset1"],
+            dataset_ids='["dataset1"]',
             observer=None,
         )
         self._setup_success_flow(mocker, tool)

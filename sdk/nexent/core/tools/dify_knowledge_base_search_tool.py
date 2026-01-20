@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 import httpx
 
 from pydantic import Field
@@ -48,7 +48,7 @@ class DifyKnowledgeBaseSearchTool(Tool):
         self,
         dify_api_base: str = Field(description="Dify API base URL"),
         api_key: str = Field(description="Dify API key with Bearer token"),
-        dataset_ids: List[str] = Field(description="List of Dify dataset IDs"),
+        dataset_ids: str = Field(description="JSON string array of Dify dataset IDs"),
         top_k: int = Field(description="Maximum number of search results per dataset", default=3),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
     ):
@@ -57,7 +57,7 @@ class DifyKnowledgeBaseSearchTool(Tool):
         Args:
             dify_api_base (str): Dify API base URL
             api_key (str): Dify API key with Bearer token
-            dataset_ids (List[str]): List of Dify dataset IDs
+            dataset_ids (str): JSON string array of Dify dataset IDs, e.g., '["dataset_id_1", "dataset_id_2"]'
             top_k (int, optional): Number of results to return per dataset. Defaults to 3.
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
         """
@@ -71,10 +71,16 @@ class DifyKnowledgeBaseSearchTool(Tool):
         if not api_key or not isinstance(api_key, str):
             raise ValueError("api_key is required and must be a non-empty string")
 
-        # Normalize and validate dataset_ids
-        self.dataset_ids = self._normalize_dataset_ids(dataset_ids)
-        if not self.dataset_ids:
-            raise ValueError("dataset_ids is required and cannot be empty")
+        # Parse and validate dataset_ids from JSON string
+        if not dataset_ids or not isinstance(dataset_ids, str):
+            raise ValueError("dataset_ids is required and must be a non-empty JSON string array")
+        try:
+            parsed_ids = json.loads(dataset_ids)
+            if not isinstance(parsed_ids, list) or not parsed_ids:
+                raise ValueError("dataset_ids must be a non-empty JSON array of strings")
+            self.dataset_ids = [str(item) for item in parsed_ids]
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"dataset_ids must be a valid JSON string array: {str(e)}")
 
         self.dify_api_base = dify_api_base.rstrip("/")
         self.api_key = api_key
@@ -183,21 +189,6 @@ class DifyKnowledgeBaseSearchTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-    def _normalize_dataset_ids(self, dataset_ids: Optional[Union[str, List[str]]]) -> List[str]:
-            """Normalize dataset_ids to list; accept single string, JSON string array, and keep None as empty list."""
-            if dataset_ids is None:
-                return []
-            if isinstance(dataset_ids, str):
-                # Try to parse as JSON array first
-                try:
-                    parsed = json.loads(dataset_ids)
-                    if isinstance(parsed, list):
-                        return [str(item) for item in parsed]
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                # If not a valid JSON array, treat as single string
-                return [dataset_ids]
-            return list(dataset_ids)
     
     def _get_document_download_url(self, document_id: str, dataset_id: str = None) -> str:
         """Get download URL for a document from Dify API.
