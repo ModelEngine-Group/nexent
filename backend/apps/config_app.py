@@ -20,6 +20,7 @@ from apps.user_management_app import router as user_management_router
 from apps.voice_app import voice_config_router as voice_router
 from apps.tenant_app import router as tenant_router
 from apps.group_app import router as group_router
+from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
 from consts.const import IS_SPEED_MODE
 
@@ -62,6 +63,7 @@ app.include_router(tenant_config_router)
 app.include_router(remote_mcp_router)
 app.include_router(tenant_router)
 app.include_router(group_router)
+app.include_router(user_router)
 app.include_router(invitation_router)
 
 # Initialize monitoring for the application

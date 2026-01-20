@@ -1,7 +1,7 @@
 import { STATUS_CODES } from "@/const/auth";
 import log from "@/lib/logger";
 
-const API_BASE_URL = '/api';
+const API_BASE_URL = "/api";
 
 export const API_ENDPOINTS = {
   user: {
@@ -63,7 +63,11 @@ export const API_ENDPOINTS = {
   storage: {
     upload: `${API_BASE_URL}/file/storage`,
     files: `${API_BASE_URL}/file/storage`,
-    file: (objectName: string, download: string = "ignore", filename?: string) => {
+    file: (
+      objectName: string,
+      download: string = "ignore",
+      filename?: string
+    ) => {
       const queryParams = new URLSearchParams();
       queryParams.append("download", download);
       if (filename) queryParams.append("filename", filename);
@@ -165,8 +169,10 @@ export const API_ENDPOINTS = {
     addFromConfig: `${API_BASE_URL}/mcp/add-from-config`,
     uploadImage: `${API_BASE_URL}/mcp/upload-image`,
     containers: `${API_BASE_URL}/mcp/containers`,
-    containerLogs: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}/logs`,
-    deleteContainer: (containerId: string) => `${API_BASE_URL}/mcp/container/${containerId}`,
+    containerLogs: (containerId: string) =>
+      `${API_BASE_URL}/mcp/container/${containerId}/logs`,
+    deleteContainer: (containerId: string) =>
+      `${API_BASE_URL}/mcp/container/${containerId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -200,32 +206,76 @@ export const API_ENDPOINTS = {
       search?: string;
     }) => {
       const queryParams = new URLSearchParams();
-      if (params?.page) queryParams.append('page', params.page.toString());
-      if (params?.page_size) queryParams.append('page_size', params.page_size.toString());
-      if (params?.category) queryParams.append('category', params.category);
-      if (params?.tag) queryParams.append('tag', params.tag);
-      if (params?.search) queryParams.append('search', params.search);
+      if (params?.page) queryParams.append("page", params.page.toString());
+      if (params?.page_size)
+        queryParams.append("page_size", params.page_size.toString());
+      if (params?.category) queryParams.append("category", params.category);
+      if (params?.tag) queryParams.append("tag", params.tag);
+      if (params?.search) queryParams.append("search", params.search);
 
       const queryString = queryParams.toString();
-      return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ''}`;
+      return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
     },
-    agentDetail: (agentId: number) => `${API_BASE_URL}/market/agents/${agentId}`,
+    agentDetail: (agentId: number) =>
+      `${API_BASE_URL}/market/agents/${agentId}`,
     categories: `${API_BASE_URL}/market/categories`,
     tags: `${API_BASE_URL}/market/tags`,
-    mcpServers: (agentId: number) => `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
+    mcpServers: (agentId: number) =>
+      `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
+  },
+  tenant: {
+    list: `${API_BASE_URL}/tenants`,
+    create: `${API_BASE_URL}/tenants`,
+    detail: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+    update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+    delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+  },
+  users: {
+    list: `${API_BASE_URL}/users/list`,
+    detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+    update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+    delete: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+  },
+  groups: {
+    create: `${API_BASE_URL}/groups`,
+    list: `${API_BASE_URL}/groups/list`,
+    detail: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    update: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    // Group members
+    members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    removeMember: (groupId: number, userId: string) =>
+      `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
+  },
+  tenantGroup: {
+    detail: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    update: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    // Group members
+    members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    removeMember: (groupId: number, userId: string) =>
+      `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
   },
 };
 
 // Common error handling
 export class ApiError extends Error {
-  constructor(public code: number, message: string) {
+  constructor(
+    public code: number,
+    message: string
+  ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
 // API request interceptor
-export const fetchWithErrorHandling = async (url: string, options: RequestInit = {}) => {
+export const fetchWithErrorHandling = async (
+  url: string,
+  options: RequestInit = {}
+) => {
   try {
     const response = await fetch(url, options);
 
@@ -234,43 +284,70 @@ export const fetchWithErrorHandling = async (url: string, options: RequestInit =
       // Check if it's a session expired error (401)
       if (response.status === 401) {
         handleSessionExpired();
-        throw new ApiError(STATUS_CODES.TOKEN_EXPIRED, "Login expired, please login again");
+        throw new ApiError(
+          STATUS_CODES.TOKEN_EXPIRED,
+          "Login expired, please login again"
+        );
       }
 
       // Handle custom 499 error code (client closed connection)
       if (response.status === 499) {
         handleSessionExpired();
-        throw new ApiError(STATUS_CODES.TOKEN_EXPIRED, "Connection disconnected, session may have expired");
+        throw new ApiError(
+          STATUS_CODES.TOKEN_EXPIRED,
+          "Connection disconnected, session may have expired"
+        );
       }
 
       // Handle request entity too large error (413)
       if (response.status === 413) {
-        throw new ApiError(STATUS_CODES.REQUEST_ENTITY_TOO_LARGE, "REQUEST_ENTITY_TOO_LARGE");
+        throw new ApiError(
+          STATUS_CODES.REQUEST_ENTITY_TOO_LARGE,
+          "REQUEST_ENTITY_TOO_LARGE"
+        );
       }
 
       // Other HTTP errors
       const errorText = await response.text();
-      throw new ApiError(response.status, errorText || `Request failed: ${response.status}`);
+      throw new ApiError(
+        response.status,
+        errorText || `Request failed: ${response.status}`
+      );
     }
 
     return response;
   } catch (error) {
     // Handle network errors
-    if (error instanceof TypeError && error.message.includes('NetworkError')) {
-      log.error('Network error:', error);
-      throw new ApiError(STATUS_CODES.SERVER_ERROR, "Network connection error, please check your network connection");
+    if (error instanceof TypeError && error.message.includes("NetworkError")) {
+      log.error("Network error:", error);
+      throw new ApiError(
+        STATUS_CODES.SERVER_ERROR,
+        "Network connection error, please check your network connection"
+      );
     }
 
     // Handle connection reset errors
-    if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-      log.error('Connection error:', error);
+    if (
+      error instanceof TypeError &&
+      error.message.includes("Failed to fetch")
+    ) {
+      log.error("Connection error:", error);
 
       // For user management related requests, it might be login expiration
-      if (url.includes('/user/session') || url.includes('/user/current_user_id')) {
+      if (
+        url.includes("/user/session") ||
+        url.includes("/user/current_user_id")
+      ) {
         handleSessionExpired();
-        throw new ApiError(STATUS_CODES.TOKEN_EXPIRED, "Connection disconnected, session may have expired");
+        throw new ApiError(
+          STATUS_CODES.TOKEN_EXPIRED,
+          "Connection disconnected, session may have expired"
+        );
       } else {
-        throw new ApiError(STATUS_CODES.SERVER_ERROR, "Server connection error, please try again later");
+        throw new ApiError(
+          STATUS_CODES.SERVER_ERROR,
+          "Server connection error, please try again later"
+        );
       }
     }
 
@@ -296,9 +373,11 @@ function handleSessionExpired() {
     // Use custom events to notify other components in the app (such as SessionExpiredListener)
     if (window.dispatchEvent) {
       // Ensure using event name consistent with EVENTS.SESSION_EXPIRED constant
-      window.dispatchEvent(new CustomEvent('session-expired', {
-        detail: { message: "Login expired, please login again" }
-      }));
+      window.dispatchEvent(
+        new CustomEvent("session-expired", {
+          detail: { message: "Login expired, please login again" },
+        })
+      );
     }
 
     // Reset flag after 300ms to allow future triggers

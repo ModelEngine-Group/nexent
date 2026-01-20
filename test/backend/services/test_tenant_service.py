@@ -200,12 +200,18 @@ class TestGetAllTenants:
             # Execute
             result = get_all_tenants()
 
-            # Assert - should include all tenants (no more skipping)
+            # Assert - should return all tenants, with failed tenant having empty fields
             assert len(result) == 3
             assert result[0]["tenant_id"] == "tenant1"
+            assert result[0]["tenant_name"] == "Tenant 1"
+            assert result[0]["default_group_id"] == "group1"
             assert result[1]["tenant_id"] == "tenant2"
+            assert result[1]["tenant_name"] == "Tenant 2"
+            assert result[1]["default_group_id"] == "group2"
+            # Failed tenant should have empty name and default_group_id
             assert result[2]["tenant_id"] == "tenant3"
-            assert result[2]["tenant_name"] == ""  # Missing name config
+            assert result[2]["tenant_name"] == ""
+            assert result[2]["default_group_id"] == 'group3'
 
     def test_get_all_tenants_empty_list(self, service_mocks):
         """Test get_all_tenants when no tenants exist"""

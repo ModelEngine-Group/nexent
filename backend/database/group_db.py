@@ -307,3 +307,27 @@ def count_group_users(group_id: int) -> int:
         ).count()
 
         return result
+
+
+def remove_user_from_all_groups(user_id: str, removed_by: str) -> int:
+    """
+    Remove user from all groups (soft delete)
+
+    Args:
+        user_id (str): User ID to remove
+        removed_by (str): User who performed the removal
+
+    Returns:
+        int: Number of group memberships removed
+    """
+    with get_db_session() as session:
+        result = session.query(TenantGroupUser).filter(
+            TenantGroupUser.user_id == user_id,
+            TenantGroupUser.delete_flag == "N"
+        ).update({
+            "delete_flag": "Y",
+            "updated_by": removed_by,
+            "update_time": "NOW()"  # This will be handled by the database trigger
+        })
+
+        return result

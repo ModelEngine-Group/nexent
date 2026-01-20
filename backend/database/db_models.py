@@ -330,7 +330,8 @@ class UserTenant(TableBase):
                             primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_role = Column(String(30), doc="User role: SU, ADMIN, DEV, USER")
+    user_role = Column(String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
+    user_email = Column(String(255), doc="User email address")
 
 
 class AgentRelation(TableBase):
