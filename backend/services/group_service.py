@@ -499,3 +499,69 @@ def add_user_to_groups(user_id: str, group_ids: List[int], current_user_id: str)
             })
 
     return results
+
+
+def update_group_members(group_id: int, user_ids: List[str], current_user_id: str) -> Dict[str, Any]:
+    """
+    Update group members by setting the exact list of users that should be in the group.
+
+    Args:
+        group_id (int): Group ID
+        user_ids (List[str]): List of user IDs that should be in the group
+        current_user_id (str): Current user ID performing the action
+
+    Returns:
+        Dict[str, Any]: Update results with added/removed counts
+
+    Raises:
+        NotFoundException: When group not found
+        UnauthorizedError: When user doesn't have permission
+    """
+    # Check current user permission
+    user_info = get_user_tenant_by_user_id(current_user_id)
+    if not user_info:
+        raise UnauthorizedError(f"User {current_user_id} not found")
+
+    # Check if group exists
+    group = query_groups(group_id)
+    if not group:
+        raise NotFoundException(f"Group {group_id} not found")
+
+    # Get current group members
+    current_members = get_group_users(group_id)
+    current_user_ids = {str(member["id"]) for member in current_members}
+
+    # Convert target user_ids to set for comparison
+    target_user_ids = set(user_ids)
+
+    # Find users to add and remove
+    users_to_add = target_user_ids - current_user_ids
+    users_to_remove = current_user_ids - target_user_ids
+
+    added_count = 0
+    removed_count = 0
+
+    # Add new members
+    for user_id in users_to_add:
+        try:
+            add_user_to_single_group(group_id, user_id, current_user_id)
+            added_count += 1
+        except Exception as e:
+            logger.error(f"Failed to add user {user_id} to group {group_id}: {str(e)}")
+
+    # Remove old members
+    for user_id in users_to_remove:
+        try:
+            remove_user_from_single_group(group_id, user_id, current_user_id)
+            removed_count += 1
+        except Exception as e:
+            logger.error(f"Failed to remove user {user_id} from group {group_id}: {str(e)}")
+
+    logger.info(f"Updated group {group_id} members: added {added_count}, removed {removed_count} by user {current_user_id}")
+
+    return {
+        "group_id": group_id,
+        "added_count": added_count,
+        "removed_count": removed_count,
+        "total_members": len(target_user_ids)
+    }
