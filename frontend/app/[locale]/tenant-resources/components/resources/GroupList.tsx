@@ -12,6 +12,7 @@ import {
   message,
   Select,
 } from "antd";
+import { EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { ColumnsType } from "antd/es/table";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useUserList } from "@/hooks/user/useUserList";
@@ -22,6 +23,7 @@ import {
   addUserToGroup,
   removeUserFromGroup,
   getGroupMembers,
+  updateGroupMembers,
   type Group,
   type CreateGroupRequest,
   type UpdateGroupRequest,
@@ -57,22 +59,30 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
   const openEdit = async (g: Group) => {
     setEditingGroup(g);
-    editGroupForm.setFieldsValue({
-      name: g.group_name,
-      description: g.group_description || "",
-    });
-
-    // Load current group members
+    // Load current group members first
     try {
       const members = await getGroupMembers(g.group_id);
       setGroupUsers(members);
       // Available users are all users minus current members
       const memberIds = new Set(members.map((u) => u.id));
       setAvailableUsers(allUsers.filter((u) => !memberIds.has(u.id)));
+
+      // Set form values after loading members
+      editGroupForm.setFieldsValue({
+        name: g.group_name,
+        description: g.group_description || "",
+        members: members.map((u) => u.id),
+      });
     } catch (error) {
       message.error("Failed to load group members");
       setGroupUsers([]);
       setAvailableUsers(allUsers);
+      // Set form values even if member loading fails
+      editGroupForm.setFieldsValue({
+        name: g.group_name,
+        description: g.group_description || "",
+        members: [],
+      });
     }
 
     setModalVisible(true);
@@ -118,6 +128,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       } else {
         const createData: CreateGroupRequest = {
           group_name: values.name,
+          group_description: values.description,
         };
         await createGroup(tenantId, createData);
         message.success("Group created");
@@ -143,28 +154,17 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       };
       await updateGroup(editingGroup.group_id, updateData);
 
-      // Handle user additions/removals
-      const currentMemberIds = new Set(groupUsers.map((u) => u.id));
-      const newMemberIds = new Set((values.members as string[]) || []);
-
-      // Add new members
-      for (const userId of newMemberIds) {
-        if (!currentMemberIds.has(userId)) {
-          await addUserToGroup(editingGroup.group_id, userId);
-        }
-      }
-
-      // Remove old members
-      for (const user of groupUsers) {
-        if (!newMemberIds.has(user.id)) {
-          await removeUserFromGroup(editingGroup.group_id, user.id.toString());
-        }
-      }
+      // Update group members using batch API
+      const newMemberIds = (values.members as string[]) || [];
+      await updateGroupMembers(editingGroup.group_id, newMemberIds);
 
       message.success(t("tenantResources.groupUpdated"));
       setModalVisible(false);
-      refetch();
-      refetchUsers();
+
+      // Force refresh group list to update user counts
+      await refetch();
+      // Refresh user list in case user roles/status changed
+      await refetchUsers();
     } catch (err: any) {
       if (err.response?.data?.message) {
         message.error(err.response.data.message);
@@ -202,18 +202,14 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         key: "actions",
         render: (_, record) => (
           <div className="space-x-2">
-            <Button size="small" onClick={() => openEdit(record)}>
-              {t("common.edit")}
-            </Button>
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
             <Popconfirm
               title={t("tenantResources.confirmDeleteGroup", {
                 name: record.group_name,
               })}
               onConfirm={() => handleDelete(record.group_id)}
             >
-              <Button size="small" danger>
-                {t("common.delete")}
-              </Button>
+              <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
           </div>
         ),
@@ -273,7 +269,6 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                   label: user.username,
                   value: user.id,
                 }))}
-                value={groupUsers.map((u) => u.id)}
                 onChange={(value) => {
                   const selectedUsers = allUsers.filter((u) =>
                     value.includes(u.id)
@@ -291,10 +286,16 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           <Form layout="vertical" form={form}>
             <Form.Item
               name="name"
-              label={t("tenantResources.tenantName")}
+              label={t("tenantResources.groupName")}
               rules={[{ required: true }]}
             >
-              <Input placeholder={t("tenantResources.tenantName")} />
+            <Input placeholder={t("tenantResources.groupName")} />
+            </Form.Item>
+            <Form.Item name="description" label={t("common.description")}>
+              <Input.TextArea
+                placeholder={t("common.description")}
+                rows={3}
+              />
             </Form.Item>
           </Form>
         )}

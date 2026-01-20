@@ -13,6 +13,7 @@ import {
   message,
   Divider,
 } from "antd";
+import { EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { ColumnsType } from "antd/es/table";
 import { useUserList } from "@/hooks/user/useUserList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -31,18 +32,11 @@ import {
 
 export default function UserList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading, refetch } = useUserList(
-    tenantId,
-    currentPage,
-    pageSize
-  );
+  const { data, isLoading, refetch } = useUserList(tenantId);
   const { data: groupsData } = useGroupList(tenantId);
 
   const users = data?.users || [];
-  const total = data?.total || 0;
   const groups = groupsData?.groups || [];
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -150,18 +144,14 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         key: "actions",
         render: (_, record) => (
           <div className="space-x-2">
-            <Button size="small" onClick={() => openEdit(record)}>
-              {t("common.edit")}
-            </Button>
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
             <Popconfirm
               title={t("tenantResources.confirmDeleteUser", {
                 name: record.username,
               })}
               onConfirm={() => handleDelete(record.id)}
             >
-              <Button size="small" danger>
-                {t("common.delete")}
-              </Button>
+              <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
           </div>
         ),
@@ -177,27 +167,7 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         columns={columns}
         rowKey={(r) => String(r.id)}
         loading={isLoading}
-        pagination={{
-          current: currentPage,
-          pageSize: pageSize,
-          total: total,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total, range) =>
-            t("document.chunk.pagination.range", {
-              start: range[0],
-              end: range[1],
-              total: total,
-            }),
-          onChange: (page, pageSize) => {
-            setCurrentPage(page);
-            setPageSize(pageSize);
-          },
-          onShowSizeChange: (current, size) => {
-            setCurrentPage(1); // Reset to first page when page size changes
-            setPageSize(size);
-          },
-        }}
+        pagination={{ pageSize: 10 }}
       />
 
       <Modal

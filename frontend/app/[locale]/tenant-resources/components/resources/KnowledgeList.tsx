@@ -13,6 +13,7 @@ import {
   Tag,
   Upload,
 } from "antd";
+import { EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { ColumnsType } from "antd/es/table";
 import { UploadOutlined } from "@ant-design/icons";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
@@ -141,17 +142,13 @@ export default function KnowledgeList({
               Upload
             </Button>
           </Upload>
-          <Button size="small" onClick={() => openEdit(record)}>
-            Edit
-          </Button>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
           <Popconfirm
             title="Delete knowledge base?"
             description="This action cannot be undone."
             onConfirm={() => handleDelete(record.id)}
           >
-            <Button size="small" danger>
-              Delete
-            </Button>
+            <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </div>
       ),
@@ -160,11 +157,13 @@ export default function KnowledgeList({
 
   return (
     <div>
-      <div className="mb-4 flex justify-between items-center">
-        <h3 className="text-lg font-medium">Knowledge Bases</h3>
-        <Button type="primary" onClick={openCreate}>
-          Create Knowledge Base
-        </Button>
+      <div className="flex items-center justify-between mb-4">
+        <div />
+        <div>
+          <Button type="primary" onClick={openCreate}>
+            + {t("knowledgeBase.button.create")}
+          </Button>
+        </div>
       </div>
 
       <Table

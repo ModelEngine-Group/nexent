@@ -229,3 +229,29 @@ export async function removeUserFromGroup(
     throw new ApiError(500, "Failed to remove user from group");
   }
 }
+
+/**
+ * Update group members by setting the exact list of users
+ */
+export async function updateGroupMembers(
+  groupId: number,
+  userIds: string[]
+): Promise<{ added_count: number; removed_count: number; total_members: number }> {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.tenantGroup.members(groupId),
+      {
+        method: "PUT",
+        body: JSON.stringify({ user_ids: userIds }),
+      }
+    );
+
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to update group members");
+  }
+}
