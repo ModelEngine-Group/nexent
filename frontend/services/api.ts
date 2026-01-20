@@ -266,6 +266,12 @@ export const API_ENDPOINTS = {
     update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
     delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
   },
+  invitations: {
+    list: `${API_BASE_URL}/invitations/list`,
+    create: `${API_BASE_URL}/invitations`,
+    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+  },
 };
 
 // Common error handling
