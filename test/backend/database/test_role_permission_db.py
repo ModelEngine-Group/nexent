@@ -114,9 +114,8 @@ def test_get_all_role_permissions_success(monkeypatch, mock_session):
     mock_permission1 = MockRolePermission(user_role="USER")
     mock_permission2 = MockRolePermission(user_role="ADMIN")
 
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = [mock_permission1, mock_permission2]
-    query.filter.return_value = mock_filter
+    # Mock the .all() call directly since get_all_role_permissions() doesn't use filter
+    query.all.return_value = [mock_permission1, mock_permission2]
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -243,7 +242,7 @@ def test_database_error_handling(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.role_permission_db.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        get_role_permissions("USER")
+        get_permissions_by_category("USER")
 
 
 def test_check_role_permission_partial_match(monkeypatch, mock_session):

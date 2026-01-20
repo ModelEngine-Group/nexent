@@ -589,9 +589,14 @@ class TestGetCurrentUserId:
 class TestCurrentUserInfo:
     """Test /current_user_info endpoint"""
 
+    @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
-    def test_current_user_info_success(self, mock_get_user_info):
+    def test_current_user_info_success(self, mock_get_user_info, mock_validate_token):
         """Test successful current user info retrieval"""
+        # Setup mock user for token validation
+        mock_user = MockUser("user123", "test@example.com")
+        mock_validate_token.return_value = (True, mock_user)
+
         # Setup mock data with new format
         mock_user_info = {
             "user": {
@@ -633,9 +638,14 @@ class TestCurrentUserInfo:
         assert data["message"] == "User not logged in"
         assert data["data"] is None
 
+    @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
-    def test_current_user_info_user_not_found(self, mock_get_user_info):
+    def test_current_user_info_user_not_found(self, mock_get_user_info, mock_validate_token):
         """Test current user info when user is not found"""
+        # Setup mock user for token validation
+        mock_user = MockUser("user123", "test@example.com")
+        mock_validate_token.return_value = (True, mock_user)
+
         mock_get_user_info.return_value = None
 
         response = client.get(
@@ -647,9 +657,14 @@ class TestCurrentUserInfo:
         data = response.json()
         assert "User not logged in or session invalid" in data["detail"]
 
+    @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
-    def test_current_user_info_error(self, mock_get_user_info):
+    def test_current_user_info_error(self, mock_get_user_info, mock_validate_token):
         """Test current user info with error"""
+        # Setup mock user for token validation
+        mock_user = MockUser("user123", "test@example.com")
+        mock_validate_token.return_value = (True, mock_user)
+
         mock_get_user_info.side_effect = Exception("Database error")
 
         response = client.get(
@@ -659,7 +674,7 @@ class TestCurrentUserInfo:
 
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
-        assert "Failed to retrieve permissions for role" in data["detail"]
+        assert data["detail"] == "Get user information failed"
 
 
 class TestRevokeUserAccount:

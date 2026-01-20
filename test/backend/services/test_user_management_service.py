@@ -56,8 +56,7 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         revoke_regular_user,
-        get_user_info,
-        get_permissions_by_role,
+        get_user_info
     )
 
 # Functions to test
