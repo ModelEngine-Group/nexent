@@ -56,7 +56,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         revoke_regular_user,
-        get_user_info
+        get_user_info,
+        format_role_permissions
     )
 
 # Functions to test
@@ -1187,11 +1188,12 @@ class TestRevokeRegularUser(unittest.IsolatedAsyncioTestCase):
 class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
     """Test get_user_info function"""
 
-    @patch('backend.services.user_management_service.get_role_permissions')
+    @patch('backend.services.user_management_service.as_dict')
     @patch('backend.services.user_management_service.format_role_permissions')
+    @patch('backend.services.user_management_service.get_db_session')
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     @patch('backend.services.user_management_service.query_group_ids_by_user')
-    async def test_get_user_info_success(self, mock_query_group_ids, mock_get_user_tenant, mock_format_permissions, mock_get_permissions):
+    async def test_get_user_info_success(self, mock_query_group_ids, mock_get_user_tenant, mock_get_db_session, mock_format_permissions, mock_as_dict):
         """Test getting user information successfully"""
         # Setup mocks
         mock_get_user_tenant.return_value = {
@@ -1199,11 +1201,25 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
             "user_role": "ADMIN"
         }
         mock_query_group_ids.return_value = [1, 2, 3]
-        mock_permissions = [
+
+        # Mock database session and query
+        mock_session = MagicMock()
+        mock_query = MagicMock()
+        mock_session.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.all.return_value = [
+            MagicMock(),  # First permission record
+            MagicMock()   # Second permission record
+        ]
+        mock_get_db_session.return_value.__enter__.return_value = mock_session
+        mock_get_db_session.return_value.__exit__.return_value = None
+
+        # Mock as_dict calls for permission records
+        mock_as_dict.side_effect = [
             {"permission_category": "RESOURCE", "permission_type": "agent", "permission_subtype": "create"},
             {"permission_type": "LEFT_NAV_MENU", "permission_subtype": "chat"}
         ]
-        mock_get_permissions.return_value = mock_permissions
+
         mock_format_permissions.return_value = {
             "permissions": ["agent:create"],
             "accessibleRoutes": ["chat"]
@@ -1223,8 +1239,11 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
 
         mock_get_user_tenant.assert_called_once_with("test_user")
         mock_query_group_ids.assert_called_once_with("test_user")
-        mock_get_permissions.assert_called_once_with("ADMIN")
-        mock_format_permissions.assert_called_once_with(mock_permissions)
+        mock_format_permissions.assert_called_once_with([
+            {"permission_category": "RESOURCE", "permission_type": "agent",
+                "permission_subtype": "create"},
+            {"permission_type": "LEFT_NAV_MENU", "permission_subtype": "chat"}
+        ])
 
     @patch('backend.services.user_management_service.get_user_tenant_by_user_id')
     async def test_get_user_info_user_not_found(self, mock_get_user_tenant):
