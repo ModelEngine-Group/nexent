@@ -211,6 +211,8 @@ CREATE TABLE IF NOT EXISTS "knowledge_record_t" (
   "tenant_id" varchar(100) COLLATE "pg_catalog"."default",
   "knowledge_sources" varchar(100) COLLATE "pg_catalog"."default",
   "embedding_model_name" varchar(200) COLLATE "pg_catalog"."default",
+  "group_ids" varchar,
+  "ingroup_permission" varchar(30),
   "create_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "update_time" timestamp(0) DEFAULT CURRENT_TIMESTAMP,
   "delete_flag" varchar(1) COLLATE "pg_catalog"."default" DEFAULT 'N'::character varying,
@@ -226,6 +228,8 @@ COMMENT ON COLUMN "knowledge_record_t"."knowledge_describe" IS 'Knowledge base d
 COMMENT ON COLUMN "knowledge_record_t"."tenant_id" IS 'Tenant ID';
 COMMENT ON COLUMN "knowledge_record_t"."knowledge_sources" IS 'Knowledge base sources';
 COMMENT ON COLUMN "knowledge_record_t"."embedding_model_name" IS 'Embedding model name, used to record the embedding model used by the knowledge base';
+COMMENT ON COLUMN "knowledge_record_t"."group_ids" IS 'Knowledge base group IDs list';
+COMMENT ON COLUMN "knowledge_record_t"."ingroup_permission" IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 COMMENT ON COLUMN "knowledge_record_t"."create_time" IS 'Creation time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."update_time" IS 'Update time, audit field';
 COMMENT ON COLUMN "knowledge_record_t"."delete_flag" IS 'When deleted by user frontend, delete flag will be set to true, achieving soft delete effect. Optional values Y/N';
@@ -308,6 +312,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     few_shots_prompt TEXT,
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
+    group_ids VARCHAR,
     enabled BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -351,6 +356,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.constraint_prompt IS 'Constraint prom
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.few_shots_prompt IS 'Few-shots prompt';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.parent_agent_id IS 'Parent Agent ID';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.tenant_id IS 'Belonging tenant';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.group_ids IS 'Agent group IDs list';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.enabled IS 'Enable flag';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.provide_run_summary IS 'Whether to provide the running summary to the manager agent';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.create_time IS 'Creation time';
@@ -792,21 +798,6 @@ COMMENT ON COLUMN nexent.role_permission_t.permission_subtype IS 'Permission sub
 -- Add primary key constraint for role_permission_t table
 ALTER TABLE nexent.role_permission_t ADD CONSTRAINT role_permission_t_pkey PRIMARY KEY (role_permission_id);
 
--- 7. Add fields to knowledge_record_t table
-ALTER TABLE nexent.knowledge_record_t
-ADD COLUMN IF NOT EXISTS group_ids VARCHAR, -- int4 list
-ADD COLUMN IF NOT EXISTS ingroup_permission VARCHAR(30);
-
--- Add comments for new fields in knowledge_record_t table
-COMMENT ON COLUMN nexent.knowledge_record_t.group_ids IS 'Knowledge base group IDs list';
-COMMENT ON COLUMN nexent.knowledge_record_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
-
--- 8. Add fields to ag_tenant_agent_t table
-ALTER TABLE nexent.ag_tenant_agent_t
-ADD COLUMN IF NOT EXISTS group_ids VARCHAR; -- int4 list
-
--- Add comments for new fields in ag_tenant_agent_t table
-COMMENT ON COLUMN nexent.ag_tenant_agent_t.group_ids IS 'Agent group IDs list';
 
 -- Insert role permission data with conflict handling
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
