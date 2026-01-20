@@ -2821,6 +2821,53 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
 
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.DataMateCore')
+    def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
+        """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType, DATAMATE_URL
+
+        # Setup mocks
+        mock_tenant_config_manager.get_app_config.return_value = "https://datamate.example.com"
+        mock_datamate_instance = MagicMock()
+        mock_datamate_core.return_value = mock_datamate_instance
+
+        # Execute
+        result = get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+
+        # Assert
+        self.assertEqual(result, mock_datamate_instance)
+        mock_tenant_config_manager.get_app_config.assert_called_once_with(DATAMATE_URL, tenant_id="test-tenant")
+        mock_datamate_core.assert_called_once_with(base_url="https://datamate.example.com")
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
+        """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType
+
+        # Setup mock to return None (no URL configured)
+        mock_tenant_config_manager.get_app_config.return_value = None
+
+        # Execute and Assert
+        with self.assertRaises(ValueError) as exc:
+            get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+
+        self.assertIn("DataMate URL not configured for tenant test-tenant", str(exc.exception))
+        mock_tenant_config_manager.get_app_config.assert_called_once()
+
+    def test_get_vector_db_core_datamate_no_tenant_id(self):
+        """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType
+
+        # Execute and Assert
+        with self.assertRaises(ValueError) as exc:
+            get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id=None)
+
+        self.assertIn("tenant_id must be provided for DataMate", str(exc.exception))
+
     def test_rethrow_or_plain_parses_error_code(self):
         """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
         from backend.services.vectordatabase_service import _rethrow_or_plain
