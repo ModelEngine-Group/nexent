@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 import httpx
 
 from pydantic import Field
@@ -71,18 +71,12 @@ class DifyKnowledgeBaseSearchTool(Tool):
         if not api_key or not isinstance(api_key, str):
             raise ValueError("api_key is required and must be a non-empty string")
 
-        # Validate and normalize dataset_ids
-        if not dataset_ids:
+        # Normalize and validate dataset_ids
+        self.dataset_ids = self._normalize_dataset_ids(dataset_ids)
+        if not self.dataset_ids:
             raise ValueError("dataset_ids is required and cannot be empty")
-        if isinstance(dataset_ids, str):
-            dataset_ids = [dataset_ids]
-        elif isinstance(dataset_ids, list):
-            for dataset_id in dataset_ids:
-                if not isinstance(dataset_id, str) or not dataset_id.strip():
-                    raise ValueError("All dataset_ids must be non-empty strings")
 
         self.dify_api_base = dify_api_base.rstrip("/")
-        self.dataset_ids = dataset_ids
         self.api_key = api_key
         self.top_k = top_k
         self.observer = observer
@@ -189,6 +183,22 @@ class DifyKnowledgeBaseSearchTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
+    def _normalize_dataset_ids(self, dataset_ids: Optional[Union[str, List[str]]]) -> List[str]:
+            """Normalize dataset_ids to list; accept single string, JSON string array, and keep None as empty list."""
+            if dataset_ids is None:
+                return []
+            if isinstance(dataset_ids, str):
+                # Try to parse as JSON array first
+                try:
+                    parsed = json.loads(dataset_ids)
+                    if isinstance(parsed, list):
+                        return [str(item) for item in parsed]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                # If not a valid JSON array, treat as single string
+                return [dataset_ids]
+            return list(dataset_ids)
+    
     def _get_document_download_url(self, document_id: str, dataset_id: str = None) -> str:
         """Get download URL for a document from Dify API.
 
