@@ -78,7 +78,8 @@ class KnowledgeBaseService {
 
   // Get knowledge bases with stats from all sources (very slow, don't use it)
   async getKnowledgeBasesInfo(
-    skipHealthCheck = false
+    skipHealthCheck = false,
+    includeDataMateSync = true
   ): Promise<KnowledgeBase[]> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
@@ -138,40 +139,42 @@ class KnowledgeBaseService {
         log.error("Failed to get Elasticsearch indices:", error);
       }
 
-      // Sync DataMate knowledge bases and get the synced data
-      try {
-        const syncResult = await this.syncDataMateAndCreateRecords();
-        if (syncResult.indices_info) {
-          // Convert synced DataMate indices to knowledge base format
-          const datamateKnowledgeBases: KnowledgeBase[] =
-            syncResult.indices_info.map((indexInfo: any) => {
-              const stats = indexInfo.stats?.base_info || {};
-              const kbId = indexInfo.name;
-              const kbName = indexInfo.display_name || indexInfo.name;
+      // Sync DataMate knowledge bases and get the synced data (only if enabled)
+      if (includeDataMateSync) {
+        try {
+          const syncResult = await this.syncDataMateAndCreateRecords();
+          if (syncResult.indices_info) {
+            // Convert synced DataMate indices to knowledge base format
+            const datamateKnowledgeBases: KnowledgeBase[] =
+              syncResult.indices_info.map((indexInfo: any) => {
+                const stats = indexInfo.stats?.base_info || {};
+                const kbId = indexInfo.name;
+                const kbName = indexInfo.display_name || indexInfo.name;
 
-              return {
-                id: kbId,
-                name: kbName,
-                description: "DataMate knowledge base",
-                documentCount: stats.doc_count || 0,
-                chunkCount: stats.chunk_count || 0,
-                createdAt: stats.creation_date || null,
-                updatedAt: stats.update_date || stats.creation_date || null,
-                embeddingModel: stats.embedding_model || "unknown",
-                avatar: "",
-                chunkNum: 0,
-                language: "",
-                nickname: "",
-                parserId: "",
-                permission: "",
-                tokenNum: 0,
-                source: "datamate",
-              };
-            });
-          knowledgeBases.push(...datamateKnowledgeBases);
+                return {
+                  id: kbId,
+                  name: kbName,
+                  description: "DataMate knowledge base",
+                  documentCount: stats.doc_count || 0,
+                  chunkCount: stats.chunk_count || 0,
+                  createdAt: stats.creation_date || null,
+                  updatedAt: stats.update_date || stats.creation_date || null,
+                  embeddingModel: stats.embedding_model || "unknown",
+                  avatar: "",
+                  chunkNum: 0,
+                  language: "",
+                  nickname: "",
+                  parserId: "",
+                  permission: "",
+                  tokenNum: 0,
+                  source: "datamate",
+                };
+              });
+            knowledgeBases.push(...datamateKnowledgeBases);
+          }
+        } catch (error) {
+          log.error("Failed to sync DataMate knowledge bases:", error);
         }
-      } catch (error) {
-        log.error("Failed to sync DataMate knowledge bases:", error);
       }
 
       return knowledgeBases;
@@ -227,17 +230,14 @@ class KnowledgeBaseService {
     name: string
   ): Promise<{ status: string; action?: string }> {
     try {
-      const response = await fetch(
-        API_ENDPOINTS.knowledgeBase.checkName,
-        {
-          method: "POST",
-          headers: {
-            ...getAuthHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ knowledge_name: name }),
-        }
-      );
+      const response = await fetch(API_ENDPOINTS.knowledgeBase.checkName, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ knowledge_name: name }),
+      });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || "Server error during name check");

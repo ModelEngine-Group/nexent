@@ -239,7 +239,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
   const fetchKnowledgeBases = useCallback(
-    async (skipHealthCheck = true, shouldLoadSelected = true) => {
+    async (
+      skipHealthCheck = true,
+      shouldLoadSelected = true,
+      includeDataMateSync = true
+    ) => {
       // If already loading, return directly
       if (state.isLoading) {
         return;
@@ -252,8 +256,10 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         localStorage.removeItem("kb_cache");
 
         // Get knowledge base list data directly from server
-        const kbs =
-          await knowledgeBaseService.getKnowledgeBasesInfo(skipHealthCheck);
+        const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(
+          skipHealthCheck,
+          includeDataMateSync
+        );
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
@@ -427,8 +433,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   const refreshKnowledgeBaseData = useCallback(
     async (forceRefresh = false) => {
       try {
-        // Get latest knowledge base data directly from server, but don't reload user selections
-        await fetchKnowledgeBases(false, false);
+        // Get latest knowledge base data directly from server, but don't reload user selections and skip DataMate sync
+        await fetchKnowledgeBases(false, false, false);
 
         // If there is an active knowledge base, also refresh its document information
         if (state.activeKnowledgeBase) {
@@ -467,7 +473,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     try {
       // Get latest knowledge base data directly from server, which includes DataMate sync
       // The getKnowledgeBasesInfo method already handles syncDataMateAndCreateRecords internally
-      await fetchKnowledgeBases(false, false);
+      await fetchKnowledgeBases(false, false, true);
 
       // If there is an active knowledge base, also refresh its document information
       if (state.activeKnowledgeBase) {
@@ -531,7 +537,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         });
 
         // Reload knowledge base list when model changes
-        fetchKnowledgeBases(true);
+        fetchKnowledgeBases(true, true, true);
       }
     };
 
@@ -546,7 +552,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         });
 
         // Reload knowledge base list when model changes
-        fetchKnowledgeBases(true);
+        fetchKnowledgeBases(true, true, true);
       }
     };
 
@@ -559,7 +565,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       // If first time loading data or force refresh, get from server
       if (!initialDataLoaded || forceRefresh) {
         // For force refresh, don't reload user selections to preserve current state
-        fetchKnowledgeBases(false, !forceRefresh);
+        fetchKnowledgeBases(false, !forceRefresh, true);
         initialDataLoaded = true;
       }
     };
