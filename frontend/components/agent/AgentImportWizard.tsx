@@ -1641,7 +1641,15 @@ export default function AgentImportWizard({
 
           {Object.keys(groupedFields).length > 0 ? (
             <div className="space-y-6">
-              {Object.entries(groupedFields).map(([agentKey, agentGroup]) => (
+              {Object.entries(groupedFields)
+                .sort(([keyA], [keyB]) => {
+                  // Main agent first
+                  const mainAgentId = String(initialData?.agent_id);
+                  if (keyA === mainAgentId) return -1;
+                  if (keyB === mainAgentId) return 1;
+                  return 0;
+                })
+                .map(([agentKey, agentGroup]) => (
                 <div
                   key={agentKey}
                   className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4"
