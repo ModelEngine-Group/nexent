@@ -1,4 +1,3 @@
-from backend.apps.config_sync_app import load_config, save_config
 import os
 import sys
 from unittest.mock import patch, MagicMock
@@ -6,6 +5,8 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+
+# Delayed imports: import inside each test to avoid import-time ordering issues
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -76,6 +77,7 @@ async def test_load_config_success(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
+    from backend.apps.config_sync_app import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -109,6 +111,7 @@ async def test_load_config_chinese_language(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
+    from backend.apps.config_sync_app import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -137,6 +140,7 @@ async def test_load_config_with_error(config_mocks):
     config_mocks['get_user_info'].side_effect = Exception("Auth error")
 
     # Execute and Assert
+    from backend.apps.config_sync_app import load_config
     with pytest.raises(HTTPException) as exc_info:
         await load_config(mock_auth_header, mock_request)
 
@@ -160,6 +164,7 @@ async def test_save_config_success(config_mocks):
     config_mocks['save_config_impl'].return_value = None
 
     # Execute
+    from backend.apps.config_sync_app import save_config
     result = await save_config(global_config, mock_auth_header)
 
     # Assert
@@ -191,6 +196,7 @@ async def test_save_config_with_error(config_mocks):
         "Authentication failed")
 
     # Execute and Assert
+    from backend.apps.config_sync_app import save_config
     with pytest.raises(HTTPException) as exc_info:
         await save_config(global_config, mock_auth_header)
 
@@ -215,6 +221,7 @@ async def test_load_config_missing_language(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
+    from backend.apps.config_sync_app import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -244,6 +251,7 @@ async def test_save_config_empty_auth_header(config_mocks):
         "anonymous_user", "default_tenant")
 
     # Execute
+    from backend.apps.config_sync_app import save_config
     result = await save_config(global_config, mock_auth_header)
 
     # Assert
@@ -269,6 +277,7 @@ async def test_load_config_empty_auth_header(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
+    from backend.apps.config_sync_app import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
