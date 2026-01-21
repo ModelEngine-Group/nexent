@@ -11,12 +11,7 @@ from types import ModuleType, SimpleNamespace
 
 from fastapi.responses import StreamingResponse
 
-# Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
+# Environment variables are now configured in conftest.py
 
 # Mock boto3 before importing the module under test
 boto3_mock = MagicMock()
@@ -49,7 +44,8 @@ sys.modules['nexent.core.utils'] = _create_package_mock('nexent.core.utils')
 observer_module = ModuleType('nexent.core.utils.observer')
 observer_module.MessageObserver = MagicMock
 sys.modules['nexent.core.utils.observer'] = observer_module
-sys.modules['nexent.vector_database'] = _create_package_mock('nexent.vector_database')
+sys.modules['nexent.vector_database'] = _create_package_mock(
+    'nexent.vector_database')
 vector_db_base_module = ModuleType('nexent.vector_database.base')
 
 
@@ -96,8 +92,10 @@ minio_client_mock.storage_config.default_bucket = 'test-bucket'
 minio_client_mock._storage_client = storage_client_mock
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+      lambda self: None).start()
+patch('backend.database.client.MinioClient',
+      return_value=minio_client_mock).start()
 patch('backend.database.client.minio_client', minio_client_mock).start()
 # Patch attachment_db.minio_client to use the same mock
 # This ensures delete_file and other methods work correctly
@@ -2429,7 +2427,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Setup
         self.mock_vdb_core.delete_documents.return_value = 5
         # Configure delete_file to return a success response
-        mock_delete_file.return_value = {"success": True, "object_name": "test_path"}
+        mock_delete_file.return_value = {
+            "success": True, "object_name": "test_path"}
 
         # Execute
         result = ElasticSearchService.delete_documents(
@@ -2518,12 +2517,6 @@ class TestElasticSearchService(unittest.TestCase):
             "tenant_id": "tenant1"
         })
         self.assertEqual(result["status"], "exists_in_tenant")
-
-
-
-
-
-
 
     # Note: generate_knowledge_summary_stream function has been removed
     # These tests are no longer relevant as the function was replaced with summary_index_name
@@ -2800,7 +2793,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         from backend.services.vectordatabase_service import _rethrow_or_plain
 
         with self.assertRaises(Exception) as exc:
-            _rethrow_or_plain(Exception('{"error_code":"E123","detail":"boom"}'))
+            _rethrow_or_plain(
+                Exception('{"error_code":"E123","detail":"boom"}'))
         self.assertIn('"error_code": "E123"', str(exc.exception))
 
     def test_get_vector_db_core_unsupported_type(self):
@@ -2858,7 +2852,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
         # Redis cleanup will raise to hit error branch (lines 289-292)
-        mock_redis.delete_knowledgebase_records.side_effect = Exception("redis boom")
+        mock_redis.delete_knowledgebase_records.side_effect = Exception(
+            "redis boom")
         mock_get_redis.return_value = mock_redis
 
         files_payload = {
@@ -2894,7 +2889,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         # Redis cleanup error should be surfaced
         self.assertIn("error", result["redis_cleanup"])
         mock_list_files.assert_awaited_once()
-        mock_delete_index.assert_awaited_once_with("kb-2", mock_vdb_core, "user-2")
+        mock_delete_index.assert_awaited_once_with(
+            "kb-2", mock_vdb_core, "user-2")
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_create_index_failure(self, mock_create_record):
@@ -3005,7 +3001,8 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         mock_redis = MagicMock()
         # First call (init) raises, second call (final) raises
-        mock_redis.save_progress_info.side_effect = [Exception("init fail"), Exception("final fail")]
+        mock_redis.save_progress_info.side_effect = [
+            Exception("init fail"), Exception("final fail")]
         mock_redis.is_task_cancelled.return_value = False
         mock_get_redis.return_value = mock_redis
 
@@ -3142,11 +3139,13 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertIn("file-processing", paths)
         self.assertIn("file-failed", paths)
         # Processing file gets progress override
-        proc_file = next(f for f in result["files"] if f["path_or_url"] == "file-processing")
+        proc_file = next(
+            f for f in result["files"] if f["path_or_url"] == "file-processing")
         self.assertEqual(proc_file["processed_chunk_num"], 2)
         self.assertEqual(proc_file["total_chunk_num"], 4)
         # Failed file retains default chunk_count fallback
-        failed_file = next(f for f in result["files"] if f["path_or_url"] == "file-failed")
+        failed_file = next(
+            f for f in result["files"] if f["path_or_url"] == "file-failed")
         self.assertEqual(failed_file.get("chunk_count", 0), 0)
 
     @patch('backend.services.vectordatabase_service.get_all_files_status', return_value={})

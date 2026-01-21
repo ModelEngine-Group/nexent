@@ -134,12 +134,7 @@ import os
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-# Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
+# Environment variables are now configured in conftest.py
 
 # Mock boto3 and minio client before importing the module under test
 import sys
