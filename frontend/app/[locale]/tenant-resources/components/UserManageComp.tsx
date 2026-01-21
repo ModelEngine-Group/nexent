@@ -28,6 +28,7 @@ import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
+import InvitationList from "./resources/InvitationList";
 
 // Removed mockTenants - now using real data from API
 
@@ -317,6 +318,11 @@ export default function UserManageComp() {
                         t("tenantResources.tab.knowledge") || "Knowledge Base",
                       children: <KnowledgeList tenantId={tenantId} />,
                     },
+                    {
+                      key: "invitations",
+                      label: t("tenantResources.invitation.tab") || "Invitations",
+                      children: <InvitationList tenantId={tenantId} />,
+                    },
                   ]}
                 />
               ) : (
@@ -372,6 +378,11 @@ export default function UserManageComp() {
                     label:
                       t("tenantResources.tab.knowledge") || "Knowledge Base",
                     children: <KnowledgeList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "invitations",
+                    label: t("tenantResources.invitation.tab") || "Invitations",
+                    children: <InvitationList tenantId={tenantId} />,
                   },
                 ]}
               />

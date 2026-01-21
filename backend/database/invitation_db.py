@@ -264,7 +264,7 @@ def query_invitations_with_pagination(
     page_size: int = 20
 ) -> Dict[str, Any]:
     """
-    Query invitations with pagination support
+    Query invitations with pagination support, including usage count
 
     Args:
         tenant_id (Optional[str]): Tenant ID to filter by, None for all tenants
@@ -274,8 +274,25 @@ def query_invitations_with_pagination(
     Returns:
         Dict[str, Any]: Dictionary containing items list and total count
     """
+    from sqlalchemy import func, outerjoin
+
     with get_db_session() as session:
-        query = session.query(TenantInvitationCode).filter(
+        # Create subquery to count usage records per invitation
+        usage_subquery = session.query(
+            TenantInvitationRecord.invitation_id,
+            func.count(TenantInvitationRecord.invitation_record_id).label('used_times')
+        ).filter(
+            TenantInvitationRecord.delete_flag == "N"
+        ).group_by(TenantInvitationRecord.invitation_id).subquery()
+
+        # Main query with left join to get usage counts
+        query = session.query(
+            TenantInvitationCode,
+            func.coalesce(usage_subquery.c.used_times, 0).label('used_times')
+        ).outerjoin(
+            usage_subquery,
+            TenantInvitationCode.invitation_id == usage_subquery.c.invitation_id
+        ).filter(
             TenantInvitationCode.delete_flag == "N"
         )
 
@@ -290,8 +307,12 @@ def query_invitations_with_pagination(
         offset = (page - 1) * page_size
         results = query.offset(offset).limit(page_size).all()
 
-        # Convert to dict format
-        items = [as_dict(record) for record in results]
+        # Convert to dict format and add used_times
+        items = []
+        for invitation_record, used_times in results:
+            invitation_dict = as_dict(invitation_record)
+            invitation_dict['used_times'] = int(used_times)
+            items.append(invitation_dict)
 
         return {
             "items": items,
