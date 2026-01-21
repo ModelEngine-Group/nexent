@@ -3,7 +3,6 @@ from typing import Any, Dict
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from consts.const import TENANT_ID
 from database.client import get_db_session
 from database.db_models import TenantConfig
 
@@ -149,7 +148,6 @@ def get_all_tenant_ids():
     """
     with get_db_session() as session:
         result = session.query(TenantConfig.tenant_id).filter(
-            TenantConfig.config_key == TENANT_ID,
             TenantConfig.delete_flag == "N"
         ).distinct().all()
 
