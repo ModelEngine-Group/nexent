@@ -567,6 +567,16 @@ function DataConfig({ isActive }: DataConfigProps) {
     setDragging(false);
 
     // If in creation mode or has active knowledge base, process files
+    // Do not allow uploads when active KB source is datamate
+    if (
+      kbState.activeKnowledgeBase &&
+      kbState.activeKnowledgeBase.source === "datamate" &&
+      !isCreatingMode
+    ) {
+      message.warning(t("document.message.uploadDisabledForDataMate"));
+      return;
+    }
+
     if (isCreatingMode || kbState.activeKnowledgeBase) {
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
@@ -1042,6 +1052,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               <DocumentList
                 documents={[]}
                 onDelete={() => {}}
+                knowledgeBaseSource={""}
                 isCreatingMode={true}
                 knowledgeBaseId={""}
                 knowledgeBaseName={newKbName}
@@ -1061,6 +1072,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               <DocumentList
                 documents={viewingDocuments}
                 onDelete={handleDeleteDocument}
+                knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                 knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
                 modelMismatch={hasKnowledgeBaseModelMismatch(

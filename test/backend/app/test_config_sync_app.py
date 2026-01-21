@@ -1,3 +1,4 @@
+from backend.apps.config_sync_app import load_config, save_config
 import os
 import sys
 from unittest.mock import patch, MagicMock
@@ -5,8 +6,6 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-
-from backend.apps.config_sync_app import load_config, save_config
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +36,7 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Now we can safely import the function to test
+
 
 # Fixtures to replace setUp and tearDown
 
