@@ -1,6 +1,5 @@
 import json
 import logging
-import time
 from typing import Dict, Any
 
 from sqlalchemy.sql import func
@@ -78,9 +77,6 @@ class TenantConfigManager:
         tenant_configs = {}
         for config in configs:
             tenant_configs[config["config_key"]] = config["config_value"]
-
-        logger.info(
-            f"Configuration loaded for tenant {tenant_id} at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         return tenant_configs
 

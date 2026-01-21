@@ -219,6 +219,7 @@ class ConfigStoreClass {
           customIconUrl: backendConfig.app.icon?.customUrl || null,
           avatarUri: backendConfig.app.icon?.avatarUri || null,
           modelEngineEnabled: backendConfig.app.modelEngineEnabled ?? false,
+          datamateUrl: backendConfig.app.datamateUrl || null,
         }
       : {
           appName: "",
@@ -227,6 +228,7 @@ class ConfigStoreClass {
           customIconUrl: null,
           avatarUri: null,
           modelEngineEnabled: false,
+          datamateUrl: null,
         };
 
     // Adapt models field

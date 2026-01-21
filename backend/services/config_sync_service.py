@@ -86,10 +86,9 @@ async def save_config_impl(config, tenant_id, user_id):
             tenant_config_manager.set_single_config(
                 user_id, tenant_id, env_key, safe_value(value))
         else:
-            if env_config[env_key] not in [DEFAULT_APP_NAME_ZH, DEFAULT_APP_NAME_EN, DEFAULT_APP_DESCRIPTION_ZH,
-                                           DEFAULT_APP_DESCRIPTION_EN]:
-                tenant_config_manager.set_single_config(
-                    user_id, tenant_id, env_key, safe_value(value))
+            # Save configuration for all app config keys, including datamateUrl
+            tenant_config_manager.set_single_config(
+                user_id, tenant_id, env_key, safe_value(value))
     # Process model configuration
     for model_type, model_config in config_dict.get("models", {}).items():
         if not model_config:

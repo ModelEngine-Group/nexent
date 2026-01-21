@@ -107,6 +107,7 @@ class AppConfig(BaseModel):
     customIconUrl: Optional[str] = None
     avatarUri: Optional[str] = None
     modelEngineEnabled: bool = True
+    datamateUrl: Optional[str] = None
 
 
 class GlobalConfig(BaseModel):
