@@ -90,8 +90,7 @@ logger = logging.getLogger("vectordatabase_service")
 
 
 def get_vector_db_core(
-    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH,
-    tenant_id: Optional[str] = None,
+    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
 ) -> VectorDatabaseCore:
     """
     Return a VectorDatabaseCore implementation based on the requested type.
@@ -504,9 +503,6 @@ class ElasticSearchService:
                 continue
             # Check if index exists in Elasticsearch (skip if not found)
             if index_name not in es_indices_list:
-                # # async PG database to sync ES, remove the data that is not in ES
-                # delete_knowledge_record(
-                #     {"index_name": record["index_name"], "user_id": user_id})
                 continue
 
             # Check permission based on user role
@@ -522,7 +518,7 @@ class ElasticSearchService:
                 effective_user_role = "ADMIN"
                 logger.info("User under SPEED version is treated as admin")
 
-            if effective_user_role in ["SU", "ADMIN"] :
+            if effective_user_role in ["SU", "ADMIN"]:
                 # SU can see all knowledgebases
                 permission = "EDIT"
             elif effective_user_role in ["USER", "DEV"]:
@@ -576,10 +572,8 @@ class ElasticSearchService:
                         record["group_ids"])
                 else:
                     # If no group_ids specified, use tenant default group
-                    default_group_id = get_tenant_default_group_id(
-                        record.get("tenant_id"))
-                    record_with_permission["group_ids"] = [
-                        default_group_id] if default_group_id else []
+                    default_group_id = get_tenant_default_group_id(record.get("tenant_id"))
+                    record_with_permission["group_ids"] = [default_group_id] if default_group_id else []
                 visible_knowledgebases.append(record_with_permission)
 
                 # Track records with missing embedding model for stats update
@@ -1081,8 +1075,7 @@ class ElasticSearchService:
                                      ..., description="Name of the index to get documents from"),
                                  batch_size: int = Query(
                                      1000, description="Number of documents to retrieve per batch"),
-                                 vdb_core: VectorDatabaseCore = Depends(
-                                     get_vector_db_core),
+                                 vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
                                  user_id: Optional[str] = Body(
                                      None, description="ID of the user delete the knowledge base"),
                                  tenant_id: Optional[str] = Body(
@@ -1113,8 +1106,7 @@ class ElasticSearchService:
         """
         try:
             if not tenant_id:
-                raise Exception(
-                    "Tenant ID is required for summary generation.")
+                raise Exception("Tenant ID is required for summary generation.")
 
             from utils.document_vector_utils import (
                 process_documents_for_clustering,

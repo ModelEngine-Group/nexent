@@ -14,16 +14,56 @@ knowledge_db_mock.upsert_knowledge_record = MagicMock()
 knowledge_db_mock.get_knowledge_info_by_tenant_and_source = MagicMock()
 knowledge_db_mock.delete_knowledge_record = MagicMock()
 
+# Mock database client and models
+database_client_mock = MagicMock()
+database_client_mock.get_db_session = MagicMock()
+
+database_models_mock = MagicMock()
+database_models_mock.TenantConfig = MagicMock()
+
+# Mock database functions
+tenant_config_db_mock = MagicMock()
+tenant_config_db_mock.get_all_configs_by_tenant_id = MagicMock()
+tenant_config_db_mock.get_single_config_info = MagicMock()
+tenant_config_db_mock.insert_config = MagicMock()
+tenant_config_db_mock.delete_config_by_tenant_config_id = MagicMock()
+tenant_config_db_mock.update_config_by_tenant_config_id_and_data = MagicMock()
+
+model_management_db_mock = MagicMock()
+model_management_db_mock.get_model_by_model_id = MagicMock()
+
 # Mock the nexent modules
 datamate_core_mock = MagicMock()
 
+# Mock consts
+consts_mock = MagicMock()
+consts_mock.DATAMATE_URL = "DATAMATE_URL"
+
+# Mock sqlalchemy
+sqlalchemy_mock = MagicMock()
+sqlalchemy_exc_mock = MagicMock()
+sqlalchemy_exc_mock.SQLAlchemyError = Exception
+sqlalchemy_sql_mock = MagicMock()
+sqlalchemy_sql_mock.func = MagicMock()
+
+sqlalchemy_mock.exc = sqlalchemy_exc_mock
+sqlalchemy_mock.sql = sqlalchemy_sql_mock
+
+# Set up sys.modules mocks
 sys.modules['database.knowledge_db'] = knowledge_db_mock
+sys.modules['database.client'] = database_client_mock
+sys.modules['database.db_models'] = database_models_mock
+sys.modules['database.tenant_config_db'] = tenant_config_db_mock
+sys.modules['database.model_management_db'] = model_management_db_mock
 sys.modules['nexent.vector_database.datamate_core'] = datamate_core_mock
+sys.modules['consts.const'] = consts_mock
+sys.modules['sqlalchemy'] = sqlalchemy_mock
+sys.modules['sqlalchemy.exc'] = sqlalchemy_exc_mock
+sys.modules['sqlalchemy.sql'] = sqlalchemy_sql_mock
 
 # Patch storage factory before importing the module under test
 with patch_minio_client_initialization():
     from backend.services.datamate_service import (
-        fetch_datamate_knowledge_base_files,
         fetch_datamate_knowledge_base_file_list,
         sync_datamate_knowledge_bases_and_create_records,
         _get_datamate_core,
@@ -43,34 +83,6 @@ class FakeClient:
 
     def sync_all_knowledge_bases(self):
         return {"success": True, "knowledge_bases": [{"id": "kb1"}], "total_count": 1}
-
-
-@pytest.mark.asyncio
-async def test_fetch_datamate_knowledge_base_files_success(monkeypatch):
-    # Mock the _get_datamate_core function to return our fake core
-    fake_core = MagicMock()
-    fake_core.get_index_chunks.return_value = {
-        "chunks": [{"name": "file1", "size": 123, "knowledge_base_id": "kb1"}]
-    }
-
-    monkeypatch.setattr(
-        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
-    files = await fetch_datamate_knowledge_base_files("kb1", "tenant1")
-    assert isinstance(files, list)
-    assert files[0]["knowledge_base_id"] == "kb1"
-
-
-@pytest.mark.asyncio
-async def test_fetch_datamate_knowledge_base_files_failure(monkeypatch):
-    # Mock the _get_datamate_core function to return a core that raises an exception
-    fake_core = MagicMock()
-    fake_core.get_index_chunks.side_effect = Exception("boom")
-
-    monkeypatch.setattr(
-        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
-    with pytest.raises(RuntimeError) as excinfo:
-        await fetch_datamate_knowledge_base_files("kb1", "tenant1")
-    assert "Failed to fetch files for knowledge base kb1" in str(excinfo.value)
 
 
 def test_get_datamate_core_success(monkeypatch):
@@ -99,7 +111,65 @@ def test_get_datamate_core_success(monkeypatch):
     mock_config_manager.get_app_config.assert_called_once_with(
         "DATAMATE_URL", tenant_id="tenant1")
     datamate_core_class.assert_called_once_with(
-        base_url="http://datamate.example.com")
+        base_url="http://datamate.example.com", verify_ssl=True)
+
+
+def test_get_datamate_core_https_ssl_verification(monkeypatch):
+    """Test _get_datamate_core function with HTTPS URL disables SSL verification."""
+    # Mock DATAMATE_URL constant in the service module
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DATAMATE_URL", "DATAMATE_URL"
+    )
+
+    # Mock tenant_config_manager
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = "https://datamate.example.com"
+
+    # Mock DataMateCore
+    mock_datamate_core = MagicMock()
+    datamate_core_class = MagicMock(return_value=mock_datamate_core)
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager)
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DataMateCore", datamate_core_class)
+
+    result = _get_datamate_core("tenant1")
+
+    assert result == mock_datamate_core
+    mock_config_manager.get_app_config.assert_called_once_with(
+        "DATAMATE_URL", tenant_id="tenant1")
+    datamate_core_class.assert_called_once_with(
+        base_url="https://datamate.example.com", verify_ssl=False)
+
+
+def test_get_datamate_core_http_ssl_verification(monkeypatch):
+    """Test _get_datamate_core function with HTTP URL enables SSL verification."""
+    # Mock DATAMATE_URL constant in the service module
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DATAMATE_URL", "DATAMATE_URL"
+    )
+
+    # Mock tenant_config_manager
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+
+    # Mock DataMateCore
+    mock_datamate_core = MagicMock()
+    datamate_core_class = MagicMock(return_value=mock_datamate_core)
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager)
+    monkeypatch.setattr(
+        "backend.services.datamate_service.DataMateCore", datamate_core_class)
+
+    result = _get_datamate_core("tenant1")
+
+    assert result == mock_datamate_core
+    mock_config_manager.get_app_config.assert_called_once_with(
+        "DATAMATE_URL", tenant_id="tenant1")
+    datamate_core_class.assert_called_once_with(
+        base_url="http://datamate.example.com", verify_ssl=True)
 
 
 def test_get_datamate_core_missing_config(monkeypatch):
@@ -231,35 +301,6 @@ async def test_create_datamate_knowledge_records_partial_failure(monkeypatch):
 
     # Verify upsert_knowledge_record was called twice (second failed but didn't crash)
     assert knowledge_db_mock.upsert_knowledge_record.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_create_datamate_knowledge_records_empty_names(monkeypatch):
-    """Test _create_datamate_knowledge_records function when names list is shorter than ids."""
-    # Reset any previous side_effect from other tests
-    knowledge_db_mock.upsert_knowledge_record.side_effect = None
-    knowledge_db_mock.upsert_knowledge_record.reset_mock()
-
-    mock_created_record = {"id": "record1", "index_name": "kb1"}
-    knowledge_db_mock.upsert_knowledge_record.return_value = mock_created_record
-
-    result = await _create_datamate_knowledge_records(
-        knowledge_base_ids=["kb1", "kb2"],
-        knowledge_base_names=["Knowledge Base 1"],  # Only one name provided
-        embedding_model_names=["embedding1", "embedding2"],
-        tenant_id="tenant1",
-        user_id="user1"
-    )
-
-    assert len(result) == 2
-
-    # First record should use the provided name
-    first_call_args = knowledge_db_mock.upsert_knowledge_record.call_args_list[0][0][0]
-    assert first_call_args["knowledge_name"] == "Knowledge Base 1"
-
-    # Second record should use the kb_id as fallback
-    second_call_args = knowledge_db_mock.upsert_knowledge_record.call_args_list[1][0][0]
-    assert second_call_args["knowledge_name"] == "kb2"
 
 
 @pytest.mark.asyncio

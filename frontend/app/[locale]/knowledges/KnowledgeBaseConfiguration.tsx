@@ -638,7 +638,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   const handleDataMateConfigSave = async () => {
     try {
-      console.log("🔄 Saving DataMate URL:", dataMateUrl);
+      console.log("Saving DataMate URL:", dataMateUrl);
 
       const response = await fetch(API_ENDPOINTS.config.saveDataMateUrl, {
         method: "POST",
@@ -646,16 +646,16 @@ function DataConfig({ isActive }: DataConfigProps) {
         body: JSON.stringify({ datamate_url: dataMateUrl }),
       });
 
-      console.log("📡 Save response status:", response.status);
+      console.log("Save response status:", response.status);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("❌ Save failed:", response.status, errorText);
+        console.error("Save failed:", response.status, errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       const responseData = await response.json();
-      console.log("✅ Save response data:", responseData);
+      console.log("Save response data:", responseData);
 
       if (!response.ok) {
         throw new Error(

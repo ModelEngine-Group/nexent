@@ -4,9 +4,8 @@ Handles API calls to DataMate to fetch knowledge bases and their files.
 
 This service layer uses the DataMate SDK client to interact with DataMate APIs.
 """
-import json
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 import asyncio
 
 from consts.const import DATAMATE_URL
@@ -39,9 +38,7 @@ async def _create_datamate_knowledge_records(knowledge_base_ids: List[str],
 
     for i, kb_id in enumerate(knowledge_base_ids):
         try:
-            # Get knowledge base name, fallback to ID if not available
-            knowledge_name = knowledge_base_names[i] if i < len(
-                knowledge_base_names) else kb_id
+            knowledge_name = knowledge_base_names[i]
 
             # Create or update knowledge record in local database
             record_data = {
@@ -82,35 +79,11 @@ def _get_datamate_core(tenant_id: str) -> DataMateCore:
         DATAMATE_URL, tenant_id=tenant_id)
     if not datamate_url:
         raise ValueError(f"DataMate URL not configured for tenant {tenant_id}")
-    return DataMateCore(base_url=datamate_url)
 
+    # For HTTPS URLs with self-signed certificates, disable SSL verification
+    verify_ssl = not datamate_url.startswith("https://")
 
-async def fetch_datamate_knowledge_base_files(knowledge_base_id: str, tenant_id: str) -> List[Dict[str, Any]]:
-    """
-    Fetch file list for a specific DataMate knowledge base.
-
-    Args:
-        knowledge_base_id: The ID of the knowledge base.
-        tenant_id: Tenant ID for configuration lookup.
-
-    Returns:
-        List of file dictionaries with name, status, size, upload_date, etc.
-    """
-    try:
-        core = _get_datamate_core(tenant_id)
-        # Run synchronous SDK call in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            core.get_index_chunks,
-            knowledge_base_id
-        )
-        return result["chunks"]
-    except Exception as e:
-        logger.error(
-            f"Error fetching files for knowledge base {knowledge_base_id}: {str(e)}")
-        raise RuntimeError(
-            f"Failed to fetch files for knowledge base {knowledge_base_id}: {str(e)}")
+    return DataMateCore(base_url=datamate_url, verify_ssl=verify_ssl)
 
 
 async def fetch_datamate_knowledge_base_file_list(knowledge_base_id: str, tenant_id: str) -> Dict[str, Any]:
@@ -195,7 +168,7 @@ async def sync_datamate_knowledge_bases_and_create_records(tenant_id: str, user_
         response["indices_info"] = indices_info
 
         # Create knowledge records in local database
-        created_records = await _create_datamate_knowledge_records(
+        await _create_datamate_knowledge_records(
             knowledge_base_ids, knowledge_base_names, embedding_model_names, tenant_id, user_id
         )
 

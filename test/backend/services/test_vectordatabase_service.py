@@ -2834,12 +2834,15 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_datamate_core.return_value = mock_datamate_instance
 
         # Execute
-        result = get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+        result = get_vector_db_core(
+            db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
 
         # Assert
         self.assertEqual(result, mock_datamate_instance)
-        mock_tenant_config_manager.get_app_config.assert_called_once_with(DATAMATE_URL, tenant_id="test-tenant")
-        mock_datamate_core.assert_called_once_with(base_url="https://datamate.example.com")
+        mock_tenant_config_manager.get_app_config.assert_called_once_with(
+            DATAMATE_URL, tenant_id="test-tenant")
+        mock_datamate_core.assert_called_once_with(
+            base_url="https://datamate.example.com")
 
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
@@ -2852,9 +2855,11 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         # Execute and Assert
         with self.assertRaises(ValueError) as exc:
-            get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+            get_vector_db_core(
+                db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
 
-        self.assertIn("DataMate URL not configured for tenant test-tenant", str(exc.exception))
+        self.assertIn(
+            "DataMate URL not configured for tenant test-tenant", str(exc.exception))
         mock_tenant_config_manager.get_app_config.assert_called_once()
 
     def test_get_vector_db_core_datamate_no_tenant_id(self):
@@ -2864,9 +2869,11 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         # Execute and Assert
         with self.assertRaises(ValueError) as exc:
-            get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id=None)
+            get_vector_db_core(
+                db_type=VectorDatabaseType.DATAMATE, tenant_id=None)
 
-        self.assertIn("tenant_id must be provided for DataMate", str(exc.exception))
+        self.assertIn("tenant_id must be provided for DataMate",
+                      str(exc.exception))
 
     def test_rethrow_or_plain_parses_error_code(self):
         """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
