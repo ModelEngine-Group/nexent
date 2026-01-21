@@ -515,13 +515,13 @@ def test_database_error_handling(monkeypatch, mock_session):
 
 
 def test_query_invitations_with_pagination_success(monkeypatch, mock_session):
-    """Test successfully querying invitations with pagination"""
+    """Test successfully querying invitations with pagination and usage count"""
     session, query = mock_session
 
-    # Mock invitations data
+    # Mock invitations data with usage counts (invitation_record, used_times)
     mock_invitation1 = MockTenantInvitationCode(invitation_id=1, invitation_code="code1")
     mock_invitation2 = MockTenantInvitationCode(invitation_id=2, invitation_code="code2")
-    mock_results = [mock_invitation1, mock_invitation2]
+    mock_results = [(mock_invitation1, 3), (mock_invitation2, 0)]  # invitation1 used 3 times, invitation2 used 0 times
 
     # Mock query chain
     mock_filter = MagicMock()
@@ -546,7 +546,9 @@ def test_query_invitations_with_pagination_success(monkeypatch, mock_session):
     assert result["total_pages"] == 3  # Ceiling division: (5 + 2 - 1) // 2 = 3
     assert len(result["items"]) == 2
     assert result["items"][0]["invitation_code"] == "code1"
+    assert result["items"][0]["used_times"] == 3
     assert result["items"][1]["invitation_code"] == "code2"
+    assert result["items"][1]["used_times"] == 0
 
 
 def test_query_invitations_with_pagination_empty_results(monkeypatch, mock_session):
@@ -581,15 +583,16 @@ def test_query_invitations_with_pagination_with_tenant_filter(monkeypatch, mock_
     """Test querying invitations with pagination and tenant filter"""
     session, query = mock_session
 
-    # Mock invitations data
+    # Mock invitations data with usage count
     mock_invitation = MockTenantInvitationCode(invitation_id=1, invitation_code="code1", tenant_id="test_tenant")
+    mock_result = (mock_invitation, 2)  # invitation used 2 times
 
     # Mock query chain with tenant filter
     mock_tenant_filter = MagicMock()
     mock_tenant_filter.count.return_value = 1
     mock_offset = MagicMock()
     mock_offset.limit.return_value = mock_offset
-    mock_offset.all.return_value = [mock_invitation]
+    mock_offset.all.return_value = [mock_result]
     mock_tenant_filter.offset.return_value = mock_offset
 
     mock_base_filter = MagicMock()
@@ -610,21 +613,23 @@ def test_query_invitations_with_pagination_with_tenant_filter(monkeypatch, mock_
     assert result["total_pages"] == 1
     assert len(result["items"]) == 1
     assert result["items"][0]["tenant_id"] == "test_tenant"
+    assert result["items"][0]["used_times"] == 2
 
 
 def test_query_invitations_with_pagination_second_page(monkeypatch, mock_session):
     """Test querying invitations with pagination on second page"""
     session, query = mock_session
 
-    # Mock invitations data for second page
+    # Mock invitations data for second page with usage count
     mock_invitation = MockTenantInvitationCode(invitation_id=3, invitation_code="code3")
+    mock_result = (mock_invitation, 1)  # invitation used 1 time
 
     # Mock query chain
     mock_filter = MagicMock()
     mock_filter.count.return_value = 5  # Total count
     mock_offset = MagicMock()
     mock_offset.limit.return_value = mock_offset
-    mock_offset.all.return_value = [mock_invitation]
+    mock_offset.all.return_value = [mock_result]
     mock_filter.offset.return_value = mock_offset
     query.filter.return_value = mock_filter
 
@@ -642,6 +647,7 @@ def test_query_invitations_with_pagination_second_page(monkeypatch, mock_session
     assert result["total_pages"] == 3
     assert len(result["items"]) == 1
     assert result["items"][0]["invitation_code"] == "code3"
+    assert result["items"][0]["used_times"] == 1
 
 
 def test_query_invitations_with_pagination_database_error(monkeypatch, mock_session):

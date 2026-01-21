@@ -29,6 +29,7 @@ import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
+import InvitationList from "./resources/InvitationList";
 
 // Removed mockTenants - now using real data from API
 
@@ -319,27 +320,32 @@ export default function UserManageComp() {
                           key: "knowledge",
                           label:
                             t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                          children: <KnowledgeList tenantId={tenantId} />,
-                        },
-                      ]}
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                        <Users className="h-8 w-8 text-gray-400" />
-                      </div>
-                      <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        {t("tenantResources.selectTenantFirst") ||
-                          "Please select a tenant"}
-                      </h3>
-                      <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                        {t("tenantResources.selectTenantDescription") ||
-                          "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
-                      </p>
-                    </div>
-                  )}
+                      children: <KnowledgeList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "invitations",
+                      label: t("tenantResources.invitation.tab") || "Invitations",
+                      children: <InvitationList tenantId={tenantId} />,
+                    },
+                  ]}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                    <Users className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                    {t("tenantResources.selectTenantFirst") ||
+                      "Please select a tenant"}
+                  </h3>
+                  <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+                    {t("tenantResources.selectTenantDescription") ||
+                      "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
+                  </p>
                 </div>
-              </div>
+              )}
+            </div>
+          </div>
             </Col>
           </Row>
         ) : (
@@ -376,29 +382,33 @@ export default function UserManageComp() {
                       key: "knowledge",
                       label:
                         t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                      children: <KnowledgeList tenantId={tenantId} />,
-                    },
-                  ]}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                    <Users className="h-8 w-8 text-gray-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                    {t("tenantResources.noTenantAssigned") ||
-                      "No tenant assigned"}
-                  </h3>
-                  <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                    {t("tenantResources.contactAdmin") ||
-                      "Please contact your administrator to assign a tenant."}
-                  </p>
+                    children: <KnowledgeList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "invitations",
+                    label: t("tenantResources.invitation.tab") || "Invitations",
+                    children: <InvitationList tenantId={tenantId} />,
+                  },
+                ]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-gray-400" />
                 </div>
-              )}
-            </div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                  {t("tenantResources.noTenantAssigned") ||
+                    "No tenant assigned"}
+                </h3>
+                <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+                  {t("tenantResources.contactAdmin") ||
+                    "Please contact your administrator to assign a tenant."}
+                </p>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-    </Flex>
+        </div>
+      )}
+    </div></Flex>
   );
 }
