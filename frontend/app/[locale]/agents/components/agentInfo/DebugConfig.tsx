@@ -24,7 +24,7 @@ interface AgentDebuggingProps {
 
 // Main component Props interface
 interface DebugConfigProps {
-  agentId?: number; // Make agentId an optional prop
+  agentId?: number | null; // Make agentId an optional prop
 }
 
 /**
