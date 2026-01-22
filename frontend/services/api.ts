@@ -254,18 +254,6 @@ export const API_ENDPOINTS = {
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
   },
-  tenantGroup: {
-    detail: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
-    update: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
-    delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
-    // Group members
-    members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
-    addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
-    removeMember: (groupId: number, userId: string) =>
-      `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
-    mcpServers: (agentId: number) =>
-      `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
-  },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
     create: `${API_BASE_URL}/invitations`,
