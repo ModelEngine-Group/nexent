@@ -2265,7 +2265,7 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         result = _validate_local_tool(
-            "datamate_search_tool",
+            "datamate_search",
             {"query": "test query"},
             {"param": "config"},
             "tenant1",
@@ -2273,7 +2273,7 @@ class TestValidateLocalToolDatamateSearchTool:
         )
 
         assert result == "datamate search result"
-        mock_get_class.assert_called_once_with("datamate_search_tool")
+        mock_get_class.assert_called_once_with("datamate_search")
 
         # Verify datamate_search_tool specific parameters were passed
         expected_params = {
@@ -2297,9 +2297,9 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for datamate_search_tool validation"):
+                           match=r"Local tool datamate_search validation failed: Tenant ID and User ID are required for datamate_search validation"):
             _validate_local_tool(
-                "datamate_search_tool",
+                "datamate_search",
                 {"query": "test query"},
                 {"param": "config"},
                 None,  # Missing tenant_id
@@ -2315,9 +2315,9 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for datamate_search_tool validation"):
+                           match=r"Local tool datamate_search validation failed: Tenant ID and User ID are required for datamate_search validation"):
             _validate_local_tool(
-                "datamate_search_tool",
+                "datamate_search",
                 {"query": "test query"},
                 {"param": "config"},
                 "tenant1",
@@ -2333,9 +2333,9 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for datamate_search_tool validation"):
+                           match=r"Local tool datamate_search validation failed: Tenant ID and User ID are required for datamate_search validation"):
             _validate_local_tool(
-                "datamate_search_tool",
+                "datamate_search",
                 {"query": "test query"},
                 {"param": "config"},
                 None,  # Missing tenant_id
@@ -2370,7 +2370,7 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         result = _validate_local_tool(
-            "datamate_search_tool",
+            "datamate_search",
             {"query": "test query"},
             {"param": "config"},
             "tenant1",
@@ -2421,7 +2421,7 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         result = _validate_local_tool(
-            "datamate_search_tool",
+            "datamate_search",
             {"query": "test query"},
             {"param": "config"},
             "tenant1",
@@ -2471,9 +2471,9 @@ class TestValidateLocalToolDatamateSearchTool:
         from backend.services.tool_configuration_service import _validate_local_tool
 
         with pytest.raises(ToolExecutionException,
-                           match="Local tool datamate_search_tool validation failed: Datamate search failed"):
+                           match=r"Local tool datamate_search validation failed: Datamate search failed"):
             _validate_local_tool(
-                "datamate_search_tool",
+                "datamate_search",
                 {"query": "test query"},
                 {"param": "config"},
                 "tenant1",
