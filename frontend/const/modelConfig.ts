@@ -141,6 +141,7 @@ export const defaultConfig: GlobalConfig = {
     customIconUrl: "",
     avatarUri: "",
     modelEngineEnabled: false,
+    datamateUrl: "",
   },
   models: {
     llm: {
