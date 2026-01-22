@@ -54,6 +54,8 @@ export async function listUsers(
         tenant_id: tenantId,
         page,
         page_size: pageSize,
+        sort_by: "created_at",
+        sort_order: "desc",
       }),
     });
 

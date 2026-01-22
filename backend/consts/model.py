@@ -528,6 +528,8 @@ class GroupListRequest(BaseModel):
     page: int = Field(1, ge=1, description="Page number for pagination")
     page_size: int = Field(
         20, ge=1, le=100, description="Number of items per page")
+    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
 
 
 class UserListRequest(BaseModel):
@@ -536,6 +538,8 @@ class UserListRequest(BaseModel):
     page: int = Field(1, ge=1, description="Page number for pagination")
     page_size: int = Field(
         20, ge=1, le=100, description="Number of items per page")
+    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
 
 
 class GroupUserRequest(BaseModel):

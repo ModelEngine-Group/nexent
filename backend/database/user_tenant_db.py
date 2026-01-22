@@ -6,7 +6,6 @@ from typing import Any, List, Dict, Optional
 from consts.const import DEFAULT_TENANT_ID
 from database.client import as_dict, get_db_session
 from database.db_models import UserTenant
-from utils.str_utils import convert_list_to_string
 
 
 def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
@@ -73,14 +72,17 @@ def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         session.add(user_tenant)
 
 
-def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20,
+                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
-    Get users belonging to a specific tenant with pagination
+    Get users belonging to a specific tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
         page (int): Page number (1-based)
         page_size (int): Number of items per page
+        sort_by (str): Field to sort by
+        sort_order (str): Sort order (asc or desc)
 
     Returns:
         Dict[str, Any]: Dictionary containing users list and total count
@@ -92,12 +94,22 @@ def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20) -
             UserTenant.delete_flag == "N"
         ).count()
 
-        # Get paginated results
-        offset = (page - 1) * page_size
-        results = session.query(UserTenant).filter(
+        # Build base query
+        query = session.query(UserTenant).filter(
             UserTenant.tenant_id == tenant_id,
             UserTenant.delete_flag == "N"
-        ).offset(offset).limit(page_size).all()
+        )
+
+        # Add sorting
+        if sort_by == "created_at":
+            if sort_order == "desc":
+                query = query.order_by(UserTenant.create_time.desc())
+            else:
+                query = query.order_by(UserTenant.create_time.asc())
+
+        # Get paginated results
+        offset = (page - 1) * page_size
+        results = query.offset(offset).limit(page_size).all()
 
         return {
             "users": [as_dict(row) for row in results],

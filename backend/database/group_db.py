@@ -49,14 +49,17 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
             return groups
 
 
-def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
+                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
-    Query groups for a tenant with pagination
+    Query groups for a tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
         page (int): Page number (1-based)
         page_size (int): Number of items per page
+        sort_by (str): Field to sort by
+        sort_order (str): Sort order (asc or desc)
 
     Returns:
         Dict[str, Any]: Dictionary containing groups list and total count
@@ -70,11 +73,21 @@ def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20) -
             TenantGroupInfo.delete_flag == "N"
         ).count()
 
-        # Get paginated results
-        result = session.query(TenantGroupInfo).filter(
+        # Build base query
+        query = session.query(TenantGroupInfo).filter(
             TenantGroupInfo.tenant_id == tenant_id,
             TenantGroupInfo.delete_flag == "N"
-        ).offset(offset).limit(page_size).all()
+        )
+
+        # Add sorting
+        if sort_by == "created_at":
+            if sort_order == "desc":
+                query = query.order_by(TenantGroupInfo.create_time.desc())
+            else:
+                query = query.order_by(TenantGroupInfo.create_time.asc())
+
+        # Get paginated results
+        result = query.offset(offset).limit(page_size).all()
 
         return {
             "groups": [as_dict(record) for record in result],

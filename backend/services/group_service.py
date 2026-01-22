@@ -68,20 +68,23 @@ def get_group_info(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[
     return result
 
 
-def get_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+def get_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
+                         sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
-    Get groups for a specific tenant with pagination.
+    Get groups for a specific tenant with pagination and sorting.
 
     Args:
         tenant_id (str): Tenant ID
         page (int): Page number (1-based)
         page_size (int): Number of items per page
+        sort_by (str): Field to sort by
+        sort_order (str): Sort order (asc or desc)
 
     Returns:
         Dict[str, Any]: Dictionary containing groups list and total count
     """
     # Get paginated results and total count
-    result = query_groups_by_tenant(tenant_id, page, page_size)
+    result = query_groups_by_tenant(tenant_id, page, page_size, sort_by, sort_order)
 
     # Filter to only return required fields for each group and add user count
     filtered_groups = []
