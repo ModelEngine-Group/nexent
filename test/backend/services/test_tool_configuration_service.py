@@ -190,6 +190,19 @@ class MockElasticSearchCore(MockVectorDatabaseCore):
         pass
 
 
+# Provide a mock DataMateCore to satisfy imports in vectordatabase_service
+vector_database_datamate_module = types.ModuleType('nexent.vector_database.datamate_core')
+
+
+class MockDataMateCore(MockVectorDatabaseCore):
+    def __init__(self, *args, **kwargs):
+        pass
+
+vector_database_datamate_module.DataMateCore = MockDataMateCore
+sys.modules['nexent.vector_database.datamate_core'] = vector_database_datamate_module
+setattr(sys.modules['nexent.vector_database'], 'datamate_core', vector_database_datamate_module)
+setattr(sys.modules['nexent.vector_database'], 'DataMateCore', MockDataMateCore)
+
 vector_database_base_module.VectorDatabaseCore = MockVectorDatabaseCore
 vector_database_elasticsearch_module.ElasticSearchCore = MockElasticSearchCore
 sys.modules['nexent.vector_database.base'] = vector_database_base_module
