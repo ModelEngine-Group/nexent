@@ -166,7 +166,7 @@ class TestGetUsers:
 
         assert result["page"] == 1
         assert result["page_size"] == 20
-        mock_db.assert_called_once_with("tenant123", 1, 20)
+        mock_db.assert_called_once_with("tenant123", 1, 20, 'created_at', 'desc')
 
 
 @pytest.mark.asyncio
