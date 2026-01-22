@@ -6,7 +6,7 @@ import httpx
 import pytest
 from pytest_mock import MockFixture
 
-from sdk.nexent.core.tools.dify_knowledge_base_search_tool import DifyKnowledgeBaseSearchTool
+from sdk.nexent.core.tools.dify_search_tool import DifySearchTool
 from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
 
 
@@ -18,8 +18,8 @@ def mock_observer() -> MessageObserver:
 
 
 @pytest.fixture
-def dify_tool(mock_observer: MessageObserver) -> DifyKnowledgeBaseSearchTool:
-    return DifyKnowledgeBaseSearchTool(
+def dify_tool(mock_observer: MessageObserver) -> DifySearchTool:
+    return DifySearchTool(
         dify_api_base="https://api.dify.ai/v1",
         api_key="test_api_key",
         dataset_ids='["dataset1", "dataset2"]',
@@ -59,9 +59,9 @@ def _build_download_url_response(download_url: str = "https://download.example.c
     return {"download_url": download_url}
 
 
-class TestDifyKnowledgeBaseSearchToolInit:
+class TestDifySearchToolInit:
     def test_init_success(self, mock_observer: MessageObserver):
-        tool = DifyKnowledgeBaseSearchTool(
+        tool = DifySearchTool(
             dify_api_base="https://api.dify.ai/v1",
             api_key="test_key",
             dataset_ids='["ds1", "ds2"]',
@@ -79,7 +79,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
         assert tool.running_prompt_en == "Searching Dify knowledge base..."
 
     def test_init_singledataset_id(self, mock_observer: MessageObserver):
-        tool = DifyKnowledgeBaseSearchTool(
+        tool = DifySearchTool(
             dify_api_base="https://api.dify.ai/v1/",
             api_key="test_key",
             dataset_ids='["single_dataset"]',
@@ -90,7 +90,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
         assert tool.dataset_ids == ["single_dataset"]
 
     def test_init_json_string_array_dataset_ids(self, mock_observer: MessageObserver):
-        tool = DifyKnowledgeBaseSearchTool(
+        tool = DifySearchTool(
             dify_api_base="https://api.dify.ai/v1/",
             api_key="test_key",
             dataset_ids='["0ab7096c-dfa5-4e0e-9dad-9265781447a3"]',
@@ -101,7 +101,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
         assert tool.dataset_ids == ["0ab7096c-dfa5-4e0e-9dad-9265781447a3"]
 
     def test_init_json_string_array_multiple_dataset_ids(self, mock_observer: MessageObserver):
-        tool = DifyKnowledgeBaseSearchTool(
+        tool = DifySearchTool(
             dify_api_base="https://api.dify.ai/v1/",
             api_key="test_key",
             dataset_ids='["ds1", "ds2", "ds3"]',
@@ -117,7 +117,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
     ])
     def test_init_invalid_api_base(self, dify_api_base, expected_error):
         with pytest.raises(ValueError) as excinfo:
-            DifyKnowledgeBaseSearchTool(
+            DifySearchTool(
                 dify_api_base=dify_api_base,
                 api_key="test_key",
                 dataset_ids='["ds1"]',
@@ -130,7 +130,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
     ])
     def test_init_invalid_api_key(self, api_key, expected_error):
         with pytest.raises(ValueError) as excinfo:
-            DifyKnowledgeBaseSearchTool(
+            DifySearchTool(
                 dify_api_base="https://api.dify.ai/v1",
                 api_key=api_key,
                 dataset_ids='["ds1"]',
@@ -144,7 +144,7 @@ class TestDifyKnowledgeBaseSearchToolInit:
     ])
     def test_init_invaliddataset_ids(self, dataset_ids, expected_error):
         with pytest.raises(ValueError) as excinfo:
-            DifyKnowledgeBaseSearchTool(
+            DifySearchTool(
                 dify_api_base="https://api.dify.ai/v1",
                 api_key="test_key",
                 dataset_ids=dataset_ids,
@@ -153,8 +153,8 @@ class TestDifyKnowledgeBaseSearchToolInit:
 
 
 class TestGetDocumentDownloadUrl:
-    def test_get_document_download_url_success(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_get_document_download_url_success(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -173,12 +173,12 @@ class TestGetDocumentDownloadUrl:
             }
         )
 
-    def test_get_document_download_url_empty_document_id(self, dify_tool: DifyKnowledgeBaseSearchTool):
+    def test_get_document_download_url_empty_document_id(self, dify_tool: DifySearchTool):
         url = dify_tool._get_document_download_url("", "dataset1")
         assert url == ""
 
-    def test_get_document_download_url_nodataset_id(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_get_document_download_url_nodataset_id(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -198,8 +198,8 @@ class TestGetDocumentDownloadUrl:
             }
         )
 
-    def test_get_document_download_url_request_error(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_get_document_download_url_request_error(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
         client.get.side_effect = httpx.RequestError("Connection error", request=MagicMock())
 
@@ -207,8 +207,8 @@ class TestGetDocumentDownloadUrl:
 
         assert url == ""
 
-    def test_get_document_download_url_json_decode_error(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_get_document_download_url_json_decode_error(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -220,8 +220,8 @@ class TestGetDocumentDownloadUrl:
 
         assert url == ""
 
-    def test_get_document_download_url_missing_key(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_get_document_download_url_missing_key(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -235,8 +235,8 @@ class TestGetDocumentDownloadUrl:
 
 
 class TestSearchDifyKnowledgeBase:
-    def test_search_dify_knowledge_base_success(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_search_dify_knowledge_base_success(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -279,8 +279,8 @@ class TestSearchDifyKnowledgeBase:
             }
         )
 
-    def test_search_dify_knowledge_base_no_records(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_search_dify_knowledge_base_no_records(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -292,8 +292,8 @@ class TestSearchDifyKnowledgeBase:
 
         assert result == {"query": "test query", "records": []}
 
-    def test_search_dify_knowledge_base_request_error(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_search_dify_knowledge_base_request_error(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
         client.post.side_effect = httpx.RequestError("API error", request=MagicMock())
 
@@ -302,8 +302,8 @@ class TestSearchDifyKnowledgeBase:
 
         assert "Dify API request failed" in str(excinfo.value)
 
-    def test_search_dify_knowledge_base_json_decode_error(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_search_dify_knowledge_base_json_decode_error(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -316,8 +316,8 @@ class TestSearchDifyKnowledgeBase:
 
         assert "Failed to parse Dify API response" in str(excinfo.value)
 
-    def test_search_dify_knowledge_base_missing_key(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+    def test_search_dify_knowledge_base_missing_key(self, mocker: MockFixture, dify_tool: DifySearchTool):
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         response = MagicMock()
@@ -332,9 +332,9 @@ class TestSearchDifyKnowledgeBase:
 
 
 class TestForward:
-    def _setup_success_flow(self, mocker: MockFixture, tool: DifyKnowledgeBaseSearchTool):
+    def _setup_success_flow(self, mocker: MockFixture, tool: DifySearchTool):
         # Mock httpx.Client for both search and download operations
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         # Mock search method to return records
@@ -380,10 +380,10 @@ class TestForward:
 
         return client
 
-    def test_forward_success_with_observer_en(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
+    def test_forward_success_with_observer_en(self, mocker: MockFixture, dify_tool: DifySearchTool):
         client = self._setup_success_flow(mocker, dify_tool)
 
-        result_json = dify_tool.forward("test query", top_k=2, search_method="keyword_search")
+        result_json = dify_tool.forward("test query", search_method="keyword_search")
         results = json.loads(result_json)
 
         assert len(results) == 2  # 2 datasets * 1 record each
@@ -408,7 +408,7 @@ class TestForward:
         # Verify API calls were made for both datasets
         assert client.post.call_count == 2  # Called once per dataset
 
-    def test_forward_success_with_observer_zh(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
+    def test_forward_success_with_observer_zh(self, mocker: MockFixture, dify_tool: DifySearchTool):
         dify_tool.observer.lang = "zh"
         self._setup_success_flow(mocker, dify_tool)
 
@@ -419,7 +419,7 @@ class TestForward:
         )
 
     def test_forward_no_observer(self, mocker: MockFixture):
-        tool = DifyKnowledgeBaseSearchTool(
+        tool = DifySearchTool(
             dify_api_base="https://api.dify.ai/v1",
             api_key="test_api_key",
             dataset_ids='["dataset1"]',
@@ -431,7 +431,7 @@ class TestForward:
         result_json = tool.forward("query")
         assert len(json.loads(result_json)) == 1
 
-    def test_forward_no_results(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
+    def test_forward_no_results(self, mocker: MockFixture, dify_tool: DifySearchTool):
         # Mock empty search results
         search_response = {"query": "test query", "records": []}
 
@@ -440,7 +440,7 @@ class TestForward:
         mock_response.json.return_value = search_response
 
         # Mock httpx.Client instead of requests
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
         client.post.return_value = mock_response
 
@@ -451,9 +451,9 @@ class TestForward:
         assert "No results found!" in str(excinfo.value)
         assert "Error searching Dify knowledge base" in str(excinfo.value)
 
-    def test_forward_search_api_error(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
+    def test_forward_search_api_error(self, mocker: MockFixture, dify_tool: DifySearchTool):
         # Mock API error during search
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
         client.post.side_effect = httpx.RequestError("API error", request=MagicMock())
 
@@ -463,9 +463,9 @@ class TestForward:
         assert "Error searching Dify knowledge base" in str(excinfo.value)
         assert "Dify API request failed" in str(excinfo.value)
 
-    def test_forward_download_url_error_still_works(self, mocker: MockFixture, dify_tool: DifyKnowledgeBaseSearchTool):
+    def test_forward_download_url_error_still_works(self, mocker: MockFixture, dify_tool: DifySearchTool):
         # Mock httpx.Client
-        client_cls = mocker.patch("sdk.nexent.core.tools.dify_knowledge_base_search_tool.httpx.Client")
+        client_cls = mocker.patch("sdk.nexent.core.tools.dify_search_tool.httpx.Client")
         client = client_cls.return_value.__enter__.return_value
 
         # Mock successful search but failed download URL
@@ -500,4 +500,3 @@ class TestForward:
         assert len(results) == 2  # Still processes results even with download URL failure
         assert results[0]["title"] == "document1.txt"
         # URL should be empty string due to download failure
-
