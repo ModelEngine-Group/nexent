@@ -177,7 +177,7 @@ class DataMateSearchTool(Tool):
     def forward(
         self,
         query: str,
-        top_k: int = 10,
+        top_k: int = 3,
         threshold: float = 0.2,
         index_names: Union[str, List[str], None] = None,
         kb_page: int = 0,

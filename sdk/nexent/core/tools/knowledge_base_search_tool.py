@@ -41,14 +41,14 @@ class KnowledgeBaseSearchTool(Tool):
         },
     }
     output_type = "string"
-    category = ToolCategory.SEARCH.value
+    category = ToolCategory.SEARCH.value 
 
     # Used to distinguish different index sources for summaries
     tool_sign = ToolSign.KNOWLEDGE_BASE.value
 
     def __init__(
         self,
-        top_k: int = Field(description="Maximum number of search results", default=5),
+        top_k: int = Field(description="Maximum number of search results", default=3),
         index_names: List[str] = Field(description="The list of index names to search", default=None, exclude=True),
         name_resolver: Optional[Dict[str, str]] = Field(
             description="Mapping from knowledge_name to index_name", default=None, exclude=True
