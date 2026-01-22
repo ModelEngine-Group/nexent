@@ -109,7 +109,7 @@ class TestGetUsers:
         assert result["total_pages"] == 1
 
         # Verify database call
-        mock_db.assert_called_once_with(tenant_id, page, page_size)
+        mock_db.assert_called_once_with(tenant_id, page, page_size, "created_at", "desc")
 
     def test_get_users_empty_result(self):
         """Test retrieving users when no users exist"""

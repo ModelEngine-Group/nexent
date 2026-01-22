@@ -16,20 +16,23 @@ from utils.auth_utils import get_supabase_admin_client
 logger = logging.getLogger(__name__)
 
 
-def get_users(tenant_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+def get_users(tenant_id: str, page: int = 1, page_size: int = 20,
+              sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
-    Get users belonging to a specific tenant with pagination
+    Get users belonging to a specific tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
         page (int): Page number (1-based)
         page_size (int): Number of items per page
+        sort_by (str): Field to sort by
+        sort_order (str): Sort order (asc or desc)
 
     Returns:
         Dict[str, Any]: Dictionary containing users list and pagination info
     """
-    # Get user-tenant relationships from database with pagination
-    result = get_users_by_tenant_id(tenant_id, page, page_size)
+    # Get user-tenant relationships from database with pagination and sorting
+    result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
 
     # For now, return basic user information from the relationships
     # In the future, this could be enhanced to fetch full user details from Supabase

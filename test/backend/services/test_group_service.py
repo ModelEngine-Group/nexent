@@ -147,7 +147,7 @@ def test_get_groups_by_tenant_success(mock_query_groups_by_tenant, mock_count_us
     assert result["groups"][1]["group_name"] == "Group 2"
     assert result["groups"][1]["group_description"] == "Desc 2"
     assert result["groups"][1]["user_count"] == 3  # Check user count
-    mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10)
+    mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10, "created_at", "desc")
     # count_group_users should be called for each group
     assert mock_count_users.call_count == 2
 
