@@ -301,13 +301,13 @@ class TestForward:
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["default_kb1"],
-            top_k=10,
+            top_k=3,
             weight_accurate=0.2
         )
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["default_kb2"],
-            top_k=10,
+            top_k=3,
             weight_accurate=0.2
         )
 
@@ -339,13 +339,13 @@ class TestForward:
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["kb1"],
-            top_k=10,
+            top_k=3,
             weight_accurate=0.2
         )
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["kb2"],
-            top_k=10,
+            top_k=3,
             weight_accurate=0.2
         )
 
