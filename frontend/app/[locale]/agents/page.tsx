@@ -1,16 +1,32 @@
 "use client";
 
 import { Card, Row, Col, Flex } from "antd";
+import { useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { motion } from "framer-motion";
 import AgentManageComp from "./components/AgentManageComp";
 import AgentConfigComp from "./components/AgentConfigComp";
 import AgentInfoComp from "./components/AgentInfoComp";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
 export default function AgentSetupOrchestrator() {
   const { pageVariants, pageTransition, canAccessProtectedData } =
     useSetupFlow();
+  const searchParams = useSearchParams();
+  const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
+
+  // Handle auto-create mode from URL params
+  useEffect(() => {
+    const create = searchParams.get('create');
+    if (create === 'true') {
+      // Small delay to ensure component is fully mounted
+      setTimeout(() => {
+        enterCreateMode();
+      }, 100);
+    }
+  }, [searchParams, enterCreateMode]);
 
   return (
     <>
