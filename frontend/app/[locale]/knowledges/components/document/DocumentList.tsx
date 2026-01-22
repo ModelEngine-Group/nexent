@@ -432,6 +432,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         </div>
 
         {/* Document list */}
+
         <div
           className="p-2 overflow-auto flex-grow"
           onDragOver={(e) => {
@@ -673,30 +674,38 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         </div>
 
         {/* Upload area */}
-        {!showDetail && !showChunk && !isDataMate && (
-          <UploadArea
-            key={
-              isCreatingMode
-                ? `create-${knowledgeBaseName}`
-                : `view-${knowledgeBaseName}`
-            }
-            ref={uploadAreaRef}
-            onFileSelect={onFileSelect}
-            onUpload={onUpload || (() => {})}
-            isUploading={isUploading}
-            isDragging={isDragging}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-            disabled={!isCreatingMode && !knowledgeBaseId}
-            componentHeight={uploadHeight}
-            isCreatingMode={isCreatingMode}
-            // Use internal ID for backend operations; fall back to name in creation mode
-            indexName={knowledgeBaseId || knowledgeBaseName}
-            newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
-            modelMismatch={modelMismatch}
-          />
-        )}
+        {!showDetail &&
+          !showChunk &&
+          (isDataMate ? (
+            <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center min-h-[120px]">
+              <span className="text-base font-medium text-center leading-[1.7] text-gray-500">
+                {t("knowledgeBase.datamate.editDisabled")}
+              </span>
+            </div>
+          ) : (
+            <UploadArea
+              key={
+                isCreatingMode
+                  ? `create-${knowledgeBaseName}`
+                  : `view-${knowledgeBaseName}`
+              }
+              ref={uploadAreaRef}
+              onFileSelect={onFileSelect}
+              onUpload={onUpload || (() => {})}
+              isUploading={isUploading}
+              isDragging={isDragging}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              disabled={!isCreatingMode && !knowledgeBaseId}
+              componentHeight={uploadHeight}
+              isCreatingMode={isCreatingMode}
+              // Use internal ID for backend operations; fall back to name in creation mode
+              indexName={knowledgeBaseId || knowledgeBaseName}
+              newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
+              modelMismatch={modelMismatch}
+            />
+          ))}
       </div>
     );
   }
