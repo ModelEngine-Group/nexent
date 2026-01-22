@@ -284,16 +284,18 @@ def test_get_groups_by_tenant_success(monkeypatch, mock_session):
     # Mock the count query
     mock_count_filter = MagicMock()
     mock_count_filter.count.return_value = 2
-    query.filter.return_value = mock_count_filter
 
-    # Create a separate mock for the paginated query
+    # Mock the paginated query chain
     mock_paginated_filter = MagicMock()
-    mock_paginated_filter.offset.return_value = mock_paginated_filter
-    mock_paginated_filter.limit.return_value = mock_paginated_filter
-    mock_paginated_filter.all.return_value = [mock_group1, mock_group2]
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = [mock_group1, mock_group2]
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
 
     # Mock session.query to return different objects for different calls
-    original_query = session.query
     call_count = 0
     def mock_query(*args, **kwargs):
         nonlocal call_count
@@ -599,14 +601,14 @@ def test_query_groups_by_tenant_with_pagination(monkeypatch, mock_session):
     mock_count_filter.count.return_value = 2
 
     # Mock the paginated query chain
-    mock_limit = MagicMock()
-    mock_limit.all.return_value = [mock_group1, mock_group2]
-
-    mock_offset = MagicMock()
-    mock_offset.limit.return_value = mock_limit
-
     mock_paginated_filter = MagicMock()
-    mock_paginated_filter.offset.return_value = mock_offset
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = [mock_group1, mock_group2]
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
 
     # Mock session.query to return different objects for different calls
     call_count = 0
@@ -633,8 +635,8 @@ def test_query_groups_by_tenant_with_pagination(monkeypatch, mock_session):
     result = query_groups_by_tenant("test_tenant", page=2, page_size=10)
 
     # Verify pagination parameters were used correctly
-    mock_paginated_filter.offset.assert_called_with(10)  # (page-1) * page_size = (2-1) * 10 = 10
-    mock_offset.limit.assert_called_with(10)
+    mock_paginated_order_by.offset.assert_called_with(10)  # (page-1) * page_size = (2-1) * 10 = 10
+    mock_paginated_offset.limit.assert_called_with(10)
 
     assert result["total"] == 2
     assert len(result["groups"]) == 2
