@@ -41,7 +41,7 @@ class KnowledgeBaseSearchTool(Tool):
         },
     }
     output_type = "string"
-    category = ToolCategory.SEARCH.valuex 
+    category = ToolCategory.SEARCH.value 
 
     # Used to distinguish different index sources for summaries
     tool_sign = ToolSign.KNOWLEDGE_BASE.value

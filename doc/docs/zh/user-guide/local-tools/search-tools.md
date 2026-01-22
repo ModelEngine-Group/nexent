@@ -40,7 +40,7 @@ title: 搜索工具
   - `verify_ssl`：是否验证 SSL 证书（HTTPS 默认 False，HTTP 默认 True）
 - **检索参数**：
   - `query`：检索问题，必填。
-  - `top_k`：返回数量，默认 10。
+  - `top_k`：返回数量，默认 3。
   - `threshold`：相似度阈值，默认 0.2。
   - `index_names`：指定要搜索的知识库名称列表，可选。
   - `kb_page` / `kb_page_size`：分页获取 DataMate 知识库列表。
@@ -63,7 +63,7 @@ title: 搜索工具
 ### exa_search / tavily_search / linkup_search
 - **配置参数**：
   - `exa/tavily/linkup_api_key`：对应服务的 API 密钥
-  - `max_results`：返回结果数量，默认 5
+  - `max_results`：返回结果数量，默认 3
   - `image_filter`：是否启用图片过滤，默认 True
 - **检索参数**：
   - `query`：检索问题，必填。
