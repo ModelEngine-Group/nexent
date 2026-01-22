@@ -106,7 +106,8 @@ class AppConfig(BaseModel):
     iconType: str
     customIconUrl: Optional[str] = None
     avatarUri: Optional[str] = None
-    modelEngineEnabled: bool = True
+    modelEngineEnabled: bool = False
+    datamateUrl: Optional[str] = None
 
 
 class GlobalConfig(BaseModel):

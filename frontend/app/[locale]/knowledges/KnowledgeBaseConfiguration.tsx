@@ -21,6 +21,8 @@ import knowledgeBasePollingService from "@/services/knowledgeBasePollingService"
 import { API_ENDPOINTS } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
+import { ConfigStore } from "@/lib/config";
+import { configService } from "@/services/configService";
 import {
   SETUP_PAGE_CONTAINER,
   TWO_COLUMN_LAYOUT,
@@ -128,7 +130,16 @@ function DataConfig({ isActive }: DataConfigProps) {
     localStorage.removeItem("kb_cache");
 
     // Load DataMate URL configuration
-    loadDataMateConfig();
+    const loadConfig = async () => {
+      try {
+        await loadDataMateConfig();
+      } catch (error) {
+        console.error("Failed to load DataMate configuration on mount:", error);
+        // Set default values if loading fails
+        setDataMateUrl("");
+      }
+    };
+    loadConfig();
   }, []);
 
   // Load DataMate URL configuration
@@ -156,26 +167,29 @@ function DataConfig({ isActive }: DataConfigProps) {
           setDataMateUrl("");
         }
 
-        // Set modelEngineEnabled from config
         if (
           config &&
           config.app &&
           typeof config.app.modelEngineEnabled === "boolean"
         ) {
-          console.log(
-            "Setting modelEngineEnabled to:",
-            config.app.modelEngineEnabled
-          );
           setModelEngineEnabled(config.app.modelEngineEnabled);
-        } else {
-          console.log(
-            "No modelEngineEnabled found in config, setting to false"
-          );
-          setModelEngineEnabled(false);
         }
+
+        // Return the DataMate URL for verification
+        return config.app?.datamateUrl || "";
+      } else {
+        console.error(
+          "Failed to load config, response status:",
+          response.status,
+          response.statusText
+        );
+        throw new Error(
+          `Failed to load config: ${response.status} ${response.statusText}`
+        );
       }
     } catch (error) {
       log.error("Failed to load DataMate configuration:", error);
+      throw error; // Re-throw so the calling function can handle it
     }
   };
 
@@ -553,6 +567,16 @@ function DataConfig({ isActive }: DataConfigProps) {
     setDragging(false);
 
     // If in creation mode or has active knowledge base, process files
+    // Do not allow uploads when active KB source is datamate
+    if (
+      kbState.activeKnowledgeBase &&
+      kbState.activeKnowledgeBase.source === "datamate" &&
+      !isCreatingMode
+    ) {
+      message.warning(t("document.message.uploadDisabledForDataMate"));
+      return;
+    }
+
     if (isCreatingMode || kbState.activeKnowledgeBase) {
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
@@ -631,6 +655,12 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Handle DataMate configuration
   const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
   const [dataMateUrl, setDataMateUrl] = useState("");
+  const configStore = ConfigStore.getInstance();
+
+  // Monitor DataMate URL changes
+  useEffect(() => {
+    console.log("DataMate URL changed to:", dataMateUrl);
+  }, [dataMateUrl]);
 
   const handleDataMateConfig = () => {
     setShowDataMateConfigModal(true);
@@ -640,38 +670,41 @@ function DataConfig({ isActive }: DataConfigProps) {
     try {
       console.log("Saving DataMate URL:", dataMateUrl);
 
-      const response = await fetch(API_ENDPOINTS.config.saveDataMateUrl, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ datamate_url: dataMateUrl }),
-      });
+      // Update global configuration with DataMate URL
+      const currentConfig = configStore.getConfig();
+      const updatedConfig = {
+        ...currentConfig,
+        app: {
+          ...currentConfig.app,
+          datamateUrl: dataMateUrl,
+        },
+      };
 
-      console.log("Save response status:", response.status);
+      // Save to backend using global config API
+      const success = await configService.saveConfigToBackend(updatedConfig);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Save failed:", response.status, errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const responseData = await response.json();
-      console.log("Save response data:", responseData);
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to save DataMate URL: ${response.status} ${response.statusText}`
-        );
+      if (!success) {
+        throw new Error("Failed to save configuration to backend");
       }
 
       message.success(t("knowledgeBase.message.dataMateConfigSaved"));
 
-      // Add a small delay to ensure database transaction is committed
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Update local config store
+      configStore.updateConfig(updatedConfig);
 
-      // Reload DataMate configuration
-      console.log("Reloading DataMate configuration after save...");
-      await loadDataMateConfig();
-      console.log("DataMate URL after reload:", dataMateUrl);
+      // Update local state
+      setDataMateUrl(dataMateUrl);
+
+      try {
+        await configService.loadConfigToFrontend();
+        console.log("Configuration reloaded from backend successfully");
+      } catch (reloadError) {
+        console.warn(
+          "Failed to reload configuration from backend, but save was successful:",
+          reloadError
+        );
+        // Don't fail the entire operation if reload fails
+      }
 
       // Trigger knowledge base sync with the new configuration
       await handleSync();
@@ -1019,6 +1052,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               <DocumentList
                 documents={[]}
                 onDelete={() => {}}
+                knowledgeBaseSource={""}
                 isCreatingMode={true}
                 knowledgeBaseId={""}
                 knowledgeBaseName={newKbName}
@@ -1038,6 +1072,7 @@ function DataConfig({ isActive }: DataConfigProps) {
               <DocumentList
                 documents={viewingDocuments}
                 onDelete={handleDeleteDocument}
+                knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                 knowledgeBaseId={kbState.activeKnowledgeBase.id}
                 knowledgeBaseName={viewingKbName}
                 modelMismatch={hasKnowledgeBaseModelMismatch(

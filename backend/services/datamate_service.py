@@ -12,6 +12,8 @@ from consts.const import DATAMATE_URL
 from utils.config_utils import tenant_config_manager
 from database.knowledge_db import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
 from nexent.vector_database.datamate_core import DataMateCore
+from consts.const import MODEL_ENGINE_ENABLED
+
 
 logger = logging.getLogger("datamate_service")
 
@@ -130,6 +132,33 @@ async def sync_datamate_knowledge_bases_and_create_records(tenant_id: str, user_
     Returns:
         Dictionary containing knowledge bases list and created records.
     """
+    # Check if ModelEngine is enabled
+    if str(MODEL_ENGINE_ENABLED).lower() != "true":
+        logger.info(
+            f"ModelEngine is disabled (MODEL_ENGINE_ENABLED={MODEL_ENGINE_ENABLED}), skipping DataMate sync")
+        return {
+            "indices": [],
+            "count": 0,
+            "indices_info": [],
+            "created_records": []
+        }
+
+    # Verify DataMate URL is configured before proceeding
+    datamate_url = tenant_config_manager.get_app_config(
+        DATAMATE_URL, tenant_id=tenant_id)
+    if not datamate_url:
+        logger.warning(
+            f"DataMate URL not configured for tenant {tenant_id}, skipping sync")
+        return {
+            "indices": [],
+            "count": 0,
+            "indices_info": [],
+            "created_records": []
+        }
+
+    logger.info(
+        f"Starting DataMate sync for tenant {tenant_id} using URL: {datamate_url}")
+
     try:
         core = _get_datamate_core(tenant_id)
 

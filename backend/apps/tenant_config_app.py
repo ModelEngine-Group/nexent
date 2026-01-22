@@ -82,7 +82,7 @@ def update_knowledge_list(
         result = update_selected_knowledge(
             tenant_id=tenant_id, user_id=user_id, index_name_list=knowledge_list, knowledge_sources=knowledge_sources)
         if result:
-            # 获取更新后的知识库信息
+            # Get updated knowledge base information
             selected_knowledge_info = get_selected_knowledge_list(
                 tenant_id=tenant_id, user_id=user_id)
 
