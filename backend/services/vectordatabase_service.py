@@ -25,7 +25,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DATAMATE_URL, DEFAULT_TENANT_ID, DEFAULT_USER_ID, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
+from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -514,19 +514,20 @@ class ElasticSearchService:
             if user_id == tenant_id:
                 effective_user_role = "ADMIN"
                 logger.info(f"User {user_id} identified as legacy admin")
-            elif user_id == DEFAULT_USER_ID and tenant_id == DEFAULT_TENANT_ID:
-                effective_user_role = "ADMIN"
+            elif IS_SPEED_MODE:
+                effective_user_role = "SPEED"
                 logger.info("User under SPEED version is treated as admin")
 
-            if effective_user_role in ["SU", "ADMIN"]:
-                # SU can see all knowledgebases
+            if effective_user_role in ["SU", "ADMIN", "SPEED"]:
+                # SU, ADMIN and SPEED roles can see all knowledgebases
                 permission = "EDIT"
             elif effective_user_role in ["USER", "DEV"]:
                 # USER/DEV need group-based permission checking
                 kb_group_ids_str = record.get("group_ids")
                 kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
                 kb_created_by = record.get("created_by")
-                kb_ingroup_permission = record.get("ingroup_permission") or "READ_ONLY"
+                kb_ingroup_permission = record.get(
+                    "ingroup_permission") or "READ_ONLY"
 
                 # Check if user belongs to any of the knowledgebase groups
                 # Compatibility logic for legacy data:
@@ -572,8 +573,10 @@ class ElasticSearchService:
                         record["group_ids"])
                 else:
                     # If no group_ids specified, use tenant default group
-                    default_group_id = get_tenant_default_group_id(record.get("tenant_id"))
-                    record_with_permission["group_ids"] = [default_group_id] if default_group_id else []
+                    default_group_id = get_tenant_default_group_id(
+                        record.get("tenant_id"))
+                    record_with_permission["group_ids"] = [
+                        default_group_id] if default_group_id else []
                 visible_knowledgebases.append(record_with_permission)
 
                 # Track records with missing embedding model for stats update
@@ -1075,7 +1078,8 @@ class ElasticSearchService:
                                      ..., description="Name of the index to get documents from"),
                                  batch_size: int = Query(
                                      1000, description="Number of documents to retrieve per batch"),
-                                 vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+                                 vdb_core: VectorDatabaseCore = Depends(
+                                     get_vector_db_core),
                                  user_id: Optional[str] = Body(
                                      None, description="ID of the user delete the knowledge base"),
                                  tenant_id: Optional[str] = Body(
@@ -1106,7 +1110,8 @@ class ElasticSearchService:
         """
         try:
             if not tenant_id:
-                raise Exception("Tenant ID is required for summary generation.")
+                raise Exception(
+                    "Tenant ID is required for summary generation.")
 
             from utils.document_vector_utils import (
                 process_documents_for_clustering,

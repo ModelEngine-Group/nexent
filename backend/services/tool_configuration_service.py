@@ -572,7 +572,7 @@ def _validate_local_tool(
                 'embedding_model': embedding_model,
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "datamate_search_tool":
+        elif tool_name == "datamate_search":
             if not tenant_id or not user_id:
                 raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
             knowledge_info_list = get_selected_knowledge_list(

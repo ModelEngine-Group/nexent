@@ -25,7 +25,7 @@ def _normalize_index_names(index_names: Optional[Union[str, List[str]]]) -> List
 
 class DataMateSearchTool(Tool):
     """DataMate knowledge base search tool"""
-    name = "datamate_search_tool"
+    name = "datamate_search"
     description = (
         "Performs a DataMate knowledge base search based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in the DataMate knowledge base. "
@@ -72,14 +72,17 @@ class DataMateSearchTool(Tool):
     category = ToolCategory.SEARCH.value
 
     # Used to distinguish different index sources for summaries
-    tool_sign = ToolSign.DATAMATE_KNOWLEDGE_BASE.value
+    tool_sign = ToolSign.DATAMATE_SEARCH.value
 
     def __init__(
         self,
-        server_url: str,
-        verify_ssl: Optional[bool] = None,
-        index_names: Optional[List[str]] = None,
-        observer: Optional[MessageObserver] = None,
+        server_url: str = Field(description="DataMate server url"),
+        verify_ssl: bool = Field(
+            description="Whether to verify SSL certificates for HTTPS connections", default=False),
+        index_names: List[str] = Field(
+            description="The list of index names to search", default=None, exclude=True),
+        observer: MessageObserver = Field(
+            description="Message observer", default=None, exclude=True),
     ):
         """Initialize the DataMateSearchTool.
 

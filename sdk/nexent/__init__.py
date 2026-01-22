@@ -7,4 +7,4 @@ from .vector_database import *
 from .container import *
 
 
-__all__ = ["core", "data_process", "datamate","memory", "storage", "vector_database", "container"]
+__all__ = ["core", "data_process", "memory", "storage", "vector_database", "container", "datamate"]
