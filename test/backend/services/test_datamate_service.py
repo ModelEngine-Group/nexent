@@ -457,6 +457,92 @@ async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch, mock_da
 
 
 @pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_datamate_url_not_configured(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records when DataMate URL is not configured."""
+    # Mock MODEL_ENGINE_ENABLED to be true
+    monkeypatch.setattr(
+        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "true"
+    )
+
+    # Mock tenant_config_manager to return None (no DataMate URL configured)
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = None
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager
+    )
+
+    # Mock logger to capture warning message
+    mock_logger = MagicMock()
+    monkeypatch.setattr(
+        "backend.services.datamate_service.logger", mock_logger
+    )
+
+    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    # Verify the warning was logged
+    mock_logger.warning.assert_called_once_with(
+        "DataMate URL not configured for tenant tenant1, skipping sync"
+    )
+
+    # Verify the correct default response is returned
+    expected_result = {
+        "indices": [],
+        "count": 0,
+        "indices_info": [],
+        "created_records": []
+    }
+    assert result == expected_result
+
+    # Verify tenant_config_manager.get_app_config was called correctly
+    mock_config_manager.get_app_config.assert_called_once_with(
+        "DATAMATE_URL", tenant_id="tenant1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_datamate_url_empty_string(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records when DataMate URL is empty string."""
+    # Mock MODEL_ENGINE_ENABLED to be true
+    monkeypatch.setattr(
+        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "true"
+    )
+
+    # Mock tenant_config_manager to return empty string (no DataMate URL configured)
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = ""
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager
+    )
+
+    # Mock logger to capture warning message
+    mock_logger = MagicMock()
+    monkeypatch.setattr(
+        "backend.services.datamate_service.logger", mock_logger
+    )
+
+    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    # Verify the warning was logged
+    mock_logger.warning.assert_called_once_with(
+        "DataMate URL not configured for tenant tenant1, skipping sync"
+    )
+
+    # Verify the correct default response is returned
+    expected_result = {
+        "indices": [],
+        "count": 0,
+        "indices_info": [],
+        "created_records": []
+    }
+    assert result == expected_result
+
+    # Verify tenant_config_manager.get_app_config was called correctly
+    mock_config_manager.get_app_config.assert_called_once_with(
+        "DATAMATE_URL", tenant_id="tenant1"
+    )
+
+
+@pytest.mark.asyncio
 async def test_sync_datamate_knowledge_bases_error_handling(monkeypatch):
     """Test sync_datamate_knowledge_bases_and_create_records with error handling."""
     # Mock the _get_datamate_core function to raise an exception
