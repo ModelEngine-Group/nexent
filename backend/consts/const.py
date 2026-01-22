@@ -24,7 +24,6 @@ ES_PASSWORD = os.getenv("ELASTIC_PASSWORD")
 ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 
-
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")

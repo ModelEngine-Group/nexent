@@ -25,7 +25,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DATAMATE_URL, DEFAULT_TENANT_ID, DEFAULT_USER_ID, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType
+from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -514,12 +514,11 @@ class ElasticSearchService:
             if user_id == tenant_id:
                 effective_user_role = "ADMIN"
                 logger.info(f"User {user_id} identified as legacy admin")
-            elif user_id == DEFAULT_USER_ID and tenant_id == DEFAULT_TENANT_ID:
-                effective_user_role = "ADMIN"
-                logger.info("User under SPEED version is treated as admin")
+            elif IS_SPEED_MODE:
+                effective_user_role = "SPEED"
 
-            if effective_user_role in ["SU", "ADMIN"]:
-                # SU can see all knowledgebases
+            if effective_user_role in ["SU", "ADMIN", "SPEED"]:
+                # SU, ADMIN and SPEED roles can see all knowledgebases
                 permission = "EDIT"
             elif effective_user_role in ["USER", "DEV"]:
                 # USER/DEV need group-based permission checking
@@ -542,8 +541,7 @@ class ElasticSearchService:
                     has_group_intersection = True
                 else:
                     # Normal intersection check
-                    has_group_intersection = bool(
-                        set(user_group_ids) & set(kb_group_ids))
+                    has_group_intersection = bool(set(user_group_ids) & set(kb_group_ids))
 
                 if has_group_intersection:
                     # Determine permission level
@@ -1116,8 +1114,7 @@ class ElasticSearchService:
             )
 
             # Use new Map-Reduce approach
-            # Sample reasonable number of documents
-            sample_count = min(batch_size // 5, 200)
+            sample_count = min(batch_size // 5, 200)  # Sample reasonable number of documents
 
             # Define a helper function to run all blocking operations in a thread pool
             def _generate_summary_sync():
@@ -1176,8 +1173,7 @@ class ElasticSearchService:
             )
 
         except Exception as e:
-            logger.error(
-                f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
+            logger.error(f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate summary: {str(e)}")
 
     @staticmethod

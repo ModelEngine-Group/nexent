@@ -1329,6 +1329,86 @@ def test_agent_run_with_observer_with_reset_false(nexent_agent_instance, mock_co
     mock_core_agent.run.assert_called_once_with(
         "test query", stream=True, reset=False)
 
+def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
+    """Test successful creation of DataMateSearchTool with metadata."""
+    mock_datamate_tool_class = MagicMock()
+    mock_datamate_tool_instance = MagicMock()
+    mock_datamate_tool_class.return_value = mock_datamate_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="DataMateSearchTool",
+        name="datamate_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 10, "server_ip": "127.0.0.1", "server_port": 8080},
+        source="local",
+        metadata={
+            "index_names": ["datamate_index1", "datamate_index2"],
+        },
+    )
+
+    original_value = nexent_agent.__dict__.get("DataMateSearchTool")
+    nexent_agent.__dict__["DataMateSearchTool"] = mock_datamate_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        # Restore original value
+        if original_value is not None:
+            nexent_agent.__dict__["DataMateSearchTool"] = original_value
+        elif "DataMateSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["DataMateSearchTool"]
+
+    # Verify tool was created with all params
+    mock_datamate_tool_class.assert_called_once_with(
+        top_k=10, server_ip="127.0.0.1", server_port=8080
+    )
+    # Verify excluded parameters were set directly as attributes after instantiation
+    assert result == mock_datamate_tool_instance
+    assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
+    assert mock_datamate_tool_instance.index_names == ["datamate_index1", "datamate_index2"]
+
+
+
+def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_instance):
+    """Test DataMateSearchTool creation with None defaults when metadata is missing."""
+    mock_datamate_tool_class = MagicMock()
+    mock_datamate_tool_instance = MagicMock()
+    mock_datamate_tool_class.return_value = mock_datamate_tool_instance
+
+    tool_config = ToolConfig(
+        class_name="DataMateSearchTool",
+        name="datamate_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"top_k": 5, "server_ip": "127.0.0.1", "server_port": 8080},
+        source="local",
+        metadata={},  # No metadata provided
+    )
+
+    original_value = nexent_agent.__dict__.get("DataMateSearchTool")
+    nexent_agent.__dict__["DataMateSearchTool"] = mock_datamate_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        # Restore original value
+        if original_value is not None:
+            nexent_agent.__dict__["DataMateSearchTool"] = original_value
+        elif "DataMateSearchTool" in nexent_agent.__dict__:
+            del nexent_agent.__dict__["DataMateSearchTool"]
+
+    # Verify tool was created with all params
+    mock_datamate_tool_class.assert_called_once_with(
+        top_k=5, server_ip="127.0.0.1", server_port=8080
+    )
+    # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
+    assert result == mock_datamate_tool_instance
+    assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
+    assert mock_datamate_tool_instance.index_names == []  # Empty list when None
+
 
 def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     """Test successful creation of DataMateSearchTool with metadata."""

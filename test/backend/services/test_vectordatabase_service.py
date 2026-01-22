@@ -2885,6 +2885,19 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
 
+    def test_get_vector_db_core_datamate_type(self):
+        """get_vector_db_core returns DataMateCore for DATAMATE type."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType, DATAMATE_URL
+
+        with patch('backend.services.vectordatabase_service.DataMateCore') as mock_datamate_core:
+            mock_datamate_core.return_value = MagicMock()
+
+            result = get_vector_db_core(db_type=VectorDatabaseType.DATAMATE)
+
+            mock_datamate_core.assert_called_once_with(base_url=DATAMATE_URL)
+            self.assertEqual(result, mock_datamate_core.return_value)
+
     @patch('backend.services.vectordatabase_service.tenant_config_manager')
     @patch('backend.services.vectordatabase_service.DataMateCore')
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
