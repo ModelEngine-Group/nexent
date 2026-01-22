@@ -56,8 +56,9 @@ def _parse_timestamp(timestamp: Any, default: int = 0) -> int:
 class DataMateCore(VectorDatabaseCore):
     """VectorDatabaseCore implementation backed by the DataMate REST API."""
 
-    def __init__(self, base_url: str, timeout: float = 30.0):
-        self.client = DataMateClient(base_url=base_url, timeout=timeout)
+    def __init__(self, base_url: str, timeout: float = 30.0, verify_ssl: bool = True):
+        self.client = DataMateClient(
+            base_url=base_url, timeout=timeout, verify_ssl=verify_ssl)
 
     # ---- INDEX MANAGEMENT ----
     def create_index(self, index_name: str, embedding_dim: Optional[int] = None) -> bool:
@@ -73,7 +74,7 @@ class DataMateCore(VectorDatabaseCore):
         """Return DataMate knowledge base IDs as index identifiers."""
         _ = index_pattern
         knowledge_bases = self.client.list_knowledge_bases()
-        return [str(kb.get("id")) for kb in knowledge_bases if kb.get("id") is not None]
+        return [str(kb.get("id")) for kb in knowledge_bases if kb.get("id") is not None and kb.get("type") == "DOCUMENT"]
 
     def check_index_exists(self, index_name: str) -> bool:
         """Check existence by knowledge base id."""

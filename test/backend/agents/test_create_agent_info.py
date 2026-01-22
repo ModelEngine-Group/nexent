@@ -439,6 +439,93 @@ class TestCreateToolConfigList:
                 "data_process_service_url": consts_const.DATA_PROCESS_SERVICE,
             }
 
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_knowledge_base_tool_mixed_sources(self):
+        """Test KnowledgeBaseSearchTool filters only elasticsearch knowledge sources"""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
+                patch('backend.agents.create_agent_info.build_knowledge_name_mapping') as mock_build_mapping:
+
+            mock_discover.return_value = []
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            # Mix of elasticsearch and datamate sources
+            mock_knowledge.return_value = [
+                {"index_name": "elastic_kb_1", "knowledge_sources": "elasticsearch"},
+                {"index_name": "datamate_kb_1", "knowledge_sources": "datamate"},
+                {"index_name": "elastic_kb_2", "knowledge_sources": "elasticsearch"},
+                {"index_name": "other_kb", "knowledge_sources": "other"}
+            ]
+            mock_vdb_core = "mock_elastic_core"
+            mock_get_vector_db_core.return_value = mock_vdb_core
+            mock_embedding.return_value = "mock_embedding_model"
+            mock_build_mapping.return_value = {"mapping": "mock"}
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            # Should only include elasticsearch index names
+            expected_index_names = ["elastic_kb_1", "elastic_kb_2"]
+            assert mock_tool_instance.metadata["index_names"] == expected_index_names
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool(self):
+        """Test DataMateSearchTool filters only datamate knowledge sources"""
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateSearchTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge:
+
+            mock_discover.return_value = []
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateSearchTool",
+                    "name": "datamate_search",
+                    "description": "DataMate search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            # Mix of different knowledge sources
+            mock_knowledge.return_value = [
+                {"index_name": "elastic_kb_1", "knowledge_sources": "elasticsearch"},
+                {"index_name": "datamate_kb_1", "knowledge_sources": "datamate"},
+                {"index_name": "datamate_kb_2", "knowledge_sources": "datamate"},
+                {"index_name": "other_kb", "knowledge_sources": "other"}
+            ]
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            # Should only include datamate index names
+            expected_index_names = ["datamate_kb_1", "datamate_kb_2"]
+            assert mock_tool_instance.metadata["index_names"] == expected_index_names
+
 
 class TestCreateAgentConfig:
     """Tests for the create_agent_config function"""
@@ -856,6 +943,73 @@ class TestCreateAgentConfig:
 
             assert "Failed to retrieve memory list: boom" in str(excinfo.value)
 
+    @pytest.mark.asyncio
+    async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
+        """Test knowledge base summary generation filters only elasticsearch sources"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.ElasticSearchService') as mock_es_service:
+
+            # Set mock return values
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = []
+
+            # Create a mock tool with KnowledgeBaseSearchTool class name
+            mock_tool = Mock()
+            mock_tool.class_name = "KnowledgeBaseSearchTool"
+            mock_create_tools.return_value = [mock_tool]
+
+            mock_get_template.return_value = {
+                "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"}
+            mock_tenant_config.get_app_config.side_effect = [
+                "TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1"
+            )
+            mock_knowledge.return_value = [
+                {"index_name": "elastic_kb_1", "knowledge_sources": "elasticsearch"},
+                {"index_name": "datamate_kb_1", "knowledge_sources": "datamate"},
+                {"index_name": "elastic_kb_2", "knowledge_sources": "elasticsearch"}
+            ]
+            mock_prepare_templates.return_value = {
+                "system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            # Mock ElasticSearchService
+            mock_es_instance = Mock()
+            mock_es_instance.get_summary.return_value = {"summary": "Test summary"}
+            mock_es_service.return_value = mock_es_instance
+
+            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            # Verify that ElasticSearchService was called only for elasticsearch sources
+            assert mock_es_service.call_count == 2  # Only for elastic_kb_1 and elastic_kb_2
+            mock_es_instance.get_summary.assert_any_call(index_name="elastic_kb_1")
+            mock_es_instance.get_summary.assert_any_call(index_name="elastic_kb_2")
+            # Should not be called for datamate_kb_1
+            called_index_names = [call[1]['index_name'] for call in mock_es_instance.get_summary.call_args_list]
+            assert "datamate_kb_1" not in called_index_names
+
 
 class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
@@ -865,7 +1019,7 @@ class TestCreateModelConfigList:
         """Test case for model configuration list creation"""
         # Reset mock call count before test
         mock_model_config.reset_mock()
-        
+
         with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
                 patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name, \
@@ -882,7 +1036,7 @@ class TestCreateModelConfigList:
                 },
                 {
                     "display_name": "Claude",
-                    "api_key": "claude_key", 
+                    "api_key": "claude_key",
                     "model_repo": "anthropic",
                     "model_name": "claude-3",
                     "base_url": "https://api.anthropic.com"
@@ -904,38 +1058,38 @@ class TestCreateModelConfigList:
 
             # Should have 4 models: 2 from database + 2 default (main_model, sub_model)
             assert len(result) == 4
-            
+
             # Verify get_model_records was called correctly
             mock_get_records.assert_called_once_with({"model_type": "llm"}, "tenant_1")
-            
+
             # Verify tenant_config_manager was called for default models
             mock_manager.get_model_config.assert_called_once_with(
                 key=MODEL_CONFIG_MAPPING["llm"], tenant_id="tenant_1")
-            
+
             # Verify ModelConfig was called 4 times
             assert mock_model_config.call_count == 4
-            
+
             # Verify the calls to ModelConfig
             calls = mock_model_config.call_args_list
-            
+
             # First call: GPT-4 model from database
             assert calls[0][1]['cite_name'] == "GPT-4"
             assert calls[0][1]['api_key'] == "gpt4_key"
             assert calls[0][1]['model_name'] == "openai/gpt-4"
             assert calls[0][1]['url'] == "https://api.openai.com"
-            
+
             # Second call: Claude model from database
             assert calls[1][1]['cite_name'] == "Claude"
             assert calls[1][1]['api_key'] == "claude_key"
             assert calls[1][1]['model_name'] == "anthropic/claude-3"
             assert calls[1][1]['url'] == "https://api.anthropic.com"
-            
+
             # Third call: main_model
             assert calls[2][1]['cite_name'] == "main_model"
             assert calls[2][1]['api_key'] == "main_key"
             assert calls[2][1]['model_name'] == "main_model_name"
             assert calls[2][1]['url'] == "http://main.url"
-            
+
             # Fourth call: sub_model
             assert calls[3][1]['cite_name'] == "sub_model"
             assert calls[3][1]['api_key'] == "main_key"
@@ -947,7 +1101,7 @@ class TestCreateModelConfigList:
         """Test case when database returns no records"""
         # Reset mock call count before test
         mock_model_config.reset_mock()
-        
+
         with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
                 patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
@@ -968,10 +1122,10 @@ class TestCreateModelConfigList:
 
             # Should have 2 models: only default models (main_model, sub_model)
             assert len(result) == 2
-            
+
             # Verify ModelConfig was called 2 times
             assert mock_model_config.call_count == 2
-            
+
             # Verify both calls are for default models
             calls = mock_model_config.call_args_list
             assert calls[0][1]['cite_name'] == "main_model"
@@ -982,7 +1136,7 @@ class TestCreateModelConfigList:
         """Test case when tenant config has no model_name"""
         # Reset mock call count before test
         mock_model_config.reset_mock()
-        
+
         with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
                 patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
@@ -1001,10 +1155,10 @@ class TestCreateModelConfigList:
 
             # Should have 2 models: only default models (main_model, sub_model)
             assert len(result) == 2
-            
+
             # Verify ModelConfig was called 2 times with empty model_name
             assert mock_model_config.call_count == 2
-            
+
             calls = mock_model_config.call_args_list
             assert calls[0][1]['cite_name'] == "main_model"
             assert calls[0][1]['model_name'] == ""  # Should be empty when no model_name in config

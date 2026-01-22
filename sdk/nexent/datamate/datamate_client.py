@@ -19,17 +19,19 @@ class DataMateClient:
     for datamate knowledge base operations.
     """
 
-    def __init__(self, base_url: str, timeout: float = 30.0):
+    def __init__(self, base_url: str, timeout: float = 30.0, verify_ssl: bool = True):
         """
         Initialize DataMate client.
 
         Args:
             base_url: Base URL of DataMate server (e.g., "http://jasonwang.site:30000")
             timeout: Request timeout in seconds (default: 30.0)
+            verify_ssl: Whether to verify SSL certificates (default: True)
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        logger.info(f"Initialized DataMateClient with base_url: {self.base_url}")
+        self.verify_ssl = verify_ssl
+        logger.info(f"Initialized DataMateClient with base_url: {self.base_url}, verify_ssl: {self.verify_ssl}")
 
     def _build_url(self, path: str) -> str:
         """Build full URL from path."""
@@ -98,7 +100,7 @@ class DataMateClient:
         """
         request_timeout = timeout if timeout is not None else self.timeout
 
-        with httpx.Client(timeout=request_timeout) as client:
+        with httpx.Client(timeout=request_timeout, verify=self.verify_ssl) as client:
             if method.upper() == "GET":
                 response = client.get(url, headers=headers)
             elif method.upper() == "POST":
@@ -175,11 +177,14 @@ class DataMateClient:
             RuntimeError: If the API request fails
         """
         try:
-            url = self._build_url(f"/api/knowledge-base/{knowledge_base_id}/files")
-            logger.info(f"Fetching files for DataMate knowledge base {knowledge_base_id} from: {url}")
+            url = self._build_url(
+                f"/api/knowledge-base/{knowledge_base_id}/files")
+            logger.info(
+                f"Fetching files for DataMate knowledge base {knowledge_base_id} from: {url}")
 
             headers = self._build_headers(authorization)
-            response = self._make_request("GET", url, headers, error_message="Failed to get knowledge base files")
+            response = self._make_request(
+                "GET", url, headers, error_message="Failed to get knowledge base files")
             data = response.json()
 
             # Extract file list from response
@@ -187,15 +192,20 @@ class DataMateClient:
             if data.get("data"):
                 files = data.get("data").get("content", [])
 
-            logger.info(f"Successfully fetched {len(files)} files for datamate knowledge base {knowledge_base_id}")
+            logger.info(
+                f"Successfully fetched {len(files)} files for datamate knowledge base {knowledge_base_id}")
             return files
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
-            raise RuntimeError(f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            logger.error(
+                f"HTTP error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(
+                f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
-            raise RuntimeError(f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            logger.error(
+                f"Unexpected error while fetching files for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(
+                f"Failed to fetch files for datamate knowledge base {knowledge_base_id}: {str(e)}")
 
     def get_knowledge_base_info(
         self,
@@ -217,24 +227,31 @@ class DataMateClient:
         """
         try:
             url = self._build_url(f"/api/knowledge-base/{knowledge_base_id}")
-            logger.info(f"Fetching details for DataMate knowledge base {knowledge_base_id} from: {url}")
+            logger.info(
+                f"Fetching details for DataMate knowledge base {knowledge_base_id} from: {url}")
 
             headers = self._build_headers(authorization)
-            response = self._make_request("GET", url, headers, error_message="Failed to get knowledge base details")
+            response = self._make_request(
+                "GET", url, headers, error_message="Failed to get knowledge base details")
             data = response.json()
 
             # Extract knowledge base details from response
             knowledge_base = data.get("data", {})
 
-            logger.info(f"Successfully fetched details for datamate knowledge base {knowledge_base_id}")
+            logger.info(
+                f"Successfully fetched details for datamate knowledge base {knowledge_base_id}")
             return knowledge_base
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error while fetching details for datamate knowledge base {knowledge_base_id}: {str(e)}")
-            raise RuntimeError(f"Failed to fetch details for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            logger.error(
+                f"HTTP error while fetching details for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(
+                f"Failed to fetch details for datamate knowledge base {knowledge_base_id}: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error while fetching details for datamate knowledge base {knowledge_base_id}: {str(e)}")
-            raise RuntimeError(f"Failed to fetch details for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            logger.error(
+                f"Unexpected error while fetching details for datamate knowledge base {knowledge_base_id}: {str(e)}")
+            raise RuntimeError(
+                f"Failed to fetch details for datamate knowledge base {knowledge_base_id}: {str(e)}")
 
     def retrieve_knowledge_base(
         self,
@@ -288,15 +305,20 @@ class DataMateClient:
             for result in data.get("data", {}):
                 search_results.append(result)
 
-            logger.info(f"Successfully retrieved {len(search_results)} retrieve result(s)")
+            logger.info(
+                f"Successfully retrieved {len(search_results)} retrieve result(s)")
             return search_results
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error while retrieving DataMate knowledge bases: {str(e)}")
-            raise RuntimeError(f"Failed to retrieve DataMate knowledge bases: {str(e)}")
+            logger.error(
+                f"HTTP error while retrieving DataMate knowledge bases: {str(e)}")
+            raise RuntimeError(
+                f"Failed to retrieve DataMate knowledge bases: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error while retrieving DataMate knowledge bases: {str(e)}")
-            raise RuntimeError(f"Failed to retrieve DataMate knowledge bases: {str(e)}")
+            logger.error(
+                f"Unexpected error while retrieving DataMate knowledge bases: {str(e)}")
+            raise RuntimeError(
+                f"Failed to retrieve DataMate knowledge bases: {str(e)}")
 
     def build_file_download_url(self, dataset_id: str, file_id: str) -> str:
         """
@@ -339,7 +361,8 @@ class DataMateClient:
         """
         try:
             # Fetch all knowledge bases
-            knowledge_bases = self.list_knowledge_bases(authorization=authorization)
+            knowledge_bases = self.list_knowledge_bases(
+                authorization=authorization)
 
             # Fetch files for each knowledge base
             result = []
@@ -347,13 +370,15 @@ class DataMateClient:
                 kb_id = kb.get("id")
 
                 try:
-                    files = self.get_knowledge_base_files(str(kb_id), authorization=authorization)
+                    files = self.get_knowledge_base_files(
+                        str(kb_id), authorization=authorization)
                     result.append({
                         "knowledge_base": kb,
                         "files": files,
                     })
                 except Exception as e:
-                    logger.error(f"Failed to fetch files for datamate knowledge base {kb_id}: {str(e)}")
+                    logger.error(
+                        f"Failed to fetch files for datamate knowledge base {kb_id}: {str(e)}")
                     # Continue with other knowledge bases even if one fails
                     result.append({
                         "knowledge_base": kb,

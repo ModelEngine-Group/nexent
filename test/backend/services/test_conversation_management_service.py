@@ -1,22 +1,25 @@
-from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
-from unittest.mock import patch
-from datetime import datetime
-import asyncio
-import json
-import unittest
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
+# Mock storage client factory and MinIO config before any imports that would initialize MinIO
+from unittest.mock import MagicMock
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+
+# Mock boto3 before any imports
+boto3_mock = types.SimpleNamespace()
+sys.modules['boto3'] = boto3_mock
 
 def _stub_nexent_openai_model():
     # Provide a simple OpenAIModel stub for import-time safety
     mod = types.ModuleType("nexent.core.models")
-
     class Stub:
         def __init__(self, *a, **k):
             self.generated = None
-
         def generate(self, messages):
             # record messages for assertion and return object with content
             self.generated = messages
@@ -28,51 +31,50 @@ _stub_nexent_openai_model()
 
 # Stub jinja2 to avoid importing the dependency during tests
 jinja2_mod = types.ModuleType("jinja2")
-
-
 class StrictUndefined:
     pass
-
-
 class Template:
     def __init__(self, text, undefined=None):
         self.text = text
-
     def render(self, ctx):
         # very small render: replace {{content}} occurrence
         return self.text.replace("{{content}}", ctx.get("content", ""))
-
-
 jinja2_mod.StrictUndefined = StrictUndefined
 jinja2_mod.Template = Template
 sys.modules["jinja2"] = jinja2_mod
-# Update existing observer mock with ProcessType
-sys.modules["nexent.core.utils.observer"].ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(
-    value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
+# Stub nexent.core.agents.agent_model to satisfy imports in consts.model
+agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+agent_model_mod.ToolConfig = object
+sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
+sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+# Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
+observer_mod = types.ModuleType("nexent.core.utils.observer")
+observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
+observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
+sys.modules["nexent.core.utils.observer"] = observer_mod
+
+# Stub nexent.core.models.embedding_model to avoid import errors
+embedding_mod = types.ModuleType("nexent.core.models.embedding_model")
+embedding_mod.BaseEmbedding = object
+embedding_mod.OpenAICompatibleEmbedding = object
+embedding_mod.JinaEmbedding = object
+sys.modules["nexent.core.models.embedding_model"] = embedding_mod
 #
 # Stub consts.model to avoid pydantic/email-validator heavy imports during tests.
 consts_model_mod = types.ModuleType("consts.model")
-
-
 class AgentRequest:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
-
-
 class ConversationResponse:
     def __init__(self, code=0, message="", data=None):
         self.code = code
         self.message = message
         self.data = data
-
-
 class MessageUnit:
     def __init__(self, type="", content=""):
         self.type = type
         self.content = content
-
-
 class MessageRequest:
     def __init__(self, conversation_id=None, message_idx=None, role=None, message=None, minio_files=None):
         self.conversation_id = conversation_id
@@ -80,7 +82,6 @@ class MessageRequest:
         self.role = role
         self.message = message
         self.minio_files = minio_files
-
     def model_dump(self):
         return {
             "conversation_id": self.conversation_id,
@@ -89,7 +90,6 @@ class MessageRequest:
             "message": [m.__dict__ if hasattr(m, "__dict__") else m for m in (self.message or [])],
             "minio_files": self.minio_files,
         }
-
 
 consts_model_mod.AgentRequest = AgentRequest
 consts_model_mod.ConversationResponse = ConversationResponse
@@ -124,49 +124,37 @@ class _DummySessionCM:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-
 db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
 sys.modules["database.client"] = db_client_stub
 
 # Stub utils.prompt_template_utils to avoid requiring PyYAML
 prompt_mod = types.ModuleType("utils.prompt_template_utils")
-prompt_mod.get_generate_title_prompt_template = lambda language="zh": {
-    "USER_PROMPT": "{{content}}", "SYSTEM_PROMPT": "SYS"}
+prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{content}}", "SYSTEM_PROMPT":"SYS"}
 sys.modules["utils.prompt_template_utils"] = prompt_mod
+
 
 
 def test_call_llm_for_title_flattening(monkeypatch):
     # Patch tenant_config_manager.get_model_config and prompt template
 
-    monkeypatch.setattr("backend.services.conversation_management_service.tenant_config_manager", types.SimpleNamespace(
-        get_model_config=lambda *a, **k: {"base_url": "u", "api_key": "k", "model_factory": "modelengine", "model_name": "m"}))
-    monkeypatch.setattr("backend.services.conversation_management_service.get_generate_title_prompt_template",
-                        lambda language="zh": {"USER_PROMPT": "{{content}}", "SYSTEM_PROMPT": "SYS"})
+    monkeypatch.setattr("backend.services.conversation_management_service.tenant_config_manager", types.SimpleNamespace(get_model_config=lambda *a, **k: {"base_url":"u","api_key":"k","model_factory":"modelengine","model_name":"m"}))
+    monkeypatch.setattr("backend.services.conversation_management_service.get_generate_title_prompt_template", lambda language="zh": {"USER_PROMPT":"{{content}}", "SYSTEM_PROMPT":"SYS"})
     # Stub get_model_name_from_config to avoid dependency on config utils
-    monkeypatch.setattr("backend.services.conversation_management_service.get_model_name_from_config",
-                        lambda cfg: cfg.get("model_name", "") if cfg else "")
+    monkeypatch.setattr("backend.services.conversation_management_service.get_model_name_from_config", lambda cfg: cfg.get("model_name", "") if cfg else "")
 
     # Call with some content; expect OpenAIModel.generate to receive flattened messages
-    title = call_llm_for_title(
-        "some conversation content", tenant_id="t", language="zh")
+    title = call_llm_for_title("some conversation content", tenant_id="t", language="zh")
     assert title == "The Title"
 
+from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
+import unittest
+import json
+import asyncio
+import os
+from datetime import datetime
+from unittest.mock import patch, MagicMock
 
 # Environment variables are now configured in conftest.py
-# Mock boto3 and minio client before importing the module under test
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
-      return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
-      lambda self: None).start()
-patch('backend.database.client.MinioClient',
-      return_value=minio_client_mock).start()
 
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
     from backend.services.conversation_management_service import (
@@ -207,8 +195,7 @@ class TestConversationManagementService(unittest.TestCase):
             conversation_id=456,
             message_idx=99,
             role="assistant",
-            message=[MessageUnit(type="picture_web",
-                                 content="not a valid json")],
+            message=[MessageUnit(type="picture_web", content="not a valid json")],
             minio_files=[]
         )
         result = save_message(
@@ -220,8 +207,7 @@ class TestConversationManagementService(unittest.TestCase):
         """Should return error when both conversation_id and message_id are None."""
         result = get_sources_service(None, None, user_id=self.user_id)
         self.assertEqual(result['code'], 400)
-        self.assertEqual(
-            result['message'], "Must provide conversation_id or message_id parameter")
+        self.assertEqual(result['message'], "Must provide conversation_id or message_id parameter")
 
     @patch('backend.services.conversation_management_service.extract_user_messages')
     @patch('backend.services.conversation_management_service.call_llm_for_title')
@@ -230,8 +216,7 @@ class TestConversationManagementService(unittest.TestCase):
     def test_generate_conversation_title_service_no_title(
         self, mock_get_config, mock_update, mock_call_llm, mock_extract
     ):
-        mock_get_config.return_value = {
-            "model_name": "gpt-4", "api_key": "fake"}
+        mock_get_config.return_value = {"model_name": "gpt-4", "api_key": "fake"}
         mock_extract.return_value = "content"
         mock_call_llm.return_value = None
         result = asyncio.run(generate_conversation_title_service(
@@ -453,12 +438,10 @@ class TestConversationManagementService(unittest.TestCase):
         # Check that consecutive model_output_thinking messages were merged
         self.assertEqual(len(request_arg.message), 1)
         first_unit = request_arg.message[0]
-        unit_type = getattr(first_unit, "type", None) or (
-            first_unit.get("type") if isinstance(first_unit, dict) else None)
+        unit_type = getattr(first_unit, "type", None) or (first_unit.get("type") if isinstance(first_unit, dict) else None)
         self.assertEqual(unit_type, "model_output_thinking")
         first_unit = request_arg.message[0]
-        unit_content = getattr(first_unit, "content", None) or (
-            first_unit.get("content") if isinstance(first_unit, dict) else None)
+        unit_content = getattr(first_unit, "content", None) or (first_unit.get("content") if isinstance(first_unit, dict) else None)
         self.assertEqual(unit_content, "Machine learning is a field of AI")
 
     def test_extract_user_messages(self):

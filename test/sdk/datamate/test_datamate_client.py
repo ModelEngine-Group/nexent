@@ -316,6 +316,10 @@ class TestMakeRequest:
 
         assert response.status_code == 200
         http_client.get.assert_called_once_with("http://test.com/api", headers={"X-Header": "value"})
+        # Verify httpx.Client was called with correct SSL verification setting
+        client_cls.assert_called_once()
+        call_kwargs = client_cls.call_args[1]
+        assert call_kwargs["verify"] == client.verify_ssl
 
     def test_post_request_success(self, mocker: MockFixture, client: DataMateClient):
         client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
@@ -330,6 +334,10 @@ class TestMakeRequest:
         http_client.post.assert_called_once_with(
             "http://test.com/api", json={"key": "value"}, headers={"X-Header": "value"}
         )
+        # Verify httpx.Client was called with correct SSL verification setting
+        client_cls.assert_called_once()
+        call_kwargs = client_cls.call_args[1]
+        assert call_kwargs["verify"] == client.verify_ssl
 
     def test_custom_timeout(self, mocker: MockFixture, client: DataMateClient):
         client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
@@ -605,6 +613,17 @@ class TestClientInitialization:
     def test_custom_timeout(self):
         client = DataMateClient(base_url="http://test.com", timeout=5.0)
         assert client.timeout == 5.0
+
+    def test_default_ssl_verification(self):
+        client = DataMateClient(base_url="http://test.com")
+        assert client.verify_ssl is True
+
+    def test_custom_ssl_verification(self):
+        client_ssl_enabled = DataMateClient(base_url="http://test.com", verify_ssl=True)
+        assert client_ssl_enabled.verify_ssl is True
+
+        client_ssl_disabled = DataMateClient(base_url="http://test.com", verify_ssl=False)
+        assert client_ssl_disabled.verify_ssl is False
 
     def test_base_url_stripping(self):
         client = DataMateClient(base_url="http://test.com/", timeout=1.0)

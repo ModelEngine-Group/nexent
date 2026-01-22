@@ -90,13 +90,14 @@ logger = logging.getLogger("vectordatabase_service")
 
 
 def get_vector_db_core(
-    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH,
+    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
 ) -> VectorDatabaseCore:
     """
     Return a VectorDatabaseCore implementation based on the requested type.
 
     Args:
         db_type: Target vector database provider. Defaults to Elasticsearch.
+        tenant_id: Tenant ID for configuration lookup (required for DataMate).
 
     Returns:
         VectorDatabaseCore: Concrete vector database implementation.
@@ -113,7 +114,15 @@ def get_vector_db_core(
         )
 
     if db_type == VectorDatabaseType.DATAMATE:
-        return DataMateCore(base_url=DATAMATE_URL)
+        if tenant_id:
+            datamate_url = tenant_config_manager.get_app_config(
+                DATAMATE_URL, tenant_id=tenant_id)
+            if not datamate_url:
+                raise ValueError(
+                    f"DataMate URL not configured for tenant {tenant_id}")
+            return DataMateCore(base_url=datamate_url)
+        else:
+            raise ValueError("tenant_id must be provided for DataMate")
 
     raise ValueError(f"Unsupported vector database type: {db_type}")
 
@@ -490,7 +499,8 @@ class ElasticSearchService:
 
         for record in all_db_records:
             index_name = record["index_name"]
-
+            if record['knowledge_sources'] == 'datamate':
+                continue
             # Check if index exists in Elasticsearch (skip if not found)
             if index_name not in es_indices_list:
                 continue
@@ -506,6 +516,7 @@ class ElasticSearchService:
                 logger.info(f"User {user_id} identified as legacy admin")
             elif IS_SPEED_MODE:
                 effective_user_role = "SPEED"
+                logger.info("User under SPEED version is treated as admin")
 
             if effective_user_role in ["SU", "ADMIN", "SPEED"]:
                 # SU, ADMIN and SPEED roles can see all knowledgebases
@@ -515,7 +526,8 @@ class ElasticSearchService:
                 kb_group_ids_str = record.get("group_ids")
                 kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
                 kb_created_by = record.get("created_by")
-                kb_ingroup_permission = record.get("ingroup_permission") or "READ_ONLY"
+                kb_ingroup_permission = record.get(
+                    "ingroup_permission") or "READ_ONLY"
 
                 # Check if user belongs to any of the knowledgebase groups
                 # Compatibility logic for legacy data:
@@ -531,7 +543,8 @@ class ElasticSearchService:
                     has_group_intersection = True
                 else:
                     # Normal intersection check
-                    has_group_intersection = bool(set(user_group_ids) & set(kb_group_ids))
+                    has_group_intersection = bool(
+                        set(user_group_ids) & set(kb_group_ids))
 
                 if has_group_intersection:
                     # Determine permission level
@@ -560,8 +573,10 @@ class ElasticSearchService:
                         record["group_ids"])
                 else:
                     # If no group_ids specified, use tenant default group
-                    default_group_id = get_tenant_default_group_id(record.get("tenant_id"))
-                    record_with_permission["group_ids"] = [default_group_id] if default_group_id else []
+                    default_group_id = get_tenant_default_group_id(
+                        record.get("tenant_id"))
+                    record_with_permission["group_ids"] = [
+                        default_group_id] if default_group_id else []
                 visible_knowledgebases.append(record_with_permission)
 
                 # Track records with missing embedding model for stats update
@@ -1063,7 +1078,8 @@ class ElasticSearchService:
                                      ..., description="Name of the index to get documents from"),
                                  batch_size: int = Query(
                                      1000, description="Number of documents to retrieve per batch"),
-                                 vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+                                 vdb_core: VectorDatabaseCore = Depends(
+                                     get_vector_db_core),
                                  user_id: Optional[str] = Body(
                                      None, description="ID of the user delete the knowledge base"),
                                  tenant_id: Optional[str] = Body(
@@ -1094,7 +1110,8 @@ class ElasticSearchService:
         """
         try:
             if not tenant_id:
-                raise Exception("Tenant ID is required for summary generation.")
+                raise Exception(
+                    "Tenant ID is required for summary generation.")
 
             from utils.document_vector_utils import (
                 process_documents_for_clustering,
@@ -1104,7 +1121,8 @@ class ElasticSearchService:
             )
 
             # Use new Map-Reduce approach
-            sample_count = min(batch_size // 5, 200)  # Sample reasonable number of documents
+            # Sample reasonable number of documents
+            sample_count = min(batch_size // 5, 200)
 
             # Define a helper function to run all blocking operations in a thread pool
             def _generate_summary_sync():
@@ -1163,7 +1181,8 @@ class ElasticSearchService:
             )
 
         except Exception as e:
-            logger.error(f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
+            logger.error(
+                f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
             raise Exception(f"Failed to generate summary: {str(e)}")
 
     @staticmethod

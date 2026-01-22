@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 
 from database.knowledge_db import get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names
 from database.tenant_config_db import get_tenant_config_info, insert_config, delete_config_by_tenant_config_id
@@ -17,7 +17,17 @@ def get_selected_knowledge_list(tenant_id: str, user_id: str):
     return knowledge_info
 
 
-def update_selected_knowledge(tenant_id: str, user_id: str, index_name_list: List[str]):
+def update_selected_knowledge(tenant_id: str, user_id: str, index_name_list: List[str], knowledge_sources: Optional[List[str]] = None):
+    # Validate that knowledge_sources length matches index_name_list if provided
+    if knowledge_sources and len(knowledge_sources) != len(index_name_list):
+        logger.error(
+            f"Knowledge sources length mismatch: sources={len(knowledge_sources)}, names={len(index_name_list)}")
+        return False
+
+    logger.info(
+        f"Updating knowledge list for tenant {tenant_id}, user {user_id}: "
+        f"names={index_name_list}, sources={knowledge_sources}")
+
     knowledge_ids = get_knowledge_ids_by_index_names(index_name_list)
     record_list = get_tenant_config_info(
         tenant_id=tenant_id, user_id=user_id, select_key="selected_knowledge_id")

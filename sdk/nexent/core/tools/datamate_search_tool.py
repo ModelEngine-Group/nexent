@@ -4,6 +4,7 @@ from typing import Optional, List, Union
 
 from pydantic import Field
 from smolagents.tools import Tool
+from urllib.parse import urlparse
 
 from ...vector_database import DataMateCore
 from ..utils.observer import MessageObserver, ProcessType
@@ -75,8 +76,9 @@ class DataMateSearchTool(Tool):
 
     def __init__(
         self,
-        server_ip: str = Field(description="DataMate server IP or hostname"),
-        server_port: int = Field(description="DataMate server port"),
+        server_url: str = Field(description="DataMate server url"),
+        verify_ssl: bool = Field(
+            description="Whether to verify SSL certificates for HTTPS connections", default=False),
         index_names: List[str] = Field(
             description="The list of index names to search", default=None, exclude=True),
         observer: MessageObserver = Field(
@@ -85,30 +87,38 @@ class DataMateSearchTool(Tool):
         """Initialize the DataMateSearchTool.
 
         Args:
-            server_ip (str): DataMate server IP or hostname (without scheme).
-            server_port (int): DataMate server port (1-65535).
+            server_url (str): DataMate server URL (e.g., 'http://192.168.1.100:8080' or 'https://datamate.example.com:8443').
+            verify_ssl (bool, optional): Whether to verify SSL certificates for HTTPS connections. Defaults to False for HTTPS, True for HTTP.
+            index_names (List[str], optional): The list of index names to search. Defaults to None.
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
         """
         super().__init__()
 
-        if not server_ip:
-            raise ValueError("server_ip is required for DataMateSearchTool")
+        if not server_url:
+            raise ValueError("server_url is required for DataMateSearchTool")
 
-        if not isinstance(server_port, int) or not (1 <= server_port <= 65535):
-            raise ValueError(
-                "server_port must be an integer between 1 and 65535")
+        # Parse the URL
+        parsed_url = self._parse_server_url(server_url)
 
-        # Store raw host and port
-        self.server_ip = server_ip.strip()
-        self.server_port = server_port
+        # Store parsed components
+        self.server_ip = parsed_url["host"]
+        self.server_port = parsed_url["port"]
+        self.use_https = parsed_url["use_https"]
+        self.server_base_url = parsed_url["base_url"]
         self.index_names = [] if index_names is None else index_names
 
-        # Build base URL: http://host:port
-        self.server_base_url = f"http://{self.server_ip}:{self.server_port}".rstrip(
-            "/")
+        # Determine SSL verification setting
+        if verify_ssl is None:
+            # Default: don't verify SSL for HTTPS (for self-signed certificates), always verify for HTTP
+            self.verify_ssl = not self.use_https
+        else:
+            self.verify_ssl = verify_ssl
 
-        # Initialize DataMate vector database core
-        self.datamate_core = DataMateCore(base_url=self.server_base_url)
+        # Initialize DataMate vector database core with SSL verification settings
+        self.datamate_core = DataMateCore(
+            base_url=self.server_base_url,
+            verify_ssl=self.verify_ssl if self.use_https else True
+        )
 
         self.kb_page = 0
         self.kb_page_size = 20
@@ -117,6 +127,52 @@ class DataMateSearchTool(Tool):
         self.record_ops = 1  # To record serial number
         self.running_prompt_zh = "DataMate知识库检索中..."
         self.running_prompt_en = "Searching the DataMate knowledge base..."
+
+    @staticmethod
+    def _parse_server_url(server_url: str) -> dict:
+        """Parse server URL and extract components.
+
+        Args:
+            server_url: Server URL string (e.g., 'http://192.168.1.100:8080' or 'https://example.com:8443')
+
+        Returns:
+            dict: Parsed URL components containing:
+                - host: Server hostname or IP
+                - port: Server port
+                - use_https: Whether HTTPS is used
+                - base_url: Full base URL
+        """
+
+        # Ensure URL has a scheme
+        if not server_url.startswith(('http://', 'https://')):
+            raise ValueError(
+                f"server_url must include protocol (http:// or https://): {server_url}")
+
+        parsed = urlparse(server_url)
+
+        if not parsed.hostname:
+            raise ValueError(f"Invalid server_url format: {server_url}")
+
+        # Determine port
+        if parsed.port:
+            port = parsed.port
+        else:
+            # Use default ports
+            port = 443 if parsed.scheme == 'https' else 80
+
+        # Validate port range
+        if not (1 <= port <= 65535):
+            raise ValueError(f"Port {port} is not in valid range (1-65535)")
+
+        use_https = parsed.scheme == 'https'
+        base_url = f"{parsed.scheme}://{parsed.hostname}:{port}".rstrip('/')
+
+        return {
+            "host": parsed.hostname,
+            "port": port,
+            "use_https": use_https,
+            "base_url": base_url
+        }
 
     def forward(
         self,
