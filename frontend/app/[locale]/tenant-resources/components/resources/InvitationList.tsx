@@ -15,10 +15,12 @@ import {
   Pagination,
   Collapse,
   DatePicker,
+  Progress,
 } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { useInvitationList } from "@/hooks/invitation/useInvitationList";
 import { useGroupList } from "@/hooks/group/useGroupList";
+import { getTenantDefaultGroupId } from "@/services/groupService";
 import {
   createInvitation,
   updateInvitation,
@@ -27,7 +29,7 @@ import {
   type CreateInvitationRequest,
   type UpdateInvitationRequest,
 } from "@/services/invitationService";
-import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, AlertCircle } from "lucide-react";
+import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, AlertCircle, Copy } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import dayjs from "dayjs";
 
@@ -56,12 +58,28 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
   const invitations = data?.items || [];
   const total = data?.total || 0;
 
-  const openCreate = () => {
+  const openCreate = async () => {
     setEditingInvitation(null);
     form.resetFields();
+
+    // Get default group for the tenant
+    let defaultGroupIds: number[] = [];
+    if (tenantId) {
+      try {
+        const defaultGroupId = await getTenantDefaultGroupId(tenantId);
+        if (defaultGroupId) {
+          defaultGroupIds = [defaultGroupId];
+        }
+      } catch (error) {
+        // If we can't get default group, just continue without it
+        console.warn("Failed to get default group:", error);
+      }
+    }
+
     form.setFieldsValue({
       code_type: "USER_INVITE",
       capacity: 1,
+      group_ids: defaultGroupIds,
     });
     setModalVisible(true);
   };
@@ -163,8 +181,24 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         title: t("tenantResources.invitation.invitationCode"),
         dataIndex: "invitation_code",
         key: "invitation_code",
-        width: 150,
-        render: (code: string) => <span className="font-mono font-medium">{code}</span>,
+        width: 180,
+        render: (code: string) => (
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono font-medium">{code}</span>
+            <Tooltip title={t("common.copy")}>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(code);
+                  message.success(t("common.copied"));
+                }}
+                className="text-gray-400 hover:text-blue-600 transition-colors cursor-pointer"
+                aria-label={t("common.copy")}
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          </div>
+        ),
       },
       {
         title: t("tenantResources.invitation.codeType"),
@@ -201,18 +235,26 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         },
       },
       {
-        title: t("tenantResources.invitation.capacity"),
-        dataIndex: "capacity",
-        key: "capacity",
+        title: t("tenantResources.invitation.usage"),
+        key: "usage",
         width: 100,
-        render: (capacity: number) => <span>{capacity}</span>,
-      },
-      {
-        title: t("tenantResources.invitation.used"),
-        dataIndex: "used_times",
-        key: "used_times",
-        width: 80,
-        render: (used: number) => <span>{used}</span>,
+        render: (_, record: Invitation) => {
+          const { capacity, used_times } = record;
+          const remaining = capacity - used_times;
+          const percent = Math.round((remaining / capacity) * 100);
+          return (
+            <div className="flex justify-center">
+              <Progress
+                type="dashboard"
+                percent={percent}
+                gapDegree={100}
+                format={() => t("tenantResources.invitation.remaining", { remaining })}
+                size={20}
+                strokeColor={remaining > 0 ? "#52c41a" : "#ff4d4f"}
+              />
+            </div>
+          );
+        },
       },
       {
         title: t("tenantResources.invitation.expiryDate"),
@@ -226,16 +268,15 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         title: t("tenantResources.invitation.status"),
         dataIndex: "status",
         key: "status",
-        width: 120,
         render: (status: string) => {
           const color =
-            status === "IN_USE" ? "green" :
+            status === "IN_USE" ? "blue" :
             status === "EXPIRE" ? "gray" :
-            status === "DISABLE" ? "red" : "orange";
+            status === "RUN_OUT" ? "orange" : "red";
 
           const icon = status === "IN_USE" ? <CheckCircle className="w-3 h-3 mr-1" /> :
                       status === "EXPIRE" ? <Clock className="w-3 h-3 mr-1" /> :
-                      status === "DISABLE" ? <XCircle className="w-3 h-3 mr-1" /> :
+                      status === "RUN_OUT" ? <XCircle className="w-3 h-3 mr-1" /> :
                       <AlertCircle className="w-3 h-3 mr-1" />;
 
           return (
@@ -269,7 +310,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
             >
               <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
                 <button
-                  className="text-gray-600 hover:text-red-600 transition-colors cursor-pointer"
+                  className="text-red-600 hover:text-red-700 transition-colors cursor-pointer"
                   aria-label={t("tenantResources.invitation.deleteInvitation")}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -303,7 +344,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
       <div className="mb-4 flex justify-between items-center">
         <div />
         <div>
-          <Button type="primary" onClick={openCreate} icon={<Plus className="h-4 w-4 mr-2" />}>
+          <Button type="primary" onClick={openCreate} icon={<Plus className="h-4 w-4"/>}>
             {t("tenantResources.invitation.createInvitation")}
           </Button>
         </div>
@@ -369,6 +410,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
         width={600}
+        maskClosable={false}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -388,7 +430,16 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
             label={t("tenantResources.invitation.capacity")}
             rules={[
               { required: true, message: t("tenantResources.invitation.capacityRequired") },
-              { type: "number", min: 1, message: t("tenantResources.invitation.capacityMin") }
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  const numValue = Number(value);
+                  if (isNaN(numValue) || numValue < 1) {
+                    return Promise.reject(new Error(t("tenantResources.invitation.capacityMin")));
+                  }
+                  return Promise.resolve();
+                }
+              }
             ]}
           >
             <Input type="number" placeholder={t("tenantResources.invitation.capacity")} min={1} />
