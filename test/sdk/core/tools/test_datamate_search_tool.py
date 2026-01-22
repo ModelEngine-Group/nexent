@@ -2,12 +2,12 @@ import json
 from typing import List
 from unittest.mock import ANY, MagicMock
 
-import httpx
 import pytest
 from pytest_mock import MockFixture
 
-from sdk.nexent.core.tools.datamate_search_tool import DataMateSearchTool
+from sdk.nexent.core.tools.datamate_search_tool import DataMateSearchTool, _normalize_index_names
 from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
+from sdk.nexent.datamate.datamate_client import DataMateClient
 
 
 @pytest.fixture
@@ -17,47 +17,42 @@ def mock_observer() -> MessageObserver:
     return observer
 
 
+
+
 @pytest.fixture
 def datamate_tool(mock_observer: MessageObserver) -> DataMateSearchTool:
-    return DataMateSearchTool(
+    tool = DataMateSearchTool(
         server_ip="127.0.0.1",
         server_port=8080,
         observer=mock_observer,
     )
+    return tool
 
 
-def _build_kb_list_response(ids: List[str]):
-    return {
-        "data": {
-            "content": [
-                {"id": kb_id, "chunkCount": 1}
-                for kb_id in ids
-            ]
-        }
-    }
+def _build_kb_list(ids: List[str]):
+    return [{"id": kb_id, "chunkCount": 1} for kb_id in ids]
 
 
-def _build_search_response(kb_id: str, count: int = 2):
-    return {
-        "data": [
-            {
-                "entity": {
-                    "id": f"file-{i}",
-                    "text": f"content-{i}",
-                    "createTime": "2024-01-01T00:00:00Z",
-                    "score": 0.9 - i * 0.1,
-                    "metadata": json.dumps(
-                        {
-                            "file_name": f"file-{i}.txt",
-                            "absolute_directory_path": f"/data/{kb_id}",
-                        }
-                    ),
-                    "scoreDetails": {"raw": 0.8},
-                }
+def _build_search_results(kb_id: str, count: int = 2):
+    return [
+        {
+            "entity": {
+                "id": f"file-{i}",
+                "text": f"content-{i}",
+                "createTime": "2024-01-01T00:00:00Z",
+                "score": 0.9 - i * 0.1,
+                "metadata": json.dumps(
+                    {
+                        "file_name": f"file-{i}.txt",
+                        "absolute_directory_path": f"/data/{kb_id}",
+                        "original_file_id": f"orig-{i}",
+                    }
+                ),
+                "scoreDetails": {"raw": 0.8},
             }
-            for i in range(count)
-        ]
-    }
+        }
+        for i in range(count)
+    ]
 
 
 class TestDataMateSearchToolInit:
@@ -74,6 +69,21 @@ class TestDataMateSearchToolInit:
         assert tool.kb_page == 0
         assert tool.kb_page_size == 20
         assert tool.observer is mock_observer
+        # index_names is excluded from the model, so we can't directly test it
+        # The tool exposes the DataMate client via datamate_core.client
+        assert isinstance(tool.datamate_core.client, DataMateClient)
+
+    def test_init_with_index_names(self, mock_observer: MessageObserver):
+        """Test initialization with custom index_names."""
+        custom_index_names = ["kb1", "kb2"]
+        tool = DataMateSearchTool(
+            server_ip="127.0.0.1",
+            server_port=8080,
+            index_names=custom_index_names,
+            observer=mock_observer,
+        )
+
+        assert tool.index_names == custom_index_names
 
     @pytest.mark.parametrize("server_ip", ["", None])
     def test_init_invalid_server_ip(self, server_ip):
@@ -109,267 +119,272 @@ class TestHelperMethods:
             ("/single", "single"),
             ("/a/b/c", "c"),
             ("////", ""),
+            ("/a/b/c/d/", "d"),
+            ("no-leading-slash", "no-leading-slash"),
+            ("///multiple///slashes///", "slashes"),  # After filtering empty segments, last is "slashes"
         ],
     )
     def test_extract_dataset_id(self, datamate_tool: DataMateSearchTool, path, expected):
         assert datamate_tool._extract_dataset_id(path) == expected
 
+
+class TestNormalizeIndexNames:
     @pytest.mark.parametrize(
-        "dataset_id, file_id, expected",
+        "input_names, expected",
         [
-            ("ds1", "f1", "http://127.0.0.1:8080/api/data-management/datasets/ds1/files/f1/download"),
-            ("", "f1", ""),
-            ("ds1", "", ""),
+            (None, []),
+            ("single_kb", ["single_kb"]),
+            (["kb1", "kb2"], ["kb1", "kb2"]),
+            ([], []),
+            ("", [""]),  # Edge case: empty string becomes list with empty string
         ],
     )
-    def test_build_file_download_url(self, datamate_tool: DataMateSearchTool, dataset_id, file_id, expected):
-        assert datamate_tool._build_file_download_url(dataset_id, file_id) == expected
-
-
-class TestKnowledgeBaseList:
-    def test_get_knowledge_base_list_success(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = _build_kb_list_response(["kb1", "kb2"])
-        client.post.return_value = response
-
-        kb_ids = datamate_tool._get_knowledge_base_list()
-
-        assert kb_ids == ["kb1", "kb2"]
-        client.post.assert_called_once_with(
-            f"{datamate_tool.server_base_url}/api/knowledge-base/list",
-            json={"page": datamate_tool.kb_page, "size": datamate_tool.kb_page_size},
-        )
-
-    def test_get_knowledge_base_list_http_error_json_detail(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-
-        response = MagicMock()
-        response.status_code = 500
-        response.headers = {"content-type": "application/json"}
-        response.json.return_value = {"detail": "server error"}
-        client.post.return_value = response
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._get_knowledge_base_list()
-
-        assert "Failed to get knowledge base list" in str(excinfo.value)
-
-    def test_get_knowledge_base_list_http_error_text_detail(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-
-        response = MagicMock()
-        response.status_code = 400
-        response.headers = {"content-type": "text/plain"}
-        response.text = "bad request"
-        client.post.return_value = response
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._get_knowledge_base_list()
-
-        assert "bad request" in str(excinfo.value)
-
-    def test_get_knowledge_base_list_timeout(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-        client.post.side_effect = httpx.TimeoutException("timeout")
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._get_knowledge_base_list()
-
-        assert "Timeout while getting knowledge base list" in str(excinfo.value)
-
-    def test_get_knowledge_base_list_request_error(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-        client.post.side_effect = httpx.RequestError("network", request=MagicMock())
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._get_knowledge_base_list()
-
-        assert "Request error while getting knowledge base list" in str(excinfo.value)
-
-
-class TestRetrieveKnowledgeBaseContent:
-    def test_retrieve_content_success(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = _build_search_response("kb1", count=2)
-        client.post.return_value = response
-
-        results = datamate_tool._retrieve_knowledge_base_content(
-            "query",
-            ["kb1"],
-            top_k=3,
-            threshold=0.2,
-        )
-
-        assert len(results) == 2
-        client.post.assert_called_once()
-
-    def test_retrieve_content_http_error(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-
-        response = MagicMock()
-        response.status_code = 500
-        response.headers = {"content-type": "application/json"}
-        response.json.return_value = {"detail": "server error"}
-        client.post.return_value = response
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._retrieve_knowledge_base_content(
-                "query",
-                ["kb1"],
-                top_k=3,
-                threshold=0.2,
-            )
-
-        assert "Failed to retrieve knowledge base content" in str(excinfo.value)
-
-    def test_retrieve_content_timeout(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-        client.post.side_effect = httpx.TimeoutException("timeout")
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._retrieve_knowledge_base_content(
-                "query",
-                ["kb1"],
-                top_k=3,
-                threshold=0.2,
-            )
-
-        assert "Timeout while retrieving knowledge base content" in str(excinfo.value)
-
-    def test_retrieve_content_request_error(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
-        client.post.side_effect = httpx.RequestError("network", request=MagicMock())
-
-        with pytest.raises(Exception) as excinfo:
-            datamate_tool._retrieve_knowledge_base_content(
-                "query",
-                ["kb1"],
-                top_k=3,
-                threshold=0.2,
-            )
-
-        assert "Request error while retrieving knowledge base content" in str(excinfo.value)
+    def test_normalize_index_names(self, input_names, expected):
+        result = _normalize_index_names(input_names)
+        assert result == expected
 
 
 class TestForward:
-    def _setup_success_flow(self, mocker: MockFixture, tool: DataMateSearchTool):
-        # Mock knowledge base list
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
+    def test_forward_success_with_observer_en(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        # Mock the hybrid_search method to return search results
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.return_value = _build_search_results("kb1", count=2)
 
-        kb_response = MagicMock()
-        kb_response.status_code = 200
-        kb_response.json.return_value = _build_kb_list_response(["kb1"])
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(datamate_tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.side_effect = lambda ds, fid: f"http://dl/{ds}/{fid}"
 
-        search_response = MagicMock()
-        search_response.status_code = 200
-        search_response.json.return_value = _build_search_response("kb1", count=2)
-
-        # First call for list, second for retrieve
-        client.post.side_effect = [kb_response, search_response]
-        return client
-
-    def test_forward_success_with_observer_en(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client = self._setup_success_flow(mocker, datamate_tool)
-
-        result_json = datamate_tool.forward("test query", top_k=2, threshold=0.5)
+        result_json = datamate_tool.forward("test query", index_names=["kb1"], top_k=2, threshold=0.5)
         results = json.loads(result_json)
 
         assert len(results) == 2
-        # Check that observer received running prompt and card
-        datamate_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, datamate_tool.running_prompt_en
-        )
+        datamate_tool.observer.add_message.assert_any_call("", ProcessType.TOOL, datamate_tool.running_prompt_en)
         datamate_tool.observer.add_message.assert_any_call(
             "", ProcessType.CARD, json.dumps([{"icon": "search", "text": "test query"}], ensure_ascii=False)
         )
-        # Check that search content message is added (payload content is not strictly validated here)
-        datamate_tool.observer.add_message.assert_any_call(
-            "", ProcessType.SEARCH_CONTENT, ANY
-        )
+        datamate_tool.observer.add_message.assert_any_call("", ProcessType.SEARCH_CONTENT, ANY)
         assert datamate_tool.record_ops == 1 + len(results)
-        assert all(isinstance(item["index"], str) for item in results)
 
-        # Ensure both list and retrieve endpoints were called
-        assert client.post.call_count == 2
-
-    def test_forward_success_with_observer_zh(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        datamate_tool.observer.lang = "zh"
-        self._setup_success_flow(mocker, datamate_tool)
-
-        datamate_tool.forward("测试查询")
-
-        datamate_tool.observer.add_message.assert_any_call(
-            "", ProcessType.TOOL, datamate_tool.running_prompt_zh
+        # Verify hybrid_search was called correctly
+        mock_hybrid_search.assert_called_once_with(
+            query_text="test query",
+            index_names=["kb1"],
+            top_k=2,
+            weight_accurate=0.5
         )
+        mock_build_url.assert_any_call("kb1", "orig-0")
+
+    def test_forward_success_with_observer_zh(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        datamate_tool.observer.lang = "zh"
+
+        # Mock the hybrid_search method to return search results
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.return_value = _build_search_results("kb1", count=1)
+
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(datamate_tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.return_value = "http://dl/kb1/file-1"
+
+        datamate_tool.forward("测试查询", index_names=["kb1"])
+
+        datamate_tool.observer.add_message.assert_any_call("", ProcessType.TOOL, datamate_tool.running_prompt_zh)
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(server_ip="127.0.0.1", server_port=8080, observer=None)
-        self._setup_success_flow(mocker, tool)
 
-        # Should not raise and should not call observer
-        result_json = tool.forward("query")
-        assert len(json.loads(result_json)) == 2
+        # Mock the hybrid_search method to return search results
+        mock_hybrid_search = mocker.patch.object(tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.return_value = _build_search_results("kb1", count=1)
 
-    def test_forward_no_knowledge_bases(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.return_value = "http://dl/kb1/file-1"
 
-        kb_response = MagicMock()
-        kb_response.status_code = 200
-        kb_response.json.return_value = _build_kb_list_response([])
-        client.post.return_value = kb_response
+        result_json = tool.forward("query", index_names=["kb1"])
+        assert len(json.loads(result_json)) == 1
 
-        result = datamate_tool.forward("query")
-        assert result == json.dumps("No knowledge base found. No relevant information found.", ensure_ascii=False)
+    def test_forward_no_knowledge_bases(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        # Mock the hybrid_search method
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
 
-    def test_forward_no_results(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        client_cls = mocker.patch("sdk.nexent.core.tools.datamate_search_tool.httpx.Client")
-        client = client_cls.return_value.__enter__.return_value
+        result = datamate_tool.forward("query", index_names=[])
+        assert result == json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
+        mock_hybrid_search.assert_not_called()
 
-        kb_response = MagicMock()
-        kb_response.status_code = 200
-        kb_response.json.return_value = _build_kb_list_response(["kb1"])
-
-        search_response = MagicMock()
-        search_response.status_code = 200
-        search_response.json.return_value = {"data": []}
-
-        client.post.side_effect = [kb_response, search_response]
+    def test_forward_no_results(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        # Mock the hybrid_search method to return empty results
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.return_value = []
 
         with pytest.raises(Exception) as excinfo:
-            datamate_tool.forward("query")
+            datamate_tool.forward("query", index_names=["kb1"])
 
-        assert "No results found!" in str(excinfo.value)
+        assert "No results found! Try a less restrictive/shorter query." in str(excinfo.value)
 
-    def test_forward_wrapped_error(self, mocker: MockFixture, datamate_tool: DataMateSearchTool):
-        # Simulate error in underlying method to verify top-level error wrapping
-        mocker.patch.object(
-            datamate_tool,
-            "_get_knowledge_base_list",
-            side_effect=Exception("low level error"),
-        )
+    def test_forward_wrapped_error(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        # Mock the hybrid_search method to raise an error
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.side_effect = RuntimeError("low level error")
 
         with pytest.raises(Exception) as excinfo:
-            datamate_tool.forward("query")
+            datamate_tool.forward("query", index_names=["kb1"])
 
         msg = str(excinfo.value)
         assert "Error during DataMate knowledge base search" in msg
         assert "low level error" in msg
 
+    def test_forward_with_default_index_names(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        """Test forward method using default index_names from constructor."""
+        # Set default index_names in the tool
+        datamate_tool.index_names = ["default_kb1", "default_kb2"]
 
+        # Mock the hybrid_search method to return results for each knowledge base
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.side_effect = [
+            _build_search_results("default_kb1", count=1),  # First call returns results for kb1
+            _build_search_results("default_kb2", count=1),  # Second call returns results for kb2
+        ]
+
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(datamate_tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.return_value = "http://dl/default_kb/file-1"
+
+        result_json = datamate_tool.forward("query")
+        results = json.loads(result_json)
+
+        assert len(results) == 2  # One result from each knowledge base
+        assert mock_hybrid_search.call_count == 2
+        mock_hybrid_search.assert_any_call(
+            query_text="query",
+            index_names=["default_kb1"],
+            top_k=10,
+            weight_accurate=0.2
+        )
+        mock_hybrid_search.assert_any_call(
+            query_text="query",
+            index_names=["default_kb2"],
+            top_k=10,
+            weight_accurate=0.2
+        )
+
+    def test_forward_multiple_knowledge_bases(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        """Test forward method with multiple knowledge bases."""
+        # Mock the hybrid_search method to return results from multiple KBs
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.side_effect = [
+            _build_search_results("kb1", count=1),  # First call returns results from kb1
+            _build_search_results("kb2", count=2),  # Second call returns results from kb2
+        ]
+
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(datamate_tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.side_effect = lambda ds, fid: f"http://dl/{ds}/{fid}"
+
+        result_json = datamate_tool.forward("query", index_names=["kb1", "kb2"])
+        results = json.loads(result_json)
+
+        assert len(results) == 3  # 1 from kb1 + 2 from kb2
+
+        # Verify hybrid_search was called for each knowledge base
+        assert mock_hybrid_search.call_count == 2
+        mock_hybrid_search.assert_any_call(
+            query_text="query",
+            index_names=["kb1"],
+            top_k=10,
+            weight_accurate=0.2
+        )
+        mock_hybrid_search.assert_any_call(
+            query_text="query",
+            index_names=["kb2"],
+            top_k=10,
+            weight_accurate=0.2
+        )
+
+    def test_forward_with_custom_parameters(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        """Test forward method with custom parameters."""
+        # Mock the hybrid_search method
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.return_value = _build_search_results("kb1", count=1)
+
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(datamate_tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.return_value = "http://dl/kb1/file-1"
+
+        result_json = datamate_tool.forward(
+            query="custom query",
+            index_names=["kb1"],
+            top_k=5,
+            threshold=0.8,
+            kb_page=2,
+            kb_page_size=50
+        )
+        results = json.loads(result_json)
+
+        assert len(results) == 1
+        assert datamate_tool.kb_page == 2
+        assert datamate_tool.kb_page_size == 50
+
+        mock_hybrid_search.assert_called_once_with(
+            query_text="custom query",
+            index_names=["kb1"],
+            top_k=5,
+            weight_accurate=0.8
+        )
+
+    def test_forward_metadata_parsing_edge_cases(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
+        """Test forward method with various metadata parsing edge cases."""
+        # Create search results with different metadata formats
+        search_results = [
+            {
+                "entity": {
+                    "id": "file-1",
+                    "text": "content-1",
+                    "createTime": "2024-01-01T00:00:00Z",
+                    "score": 0.9,
+                    "metadata": json.dumps({
+                        "file_name": "file-1.txt",
+                        "absolute_directory_path": "/data/kb1",
+                        "original_file_id": "orig-1",
+                    }),
+                    "scoreDetails": {"raw": 0.8},
+                }
+            },
+            {
+                "entity": {
+                    "id": "file-2",
+                    "text": "content-2",
+                    "createTime": "2024-01-01T00:00:00Z",
+                    "score": 0.8,
+                    "metadata": {},  # Empty dict metadata
+                    "scoreDetails": {"raw": 0.7},
+                }
+            },
+            {
+                "entity": {
+                    "id": "file-3",
+                    "text": "content-3",
+                    "createTime": "2024-01-01T00:00:00Z",
+                    "score": 0.7,
+                    "metadata": "invalid-json",  # Invalid JSON metadata
+                    "scoreDetails": {"raw": 0.6},
+                }
+            },
+        ]
+
+        # Mock the hybrid_search method
+        mock_hybrid_search = mocker.patch.object(datamate_tool.datamate_core, 'hybrid_search')
+        mock_hybrid_search.return_value = search_results
+
+        # Mock the build_file_download_url method
+        mock_build_url = mocker.patch.object(datamate_tool.datamate_core.client, 'build_file_download_url')
+        mock_build_url.return_value = "http://dl/kb1/file"
+
+        result_json = datamate_tool.forward("query", index_names=["kb1"])
+        results = json.loads(result_json)
+
+        assert len(results) == 3
+
+        # Verify that missing metadata fields are handled gracefully
+        assert results[0]["title"] == "file-1.txt"
+        assert results[1]["title"] == ""  # Empty metadata dict
+        assert results[2]["title"] == ""  # Invalid JSON metadata

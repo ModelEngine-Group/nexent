@@ -14,6 +14,7 @@ TEST_VOICE_PATH = os.path.join(os.path.dirname(
 # Vector database providers
 class VectorDatabaseType(str, Enum):
     ELASTICSEARCH = "elasticsearch"
+    DATAMATE = "datamate"
 
 
 # Elasticsearch Configuration
@@ -22,7 +23,6 @@ ES_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
 ES_PASSWORD = os.getenv("ELASTIC_PASSWORD")
 ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
-
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
@@ -253,6 +253,7 @@ CUSTOM_ICON_URL = "CUSTOM_ICON_URL"
 TENANT_NAME = "TENANT_NAME"
 TENANT_ID = "TENANT_ID"
 DEFAULT_GROUP_ID = "DEFAULT_GROUP_ID"
+DATAMATE_URL = "DATAMATE_URL"
 
 # Task Status Constants
 TASK_STATUS = {

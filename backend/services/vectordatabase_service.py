@@ -23,8 +23,9 @@ from fastapi.responses import StreamingResponse
 from nexent.core.models.embedding_model import OpenAICompatibleEmbedding, JinaEmbedding, BaseEmbedding
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE
+from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -110,6 +111,9 @@ def get_vector_db_core(
             verify_certs=False,
             ssl_show_warn=False,
         )
+
+    if db_type == VectorDatabaseType.DATAMATE:
+        return DataMateCore(base_url=DATAMATE_URL)
 
     raise ValueError(f"Unsupported vector database type: {db_type}")
 

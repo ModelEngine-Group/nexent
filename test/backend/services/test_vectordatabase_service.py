@@ -57,6 +57,7 @@ class _VectorDatabaseCore:
 vector_db_base_module.VectorDatabaseCore = _VectorDatabaseCore
 sys.modules['nexent.vector_database.base'] = vector_db_base_module
 sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
+sys.modules['nexent.vector_database.datamate_core'] = MagicMock()
 # Mock nexent.storage module and its submodules before any imports
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
 storage_factory_module = MagicMock()
@@ -2805,6 +2806,19 @@ class TestRethrowOrPlain(unittest.TestCase):
             get_vector_db_core(db_type="unsupported")
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
+
+    def test_get_vector_db_core_datamate_type(self):
+        """get_vector_db_core returns DataMateCore for DATAMATE type."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType, DATAMATE_URL
+
+        with patch('backend.services.vectordatabase_service.DataMateCore') as mock_datamate_core:
+            mock_datamate_core.return_value = MagicMock()
+
+            result = get_vector_db_core(db_type=VectorDatabaseType.DATAMATE)
+
+            mock_datamate_core.assert_called_once_with(base_url=DATAMATE_URL)
+            self.assertEqual(result, mock_datamate_core.return_value)
 
     def test_rethrow_or_plain_parses_error_code(self):
         """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
