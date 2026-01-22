@@ -70,6 +70,7 @@ from backend.database.remote_mcp_db import (
     delete_mcp_record_by_name_and_url,
     delete_mcp_record_by_container_id,
     update_mcp_status_by_name_and_url,
+    update_mcp_record_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
     check_mcp_name_exists,

@@ -1,28 +1,13 @@
-import backend.services.remote_mcp_service as remote_service
-from backend.services.remote_mcp_service import (
-    mcp_server_health,
-    add_remote_mcp_server_list,
-    delete_remote_mcp_server_list,
-    update_remote_mcp_server_list,
-    get_remote_mcp_server_list,
-    check_mcp_health_and_update_db,
-    delete_mcp_by_container_id,
-    upload_and_start_mcp_image,
-)
-from backend.consts.exceptions import MCPConnectionError, MCPNameIllegal
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
-
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.modules['boto3'] = MagicMock()
-
 # Apply critical patches before importing any modules
 # This prevents real AWS/MinIO/Elasticsearch calls during import
 patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
 storage_client_mock = MagicMock()
@@ -39,9 +24,21 @@ patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
+from backend.consts.exceptions import MCPConnectionError, MCPNameIllegal
 
 # Functions to test
+from backend.services.remote_mcp_service import (
+    mcp_server_health,
+    add_remote_mcp_server_list,
+    delete_remote_mcp_server_list,
+    update_remote_mcp_server_list,
+    get_remote_mcp_server_list,
+    check_mcp_health_and_update_db,
+    delete_mcp_by_container_id,
+    upload_and_start_mcp_image,
+)
 # Patch exception classes to ensure tests use correct exceptions
+import backend.services.remote_mcp_service as remote_service
 remote_service.MCPConnectionError = MCPConnectionError
 remote_service.MCPNameIllegal = MCPNameIllegal
 
