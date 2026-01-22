@@ -151,7 +151,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
         }}
       >
         <div className="h-full">
-          <DebugConfig agentId={currentAgentId || 0} />
+          <DebugConfig agentId={currentAgentId} />
         </div>
       </Drawer>
     </>
