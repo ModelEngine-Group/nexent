@@ -11,13 +11,13 @@ from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, 
 
 
 # Get logger instance
-logger = logging.getLogger("dify_knowledge_base_search_tool")
- 
+logger = logging.getLogger("dify_search_tool")
 
-class DifyKnowledgeBaseSearchTool(Tool):
+
+class DifySearchTool(Tool):
     """Dify knowledge base search tool"""
 
-    name = "dify_knowledge_base_search"
+    name = "dify_search"
     description = (
         "Performs a search on a Dify knowledge base based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in Dify knowledge bases. "
@@ -27,12 +27,6 @@ class DifyKnowledgeBaseSearchTool(Tool):
     )
     inputs = {
         "query": {"type": "string", "description": "The search query to perform."},
-        "top_k": {
-            "type": "integer",
-            "description": "Maximum number of search results to return per dataset .",
-            "default": 3,
-            "nullable": True,
-        },
         "search_method": {
             "type": "string",
             "description": "The search method to use. Options: keyword_search, semantic_search, full_text_search, hybrid_search",
@@ -42,7 +36,7 @@ class DifyKnowledgeBaseSearchTool(Tool):
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
-    tool_sign = ToolSign.DIFY_KNOWLEDGE_BASE.value
+    tool_sign = ToolSign.DIFY_SEARCH.value
 
     def __init__(
         self,
@@ -52,7 +46,7 @@ class DifyKnowledgeBaseSearchTool(Tool):
         top_k: int = Field(description="Maximum number of search results per dataset", default=3),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
     ):
-        """Initialize the DifyKnowledgeBaseSearchTool.
+        """Initialize the DifySearchTool.
 
         Args:
             dify_api_base (str): Dify API base URL
@@ -94,7 +88,6 @@ class DifyKnowledgeBaseSearchTool(Tool):
     def forward(
         self,
         query: str,
-        top_k: Optional[int] = None,
         search_method: str = "semantic_search"
     ) -> str:
         # Send tool run message
@@ -104,12 +97,12 @@ class DifyKnowledgeBaseSearchTool(Tool):
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
-        # Use provided parameters or defaults
-        search_top_k = top_k if top_k is not None else self.top_k
+        # Use instance default top_k
+        search_top_k = self.top_k
 
         # Log the search parameters
         logger.info(
-            f"DifyKnowledgeBaseSearchTool called with query: '{query}', top_k: {search_top_k}, search_method: '{search_method}'"
+            f"DifySearchTool called with query: '{query}', top_k: {search_top_k}, search_method: '{search_method}'"
         )
 
         # Perform searches across all datasets
@@ -189,7 +182,7 @@ class DifyKnowledgeBaseSearchTool(Tool):
             logger.error(error_msg)
             raise Exception(error_msg)
 
-    
+
     def _get_document_download_url(self, document_id: str, dataset_id: str = None) -> str:
         """Get download URL for a document from Dify API.
 

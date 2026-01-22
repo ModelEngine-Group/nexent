@@ -16,7 +16,7 @@ logger = logging.getLogger("datamate_search_tool")
 
 class DataMateSearchTool(Tool):
     """DataMate knowledge base search tool"""
-    name = "datamate_search_tool"
+    name = "datamate_search"
     description = (
         "Performs a DataMate knowledge base search based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in the DataMate knowledge base. "
@@ -58,7 +58,7 @@ class DataMateSearchTool(Tool):
     category = ToolCategory.SEARCH.value
 
     # Used to distinguish different index sources for summaries
-    tool_sign = ToolSign.DATAMATE_KNOWLEDGE_BASE.value
+    tool_sign = ToolSign.DATAMATE_SEARCH.value
 
     def __init__(
         self,
