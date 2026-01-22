@@ -9,6 +9,9 @@ import { fetchAllAgents } from "@/services/agentConfigService";
 import { getUrlParam } from "@/lib/utils";
 import log from "@/lib/logger";
 import { Agent, ChatAgentSelectorProps } from "@/types/chat";
+import { clearAgentNewMark } from "@/services/agentConfigService";
+import { useQueryClient } from "@tanstack/react-query";
+import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 export function ChatAgentSelector({
   selectedAgentId,
@@ -34,6 +37,7 @@ export function ChatAgentSelector({
   const selectedAgent = agents.find(
     (agent) => agent.agent_id === selectedAgentId
   );
+  const queryClient = useQueryClient();
 
   // Detect duplicate agent names and mark later-added agents as disabled
   // For agents with the same name, keep the first one (smallest ID) enabled, disable the rest
@@ -198,7 +202,7 @@ export function ChatAgentSelector({
     }
   };
 
-  const handleAgentSelect = (agentId: number | null) => {
+  const handleAgentSelect = async (agentId: number | null) => {
     // Only effectively available agents can be selected
     if (agentId !== null) {
       const agent = agents.find((a) => a.agent_id === agentId);
@@ -206,9 +210,19 @@ export function ChatAgentSelector({
         const isAvailableTool = agent.is_available !== false;
         const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.agent_id);
         const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
-        
+
         if (!isEffectivelyAvailable) {
           return; // Unavailable agents cannot be selected
+        }
+
+    // Clear NEW mark when agent is selected for chat
+        try {
+          const res = await clearAgentAndSync(agentId, queryClient);
+          if (!res?.success) {
+            log.warn("Failed to clear NEW mark on select:", res);
+          }
+        } catch (e) {
+          log.error("Failed to clear NEW mark on select:", e);
         }
       }
     }

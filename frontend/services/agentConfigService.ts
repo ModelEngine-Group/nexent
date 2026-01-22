@@ -119,6 +119,7 @@ export const fetchAgentList = async () => {
       author: agent.author,
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
+      is_new: agent.is_new || false,
     }));
 
     return {
@@ -484,6 +485,39 @@ export const importAgent = async (
       success: false,
       data: null,
       message: "Failed to import Agent, please try again later",
+    };
+  }
+};
+
+/**
+ * Clear NEW mark for an agent
+ */
+export const clearAgentNewMark = async (agentId: string | number) => {
+  try {
+    const url = typeof API_ENDPOINTS.agent.clearNew === 'function'
+      ? API_ENDPOINTS.agent.clearNew(agentId)
+      : `${API_ENDPOINTS.agent.clearNew}/${agentId}`;
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data: data,
+      message: "Agent NEW mark cleared successfully",
+    };
+  } catch (error) {
+    log.error("Failed to clear agent NEW mark:", error);
+    return {
+      success: false,
+      data: null,
+      message: "Failed to clear agent NEW mark",
     };
   }
 };

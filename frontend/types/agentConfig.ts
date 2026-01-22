@@ -57,6 +57,7 @@ export interface Agent {
   business_logic_model_name?: string;
   business_logic_model_id?: number;
   is_available?: boolean;
+  is_new?: boolean;
   sub_agent_id_list?: number[];
 }
 
