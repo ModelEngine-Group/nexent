@@ -64,7 +64,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   const columns: ColumnsType<ModelOption> = [
     {
-      title: "Name",
+      title: t("common.name"),
       dataIndex: "displayName",
       key: "displayName",
       render: (text: string, record: ModelOption) => (
@@ -75,19 +75,19 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       ),
     },
     {
-      title: "Type",
+      title: t("common.type"),
       dataIndex: "type",
       key: "type",
       render: (type: ModelType) => <Tag>{type}</Tag>,
     },
     {
-      title: "Source",
+      title: t("common.source"),
       dataIndex: "source",
       key: "source",
       render: (source: string) => <Tag color="blue">{source}</Tag>,
     },
     {
-      title: "Status",
+      title: t("common.status"),
       dataIndex: "connect_status",
       key: "connect_status",
       render: (status: string) => {
@@ -96,13 +96,13 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       },
     },
     {
-      title: "Actions",
+      title: t("common.actions"),
       key: "actions",
       render: (_, record: ModelOption) => (
         <div className="space-x-2">
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
           <Popconfirm
-            title="Delete model?"
+            title={t("tenantResources.models.confirmDelete")}
             description="This action cannot be undone."
             onConfirm={() => handleDelete(record.displayName, record.source)}
           >
