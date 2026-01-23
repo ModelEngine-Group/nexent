@@ -591,6 +591,22 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Handle knowledge base deletion
   const handleDelete = (id: string) => {
     hasUserInteractedRef.current = true; // Mark user interaction
+
+    // Find the knowledge base to check its source
+    const kb = kbState.knowledgeBases.find((kb) => kb.id === id);
+
+    if (kb?.source === "datamate") {
+      // Show informational message for DataMate knowledge bases
+      Modal.info({
+        title: t("knowledgeBase.modal.deleteDataMate.title", { name: kb.name }),
+        content: t("knowledgeBase.modal.deleteDataMate.content"),
+        okText: t("common.confirm"),
+        centered: true,
+      });
+      return;
+    }
+
+    // Normal delete confirmation for local knowledge bases
     confirm({
       title: t("knowledgeBase.modal.deleteConfirm.title"),
       content: t("knowledgeBase.modal.deleteConfirm.content"),

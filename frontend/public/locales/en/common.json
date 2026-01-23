@@ -466,6 +466,8 @@
   "knowledgeBase.list.empty": "No knowledge bases yet, please create one first",
   "knowledgeBase.modal.deleteConfirm.title": "Confirm Delete Knowledge Base",
   "knowledgeBase.modal.deleteConfirm.content": "Are you sure you want to delete this knowledge base? This action cannot be undone.",
+  "knowledgeBase.modal.deleteDataMate.title": "Cannot Delete DataMate Knowledge Base",
+  "knowledgeBase.modal.deleteDataMate.content": "Nexent cannot delete DataMate knowledge bases. Please go to the DataMate page to perform the operation.",
   "knowledgeBase.message.deleteSuccess": "Knowledge base deleted successfully",
   "knowledgeBase.message.deleteError": "Failed to delete knowledge base",
   "knowledgeBase.message.syncSuccess": "Knowledge base synchronized successfully",

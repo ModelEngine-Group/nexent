@@ -335,17 +335,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         >
                           {kb.name}
                         </p>
-                        {kb.source !== "datamate" && (
-                          <button
-                            className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDelete(kb.id);
-                            }}
-                          >
-                            {t("common.delete")}
-                          </button>
-                        )}
+                        <button
+                          className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(kb.id);
+                          }}
+                        >
+                          {t("common.delete")}
+                        </button>
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
