@@ -35,9 +35,8 @@ async def get_users_endpoint(
         JSONResponse: Paginated list of users in the tenant
     """
     try:
-        # Get tenant users with pagination and sorting
-        result = get_users(request.tenant_id, request.page, request.page_size,
-                          request.sort_by, request.sort_order)
+        # Get tenant users with pagination
+        result = get_users(request.tenant_id, request.page, request.page_size)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,

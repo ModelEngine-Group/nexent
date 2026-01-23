@@ -151,15 +151,9 @@ export const API_ENDPOINTS = {
         pathOrUrl
       )}/error-info`,
   },
-  datamate: {
-    syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
-    files: (knowledgeBaseId: string) =>
-      `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
-  },
   config: {
     save: `${API_BASE_URL}/config/save_config`,
     load: `${API_BASE_URL}/config/load_config`,
-    saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
   },
   tenantConfig: {
     loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
@@ -254,11 +248,15 @@ export const API_ENDPOINTS = {
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
   },
-  invitations: {
-    list: `${API_BASE_URL}/invitations/list`,
-    create: `${API_BASE_URL}/invitations`,
-    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
-    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+  tenantGroup: {
+    detail: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    update: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    // Group members
+    members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    removeMember: (groupId: number, userId: string) =>
+      `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
   },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,

@@ -81,7 +81,7 @@ class TestGetUsersEndpoint:
             assert data["pagination"]["page"] == 1
             assert data["pagination"]["page_size"] == 20
             assert data["pagination"]["total_pages"] == 1
-            mock_get_users.assert_called_once_with("tenant1", 1, 20, "created_at", "desc")
+            mock_get_users.assert_called_once_with("tenant1", 1, 20)
 
     def test_get_users_empty_list(self):
         """Test user list retrieval with no users"""
@@ -125,7 +125,7 @@ class TestGetUsersEndpoint:
             assert data["pagination"]["page_size"] == 10
             assert data["pagination"]["total"] == 25
             assert data["pagination"]["total_pages"] == 3
-            mock_get_users.assert_called_once_with("tenant1", 2, 10, "created_at", "desc")
+            mock_get_users.assert_called_once_with("tenant1", 2, 10)
 
     def test_get_users_unexpected_error(self):
         """Test user list retrieval with unexpected error"""

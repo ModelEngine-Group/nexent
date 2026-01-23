@@ -12,7 +12,6 @@ import {
   Input,
   Popconfirm,
   message,
-  Flex,
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -69,7 +68,7 @@ function TenantList({
   const handleDelete = async (tenantId: string) => {
     try {
       await deleteTenant(tenantId);
-      message.success(t("tenantResources.tenants.deleted"));
+      message.success(t("tenantResources.tenantDeleted"));
       const newTenants = tenants.filter((t) => t.tenant_id !== tenantId);
       onTenantsChange(newTenants);
 
@@ -90,13 +89,13 @@ function TenantList({
         });
         // Refresh the tenant list to reflect the updated tenant name
         await onTenantsRefetch();
-        message.success(t("tenantResources.tenants.updated"));
+        message.success(t("tenantResources.tenantUpdated"));
       } else {
         const newTenant = await createTenant({ tenant_name: values.name });
         // Refresh the tenant list to include the new tenant
         await onTenantsRefetch();
         onSelect(newTenant.tenant_id);
-        message.success(t("tenantResources.tenants.created"));
+        message.success(t("tenantResources.tenantCreated"));
       }
       setModalVisible(false);
     } catch (err) {
@@ -108,7 +107,7 @@ function TenantList({
     <div className="p-2">
       <div className="flex items-center justify-between mb-2 px-1">
         <div className="text-sm font-medium text-gray-600">
-          {t("tenantResources.tenants.tenants")}
+          {t("tenantResources.tenants")}
         </div>
         <Button
           type="text"
@@ -140,7 +139,7 @@ function TenantList({
                   className="flex-1"
                   onClick={() => onSelect(tenant.tenant_id)}
                 >
-                  {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
+                  {tenant.tenant_name || t("tenantResources.unnamedTenant")}
                 </div>
                 <div className="opacity-0 group-hover:opacity-100 flex space-x-1">
                   <Button
@@ -154,7 +153,7 @@ function TenantList({
                     className="p-1 hover:bg-gray-200 rounded"
                   />
                   <Popconfirm
-                    title={t("tenantResources.tenants.confirmDelete", {
+                    title={t("tenantResources.confirmDeleteTenant", {
                       name: tenant.tenant_name,
                     })}
                     description="This action cannot be undone."
@@ -183,8 +182,8 @@ function TenantList({
       <Modal
         title={
           editingTenant
-            ? t("tenantResources.tenants.editTenant")
-            : t("tenantResources.tenants.createTenant")
+            ? t("tenantResources.editTenant")
+            : t("tenantResources.createTenant")
         }
         open={modalVisible}
         onOk={handleSubmit}
@@ -193,7 +192,7 @@ function TenantList({
         <Form layout="vertical" form={form}>
           <Form.Item
             name="name"
-            label={t("tenantResources.tenants.name")}
+            label={t("tenantResources.tenantName")}
             rules={[
               {
                 required: true,
@@ -235,14 +234,13 @@ export default function UserManageComp() {
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
-  const currentTenantName = tenantId
-    ? (currentTenant?.tenant_name || t("tenantResources.tenants.unnamed"))
-    : t("tenantResources.noTenantSelected", "No tenant selected");
+  const currentTenantName =
+    currentTenant?.tenant_name || t("tenantResources.unnamedTenant");
 
   return (
-    <Flex vertical className="h-full w-full">
+    <div className="w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="flex-shrink-0 w-full px-4 md:px-8 lg:px-16 py-6">
+      <div className="w-full px-4 md:px-8 lg:px-16 py-6">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: -8 }}
@@ -266,18 +264,16 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-
-      {/* Main content area with scrolling */}
-      <div className="flex-1 overflow-hidden">
-        {isSuperAdmin ? (
-          // Super admin layout: tenant list + resource tabs
-          <Row className="h-full" gutter={[0, 0]}>
-            <Col flex="300px" className="h-full">
-              <div className="h-full pr-6 overflow-y-auto">
+      {isSuperAdmin ? (
+        // Super admin layout: tenant list + resource tabs
+        <Row className="h-full">
+          <Col className="h-full" style={{ width: 300 }}>
+            <div className="h-full pr-6">
+              <div className="sticky top-6">
                 <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
                   <TenantList
                     selected={tenantId}
-                    onSelect={(id) => setTenantId(id === tenantId ? null : id)}
+                    onSelect={(id) => setTenantId(id)}
                     tenants={tenants}
                     onTenantsChange={setTenantsState}
                     onTenantsRefetch={refetchTenants}
@@ -286,40 +282,40 @@ export default function UserManageComp() {
                   />
                 </div>
               </div>
-            </Col>
-            <Col flex="auto" className="h-full">
-              <div className="h-full p-6 overflow-y-auto">
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4">
-                  {/* Tenant name header */}
-                  <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {currentTenantName}
-                    </h2>
-                  </div>
+            </div>
+          </Col>
+          <Col className="flex-1 p-6">
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+              {/* Tenant name header */}
+              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {currentTenantName}
+                </h2>
+              </div>
 
-                  {tenantId ? (
-                    <Tabs
-                      defaultActiveKey="users"
-                      items={[
-                        {
-                          key: "users",
-                          label: t("tenantResources.tabs.users") || "Users",
-                          children: <UserList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "groups",
-                          label: t("tenantResources.tabs.groups") || "Groups",
-                          children: <GroupList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "models",
-                          label: t("tenantResources.tabs.models") || "Models",
-                          children: <ModelList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "knowledge",
-                          label:
-                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
+              {tenantId ? (
+                <Tabs
+                  defaultActiveKey="users"
+                  items={[
+                    {
+                      key: "users",
+                      label: t("tenantResources.tab.users") || "Users",
+                      children: <UserList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "groups",
+                      label: t("tenantResources.tab.groups") || "Groups",
+                      children: <GroupList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "models",
+                      label: t("tenantResources.tab.models") || "Models",
+                      children: <ModelList tenantId={tenantId} />,
+                    },
+                    {
+                      key: "knowledge",
+                      label:
+                        t("tenantResources.tab.knowledge") || "Knowledge Base",
                       children: <KnowledgeList tenantId={tenantId} />,
                     },
                     {
@@ -345,43 +341,42 @@ export default function UserManageComp() {
                 </div>
               )}
             </div>
-          </div>
-            </Col>
-          </Row>
-        ) : (
-          // Regular user layout: only resource tabs (no tenant selection)
-          <div className="h-full p-6 overflow-y-auto">
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4">
-              {/* Tenant name header */}
-              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {currentTenantName}
-                </h2>
-              </div>
+          </Col>
+        </Row>
+      ) : (
+        // Regular user layout: only resource tabs (no tenant selection)
+        <div className="h-full p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+            {/* Tenant name header */}
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {currentTenantName}
+              </h2>
+            </div>
 
-              {tenantId ? (
-                <Tabs
-                  defaultActiveKey="users"
-                  items={[
-                    {
-                      key: "users",
-                      label: t("tenantResources.tabs.users") || "Users",
-                      children: <UserList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "groups",
-                      label: t("tenantResources.tabs.groups") || "Groups",
-                      children: <GroupList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "models",
-                      label: t("tenantResources.tabs.models") || "Models",
-                      children: <ModelList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "knowledge",
-                      label:
-                        t("tenantResources.tabs.knowledge") || "Knowledge Base",
+            {tenantId ? (
+              <Tabs
+                defaultActiveKey="users"
+                items={[
+                  {
+                    key: "users",
+                    label: t("tenantResources.tab.users") || "Users",
+                    children: <UserList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "groups",
+                    label: t("tenantResources.tab.groups") || "Groups",
+                    children: <GroupList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "models",
+                    label: t("tenantResources.tab.models") || "Models",
+                    children: <ModelList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "knowledge",
+                    label:
+                      t("tenantResources.tab.knowledge") || "Knowledge Base",
                     children: <KnowledgeList tenantId={tenantId} />,
                   },
                   {
@@ -409,6 +404,6 @@ export default function UserManageComp() {
           </div>
         </div>
       )}
-    </div></Flex>
+    </div>
   );
 }
