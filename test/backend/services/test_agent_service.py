@@ -6937,11 +6937,8 @@ async def test_clear_agent_new_mark_impl_success():
     3. Logs the operation with correct parameters
     """
     # Setup
-    from backend.database import agent_db
-    with patch.object(agent_db, 'clear_agent_new_mark') as mock_clear_db, \
+    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=1) as mock_clear_db, \
          patch('backend.services.agent_service.logger') as mock_logger:
-
-        mock_clear_db.return_value = 1
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -6968,11 +6965,8 @@ async def test_clear_agent_new_mark_impl_no_rows_affected():
     2. Still logs the operation appropriately
     """
     # Setup
-    from backend.database import agent_db
-    with patch.object(agent_db, 'clear_agent_new_mark') as mock_clear_db, \
+    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=0) as mock_clear_db, \
          patch('backend.services.agent_service.logger') as mock_logger:
-
-        mock_clear_db.return_value = 0
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -6999,11 +6993,8 @@ async def test_clear_agent_new_mark_impl_multiple_rows_affected():
     2. Logs the correct count
     """
     # Setup
-    from backend.database import agent_db
-    with patch.object(agent_db, 'clear_agent_new_mark') as mock_clear_db, \
+    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=3) as mock_clear_db, \
          patch('backend.services.agent_service.logger') as mock_logger:
-
-        mock_clear_db.return_value = 3
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -7030,8 +7021,7 @@ async def test_clear_agent_new_mark_impl_database_error():
     2. Does not log success when operation fails
     """
     # Setup
-    from backend.database import agent_db
-    with patch.object(agent_db, 'clear_agent_new_mark') as mock_clear_db, \
+    with patch('backend.services.agent_service.clear_agent_new_mark', create=True) as mock_clear_db, \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         mock_clear_db.side_effect = Exception("Database connection failed")
@@ -7058,11 +7048,8 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
     2. Properly passes through all parameters
     """
     # Setup
-    from backend.database import agent_db
-    with patch.object(agent_db, 'clear_agent_new_mark') as mock_clear_db, \
+    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=1) as mock_clear_db, \
          patch('backend.services.agent_service.logger') as mock_logger:
-
-        mock_clear_db.return_value = 1
 
         # Execute
         result = await clear_agent_new_mark_impl(
