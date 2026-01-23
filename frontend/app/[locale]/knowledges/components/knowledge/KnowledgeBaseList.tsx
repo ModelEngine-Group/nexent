@@ -1,8 +1,14 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Checkbox, ConfigProvider } from "antd";
-import { SyncOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Checkbox, ConfigProvider, Input, Select, Space } from "antd";
+import {
+  SyncOutlined,
+  PlusOutlined,
+  SettingOutlined,
+  SearchOutlined,
+  FilterOutlined,
+} from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 
@@ -79,6 +85,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 }) => {
   const { t } = useTranslation();
 
+  // Search and filter states
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+
   // Format date function, only keep date part
   const formatDate = (dateValue: any) => {
     try {
@@ -108,6 +119,46 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     const bTime = getTimestamp(b.updatedAt ?? b.createdAt);
     return bTime - aTime;
   });
+
+  // Calculate available filter options
+  const availableSources = useMemo(() => {
+    const sources = new Set(knowledgeBases.map((kb) => kb.source));
+    return Array.from(sources)
+      .filter((source) => source)
+      .sort();
+  }, [knowledgeBases]);
+
+  const availableModels = useMemo(() => {
+    const models = new Set(knowledgeBases.map((kb) => kb.embeddingModel));
+    return Array.from(models)
+      .filter((model) => model && model !== "unknown")
+      .sort();
+  }, [knowledgeBases]);
+
+  // Filter knowledge bases based on search and filters
+  const filteredKnowledgeBases = useMemo(() => {
+    return sortedKnowledgeBases.filter((kb) => {
+      // Keyword search: match name, description, or nickname
+      const matchesSearch =
+        !searchKeyword ||
+        kb.name.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+        (kb.description &&
+          kb.description.toLowerCase().includes(searchKeyword.toLowerCase())) ||
+        (kb.nickname &&
+          kb.nickname.toLowerCase().includes(searchKeyword.toLowerCase()));
+
+      // Source filter
+      const matchesSource =
+        selectedSources.length === 0 || selectedSources.includes(kb.source);
+
+      // Model filter
+      const matchesModel =
+        selectedModels.length === 0 ||
+        selectedModels.includes(kb.embeddingModel);
+
+      return matchesSearch && matchesSource && matchesModel;
+    });
+  }, [sortedKnowledgeBases, searchKeyword, selectedSources, selectedModels]);
 
   return (
     <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col">
@@ -192,6 +243,104 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             )}
           </div>
         </div>
+
+        {/* Search and filter area */}
+        <div className="mt-3 flex items-center gap-3">
+          <Input
+            placeholder={t("knowledgeBase.search.placeholder")}
+            prefix={<SearchOutlined />}
+            value={searchKeyword}
+            onChange={(e) => setSearchKeyword(e.target.value)}
+            style={{ width: 250 }}
+            allowClear
+          />
+
+          {availableSources.length > 0 && (
+            <Select
+              mode="multiple"
+              placeholder={t("knowledgeBase.filter.source.placeholder")}
+              value={selectedSources}
+              onChange={setSelectedSources}
+              style={{ minWidth: 150 }}
+              allowClear
+              maxTagCount={2}
+            >
+              {availableSources.map((source) => (
+                <Select.Option key={source} value={source}>
+                  <div
+                    className="flex items-center gap-2"
+                    onMouseDown={(e) => {
+                      // Prevent Select from losing focus when clicking checkbox
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const exists = selectedSources.includes(source);
+                      const next = exists
+                        ? selectedSources.filter((s) => s !== source)
+                        : [...selectedSources, source];
+                      setSelectedSources(next);
+                    }}
+                  >
+                    <Checkbox
+                      checked={selectedSources.includes(source)}
+                      onClick={(e) => {
+                        // Keep checkbox click handling local
+                        e.stopPropagation();
+                      }}
+                    />
+                    <span>
+                      {t("knowledgeBase.source." + source, {
+                        defaultValue: source,
+                      })}
+                    </span>
+                  </div>
+                </Select.Option>
+              ))}
+            </Select>
+          )}
+
+          {availableModels.length > 0 && (
+            <Select
+              mode="multiple"
+              placeholder={t("knowledgeBase.filter.model.placeholder")}
+              value={selectedModels}
+              onChange={setSelectedModels}
+              style={{ minWidth: 180 }}
+              allowClear
+              maxTagCount={2}
+            >
+              {availableModels.map((model) => (
+                <Select.Option key={model} value={model}>
+                  <div
+                    className="flex items-center gap-2"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const exists = selectedModels.includes(model);
+                      const next = exists
+                        ? selectedModels.filter((m) => m !== model)
+                        : [...selectedModels, model];
+                      setSelectedModels(next);
+                    }}
+                  >
+                    <Checkbox
+                      checked={selectedModels.includes(model)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                    <span>{getModelDisplayName(model)}</span>
+                  </div>
+                </Select.Option>
+              ))}
+            </Select>
+          )}
+        </div>
       </div>
 
       {/* Fixed selection status area */}
@@ -248,9 +397,9 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
       {/* Scrollable knowledge base list area */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        {sortedKnowledgeBases.length > 0 ? (
+        {filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
-            {sortedKnowledgeBases.map((kb, index) => {
+            {filteredKnowledgeBases.map((kb, index) => {
               const canSelect = isSelectable(kb);
               const isSelected = selectedIds.includes(kb.id);
               const isActive = activeKnowledgeBase?.id === kb.id;
@@ -425,7 +574,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           <div
             className={`${KB_LAYOUT.EMPTY_STATE_PADDING} text-center text-gray-500`}
           >
-            {t("knowledgeBase.list.empty")}
+            {searchKeyword ||
+            selectedSources.length > 0 ||
+            selectedModels.length > 0
+              ? t("knowledgeBase.list.noResults")
+              : t("knowledgeBase.list.empty")}
           </div>
         )}
       </div>
