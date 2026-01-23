@@ -335,15 +335,17 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         >
                           {kb.name}
                         </p>
-                        <button
-                          className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(kb.id);
-                          }}
-                        >
-                          {t("common.delete")}
-                        </button>
+                        {kb.source !== "datamate" && (
+                          <button
+                            className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(kb.id);
+                            }}
+                          >
+                            {t("common.delete")}
+                          </button>
+                        )}
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
@@ -366,19 +368,19 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           })}
                         </span>
 
-                        {/* Only show source, creation date, and model tags when there are valid documents or chunks */}
+                        {/* Always show source tag regardless of document/chunk count */}
+                        <span
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                        >
+                          {t("knowledgeBase.tag.source", {
+                            source: kb.source,
+                          })}
+                        </span>
+
+                        {/* Only show creation date, model tags when there are valid documents or chunks */}
                         {((kb.documentCount || 0) > 0 ||
                           (kb.chunkCount || 0) > 0) && (
                           <>
-                            {/* Knowledge base source tag */}
-                            <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
-                            >
-                              {t("knowledgeBase.tag.source", {
-                                source: kb.source,
-                              })}
-                            </span>
-
                             {/* Creation date tag - only show date */}
                             <span
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
