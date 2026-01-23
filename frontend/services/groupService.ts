@@ -65,6 +65,8 @@ export async function listGroups(
         tenant_id: tenantId,
         page,
         page_size: pageSize,
+        sort_by: "created_at",
+        sort_order: "desc",
       }),
     });
 
@@ -88,7 +90,7 @@ export async function listGroups(
 export async function getGroup(groupId: number): Promise<Group> {
   try {
     const response = await fetchWithAuth(
-      API_ENDPOINTS.tenantGroup.detail(groupId),
+      API_ENDPOINTS.groups.detail(groupId),
       {
         method: "GET",
       }
@@ -110,7 +112,7 @@ export async function getGroup(groupId: number): Promise<Group> {
 export async function getGroupMembers(groupId: number): Promise<User[]> {
   try {
     const response = await fetchWithAuth(
-      API_ENDPOINTS.tenantGroup.members(groupId),
+      API_ENDPOINTS.groups.members(groupId),
       {
         method: "GET",
       }
@@ -160,7 +162,7 @@ export async function updateGroup(
   payload: UpdateGroupRequest
 ): Promise<void> {
   try {
-    await fetchWithAuth(API_ENDPOINTS.tenantGroup.update(groupId), {
+    await fetchWithAuth(API_ENDPOINTS.groups.update(groupId), {
       method: "PUT",
       body: JSON.stringify(payload),
     });
@@ -177,7 +179,7 @@ export async function updateGroup(
  */
 export async function deleteGroup(groupId: number): Promise<void> {
   try {
-    await fetchWithAuth(API_ENDPOINTS.tenantGroup.delete(groupId), {
+    await fetchWithAuth(API_ENDPOINTS.groups.delete(groupId), {
       method: "DELETE",
     });
   } catch (error) {
@@ -196,7 +198,7 @@ export async function addUserToGroup(
   userId: string
 ): Promise<void> {
   try {
-    await fetchWithAuth(API_ENDPOINTS.tenantGroup.addMember(groupId), {
+    await fetchWithAuth(API_ENDPOINTS.groups.addMember(groupId), {
       method: "POST",
       body: JSON.stringify({ user_id: userId }),
     });
@@ -217,7 +219,7 @@ export async function removeUserFromGroup(
 ): Promise<void> {
   try {
     await fetchWithAuth(
-      API_ENDPOINTS.tenantGroup.removeMember(groupId, userId),
+      API_ENDPOINTS.groups.removeMember(groupId, userId),
       {
         method: "DELETE",
       }
@@ -239,7 +241,7 @@ export async function updateGroupMembers(
 ): Promise<{ added_count: number; removed_count: number; total_members: number }> {
   try {
     const response = await fetchWithAuth(
-      API_ENDPOINTS.tenantGroup.members(groupId),
+      API_ENDPOINTS.groups.members(groupId),
       {
         method: "PUT",
         body: JSON.stringify({ user_ids: userIds }),
@@ -253,5 +255,27 @@ export async function updateGroupMembers(
       throw error;
     }
     throw new ApiError(500, "Failed to update group members");
+  }
+}
+
+/**
+ * Get tenant's default group ID
+ */
+export async function getTenantDefaultGroupId(tenantId: string): Promise<number | null> {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.groups.default(tenantId),
+      {
+        method: "GET",
+      }
+    );
+
+    const result = await response.json();
+    return result.data?.default_group_id || null;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to get tenant default group");
   }
 }

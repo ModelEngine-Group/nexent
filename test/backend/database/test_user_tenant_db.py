@@ -422,22 +422,37 @@ def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
     """Test successfully getting users by tenant ID with pagination"""
     session, query = mock_session
 
-    # Mock the count query result
-    mock_count_result = MagicMock()
-    mock_count_result.count.return_value = 5
-
     # Mock the pagination query result
     mock_paginated_results = [
         MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN"),
         MockUserTenant(user_id="user2", user_email="user2@example.com", user_role="USER"),
     ]
-    mock_pagination_result = MagicMock()
-    mock_pagination_result.offset.return_value = mock_pagination_result
-    mock_pagination_result.limit.return_value = mock_pagination_result
-    mock_pagination_result.all.return_value = mock_paginated_results
 
-    # Set up different returns for count vs pagination queries
-    query.filter.side_effect = [mock_count_result, mock_pagination_result]
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 5
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_paginated_filter = MagicMock()
+            mock_paginated_order_by = MagicMock()
+            mock_paginated_offset = MagicMock()
+            mock_paginated_limit = MagicMock()
+            mock_paginated_limit.all.return_value = mock_paginated_results
+            mock_paginated_offset.limit.return_value = mock_paginated_limit
+            mock_paginated_order_by.offset.return_value = mock_paginated_offset
+            mock_paginated_filter.order_by.return_value = mock_paginated_order_by
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session

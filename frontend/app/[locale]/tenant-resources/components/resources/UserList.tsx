@@ -59,7 +59,7 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
   const handleDelete = async (id: string) => {
     try {
       await deleteUser(id.toString());
-      message.success(t("tenantResources.userDeleted"));
+      message.success(t("tenantResources.users.deleted"));
       refetch();
     } catch (err: any) {
       if (err.response?.data?.message) {
@@ -80,7 +80,7 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
           role: values.role,
         };
         await updateUser(editingUser.id.toString(), updateData);
-        message.success(t("tenantResources.userUpdated"));
+        message.success(t("tenantResources.users.updated"));
       }
       setModalVisible(false);
       form.resetFields();
@@ -104,7 +104,7 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
       };
 
       const createdGroup = await createGroup(tenantId, groupData);
-      message.success(t("tenantResources.groupCreated"));
+      message.success(t("tenantResources.groups.created"));
 
       setCreateGroupModalVisible(false);
       groupForm.resetFields();
@@ -121,12 +121,12 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
   const columns: ColumnsType<User> = useMemo(
     () => [
       {
-        title: "Email",
+        title: t("common.email"),
         dataIndex: "username",
         key: "username",
       },
       {
-        title: "Role",
+        title: t("common.type"),
         dataIndex: "role",
         key: "role",
         render: (role: string) => {
@@ -140,13 +140,13 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         },
       },
       {
-        title: "Actions",
+        title: t("common.actions"),
         key: "actions",
         render: (_, record) => (
           <div className="space-x-2">
             <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
             <Popconfirm
-              title={t("tenantResources.confirmDeleteUser", {
+              title={t("tenantResources.users.confirmDelete", {
                 name: record.username,
               })}
               onConfirm={() => handleDelete(record.id)}
@@ -171,21 +171,19 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
       />
 
       <Modal
-        title={t("tenantResources.editUser")}
+        title={t("tenantResources.users.editUser")}
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
       >
         <Form layout="vertical" form={form}>
-          <Form.Item name="username" label="Email">
+          <Form.Item name="username" label={t("common.email")}>
             <Input
               disabled={!!editingUser}
-              placeholder={
-                editingUser ? "User email address" : "Enter user email address"
-              }
+              placeholder={t("tenantResources.users.enterEmail")}
             />
           </Form.Item>
-          <Form.Item name="role" label="Role" rules={[{ required: true }]}>
+          <Form.Item name="role" label={t("common.type")} rules={[{ required: true }]}>
             <Select
               options={[
                 { label: t("user.role.admin"), value: "ADMIN" },
@@ -199,7 +197,7 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
 
       {/* Create Group Modal */}
       <Modal
-        title={t("tenantResources.createGroup")}
+        title={t("tenantResources.groups.createGroup")}
         open={createGroupModalVisible}
         onOk={handleCreateGroup}
         onCancel={() => setCreateGroupModalVisible(false)}
@@ -207,7 +205,7 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         <Form layout="vertical" form={groupForm}>
           <Form.Item
             name="name"
-            label={t("tenantResources.tenantName")}
+            label={t("tenantResources.tenants.name")}
             rules={[{ required: true, message: "Please enter group name" }]}
           >
             <Input placeholder="Enter group name" />

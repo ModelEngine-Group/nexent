@@ -158,7 +158,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       const newMemberIds = (values.members as string[]) || [];
       await updateGroupMembers(editingGroup.group_id, newMemberIds);
 
-      message.success(t("tenantResources.groupUpdated"));
+      message.success(t("tenantResources.groups.updated"));
       setModalVisible(false);
 
       // Force refresh group list to update user counts
@@ -176,14 +176,14 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
   const columns: ColumnsType<Group> = useMemo(
     () => [
-      { title: "Group", dataIndex: "group_name", key: "group_name" },
+      { title: t("tenantResources.groups.name"), dataIndex: "group_name", key: "group_name" },
       {
-        title: "Description",
+        title: t("common.description"),
         dataIndex: "group_description",
         key: "group_description",
       },
       {
-        title: "Users",
+        title: t("tenantResources.groups.members"),
         dataIndex: "user_count",
         key: "user_count",
         render: (count: number, record: Group) => (
@@ -198,13 +198,13 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         ),
       },
       {
-        title: "Actions",
+        title: t("common.actions"),
         key: "actions",
         render: (_, record) => (
           <div className="space-x-2">
             <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
             <Popconfirm
-              title={t("tenantResources.confirmDeleteGroup", {
+              title={t("tenantResources.groups.confirmDelete", {
                 name: record.group_name,
               })}
               onConfirm={() => handleDelete(record.group_id)}
@@ -215,7 +215,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         ),
       },
     ],
-    []
+    [t]
   );
 
   return (
@@ -224,7 +224,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         <div />
         <div>
           <Button type="primary" onClick={openCreate}>
-            + {t("tenantResources.createGroup")}
+            + {t("tenantResources.groups.createGroup")}
           </Button>
         </div>
       </div>
@@ -241,8 +241,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       <Modal
         title={
           editingGroup
-            ? t("tenantResources.editGroup")
-            : t("tenantResources.createGroup")
+            ? t("tenantResources.groups.editGroup")
+            : t("tenantResources.groups.createGroup")
         }
         open={modalVisible}
         onOk={editingGroup ? handleEditGroupSubmit : handleSubmit}
@@ -253,18 +253,18 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           <Form layout="vertical" form={editGroupForm}>
             <Form.Item
               name="name"
-              label={t("tenantResources.tenantName")}
+              label={t("tenantResources.tenants.name")}
               rules={[{ required: true }]}
             >
-              <Input placeholder={t("tenantResources.tenantName")} />
+              <Input placeholder={t("tenantResources.tenants.name")} />
             </Form.Item>
             <Form.Item name="description" label={t("common.description")}>
               <Input.TextArea placeholder={t("common.description")} rows={3} />
             </Form.Item>
-            <Form.Item name="members" label={t("tenantResources.groupMembers")}>
+            <Form.Item name="members" label={t("tenantResources.groups.members")}>
               <Select
                 mode="multiple"
-                placeholder={t("tenantResources.selectUsers")}
+                placeholder={t("tenantResources.groups.selectUsers")}
                 options={allUsers.map((user) => ({
                   label: user.username,
                   value: user.id,
@@ -286,10 +286,10 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           <Form layout="vertical" form={form}>
             <Form.Item
               name="name"
-              label={t("tenantResources.groupName")}
+              label={t("tenantResources.groups.name")}
               rules={[{ required: true }]}
             >
-            <Input placeholder={t("tenantResources.groupName")} />
+            <Input placeholder={t("tenantResources.groups.enterName")} />
             </Form.Item>
             <Form.Item name="description" label={t("common.description")}>
               <Input.TextArea
@@ -303,7 +303,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
       {/* User List Modal */}
       <Modal
-        title={`${t("tenantResources.groupMembers")} - ${selectedGroupForUsers?.group_name}`}
+        title={`${t("tenantResources.groups.members")} - ${selectedGroupForUsers?.group_name}`}
         open={userListModalVisible}
         onCancel={() => setUserListModalVisible(false)}
         footer={null}
@@ -311,7 +311,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       >
         <div>
           <p style={{ marginBottom: 16 }}>
-            {t("tenantResources.totalMembers")}: {groupUsers.length}
+            {t("tenantResources.groups.totalMembers")}: {groupUsers.length}
           </p>
           {groupUsers.length > 0 ? (
             <div style={{ maxHeight: 300, overflowY: "auto" }}>
@@ -332,7 +332,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
             </div>
           ) : (
             <p style={{ color: "#999", fontStyle: "italic" }}>
-              {t("tenantResources.noGroupMembers")}
+              {t("tenantResources.groups.noMembers")}
             </p>
           )}
         </div>

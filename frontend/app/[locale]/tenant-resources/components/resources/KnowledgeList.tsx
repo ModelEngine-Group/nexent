@@ -97,13 +97,13 @@ export default function KnowledgeList({
 
   const columns: ColumnsType<KnowledgeBase> = [
     {
-      title: "Name",
+      title: t("common.name"),
       dataIndex: "name",
       key: "name",
       render: (text: string) => <div className="font-medium">{text}</div>,
     },
     {
-      title: "Description",
+      title: t("common.description"),
       dataIndex: "description",
       key: "description",
     },
@@ -120,13 +120,13 @@ export default function KnowledgeList({
       render: (count: number) => count || 0,
     },
     {
-      title: "Created",
+      title: t("common.created"),
       dataIndex: "createdAt",
       key: "createdAt",
       render: (date: any) => date ? new Date(date).toLocaleDateString() : "Unknown",
     },
     {
-      title: "Actions",
+      title: t("common.actions"),
       key: "actions",
       render: (_, record: KnowledgeBase) => (
         <div className="space-x-2">
@@ -144,7 +144,7 @@ export default function KnowledgeList({
           </Upload>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
           <Popconfirm
-            title="Delete knowledge base?"
+            title={t("knowledgeBase.modal.deleteConfirm.title")}
             description="This action cannot be undone."
             onConfirm={() => handleDelete(record.id)}
           >
@@ -185,16 +185,16 @@ export default function KnowledgeList({
         <Form form={form} layout="vertical">
           <Form.Item
             name="name"
-            label="Name"
+            label={t("common.name")}
             rules={[
               { required: true, message: "Please enter knowledge base name" },
             ]}
           >
-            <Input placeholder="e.g., Company Documents" />
+            <Input placeholder={t("tenantResources.knowledgeBases.enterName")} />
           </Form.Item>
 
-          <Form.Item name="description" label="Description">
-            <Input.TextArea placeholder="Optional description" rows={3} />
+          <Form.Item name="description" label={t("common.description")}>
+            <Input.TextArea placeholder={t("tenantResources.knowledgeBases.enterDescription")} rows={3} />
           </Form.Item>
         </Form>
       </Modal>

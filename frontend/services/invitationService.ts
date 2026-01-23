@@ -21,6 +21,8 @@ export interface InvitationListRequest {
   tenant_id?: string;
   page?: number;
   page_size?: number;
+  sort_by?: string;
+  sort_order?: string;
 }
 
 export interface InvitationListResponse {
@@ -78,6 +80,8 @@ export async function listInvitations(
         tenant_id: request.tenant_id,
         page: request.page || 1,
         page_size: request.page_size || 20,
+        sort_by: request.sort_by,
+        sort_order: request.sort_order,
       }),
     });
 

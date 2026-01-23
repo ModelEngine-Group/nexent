@@ -261,7 +261,9 @@ def query_invitation_status(invitation_code: str) -> Optional[str]:
 def query_invitations_with_pagination(
     tenant_id: Optional[str] = None,
     page: int = 1,
-    page_size: int = 20
+    page_size: int = 20,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Query invitations with pagination support, including usage count
@@ -270,6 +272,8 @@ def query_invitations_with_pagination(
         tenant_id (Optional[str]): Tenant ID to filter by, None for all tenants
         page (int): Page number (1-based)
         page_size (int): Number of items per page
+        sort_by (Optional[str]): Sort field ('create_time', 'update_time', etc.)
+        sort_order (Optional[str]): Sort order ('asc', 'desc')
 
     Returns:
         Dict[str, Any]: Dictionary containing items list and total count
@@ -299,6 +303,14 @@ def query_invitations_with_pagination(
         # Apply tenant filter if provided
         if tenant_id:
             query = query.filter(TenantInvitationCode.tenant_id == tenant_id)
+
+        # Apply sorting
+        if sort_by and hasattr(TenantInvitationCode, sort_by):
+            sort_column = getattr(TenantInvitationCode, sort_by)
+            if sort_order and sort_order.lower() == 'desc':
+                query = query.order_by(sort_column.desc())
+            else:
+                query = query.order_by(sort_column.asc())
 
         # Get total count
         total = query.count()
