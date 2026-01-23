@@ -257,3 +257,25 @@ export async function updateGroupMembers(
     throw new ApiError(500, "Failed to update group members");
   }
 }
+
+/**
+ * Get tenant's default group ID
+ */
+export async function getTenantDefaultGroupId(tenantId: string): Promise<number | null> {
+  try {
+    const response = await fetchWithAuth(
+      API_ENDPOINTS.groups.default(tenantId),
+      {
+        method: "GET",
+      }
+    );
+
+    const result = await response.json();
+    return result.data?.default_group_id || null;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to get tenant default group");
+  }
+}

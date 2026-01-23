@@ -48,7 +48,9 @@ async def list_invitations_endpoint(
             tenant_id=request.tenant_id,
             page=request.page,
             page_size=request.page_size,
-            user_id=user_id
+            user_id=user_id,
+            sort_by=request.sort_by,
+            sort_order=request.sort_order
         )
 
         logger.info(f"User {user_id} retrieved invitation list (tenant: {request.tenant_id or 'all'}, page: {request.page}, size: {request.page_size})")

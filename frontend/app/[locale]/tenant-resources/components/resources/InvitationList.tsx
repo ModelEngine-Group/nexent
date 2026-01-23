@@ -49,6 +49,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
     tenant_id: tenantId || undefined,
     page: currentPage,
     page_size: pageSize,
+    sort_by: "update_time",
+    sort_order: "desc",
   });
 
   // Fetch groups for group selection
@@ -56,7 +58,6 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
   const groups = groupData?.groups || [];
 
   const invitations = data?.items || [];
-  const total = data?.total || 0;
 
   const openCreate = async () => {
     setEditingInvitation(null);
@@ -71,11 +72,13 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           defaultGroupIds = [defaultGroupId];
         }
       } catch (error) {
-        // If we can't get default group, just continue without it
         console.warn("Failed to get default group:", error);
+        // Show user-friendly message
+        message.warning("Unable to load default group. You can manually select groups.");
       }
+    } else {
+      console.log("No tenantId available for getting default group");
     }
-
     form.setFieldsValue({
       code_type: "USER_INVITE",
       capacity: 1,
@@ -181,21 +184,20 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         title: t("tenantResources.invitation.invitationCode"),
         dataIndex: "invitation_code",
         key: "invitation_code",
-        width: 180,
+        width: 80,
         render: (code: string) => (
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono font-medium">{code}</span>
             <Tooltip title={t("common.copy")}>
-              <button
+              <Button
+                type="text"
+                icon={<Copy className="h-4 w-4" />}
                 onClick={() => {
                   navigator.clipboard.writeText(code);
                   message.success(t("common.copied"));
                 }}
-                className="text-gray-400 hover:text-blue-600 transition-colors cursor-pointer"
                 aria-label={t("common.copy")}
-              >
-                <Copy className="h-4 w-4" />
-              </button>
+              />
             </Tooltip>
           </div>
         ),
@@ -204,46 +206,24 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         title: t("tenantResources.invitation.codeType"),
         dataIndex: "code_type",
         key: "code_type",
-        width: 120,
+        width: 80,
         render: (type: string) => {
           const color =
             type === "ADMIN_INVITE" ? "magenta" :
-            type === "DEV_INVITE" ? "blue" : "green";
+            type === "DEV_INVITE" ? "geekblue" : "cyan";
           return <Tag color={color}>{t(`tenantResources.invitation.codeType.${type}`)}</Tag>;
-        },
-      },
-      {
-        title: t("tenantResources.invitation.groupNames"),
-        dataIndex: "group_ids",
-        key: "group_names",
-        width: 200,
-        render: (groupIds: number[]) => {
-          const names = getGroupNames(groupIds);
-          return (
-            <div className="flex flex-wrap gap-1">
-              {names.length > 0 ? (
-                names.map((name, index) => (
-                  <Tag key={index} color="cyan">
-                    {name}
-                  </Tag>
-                ))
-              ) : (
-                <span className="text-gray-400">{t("tenantResources.invitation.noGroups")}</span>
-              )}
-            </div>
-          );
         },
       },
       {
         title: t("tenantResources.invitation.usage"),
         key: "usage",
-        width: 100,
+        width: 80,
         render: (_, record: Invitation) => {
           const { capacity, used_times } = record;
           const remaining = capacity - used_times;
           const percent = Math.round((remaining / capacity) * 100);
           return (
-            <div className="flex justify-center">
+            <div className="flex ml-5">
               <Progress
                 type="dashboard"
                 percent={percent}
@@ -260,19 +240,46 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         title: t("tenantResources.invitation.expiryDate"),
         dataIndex: "expiry_date",
         key: "expiry_date",
-        width: 130,
+        width: 120,
         render: (date: string) =>
           date ? dayjs(date).format("YYYY-MM-DD") : <span className="text-gray-400">{t("tenantResources.invitation.noExpiry")}</span>,
+      },
+      {
+        title: t("tenantResources.invitation.groupNames"),
+        dataIndex: "group_ids",
+        key: "group_names",
+        width: 300,
+        render: (groupIds: number[]) => {
+          const names = getGroupNames(groupIds);
+          return (
+            <div className="flex flex-wrap gap-1">
+              {names.length > 0 ? (
+                names.map((name, index) => (
+                  <Tag
+                    key={index}
+                    color="blue"
+                    variant="outlined"
+                  >
+                    {name}
+                  </Tag>
+                ))
+              ) : (
+                <span className="text-gray-400">{t("tenantResources.invitation.noGroups")}</span>
+              )}
+            </div>
+          );
+        },
       },
       {
         title: t("tenantResources.invitation.status"),
         dataIndex: "status",
         key: "status",
+        width: 120,
         render: (status: string) => {
           const color =
-            status === "IN_USE" ? "blue" :
+            status === "IN_USE" ? "green" :
             status === "EXPIRE" ? "gray" :
-            status === "RUN_OUT" ? "orange" : "red";
+            status === "RUN_OUT" ? "gray" : "volcano";
 
           const icon = status === "IN_USE" ? <CheckCircle className="w-3 h-3 mr-1" /> :
                       status === "EXPIRE" ? <Clock className="w-3 h-3 mr-1" /> :
@@ -280,7 +287,11 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
                       <AlertCircle className="w-3 h-3 mr-1" />;
 
           return (
-            <Tag color={color} className="flex items-center">
+            <Tag
+              color={color}
+              className="inline-flex items-center"
+              variant="solid"
+            >
               {icon}
               {t(`tenantResources.invitation.status.${status}`)}
             </Tag>
@@ -290,18 +301,17 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
       {
         title: t("tenantResources.invitation.actions"),
         key: "actions",
-        width: 120,
+        width: 200,
         fixed: "right",
         render: (_, record: Invitation) => (
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
             <Tooltip title={t("tenantResources.invitation.editInvitation")}>
-              <button
+              <Button
+                type="text"
+                icon={<Edit className="h-4 w-4" />}
                 onClick={() => openEdit(record)}
-                className="text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
-                aria-label={t("tenantResources.invitation.editInvitation")}
-              >
-                <Edit className="h-4 w-4" />
-              </button>
+                size="small"
+              />
             </Tooltip>
             <Popconfirm
               title={t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code })}
@@ -309,12 +319,12 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               onConfirm={() => handleDelete(record.invitation_code)}
             >
               <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
-                <button
-                  className="text-red-600 hover:text-red-700 transition-colors cursor-pointer"
-                  aria-label={t("tenantResources.invitation.deleteInvitation")}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                />
               </Tooltip>
             </Popconfirm>
           </div>
@@ -352,38 +362,14 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
 
       {tenantId ? (
         // Single tenant view with pagination
-        <>
-          <Table
-            columns={columns}
-            dataSource={invitations}
-            loading={isLoading}
-            rowKey="invitation_id"
-            pagination={false}
-            scroll={{ x: 1000 }}
-          />
-          {total > pageSize && (
-            <div className="mt-4 flex justify-center">
-              <Pagination
-                current={currentPage}
-                pageSize={pageSize}
-                total={total}
-                showSizeChanger
-                showQuickJumper
-                showTotal={(total, range) =>
-                  `Showing ${range[0]}-${range[1]} of ${total} invitations`
-                }
-                onChange={(page, size) => {
-                  setCurrentPage(page);
-                  setPageSize(size);
-                }}
-                onShowSizeChange={(current, size) => {
-                  setCurrentPage(1);
-                  setPageSize(size);
-                }}
-              />
-            </div>
-          )}
-        </>
+        <Table
+          columns={columns}
+          dataSource={invitations}
+          loading={isLoading}
+          rowKey="invitation_id"
+          pagination={{ pageSize: 10 }}
+          scroll={{ x: 1000 }}
+        />
       ) : (
         // Multi-tenant view with collapse
         <Collapse>
@@ -394,7 +380,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
                 dataSource={tenantInvitations}
                 loading={isLoading}
                 rowKey="invitation_id"
-                pagination={false}
+                pagination={{ pageSize: 10 }}
                 size="small"
                 scroll={{ x: 1000 }}
               />
@@ -409,6 +395,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
         width={600}
         maskClosable={false}
       >

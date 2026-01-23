@@ -662,3 +662,126 @@ def test_query_invitations_with_pagination_database_error(monkeypatch, mock_sess
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         query_invitations_with_pagination()
+
+
+def test_query_invitations_with_pagination_with_sorting(monkeypatch, mock_session):
+    """Test querying invitations with pagination and sorting"""
+    session, query = mock_session
+
+    # Mock invitations data with usage counts
+    mock_invitation1 = MockTenantInvitationCode(invitation_id=1, invitation_code="code1")
+    mock_invitation2 = MockTenantInvitationCode(invitation_id=2, invitation_code="code2")
+    mock_results = [(mock_invitation1, 3), (mock_invitation2, 0)]
+
+    # Mock the complete query chain: query -> outerjoin -> filter -> order_by -> count/offset
+    mock_outerjoin = MagicMock()
+    mock_tenant_filter = MagicMock()
+    mock_ordered = MagicMock()
+    mock_ordered.count.return_value = 5
+    mock_offset = MagicMock()
+    mock_offset.limit.return_value = MagicMock()
+    mock_offset.limit.return_value.all.return_value = mock_results
+    mock_ordered.offset.return_value = mock_offset
+
+    # Set up the chain
+    mock_tenant_filter.order_by.return_value = mock_ordered
+    mock_outerjoin.filter.return_value = mock_tenant_filter
+    query.outerjoin.return_value = mock_outerjoin
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_invitations_with_pagination(
+        page=1,
+        page_size=2,
+        sort_by="update_time",
+        sort_order="desc"
+    )
+
+    assert result["total"] == 5
+    assert result["page"] == 1
+    assert result["page_size"] == 2
+    assert result["total_pages"] == 3
+    assert len(result["items"]) == 2
+    # Verify that order_by was called
+    mock_tenant_filter.order_by.assert_called_once()
+
+
+def test_query_invitations_with_pagination_sort_ascending(monkeypatch, mock_session):
+    """Test querying invitations with ascending sort order"""
+    session, query = mock_session
+
+    # Mock invitations data
+    mock_invitation = MockTenantInvitationCode(invitation_id=1, invitation_code="code1")
+    mock_results = [(mock_invitation, 1)]
+
+    # Mock the complete query chain: query -> outerjoin -> filter -> order_by -> count/offset
+    mock_outerjoin = MagicMock()
+    mock_tenant_filter = MagicMock()
+    mock_ordered = MagicMock()
+    mock_ordered.count.return_value = 1
+    mock_offset = MagicMock()
+    mock_offset.limit.return_value = MagicMock()
+    mock_offset.limit.return_value.all.return_value = mock_results
+    mock_ordered.offset.return_value = mock_offset
+
+    # Set up the chain
+    mock_tenant_filter.order_by.return_value = mock_ordered
+    mock_outerjoin.filter.return_value = mock_tenant_filter
+    query.outerjoin.return_value = mock_outerjoin
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_invitations_with_pagination(
+        page=1,
+        page_size=10,
+        sort_by="create_time",
+        sort_order="asc"
+    )
+
+    assert result["total"] == 1
+    assert len(result["items"]) == 1
+    # Verify that order_by was called
+    mock_tenant_filter.order_by.assert_called_once()
+
+
+def test_query_invitations_with_pagination_no_sorting(monkeypatch, mock_session):
+    """Test querying invitations with pagination but no sorting parameters"""
+    session, query = mock_session
+
+    # Mock invitations data
+    mock_invitation = MockTenantInvitationCode(invitation_id=1, invitation_code="code1")
+    mock_results = [(mock_invitation, 1)]
+
+    # Mock the complete query chain: query -> outerjoin -> filter -> count/offset (no order_by)
+    mock_outerjoin = MagicMock()
+    mock_tenant_filter = MagicMock()
+    mock_tenant_filter.count.return_value = 1
+    mock_offset = MagicMock()
+    mock_offset.limit.return_value = MagicMock()
+    mock_offset.limit.return_value.all.return_value = mock_results
+    mock_tenant_filter.offset.return_value = mock_offset
+
+    # Set up the chain
+    mock_outerjoin.filter.return_value = mock_tenant_filter
+    query.outerjoin.return_value = mock_outerjoin
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_invitations_with_pagination(page=1, page_size=10)
+
+    assert result["total"] == 1
+    assert len(result["items"]) == 1
+    # Verify that order_by was NOT called when no sorting parameters provided
+    mock_tenant_filter.order_by.assert_not_called()

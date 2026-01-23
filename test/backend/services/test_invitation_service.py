@@ -604,14 +604,20 @@ def test_update_invitation_code_status_expired(
 def test_update_invitation_code_status_run_out(
     mock_modify_invitation,
     mock_count_invitation_usage,
-    mock_query_invitation_by_code,
-    mock_invitation_info
+    mock_query_invitation_by_code
 ):
     """Test updating invitation status to run out"""
-    # Mock invitation at capacity
-    mock_invitation_info["capacity"] = 5
-    mock_query_invitation_by_code.return_value = mock_invitation_info
-    mock_count_invitation_usage.return_value = 5
+    from datetime import datetime
+
+    # Mock invitation at capacity with future expiry date
+    future_date = datetime.now().replace(year=datetime.now().year + 1).isoformat()
+    mock_query_invitation_by_code.return_value = {
+        "invitation_id": 123,
+        "expiry_date": future_date,  # Ensure it's not expired
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+    mock_count_invitation_usage.return_value = 5  # At capacity
 
     result = update_invitation_code_status(123)
 
@@ -653,6 +659,62 @@ def test_update_invitation_code_status_invalid_expiry_date(mock_count_invitation
     assert result is False
     mock_query_invitation_by_id.assert_called_once_with(123)
     mock_count_invitation_usage.assert_called_once_with(123)
+
+
+@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('backend.services.invitation_service.modify_invitation')
+def test_update_invitation_code_status_recover_from_run_out(mock_modify_invitation, mock_count_invitation_usage, mock_query_invitation_by_id):
+    """Test update_invitation_code_status recovers from RUN_OUT to IN_USE when capacity increases"""
+    from datetime import datetime
+
+    # Mock invitation that was RUN_OUT but now capacity increased
+    future_date = datetime.now().replace(year=datetime.now().year + 1).isoformat()
+    mock_query_invitation_by_id.return_value = {
+        "invitation_id": 123,
+        "expiry_date": future_date,
+        "capacity": 10,  # Increased capacity
+        "status": "RUN_OUT"
+    }
+    mock_count_invitation_usage.return_value = 5  # Usage is now below new capacity
+
+    result = update_invitation_code_status(123)
+
+    # Should return True because status changed from RUN_OUT to IN_USE
+    assert result is True
+    mock_modify_invitation.assert_called_once_with(
+        invitation_id=123,
+        updates={"status": "IN_USE"},
+        updated_by="system"
+    )
+
+
+@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('backend.services.invitation_service.modify_invitation')
+def test_update_invitation_code_status_recover_from_expire(mock_modify_invitation, mock_count_invitation_usage, mock_query_invitation_by_id):
+    """Test update_invitation_code_status recovers from EXPIRE to IN_USE when expiry date is extended"""
+    from datetime import datetime
+
+    # Mock invitation that was EXPIRE but now expiry date is in future
+    future_date = datetime.now().replace(year=datetime.now().year + 1).isoformat()
+    mock_query_invitation_by_id.return_value = {
+        "invitation_id": 123,
+        "expiry_date": future_date,  # Extended expiry date
+        "capacity": 10,
+        "status": "EXPIRE"
+    }
+    mock_count_invitation_usage.return_value = 5  # Below capacity
+
+    result = update_invitation_code_status(123)
+
+    # Should return True because status changed from EXPIRE to IN_USE
+    assert result is True
+    mock_modify_invitation.assert_called_once_with(
+        invitation_id=123,
+        updates={"status": "IN_USE"},
+        updated_by="system"
+    )
 
 
 @patch('backend.services.invitation_service.query_invitation_by_id')
@@ -922,7 +984,55 @@ def test_get_invitations_list_success(mock_query_invitations, mock_get_user, moc
     mock_query_invitations.assert_called_once_with(
         tenant_id="test_tenant",
         page=1,
-        page_size=10
+        page_size=10,
+        sort_by=None,
+        sort_order=None
+    )
+
+
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('backend.services.invitation_service.query_invitations_with_pagination')
+def test_get_invitations_list_with_sorting(mock_query_invitations, mock_get_user, mock_user_info):
+    """Test getting invitations list with sorting parameters"""
+    mock_get_user.return_value = mock_user_info
+
+    mock_invitations_data = {
+        "items": [
+            {
+                "invitation_id": 123,
+                "invitation_code": "ABC123",
+                "code_type": "ADMIN_INVITE",
+                "group_ids": [],
+                "capacity": 5,
+                "expiry_date": "2024-12-31T23:59:59",
+                "status": "IN_USE",
+                "update_time": "2024-01-02T10:00:00"
+            }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 10
+    }
+    mock_query_invitations.return_value = mock_invitations_data
+
+    result = get_invitations_list(
+        tenant_id="test_tenant",
+        page=1,
+        page_size=10,
+        user_id="test_user",
+        sort_by="update_time",
+        sort_order="desc"
+    )
+
+    assert result["total"] == 1
+    assert len(result["items"]) == 1
+    assert result["items"][0]["invitation_code"] == "ABC123"
+    mock_query_invitations.assert_called_once_with(
+        tenant_id="test_tenant",
+        page=1,
+        page_size=10,
+        sort_by="update_time",
+        sort_order="desc"
     )
 
 

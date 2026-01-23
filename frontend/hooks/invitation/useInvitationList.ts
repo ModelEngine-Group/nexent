@@ -4,7 +4,7 @@ import type { InvitationListRequest } from "@/services/invitationService";
 
 export function useInvitationList(request: InvitationListRequest) {
   return useQuery({
-    queryKey: ["invitations", request.tenant_id, request.page, request.page_size],
+    queryKey: ["invitations", request.tenant_id, request.page, request.page_size, request.sort_by, request.sort_order],
     queryFn: () => listInvitations(request),
     enabled: true, // Always enabled since tenant_id is optional
     staleTime: 1000 * 30,
