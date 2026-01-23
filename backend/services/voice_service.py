@@ -48,10 +48,10 @@ class VoiceService:
     async def start_stt_streaming_session(self, websocket) -> None:
         """
         Start STT streaming session
-        
+
         Args:
             websocket: WebSocket connection for real-time audio streaming
-            
+
         Raises:
             STTConnectionException: If STT streaming fails
         """
@@ -65,20 +65,20 @@ class VoiceService:
     async def generate_tts_speech(self, text: str, stream: bool = True) -> Any:
         """
         Generate TTS speech from text
-        
+
         Args:
             text: Text to convert to speech
             stream: Whether to stream the audio or return complete audio
-            
+
         Returns:
             Audio data (streaming or complete)
-            
+
         Raises:
             TTSConnectionException: If TTS generation fails
         """
         if not text:
             raise VoiceServiceException("No text provided for TTS generation")
-            
+
         try:
             logger.info(f"Generating TTS speech for text: {text[:50]}...")
             speech_result = await self.tts_model.generate_speech(text, stream=stream)
@@ -90,11 +90,11 @@ class VoiceService:
     async def stream_tts_to_websocket(self, websocket, text: str) -> None:
         """
         Stream TTS audio to WebSocket with proper error handling and fallback
-        
+
         Args:
             websocket: WebSocket connection to stream to
             text: Text to convert to speech
-            
+
         Raises:
             TTSConnectionException: If TTS service connection fails
             VoiceServiceException: If TTS streaming fails
@@ -142,10 +142,10 @@ class VoiceService:
     async def check_stt_connectivity(self) -> bool:
         """
         Check STT service connectivity
-        
+
         Returns:
             bool: True if STT service is connected, False otherwise
-            
+
         Raises:
             STTConnectionException: If connectivity check fails
         """
@@ -165,10 +165,10 @@ class VoiceService:
     async def check_tts_connectivity(self) -> bool:
         """
         Check TTS service connectivity
-        
+
         Returns:
             bool: True if TTS service is connected, False otherwise
-            
+
         Raises:
             TTSConnectionException: If connectivity check fails
         """
@@ -188,13 +188,13 @@ class VoiceService:
     async def check_voice_connectivity(self, model_type: str) -> bool:
         """
         Check voice service connectivity based on model type
-        
+
         Args:
             model_type: Type of model to check ('stt' or 'tts')
-            
+
         Returns:
             bool: True if the specified service is connected, False otherwise
-            
+
         Raises:
             VoiceServiceException: If model_type is invalid
             STTConnectionException: If STT connectivity check fails
@@ -222,7 +222,7 @@ _voice_service_instance: Optional[VoiceService] = None
 def get_voice_service() -> VoiceService:
     """
     Get the global voice service instance
-    
+
     Returns:
         VoiceService: The global voice service instance
     """

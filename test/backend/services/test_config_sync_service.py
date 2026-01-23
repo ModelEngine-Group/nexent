@@ -987,15 +987,20 @@ class TestLoadConfigImpl:
         ]
 
         # Mock app configurations
-        service_mocks['tenant_config_manager'].get_app_config.side_effect = [
-            "Custom App Name",  # APP_NAME
-            "Custom description",  # APP_DESCRIPTION
-            "Test Tenant",  # TENANT_NAME
-            "default-group-123",  # DEFAULT_GROUP_ID
-            "preset",  # ICON_TYPE
-            "avatar-uri",  # AVATAR_URI
-            "https://custom-icon.com"  # CUSTOM_ICON_URL
-        ]
+        def mock_get_app_config(key, tenant_id=None):
+            config_map = {
+                "APP_NAME": "Custom App Name",
+                "APP_DESCRIPTION": "Custom description",
+                "TENANT_NAME": "Test Tenant",
+                "DEFAULT_GROUP_ID": "default-group-123",
+                "ICON_TYPE": "preset",
+                "AVATAR_URI": "avatar-uri",
+                "CUSTOM_ICON_URL": "https://custom-icon.com",
+                "DATAMATE_URL": "https://datamate.example.com"
+            }
+            return config_map.get(key)
+
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
 
         # Mock model name conversion to return string values
         service_mocks['get_model_name'].side_effect = [
@@ -1394,15 +1399,20 @@ class TestBuildAppConfig:
         tenant_id = "test_tenant_id"
 
         # Mock all app config values
-        service_mocks['tenant_config_manager'].get_app_config.side_effect = [
-            "Custom App Name",  # APP_NAME
-            "Custom description",  # APP_DESCRIPTION
-            None,  # TENANT_NAME (use default)
-            None,  # DEFAULT_GROUP_ID (use default)
-            "custom",  # ICON_TYPE
-            "avatar-uri",  # AVATAR_URI
-            "https://custom-icon.com"  # CUSTOM_ICON_URL
-        ]
+        def mock_get_app_config(key, tenant_id=None):
+            config_map = {
+                "APP_NAME": "Custom App Name",
+                "APP_DESCRIPTION": "Custom description",
+                "TENANT_NAME": None,  # TENANT_NAME (use default)
+                "DEFAULT_GROUP_ID": None,  # DEFAULT_GROUP_ID (use default)
+                "ICON_TYPE": "custom",
+                "AVATAR_URI": "avatar-uri",
+                "CUSTOM_ICON_URL": "https://custom-icon.com",
+                "DATAMATE_URL": "https://datamate.example.com"
+            }
+            return config_map.get(key)
+
+        service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
 
         # Mock MODEL_ENGINE_ENABLED
         with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
@@ -1427,9 +1437,10 @@ class TestBuildAppConfig:
             ("DEFAULT_GROUP_ID", tenant_id),
             ("ICON_TYPE", tenant_id),
             ("AVATAR_URI", tenant_id),
-            ("CUSTOM_ICON_URL", tenant_id)
+            ("CUSTOM_ICON_URL", tenant_id),
+            ("DATAMATE_URL", tenant_id)
         ]
-        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 7
+        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 8
         service_mocks['tenant_config_manager'].get_app_config.assert_has_calls(
             [call(key, tenant_id=tenant_id)
              for key, _ in expected_calls]

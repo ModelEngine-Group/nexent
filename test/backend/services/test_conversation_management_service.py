@@ -1,5 +1,18 @@
 import sys
 import types
+from unittest.mock import patch
+
+# Mock storage client factory and MinIO config before any imports that would initialize MinIO
+from unittest.mock import MagicMock
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+
+# Mock boto3 before any imports
+boto3_mock = types.SimpleNamespace()
+sys.modules['boto3'] = boto3_mock
 
 def _stub_nexent_openai_model():
     # Provide a simple OpenAIModel stub for import-time safety
@@ -39,6 +52,13 @@ observer_mod = types.ModuleType("nexent.core.utils.observer")
 observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
 observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
 sys.modules["nexent.core.utils.observer"] = observer_mod
+
+# Stub nexent.core.models.embedding_model to avoid import errors
+embedding_mod = types.ModuleType("nexent.core.models.embedding_model")
+embedding_mod.BaseEmbedding = object
+embedding_mod.OpenAICompatibleEmbedding = object
+embedding_mod.JinaEmbedding = object
+sys.modules["nexent.core.models.embedding_model"] = embedding_mod
 #
 # Stub consts.model to avoid pydantic/email-validator heavy imports during tests.
 consts_model_mod = types.ModuleType("consts.model")
@@ -134,25 +154,7 @@ import os
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-# Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
-
-# Mock boto3 and minio client before importing the module under test
-import sys
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-# These patches must be started before any imports that use MinioClient
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+# Environment variables are now configured in conftest.py
 
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
     from backend.services.conversation_management_service import (

@@ -43,7 +43,7 @@ export default function SpacePage() {
   const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   const handleCreateAgent = () => {
-    router.push("/agent");
+    router.push("/agents?create=true");
   };
 
   const onRefresh = () => {

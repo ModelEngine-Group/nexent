@@ -111,7 +111,7 @@ const documentReducer = (state: DocumentState, action: DocumentAction): Document
 export const DocumentContext = createContext<{
   state: DocumentState;
   dispatch: React.Dispatch<DocumentAction>;
-  fetchDocuments: (kbId: string, forceRefresh?: boolean) => Promise<void>;
+  fetchDocuments: (kbId: string, forceRefresh?: boolean, kbSource?: string) => Promise<void>;
   uploadDocuments: (kbId: string, files: File[]) => Promise<void>;
   deleteDocument: (kbId: string, docId: string) => Promise<void>;
 }>({
@@ -175,23 +175,23 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({ children }) 
   }, []);
 
   // Fetch documents for a knowledge base
-  const fetchDocuments = useCallback(async (kbId: string, forceRefresh?: boolean) => {
+  const fetchDocuments = useCallback(async (kbId: string, forceRefresh?: boolean, kbSource?: string) => {
     // Skip if already loading this kb
     if (state.loadingKbIds.has(kbId)) return;
-    
+
     // If forceRefresh is false and we have cached data, return directly
     if (!forceRefresh && state.documentsMap[kbId] && state.documentsMap[kbId].length > 0) {
       return; // If we have cached data and don't need force refresh, return directly without server request
     }
-    
+
     dispatch({ type: DOCUMENT_ACTION_TYPES.SET_LOADING_KB_ID, payload: { kbId, isLoading: true } });
-    
+
     try {
       // Use getAllFiles() to get documents including those not yet in ES
-      const documents = await knowledgeBaseService.getAllFiles(kbId);
-      dispatch({ 
-        type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS, 
-        payload: { kbId, documents } 
+      const documents = await knowledgeBaseService.getAllFiles(kbId, kbSource);
+      dispatch({
+        type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS,
+        payload: { kbId, documents }
       });
     } catch (error) {
       log.error(t('document.error.fetch'), error);

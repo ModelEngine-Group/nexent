@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Any, Tuple, Dict
+from typing import Optional, Any, Tuple, Dict, List
 
 import aiohttp
 from fastapi import Header
@@ -20,7 +20,8 @@ from database.user_tenant_db import insert_user_tenant, soft_delete_user_tenant_
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
 from database.group_db import query_group_ids_by_user
-from database.role_permission_db import get_role_permissions
+from database.client import as_dict, get_db_session
+from database.db_models import RolePermission
 from utils.memory_utils import build_memory_config
 from nexent.memory.memory_service import clear_memory
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
@@ -501,7 +502,7 @@ async def revoke_regular_user(user_id: str, tenant_id: str) -> None:
 
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
     """
-    Get user information including user ID, group IDs list, tenant ID, and user role.
+    Get user information including user ID, group IDs, tenant ID, user role, permissions, and accessible routes.
     All information is retrieved from PostgreSQL database.
 
     Args:
@@ -509,15 +510,10 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
 
     Returns:
         Optional[Dict[str, Any]]: User information dictionary containing:
-            - user_id: User ID
-            - group_ids: List of group IDs the user belongs to
-            - tenant_id: Tenant ID
-            - user_role: User role (USER, ADMIN, DEV, etc.)
+            - user: User object with user_id, group_ids, tenant_id, user_email, user_role, permissions, accessibleRoutes
         Returns None if user not found
     """
     try:
-
-
         # Get user tenant relationship
         user_tenant = get_user_tenant_by_user_id(user_id)
         if not user_tenant:
@@ -529,11 +525,29 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         # Get group IDs
         group_ids = query_group_ids_by_user(user_id)
 
+        # Get user permissions directly from database
+        with get_db_session() as session:
+            permission_records = session.query(RolePermission).filter(
+                RolePermission.user_role == user_role
+            ).all()
+            permissions = [as_dict(record) for record in permission_records]
+
+        permissions_data = format_role_permissions(permissions)
+
+        # Get user email from Supabase (placeholder for now)
+        # TODO: Implement user email retrieval from Supabase user object
+        user_email = "user@example.com"  # Placeholder
+
         return {
-            "user_id": user_id,
-            "group_ids": group_ids,
-            "tenant_id": tenant_id,
-            "user_role": user_role
+            "user": {
+                "user_id": user_id,
+                "group_ids": group_ids,
+                "tenant_id": tenant_id,
+                "user_email": user_email,
+                "user_role": user_role,
+                "permissions": permissions_data["permissions"],
+                "accessibleRoutes": permissions_data["accessibleRoutes"]
+            }
         }
 
     except Exception as e:
@@ -542,29 +556,36 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def get_permissions_by_role(user_role: str) -> Dict[str, Any]:
+def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     """
-    Get all permissions for a specific user role.
+    Format role permissions into permissions and accessibleRoutes lists.
 
-    This method retrieves role permissions from the database and returns them
-    in a structured format suitable for API responses.
+    - permissions: List of permission strings (permission_type:permission_subtype for RESOURCE category)
+    - accessibleRoutes: List of accessible route subtypes (permission_subtype for LEFT_NAV_MENU permission_type)
 
     Args:
-        user_role (str): User role to query permissions for (SU, ADMIN, DEV, USER)
+        permissions (List[Dict[str, Any]]): Raw permission records from database
 
     Returns:
-        Dict[str, Any]: Response containing permissions data and metadata
+        Dict[str, List[str]]: Dictionary containing permissions and accessibleRoutes lists
     """
-    try:
-        permissions = get_role_permissions(user_role)
+    formatted_permissions = []
+    accessible_routes = []
 
-        return {
-            "user_role": user_role,
-            "permissions": permissions,
-            "total_permissions": len(permissions),
-            "message": f"Successfully retrieved {len(permissions)} permissions for role {user_role}"
-        }
-    except Exception as e:
-        logging.error(
-            f"Failed to get role permissions for role {user_role}: {str(e)}")
-        raise Exception(f"Failed to retrieve permissions for role {user_role}")
+    for perm in permissions:
+        permission_category = perm.get("permission_category", "")
+        permission_type = perm.get("permission_type", "")
+        permission_subtype = perm.get("permission_subtype", "")
+
+        if permission_category == "RESOURCE" and permission_type and permission_subtype:
+            # Format as "permission_type:permission_subtype"
+            formatted_permissions.append(
+                f"{permission_type}:{permission_subtype}")
+        elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
+            # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
+            accessible_routes.append(permission_subtype)
+
+    return {
+        "permissions": formatted_permissions,
+        "accessibleRoutes": accessible_routes
+    }

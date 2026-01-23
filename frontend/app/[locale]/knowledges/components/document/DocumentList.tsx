@@ -47,6 +47,8 @@ const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
 interface DocumentListProps {
   documents: Document[];
   onDelete: (id: string) => void;
+  // Knowledge base source, e.g. "nexent" or "datamate"
+  knowledgeBaseSource?: string;
   // User-facing knowledge base name (display name)
   knowledgeBaseName?: string;
   // Internal knowledge base ID / Elasticsearch index name
@@ -80,6 +82,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     {
       documents,
       onDelete,
+      knowledgeBaseSource = "",
       knowledgeBaseId = "",
       knowledgeBaseName = "",
       modelMismatch = false,
@@ -163,6 +166,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const {} = useKnowledgeBaseContext();
     const { t } = useTranslation();
+    const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
 
     // Reset showDetail and showChunk state when knowledge base name changes
     React.useEffect(() => {
@@ -390,7 +394,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               )}
             </div>
             {/* Right: overview and detail buttons */}
-            {!isCreatingMode && (
+            {!isCreatingMode && !isDataMate && (
               <div className="flex gap-2">
                 <Button
                   type="primary"
@@ -428,6 +432,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         </div>
 
         {/* Document list */}
+
         <div
           className="p-2 overflow-auto flex-grow"
           onDragOver={(e) => {
@@ -577,21 +582,25 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                     >
                       {t("document.table.header.status")}
                     </th>
-                    <th
-                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.SIZE}]`}
-                    >
-                      {t("document.table.header.size")}
-                    </th>
+                    {!isDataMate && (
+                      <th
+                        className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.SIZE}]`}
+                      >
+                        {t("document.table.header.size")}
+                      </th>
+                    )}
                     <th
                       className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.DATE}]`}
                     >
                       {t("document.table.header.date")}
                     </th>
-                    <th
-                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.ACTION}]`}
-                    >
-                      {t("document.table.header.action")}
-                    </th>
+                    {!isDataMate && (
+                      <th
+                        className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.ACTION}]`}
+                      >
+                        {t("document.table.header.action")}
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className={LAYOUT.TABLE_ROW_DIVIDER}>
@@ -624,30 +633,34 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           />
                         </div>
                       </td>
-                      <td
-                        className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
-                      >
-                        {formatFileSize(doc.size)}
-                      </td>
+                      {!isDataMate && (
+                        <td
+                          className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
+                        >
+                          {formatFileSize(doc.size)}
+                        </td>
+                      )}
                       <td
                         className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
                       >
                         {new Date(doc.create_time).toLocaleString()}
                       </td>
-                      <td className={LAYOUT.CELL_PADDING}>
-                        <button
-                          onClick={() => onDelete(doc.id)}
-                          className={LAYOUT.ACTION_TEXT}
-                          title={
-                            doc.status === DOCUMENT_STATUS.PROCESSING ||
-                            doc.status === DOCUMENT_STATUS.FORWARDING
-                              ? t("document.delete.terminateTask")
-                              : undefined
-                          }
-                        >
-                          {t("common.delete")}
-                        </button>
-                      </td>
+                      {!isDataMate && (
+                        <td className={LAYOUT.CELL_PADDING}>
+                          <button
+                            onClick={() => onDelete(doc.id)}
+                            className={LAYOUT.ACTION_TEXT}
+                            title={
+                              doc.status === DOCUMENT_STATUS.PROCESSING ||
+                              doc.status === DOCUMENT_STATUS.FORWARDING
+                                ? t("document.delete.terminateTask")
+                                : undefined
+                            }
+                          >
+                            {t("common.delete")}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -661,30 +674,38 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         </div>
 
         {/* Upload area */}
-        {!showDetail && !showChunk && (
-          <UploadArea
-            key={
-              isCreatingMode
-                ? `create-${knowledgeBaseName}`
-                : `view-${knowledgeBaseName}`
-            }
-            ref={uploadAreaRef}
-            onFileSelect={onFileSelect}
-            onUpload={onUpload || (() => {})}
-            isUploading={isUploading}
-            isDragging={isDragging}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-            disabled={!isCreatingMode && !knowledgeBaseId}
-            componentHeight={uploadHeight}
-            isCreatingMode={isCreatingMode}
-            // Use internal ID for backend operations; fall back to name in creation mode
-            indexName={knowledgeBaseId || knowledgeBaseName}
-            newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
-            modelMismatch={modelMismatch}
-          />
-        )}
+        {!showDetail &&
+          !showChunk &&
+          (isDataMate ? (
+            <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center min-h-[120px]">
+              <span className="text-base font-medium text-center leading-[1.7] text-gray-500">
+                {t("knowledgeBase.datamate.editDisabled")}
+              </span>
+            </div>
+          ) : (
+            <UploadArea
+              key={
+                isCreatingMode
+                  ? `create-${knowledgeBaseName}`
+                  : `view-${knowledgeBaseName}`
+              }
+              ref={uploadAreaRef}
+              onFileSelect={onFileSelect}
+              onUpload={onUpload || (() => {})}
+              isUploading={isUploading}
+              isDragging={isDragging}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              disabled={!isCreatingMode && !knowledgeBaseId}
+              componentHeight={uploadHeight}
+              isCreatingMode={isCreatingMode}
+              // Use internal ID for backend operations; fall back to name in creation mode
+              indexName={knowledgeBaseId || knowledgeBaseName}
+              newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
+              modelMismatch={modelMismatch}
+            />
+          ))}
       </div>
     );
   }
