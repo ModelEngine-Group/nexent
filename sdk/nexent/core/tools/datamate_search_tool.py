@@ -41,7 +41,7 @@ class DataMateSearchTool(Tool):
         "top_k": {
             "type": "integer",
             "description": "Maximum number of search results to return.",
-            "default": 10,
+            "default": 3,
             "nullable": True,
         },
         "threshold": {
