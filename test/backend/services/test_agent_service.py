@@ -6951,7 +6951,7 @@ async def test_clear_agent_new_mark_impl_success():
 
         # Assert
         assert result == 1
-        mock_clear_db.assert_called_once_with(123, "test_tenant", "test_user")
+        mock_module.clear_agent_new_mark.assert_called_once_with(123, "test_tenant", "test_user")
         mock_logger.info.assert_called_once_with(
             "clear_agent_new_mark_impl called for agent_id=123, tenant_id=test_tenant, user_id=test_user, affected_rows=1"
         )
@@ -6981,7 +6981,7 @@ async def test_clear_agent_new_mark_impl_no_rows_affected():
 
         # Assert
         assert result == 0
-        mock_clear_db.assert_called_once_with(999, "test_tenant", "test_user")
+        mock_module.clear_agent_new_mark.assert_called_once_with(999, "test_tenant", "test_user")
         mock_logger.info.assert_called_once_with(
             "clear_agent_new_mark_impl called for agent_id=999, tenant_id=test_tenant, user_id=test_user, affected_rows=0"
         )
@@ -7011,7 +7011,7 @@ async def test_clear_agent_new_mark_impl_multiple_rows_affected():
 
         # Assert
         assert result == 3
-        mock_clear_db.assert_called_once_with(456, "another_tenant", "another_user")
+        mock_module.clear_agent_new_mark.assert_called_once_with(456, "another_tenant", "another_user")
         mock_logger.info.assert_called_once_with(
             "clear_agent_new_mark_impl called for agent_id=456, tenant_id=another_tenant, user_id=another_user, affected_rows=3"
         )
@@ -7040,7 +7040,7 @@ async def test_clear_agent_new_mark_impl_database_error():
                 user_id="test_user"
             )
 
-        mock_clear_db.assert_called_once_with(123, "test_tenant", "test_user")
+        mock_module.clear_agent_new_mark.assert_called_once_with(123, "test_tenant", "test_user")
         mock_logger.info.assert_not_called()
 
 
@@ -7068,7 +7068,7 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
 
         # Assert
         assert result == 1
-        mock_clear_db.assert_called_once_with(789, "tenant-with-dashes_and_underscores", "user@domain.com")
+        mock_module.clear_agent_new_mark.assert_called_once_with(789, "tenant-with-dashes_and_underscores", "user@domain.com")
         mock_logger.info.assert_called_once_with(
             "clear_agent_new_mark_impl called for agent_id=789, tenant_id=tenant-with-dashes_and_underscores, user_id=user@domain.com, affected_rows=1"
         )
