@@ -1235,6 +1235,7 @@
 
   "tenantResources.contactAdmin": "Please contact your administrator to assign a tenant.",
   "tenantResources.noTenantAssigned": "No tenant assigned",
+  "tenantResources.noTenantSelected": "No tenant selected",
   "tenantResources.selectTenantDescription": "Choose a tenant from the list to manage its resources.",
   "tenantResources.selectTenantFirst": "Please select a tenant",
 

@@ -1235,6 +1235,7 @@
 
   "tenantResources.contactAdmin": "请联系管理员为您分配租户。",
   "tenantResources.noTenantAssigned": "未分配租户",
+  "tenantResources.noTenantSelected": "未选择租户",
   "tenantResources.selectTenantDescription": "从列表中选择一个租户来管理其资源。",
   "tenantResources.selectTenantFirst": "请选择一个租户",
 
