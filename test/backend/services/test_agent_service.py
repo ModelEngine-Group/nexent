@@ -6937,7 +6937,9 @@ async def test_clear_agent_new_mark_impl_success():
     3. Logs the operation with correct parameters
     """
     # Setup
-    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=1) as mock_clear_db, \
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 1
+    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
@@ -6965,7 +6967,9 @@ async def test_clear_agent_new_mark_impl_no_rows_affected():
     2. Still logs the operation appropriately
     """
     # Setup
-    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=0) as mock_clear_db, \
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 0
+    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
@@ -6993,7 +6997,9 @@ async def test_clear_agent_new_mark_impl_multiple_rows_affected():
     2. Logs the correct count
     """
     # Setup
-    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=3) as mock_clear_db, \
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 3
+    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
@@ -7021,10 +7027,10 @@ async def test_clear_agent_new_mark_impl_database_error():
     2. Does not log success when operation fails
     """
     # Setup
-    with patch('backend.services.agent_service.clear_agent_new_mark', create=True) as mock_clear_db, \
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.side_effect = Exception("Database connection failed")
+    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
          patch('backend.services.agent_service.logger') as mock_logger:
-
-        mock_clear_db.side_effect = Exception("Database connection failed")
 
         # Execute and Assert
         with pytest.raises(Exception, match="Database connection failed"):
@@ -7048,7 +7054,9 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
     2. Properly passes through all parameters
     """
     # Setup
-    with patch('backend.services.agent_service.clear_agent_new_mark', create=True, return_value=1) as mock_clear_db, \
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 1
+    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
