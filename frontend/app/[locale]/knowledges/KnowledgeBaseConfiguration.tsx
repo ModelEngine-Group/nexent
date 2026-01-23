@@ -234,8 +234,8 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("");
-  const [modelFilter, setModelFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<string[]>([]);
+  const [modelFilter, setModelFilter] = useState<string[]>([]);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   // Open warning modal when single Embedding model is not configured (ignore multi-embedding)
@@ -1046,9 +1046,17 @@ function DataConfig({ isActive }: DataConfigProps) {
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               sourceFilter={sourceFilter}
-              onSourceFilterChange={setSourceFilter}
+              onSourceFilterChange={(values) =>
+                setSourceFilter(
+                  Array.isArray(values) ? values : values ? [values] : []
+                )
+              }
               modelFilter={modelFilter}
-              onModelFilterChange={setModelFilter}
+              onModelFilterChange={(values) =>
+                setModelFilter(
+                  Array.isArray(values) ? values : values ? [values] : []
+                )
+              }
             />
           </Col>
 
