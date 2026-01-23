@@ -62,6 +62,13 @@ interface KnowledgeBaseListProps {
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
   onKnowledgeBaseChange?: () => void; // New: callback function when knowledge base switches
+  // Optional controlled search / filter props (if parent wants to control filters)
+  searchQuery?: string;
+  onSearchChange?: (value: string) => void;
+  sourceFilter?: string | string[];
+  onSourceFilterChange?: (values: string[] | string) => void;
+  modelFilter?: string | string[];
+  onModelFilterChange?: (values: string[] | string) => void;
 }
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
@@ -82,6 +89,12 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
+  searchQuery,
+  onSearchChange,
+  sourceFilter,
+  onSourceFilterChange,
+  modelFilter,
+  onModelFilterChange,
 }) => {
   const { t } = useTranslation();
 
@@ -89,6 +102,42 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+
+  // Effective (controlled or uncontrolled) values
+  const effectiveSearchKeyword =
+    typeof searchQuery !== "undefined" ? searchQuery : searchKeyword;
+  const effectiveSelectedSources =
+    typeof sourceFilter !== "undefined"
+      ? Array.isArray(sourceFilter)
+        ? sourceFilter
+        : sourceFilter
+          ? [sourceFilter]
+          : []
+      : selectedSources;
+  const effectiveSelectedModels =
+    typeof modelFilter !== "undefined"
+      ? Array.isArray(modelFilter)
+        ? modelFilter
+        : modelFilter
+          ? [modelFilter]
+          : []
+      : selectedModels;
+
+  // Handlers that respect controlled props
+  const handleSearchChange = (value: string) => {
+    if (onSearchChange) onSearchChange(value);
+    else setSearchKeyword(value);
+  };
+
+  const handleSourcesChange = (values: string[]) => {
+    if (onSourceFilterChange) onSourceFilterChange(values);
+    else setSelectedSources(values);
+  };
+
+  const handleModelsChange = (values: string[]) => {
+    if (onModelFilterChange) onModelFilterChange(values);
+    else setSelectedModels(values);
+  };
 
   // Format date function, only keep date part
   const formatDate = (dateValue: any) => {
@@ -139,26 +188,33 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const filteredKnowledgeBases = useMemo(() => {
     return sortedKnowledgeBases.filter((kb) => {
       // Keyword search: match name, description, or nickname
+      const keyword = effectiveSearchKeyword || "";
       const matchesSearch =
-        !searchKeyword ||
-        kb.name.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+        !keyword ||
+        kb.name.toLowerCase().includes(keyword.toLowerCase()) ||
         (kb.description &&
-          kb.description.toLowerCase().includes(searchKeyword.toLowerCase())) ||
+          kb.description.toLowerCase().includes(keyword.toLowerCase())) ||
         (kb.nickname &&
-          kb.nickname.toLowerCase().includes(searchKeyword.toLowerCase()));
+          kb.nickname.toLowerCase().includes(keyword.toLowerCase()));
 
       // Source filter
       const matchesSource =
-        selectedSources.length === 0 || selectedSources.includes(kb.source);
+        effectiveSelectedSources.length === 0 ||
+        effectiveSelectedSources.includes(kb.source);
 
       // Model filter
       const matchesModel =
-        selectedModels.length === 0 ||
-        selectedModels.includes(kb.embeddingModel);
+        effectiveSelectedModels.length === 0 ||
+        effectiveSelectedModels.includes(kb.embeddingModel);
 
       return matchesSearch && matchesSource && matchesModel;
     });
-  }, [sortedKnowledgeBases, searchKeyword, selectedSources, selectedModels]);
+  }, [
+    sortedKnowledgeBases,
+    effectiveSearchKeyword,
+    effectiveSelectedSources,
+    effectiveSelectedModels,
+  ]);
 
   return (
     <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col">
@@ -249,8 +305,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           <Input
             placeholder={t("knowledgeBase.search.placeholder")}
             prefix={<SearchOutlined />}
-            value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
+            value={effectiveSearchKeyword}
+            onChange={(e) => handleSearchChange(e.target.value)}
             style={{ width: 250 }}
             allowClear
           />
@@ -259,43 +315,17 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             <Select
               mode="multiple"
               placeholder={t("knowledgeBase.filter.source.placeholder")}
-              value={selectedSources}
-              onChange={setSelectedSources}
+              value={effectiveSelectedSources}
+              onChange={handleSourcesChange}
               style={{ minWidth: 150 }}
               allowClear
               maxTagCount={2}
             >
               {availableSources.map((source) => (
                 <Select.Option key={source} value={source}>
-                  <div
-                    className="flex items-center gap-2"
-                    onMouseDown={(e) => {
-                      // Prevent Select from losing focus when clicking checkbox
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const exists = selectedSources.includes(source);
-                      const next = exists
-                        ? selectedSources.filter((s) => s !== source)
-                        : [...selectedSources, source];
-                      setSelectedSources(next);
-                    }}
-                  >
-                    <Checkbox
-                      checked={selectedSources.includes(source)}
-                      onClick={(e) => {
-                        // Keep checkbox click handling local
-                        e.stopPropagation();
-                      }}
-                    />
-                    <span>
-                      {t("knowledgeBase.source." + source, {
-                        defaultValue: source,
-                      })}
-                    </span>
-                  </div>
+                  {t("knowledgeBase.source." + source, {
+                    defaultValue: source,
+                  })}
                 </Select.Option>
               ))}
             </Select>
@@ -305,37 +335,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             <Select
               mode="multiple"
               placeholder={t("knowledgeBase.filter.model.placeholder")}
-              value={selectedModels}
-              onChange={setSelectedModels}
+              value={effectiveSelectedModels}
+              onChange={handleModelsChange}
               style={{ minWidth: 180 }}
               allowClear
               maxTagCount={2}
             >
               {availableModels.map((model) => (
                 <Select.Option key={model} value={model}>
-                  <div
-                    className="flex items-center gap-2"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const exists = selectedModels.includes(model);
-                      const next = exists
-                        ? selectedModels.filter((m) => m !== model)
-                        : [...selectedModels, model];
-                      setSelectedModels(next);
-                    }}
-                  >
-                    <Checkbox
-                      checked={selectedModels.includes(model)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                      }}
-                    />
-                    <span>{getModelDisplayName(model)}</span>
-                  </div>
+                  {getModelDisplayName(model)}
                 </Select.Option>
               ))}
             </Select>
