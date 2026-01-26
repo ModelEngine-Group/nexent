@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import log from "@/lib/logger";
+import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
 
@@ -204,13 +205,7 @@ export const API_ENDPOINTS = {
     },
   },
   market: {
-    agents: (params?: {
-      page?: number;
-      page_size?: number;
-      category?: string;
-      tag?: string;
-      search?: string;
-    }) => {
+    agents: (params?: MarketAgentListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.page) queryParams.append("page", params.page.toString());
       if (params?.page_size)
