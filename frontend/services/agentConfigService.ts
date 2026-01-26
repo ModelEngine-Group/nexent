@@ -697,6 +697,7 @@ export const fetchAllAgents = async () => {
       description: agent.description,
       author: agent.author,
       is_available: agent.is_available,
+      is_new: agent.is_new || false,
     }));
 
     return {

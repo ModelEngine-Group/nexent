@@ -360,8 +360,8 @@ export default function AgentList({
                           )}
                           {isNew && (
                             <Tooltip title={t("space.new", "New imported agent")}>
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 flex-shrink-0">
-                                NEW
+                              <span className="inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none">
+                                <span className="px-0.5">{t("space.new", "NEW")}</span>
                               </span>
                             </Tooltip>
                           )}

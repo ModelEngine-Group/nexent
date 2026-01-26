@@ -183,7 +183,7 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
       <div
         className={`w-full h-full rounded-lg border transition-all duration-300 p-4 flex flex-col group cursor-pointer ${
           isNewAgent
-            ? "bg-amber-50/50 dark:bg-amber-900/20 border-amber-300/90 dark:border-amber-400/80 shadow-amber-100/60 dark:shadow-amber-900/20 shadow-md hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700"
+            ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700"
             : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700"
         }`}
         onClick={handleViewDetail}
@@ -200,9 +200,9 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
           <div className="flex-1 flex justify-end items-center gap-2">
             {/* NEW marker */}
             {isNewAgent && (
-              <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-amber-400 to-amber-500 text-white rounded-full text-xs font-bold shadow-md border border-amber-300">
-                <Sparkles className="h-2.5 w-2.5 flex-shrink-0" />
-                <span>{t("space.new", "NEW")}</span>
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-xs font-medium border border-amber-200">
+                <Sparkles className="h-3 w-3 flex-shrink-0" />
+                <span className="tracking-wide">{t("space.new", "NEW")}</span>
               </div>
             )}
 

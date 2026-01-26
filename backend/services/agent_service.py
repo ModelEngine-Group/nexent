@@ -40,7 +40,8 @@ from database.agent_db import (
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
     update_agent,
-    update_related_agents
+    update_related_agents,
+    clear_agent_new_mark
 )
 from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
@@ -1233,20 +1234,11 @@ async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str)
         tenant_id (str): Tenant ID
         user_id (str): User ID (for audit purposes)
     """
-    from database.agent_db import clear_agent_new_mark
-
     rowcount = clear_agent_new_mark(agent_id, tenant_id, user_id)
     logger.info(f"clear_agent_new_mark_impl called for agent_id={agent_id}, tenant_id={tenant_id}, user_id={user_id}, affected_rows={rowcount}")
     return rowcount
 
 
-async def mark_agents_as_new_impl(agent_ids: list[int], tenant_id: str, user_id: str):
-    """
-    Mark a list of agents as new via DB helper
-    """
-    # Deprecated: marking is handled at creation time via create_agent().
-    # Keep DB helper available in database.agent_db for ad-hoc operations.
-    return None
 
 
 async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
