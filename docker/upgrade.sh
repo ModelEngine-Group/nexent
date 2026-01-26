@@ -242,6 +242,16 @@ main() {
 
   # Ask user if they want to inherit previous deployment options
   if [ -f "$OPTIONS_FILE" ] && [ -s "$OPTIONS_FILE" ]; then
+    # Display current deployment options in a readable format
+    log "INFO" "📋 Current deployment options:"
+    echo "   ┌───────────────────────────────────────────┐"
+    for key in "${!DEPLOY_OPTIONS[@]}"; do
+      value="${DEPLOY_OPTIONS[$key]}"
+      printf "   │ %-25s : %-20s │\n" "$key" "$value"
+    done
+    echo "   └───────────────────────────────────────────┘"
+    echo ""
+    
     read -rp "🔄 Do you want to inherit previous deployment options? (yes/no) [yes]: " inherit_choice
     inherit_choice="${inherit_choice:-yes}"
     inherit_choice="$(trim_quotes "$inherit_choice")"
