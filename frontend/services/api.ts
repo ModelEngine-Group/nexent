@@ -229,6 +229,37 @@ export const API_ENDPOINTS = {
     mcpServers: (agentId: number) =>
       `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
   },
+  tenant: {
+    list: `${API_BASE_URL}/tenants`,
+    create: `${API_BASE_URL}/tenants`,
+    detail: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+    update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+    delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+  },
+  users: {
+    list: `${API_BASE_URL}/users/list`,
+    detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+    update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+    delete: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+  },
+  groups: {
+    create: `${API_BASE_URL}/groups`,
+    list: `${API_BASE_URL}/groups/list`,
+    detail: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    update: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    // Group members
+    members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    removeMember: (groupId: number, userId: string) =>
+      `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
+  },
+  invitations: {
+    list: `${API_BASE_URL}/invitations/list`,
+    create: `${API_BASE_URL}/invitations`,
+    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+  },
 };
 
 // Common error handling

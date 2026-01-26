@@ -28,7 +28,8 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 from consts.model import (
     GroupCreateRequest, GroupUpdateRequest,
-    GroupUserRequest, GroupListRequest, SetDefaultGroupRequest
+    GroupUserRequest, GroupListRequest, SetDefaultGroupRequest,
+    GroupMembersUpdateRequest
 )
 
 # Import the modules we need
@@ -482,6 +483,113 @@ class TestGroupMembership:
             assert response.status_code == HTTPStatus.NOT_FOUND
             data = response.json()
             assert "Group not found" in data["detail"]
+
+    def test_update_group_members_success(self):
+        """Test successful group members update"""
+        mock_result = {
+            "added": 2,
+            "removed": 1,
+            "unchanged": 3
+        }
+
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("user-456", "tenant-123")
+            mock_update_members.return_value = mock_result
+
+            request_data = {
+                "user_ids": ["user-1", "user-2", "user-3"]
+            }
+
+            response = client.put("/groups/1/members", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Group members updated successfully"
+            assert data["data"] == mock_result
+            mock_update_members.assert_called_once_with(
+                group_id=1,
+                user_ids=["user-1", "user-2", "user-3"],
+                current_user_id="user-456"
+            )
+
+    def test_update_group_members_not_found(self):
+        """Test group members update when group doesn't exist"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("user-456", "tenant-123")
+            mock_update_members.side_effect = NotFoundException("Group not found")
+
+            request_data = {"user_ids": ["user-1", "user-2"]}
+
+            response = client.put("/groups/999/members", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.NOT_FOUND
+            data = response.json()
+            assert "Group not found" in data["detail"]
+
+    def test_update_group_members_validation_error(self):
+        """Test group members update with validation error"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("user-456", "tenant-123")
+            mock_update_members.side_effect = ValidationError("Invalid user IDs provided")
+
+            request_data = {"user_ids": ["invalid-user"]}
+
+            response = client.put("/groups/1/members", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            data = response.json()
+            assert "Invalid user IDs provided" in data["detail"]
+
+    def test_update_group_members_unauthorized(self):
+        """Test group members update with unauthorized access"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user:
+            mock_get_user.side_effect = UnauthorizedError("Invalid token")
+
+            request_data = {"user_ids": ["user-1", "user-2"]}
+
+            response = client.put("/groups/1/members", json=request_data, headers={"Authorization": "Bearer invalid"})
+
+            assert response.status_code == HTTPStatus.UNAUTHORIZED
+            data = response.json()
+            assert "Invalid token" in data["detail"]
+
+    def test_update_group_members_service_unauthorized(self):
+        """Test group members update with service-level unauthorized error"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("user-456", "tenant-123")
+            mock_update_members.side_effect = UnauthorizedError("User does not have permission to update group members")
+
+            request_data = {"user_ids": ["user-1", "user-2"]}
+
+            response = client.put("/groups/1/members", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.UNAUTHORIZED
+            data = response.json()
+            assert "User does not have permission to update group members" in data["detail"]
+
+    def test_update_group_members_unexpected_error(self):
+        """Test group members update with unexpected error"""
+        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
+             patch('apps.group_app.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("user-456", "tenant-123")
+            mock_update_members.side_effect = Exception("Database connection failed")
+
+            request_data = {"user_ids": ["user-1", "user-2"]}
+
+            response = client.put("/groups/1/members", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+            data = response.json()
+            assert data["detail"] == "Failed to update group members"
 
 
 class TestBatchGroupMembership:

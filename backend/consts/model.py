@@ -41,6 +41,18 @@ class UserSignInRequest(BaseModel):
     password: str
 
 
+class UserUpdateRequest(BaseModel):
+    """User update request model"""
+    username: Optional[str] = Field(None, min_length=1, max_length=50)
+    email: Optional[EmailStr] = None
+    role: Optional[str] = Field(None, pattern="^(SUPER_ADMIN|ADMIN|DEV|USER)$")
+
+
+class UserDeleteRequest(BaseModel):
+    """User delete request model"""
+    new_owner_id: Optional[str] = None
+
+
 # Response models for model management
 class ModelResponse(BaseModel):
     code: int = 200
@@ -516,6 +528,18 @@ class GroupListRequest(BaseModel):
     page: int = Field(1, ge=1, description="Page number for pagination")
     page_size: int = Field(
         20, ge=1, le=100, description="Number of items per page")
+    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
+
+
+class UserListRequest(BaseModel):
+    """Request model for listing users"""
+    tenant_id: str = Field(..., description="Tenant ID to filter users")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(
+        20, ge=1, le=100, description="Number of items per page")
+    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
 
 
 class GroupUserRequest(BaseModel):
@@ -524,6 +548,11 @@ class GroupUserRequest(BaseModel):
                          description="User ID to add/remove")
     group_ids: Optional[List[int]] = Field(
         None, description="List of group IDs (for batch operations)")
+
+
+class GroupMembersUpdateRequest(BaseModel):
+    """Request model for batch updating group members"""
+    user_ids: List[str] = Field(..., description="List of user IDs to set as group members")
 
 
 class SetDefaultGroupRequest(BaseModel):

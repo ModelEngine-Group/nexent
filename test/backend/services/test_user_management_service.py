@@ -557,7 +557,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"user": "data"})
         mock_verify_code.assert_not_called()
         mock_generate_tts.assert_not_called()
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id")
+        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="test@example.com")
         mock_parse_response.assert_called_once_with(False, mock_response, "user")
 
     @patch('backend.services.user_management_service.parse_supabase_response')
@@ -578,7 +578,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         result = await signup_user("user@example.com", "password123")
 
         self.assertEqual(result, {"user": "data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id")
+        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="user@example.com")
         mock_parse_response.assert_called_once_with(False, mock_response, "user")
 
     @patch('backend.services.user_management_service.get_supabase_client')
@@ -642,7 +642,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
 
         self.assertEqual(result, {"user": "admin_data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN")
+        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
         mock_use_invite.assert_called_once_with("ADMIN123", "user-123")
         mock_add_groups.assert_called_once_with("user-123", [1, 2, 3], "user-123")
         mock_parse_response.assert_called_once_with(False, mock_response, "ADMIN")
@@ -689,7 +689,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
 
         self.assertEqual(result, {"user": "dev_data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV")
+        mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
         mock_use_invite.assert_called_once_with("DEV456", "user-456")
         mock_add_groups.assert_called_once_with("user-456", [4, 5], "user-456")
         mock_parse_response.assert_called_once_with(False, mock_response, "DEV")
@@ -785,7 +785,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
 
             # Verify ADMIN role was assigned and TTS/STT generation was called
-            mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN")
+            mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
             mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
             mock_parse.assert_called_with(False, mock_response, "ADMIN")
 
@@ -819,7 +819,7 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV123")
 
             # Verify DEV role was assigned and TTS/STT generation was NOT called
-            mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="DEV")
+            mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
             mock_parse.assert_called_with(False, mock_response, "DEV")
 
     @patch('backend.services.user_management_service.check_invitation_available')
