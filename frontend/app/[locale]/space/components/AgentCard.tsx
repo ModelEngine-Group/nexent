@@ -128,7 +128,7 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
 
   // Handle edit - navigate to agents view
   const handleEdit = () => {
-    router.push("/agent");
+    router.push("/agents");
   };
 
   // Handle view detail

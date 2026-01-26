@@ -2,7 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Checkbox, ConfigProvider } from "antd";
-import { SyncOutlined, PlusOutlined } from "@ant-design/icons";
+import { SyncOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 
@@ -44,11 +44,14 @@ interface KnowledgeBaseListProps {
   activeKnowledgeBase: KnowledgeBase | null;
   currentEmbeddingModel: string | null;
   isLoading?: boolean;
+  syncLoading?: boolean;
   onSelect: (id: string) => void;
   onClick: (kb: KnowledgeBase) => void;
   onDelete: (id: string) => void;
   onSync: () => void;
   onCreateNew: () => void;
+  onDataMateConfig?: () => void;
+  showDataMateConfig?: boolean; // Control whether to show DataMate config button
   isSelectable: (kb: KnowledgeBase) => boolean;
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
@@ -61,11 +64,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   activeKnowledgeBase,
   currentEmbeddingModel,
   isLoading = false,
+  syncLoading = false,
   onSelect,
   onClick,
   onDelete,
   onSync,
   onCreateNew,
+  onDataMateConfig,
+  showDataMateConfig = false,
   isSelectable,
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
@@ -160,10 +166,30 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   height: "14px",
                 }}
               >
-                <SyncOutlined spin={isLoading} style={{ color: "white" }} />
+                <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
               </span>
               <span>{t("knowledgeBase.button.sync")}</span>
             </Button>
+            {showDataMateConfig && (
+              <Button
+                style={{
+                  padding: "4px 15px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  backgroundColor: "#1677ff",
+                  color: "white",
+                  border: "none",
+                }}
+                className="hover:!bg-blue-600"
+                type="primary"
+                onClick={onDataMateConfig}
+                icon={<SettingOutlined />}
+              >
+                {t("knowledgeBase.button.dataMateConfig")}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -340,19 +366,19 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           })}
                         </span>
 
-                        {/* Only show source, creation date, and model tags when there are valid documents or chunks */}
+                        {/* Always show source tag regardless of document/chunk count */}
+                        <span
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                        >
+                          {t("knowledgeBase.tag.source", {
+                            source: kb.source,
+                          })}
+                        </span>
+
+                        {/* Only show creation date, model tags when there are valid documents or chunks */}
                         {((kb.documentCount || 0) > 0 ||
                           (kb.chunkCount || 0) > 0) && (
                           <>
-                            {/* Knowledge base source tag */}
-                            <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
-                            >
-                              {t("knowledgeBase.tag.source", {
-                                source: kb.source,
-                              })}
-                            </span>
-
                             {/* Creation date tag - only show date */}
                             <span
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
@@ -378,7 +404,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               </span>
                             )}
                             {kb.embeddingModel !== "unknown" &&
-                              kb.embeddingModel !== currentEmbeddingModel && (
+                              kb.embeddingModel !== currentEmbeddingModel &&
+                              kb.source !== "datamate" && (
                                 <span
                                   className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}
                                 >

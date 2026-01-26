@@ -1,11 +1,12 @@
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 from consts.const import (
     APP_DESCRIPTION,
     APP_NAME,
     AVATAR_URI,
     CUSTOM_ICON_URL,
+    DATAMATE_URL,
     DEFAULT_APP_DESCRIPTION_EN,
     DEFAULT_APP_DESCRIPTION_ZH,
     DEFAULT_APP_NAME_EN,
@@ -85,10 +86,9 @@ async def save_config_impl(config, tenant_id, user_id):
             tenant_config_manager.set_single_config(
                 user_id, tenant_id, env_key, safe_value(value))
         else:
-            if env_config[env_key] not in [DEFAULT_APP_NAME_ZH, DEFAULT_APP_NAME_EN, DEFAULT_APP_DESCRIPTION_ZH,
-                                           DEFAULT_APP_DESCRIPTION_EN]:
-                tenant_config_manager.set_single_config(
-                    user_id, tenant_id, env_key, safe_value(value))
+            # Save configuration for all app config keys, including datamateUrl
+            tenant_config_manager.set_single_config(
+                user_id, tenant_id, env_key, safe_value(value))
     # Process model configuration
     for model_type, model_config in config_dict.get("models", {}).items():
         if not model_config:
@@ -142,8 +142,9 @@ def build_app_config(language: str, tenant_id: str) -> dict:
             "avatarUri": tenant_config_manager.get_app_config(AVATAR_URI, tenant_id=tenant_id) or "",
             "customUrl": tenant_config_manager.get_app_config(CUSTOM_ICON_URL, tenant_id=tenant_id) or ""
         },
+        "datamateUrl": tenant_config_manager.get_app_config(DATAMATE_URL, tenant_id=tenant_id) or "",
         "modelEngineEnabled": str(MODEL_ENGINE_ENABLED).lower() == "true"
-    }
+        }
 
 
 def build_models_config(tenant_id: str) -> dict:

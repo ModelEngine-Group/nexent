@@ -91,9 +91,13 @@ class TestGetTenantInfo:
             {"config_value": "group-123"}  # DEFAULT_GROUP_ID
         ]
 
-        # Execute & Assert
-        with pytest.raises(NotFoundException, match="The name of tenant not found"):
-            get_tenant_info(tenant_id)
+        # Execute
+        result = get_tenant_info(tenant_id)
+
+        # Assert - should return tenant info with empty name
+        assert result["tenant_id"] == tenant_id
+        assert result["tenant_name"] == ""
+        assert result["default_group_id"] == "group-123"
 
     def test_get_tenant_info_with_empty_group_id(self, service_mocks):
         """Test get_tenant_info when default group ID is empty"""
@@ -136,9 +140,13 @@ class TestGetTenantInfo:
         # Mock config functions to return None
         service_mocks['get_single_config_info'].side_effect = [None, None]
 
-        # Execute & Assert
-        with pytest.raises(NotFoundException, match="The name of tenant not found"):
-            get_tenant_info(tenant_id)
+        # Execute
+        result = get_tenant_info(tenant_id)
+
+        # Assert - should return tenant info with empty name and group_id
+        assert result["tenant_id"] == tenant_id
+        assert result["tenant_name"] == ""
+        assert result["default_group_id"] == ""
 
 
 class TestGetAllTenants:
@@ -165,15 +173,20 @@ class TestGetAllTenants:
             assert len(result) == 3
             assert result == tenant_infos
 
-    def test_get_all_tenants_with_failed_tenant(self, service_mocks):
-        """Test get_all_tenants when one tenant fails to load"""
+    def test_get_all_tenants_with_missing_configs(self, service_mocks):
+        """Test get_all_tenants when some tenants have missing configs"""
         # Setup
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
 
-        # Mock get_tenant_info to succeed for first two, fail for third
+        # Mock get_tenant_info to return tenant info for all, but with missing configs for tenant3
         def mock_get_tenant_info(tenant_id):
             if tenant_id == "tenant3":
-                raise NotFoundException("Tenant not found")
+                # Simulate missing name config - returns empty name
+                return {
+                    "tenant_id": tenant_id,
+                    "tenant_name": "",  # Missing name config
+                    "default_group_id": "group3"
+                }
             return {
                 "tenant_id": tenant_id,
                 "tenant_name": f"Tenant {tenant_id[-1]}",
@@ -187,10 +200,12 @@ class TestGetAllTenants:
             # Execute
             result = get_all_tenants()
 
-            # Assert - should skip the failed tenant
-            assert len(result) == 2
+            # Assert - should include all tenants (no more skipping)
+            assert len(result) == 3
             assert result[0]["tenant_id"] == "tenant1"
             assert result[1]["tenant_id"] == "tenant2"
+            assert result[2]["tenant_id"] == "tenant3"
+            assert result[2]["tenant_name"] == ""  # Missing name config
 
     def test_get_all_tenants_empty_list(self, service_mocks):
         """Test get_all_tenants when no tenants exist"""
@@ -471,25 +486,6 @@ class TestUpdateTenantInfo:
         with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
             update_tenant_info(tenant_id, new_tenant_name, user_id)
 
-    def test_update_tenant_info_get_tenant_info_failure(self, service_mocks):
-        """Test update_tenant_info when get_tenant_info fails after successful update"""
-        # Setup
-        tenant_id = "test_tenant"
-        new_tenant_name = "Updated Name"
-        user_id = "updater_user"
-
-        # Mock config info
-        config_info = {"tenant_config_id": 123, "config_value": "Old Name"}
-
-        # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException("Failed to get updated info")) as mock_get_tenant_info:
-
-            service_mocks['get_single_config_info'].return_value = config_info
-            service_mocks['update_config_by_tenant_config_id'].return_value = True
-
-            # Execute & Assert
-            with pytest.raises(NotFoundException, match="Failed to get updated info"):
-                update_tenant_info(tenant_id, new_tenant_name, user_id)
 
 
 class TestDeleteTenant:

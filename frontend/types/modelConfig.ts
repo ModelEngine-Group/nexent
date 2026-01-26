@@ -54,6 +54,7 @@ export interface AppConfig {
   customIconUrl: string | null;
   avatarUri: string | null;
   modelEngineEnabled: boolean;
+  datamateUrl: string | null;
 }
 
 // Model API configuration interface

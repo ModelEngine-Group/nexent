@@ -11,7 +11,7 @@ from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_session_by_authorization, revoke_regular_user, get_user_info, get_permissions_by_role
+    get_session_by_authorization, revoke_regular_user, get_user_info
 from consts.exceptions import UnauthorizedError
 from utils.auth_utils import get_current_user_id
 
@@ -287,32 +287,3 @@ async def revoke_user_account(request: Request):
         logging.error(f"User revoke failed: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="User revoke failed")
-
-
-@router.get("/role_permissions/{user_role}")
-async def get_role_permissions(user_role: str):
-    """
-    Get all permissions for a specific user role.
-
-    Args:
-        user_role (str): User role to query permissions for (SU, ADMIN, DEV, USER)
-
-    Returns:
-        JSONResponse: Permissions data with success message
-    """
-    try:
-        permissions_data = await get_permissions_by_role(user_role)
-
-        return JSONResponse(status_code=HTTPStatus.OK, content={
-            "message": permissions_data["message"],
-            "data": {
-                "user_role": permissions_data["user_role"],
-                "permissions": permissions_data["permissions"],
-                "total_permissions": permissions_data["total_permissions"]
-            }
-        })
-    except Exception as e:
-        logging.error(
-            f"Failed to get role permissions for role {user_role}: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail=f"Failed to retrieve permissions for role {user_role}")

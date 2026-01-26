@@ -837,20 +837,22 @@ export const ModelConfigSection = forwardRef<
           }}
         >
           <Row gutter={[8, 8]} style={{ width: "100%" }}>
-            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button
-                type="primary"
-                size="middle"
-                onClick={handleSyncModels}
-                style={{ width: "100%" }}
-                icon={<RefreshCw size={16} />}
-                block
-              >
-                <span className="button-text-full">
-                  {t("modelConfig.button.syncModelEngine")}
-                </span>
-              </Button>
-            </Col>
+            {modelEngineEnable && (
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Button
+                  type="primary"
+                  size="middle"
+                  onClick={handleSyncModels}
+                  style={{ width: "100%" }}
+                  icon={<RefreshCw size={16} />}
+                  block
+                >
+                  <span className="button-text-full">
+                    {t("modelConfig.button.syncModelEngine")}
+                  </span>
+                </Button>
+              </Col>
+            )}
             <Col xs={24} sm={12} md={6} lg={6} xl={6}>
               <Button
                 type="primary"

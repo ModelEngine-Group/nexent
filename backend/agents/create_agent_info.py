@@ -150,6 +150,8 @@ async def create_agent_config(
                     tenant_id=tenant_id, user_id=user_id)
                 if knowledge_info_list:
                     for knowledge_info in knowledge_info_list:
+                        if knowledge_info.get('knowledge_sources') != 'elasticsearch':
+                            continue
                         knowledge_name = knowledge_info.get("index_name")
                         try:
                             message = ElasticSearchService().get_summary(index_name=knowledge_name)
@@ -239,12 +241,21 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
             knowledge_info_list = get_selected_knowledge_list(
                 tenant_id=tenant_id, user_id=user_id)
             index_names = [knowledge_info.get(
-                "index_name") for knowledge_info in knowledge_info_list]
+                "index_name") for knowledge_info in knowledge_info_list if knowledge_info.get('knowledge_sources') == 'elasticsearch']
             tool_config.metadata = {
                 "index_names": index_names,
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
                 "name_resolver": build_knowledge_name_mapping(tenant_id=tenant_id, user_id=user_id),
+            }
+        elif tool_config.class_name == "DataMateSearchTool":
+            knowledge_info_list = get_selected_knowledge_list(
+                tenant_id=tenant_id, user_id=user_id)
+            index_names = [knowledge_info.get(
+                "index_name") for knowledge_info in knowledge_info_list if
+                knowledge_info.get('knowledge_sources') == 'datamate']
+            tool_config.metadata = {
+                "index_names": index_names,
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
             tool_config.metadata = {

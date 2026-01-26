@@ -106,7 +106,8 @@ class AppConfig(BaseModel):
     iconType: str
     customIconUrl: Optional[str] = None
     avatarUri: Optional[str] = None
-    modelEngineEnabled: bool = True
+    modelEngineEnabled: bool = False
+    datamateUrl: Optional[str] = None
 
 
 class GlobalConfig(BaseModel):
@@ -458,6 +459,14 @@ class MCPConfigRequest(BaseModel):
     """Request model for adding MCP servers from configuration"""
     mcpServers: Dict[str, MCPServerConfig] = Field(
         ..., description="Dictionary of MCP server configurations")
+
+
+class UpdateKnowledgeListRequest(BaseModel):
+    """Request model for updating user's selected knowledge base list grouped by source"""
+    nexent: Optional[List[str]] = Field(
+        None, description="List of knowledge base index names from nexent source")
+    datamate: Optional[List[str]] = Field(
+        None, description="List of knowledge base index names from datamate source")
 
 
 # Tenant Management Data Models

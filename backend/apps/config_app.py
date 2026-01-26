@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from apps.agent_app import agent_config_router as agent_router
 from apps.config_sync_app import router as config_sync_router
+from apps.datamate_app import router as datamate_router
 from apps.vectordatabase_app import router as vectordatabase_router
 from apps.file_management_app import file_management_config_router as file_manager_router
 from apps.image_app import router as proxy_router
@@ -43,6 +44,7 @@ app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)
 app.include_router(vectordatabase_router)
+app.include_router(datamate_router)
 app.include_router(voice_router)
 app.include_router(file_manager_router)
 app.include_router(proxy_router)

@@ -1,6 +1,7 @@
 from .exa_search_tool import ExaSearchTool
 from .get_email_tool import GetEmailTool
 from .knowledge_base_search_tool import KnowledgeBaseSearchTool
+from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
@@ -22,6 +23,7 @@ from .save_excel_tool import SaveExcelTool
 __all__ = [
     "ExaSearchTool",
     "KnowledgeBaseSearchTool",
+    "DifySearchTool",
     "DataMateSearchTool",
     "SendEmailTool",
     "GetEmailTool",

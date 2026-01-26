@@ -11,12 +11,7 @@ from types import ModuleType, SimpleNamespace
 
 from fastapi.responses import StreamingResponse
 
-# Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
+# Environment variables are now configured in conftest.py
 
 # Mock boto3 before importing the module under test
 boto3_mock = MagicMock()
@@ -49,7 +44,8 @@ sys.modules['nexent.core.utils'] = _create_package_mock('nexent.core.utils')
 observer_module = ModuleType('nexent.core.utils.observer')
 observer_module.MessageObserver = MagicMock
 sys.modules['nexent.core.utils.observer'] = observer_module
-sys.modules['nexent.vector_database'] = _create_package_mock('nexent.vector_database')
+sys.modules['nexent.vector_database'] = _create_package_mock(
+    'nexent.vector_database')
 vector_db_base_module = ModuleType('nexent.vector_database.base')
 
 
@@ -61,6 +57,7 @@ class _VectorDatabaseCore:
 vector_db_base_module.VectorDatabaseCore = _VectorDatabaseCore
 sys.modules['nexent.vector_database.base'] = vector_db_base_module
 sys.modules['nexent.vector_database.elasticsearch_core'] = MagicMock()
+sys.modules['nexent.vector_database.datamate_core'] = MagicMock()
 # Mock nexent.storage module and its submodules before any imports
 sys.modules['nexent.storage'] = _create_package_mock('nexent.storage')
 storage_factory_module = MagicMock()
@@ -96,8 +93,10 @@ minio_client_mock.storage_config.default_bucket = 'test-bucket'
 minio_client_mock._storage_client = storage_client_mock
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+      lambda self: None).start()
+patch('backend.database.client.MinioClient',
+      return_value=minio_client_mock).start()
 patch('backend.database.client.minio_client', minio_client_mock).start()
 # Patch attachment_db.minio_client to use the same mock
 # This ensures delete_file and other methods work correctly
@@ -400,8 +399,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2"},
-            {"index_name": "index2", "embedding_model_name": "test-model", "group_ids": ""}
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model",
+                "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -442,8 +442,9 @@ class TestElasticSearchService(unittest.TestCase):
         }
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2"},
-            {"index_name": "index2", "embedding_model_name": "test-model", "group_ids": ""}
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model",
+                "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -482,7 +483,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["es_index"]
         mock_get_info.return_value = [
             {"index_name": "dangling_index",
-                "embedding_model_name": "model-A", "group_ids": "1"}
+                "embedding_model_name": "model-A", "group_ids": "1", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "tenant-1"}
@@ -509,7 +510,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A", "group_ids": "1,2"}
+            {"index_name": "index1", "embedding_model_name": "model-A",
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {}
         mock_get_user_tenant.return_value = {
@@ -538,7 +540,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": None}
+            {"index_name": "index1", "embedding_model_name": None,
+                "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
             "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
@@ -570,7 +573,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A", "group_ids": "1,2"}
+            {"index_name": "index1", "embedding_model_name": "model-A",
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
         ]
         self.mock_vdb_core.get_indices_detail.side_effect = Exception(
             "503 Service Unavailable"
@@ -599,7 +603,8 @@ class TestElasticSearchService(unittest.TestCase):
         """
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
-            {"index_name": "index1", "embedding_model_name": "model-A", "group_ids": "1,2"}
+            {"index_name": "index1", "embedding_model_name": "model-A",
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
         ]
         detailed_stats = {
             "index1": {
@@ -648,7 +653,8 @@ class TestElasticSearchService(unittest.TestCase):
                 "group_ids": "1",
                 "created_by": "test_user",  # User is creator
                 "ingroup_permission": "READ_ONLY",
-                "tenant_id": "test_tenant"
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
             },
             {
                 "index_name": "index2",
@@ -656,7 +662,8 @@ class TestElasticSearchService(unittest.TestCase):
                 "group_ids": "1",
                 "created_by": "other_user",  # User is not creator
                 "ingroup_permission": "EDIT",
-                "tenant_id": "test_tenant"
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
             }
         ]
         mock_get_user_tenant.return_value = {
@@ -700,13 +707,15 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index1",
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
-                "tenant_id": "legacy_admin_user"  # Same as user_id
+                "tenant_id": "legacy_admin_user",  # Same as user_id
+                "knowledge_sources": "elasticsearch"
             },
             {
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
-                "tenant_id": "legacy_admin_user"  # Same as user_id
+                "tenant_id": "legacy_admin_user",  # Same as user_id
+                "knowledge_sources": "elasticsearch"
             }
         ]
         # user_role is None to test fallback logic
@@ -758,13 +767,15 @@ class TestElasticSearchService(unittest.TestCase):
                 "index_name": "index1",
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
-                "tenant_id": "tenant_id"  # DEFAULT_TENANT_ID
+                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "knowledge_sources": "elasticsearch"
             },
             {
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
-                "tenant_id": "tenant_id"  # DEFAULT_TENANT_ID
+                "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
+                "knowledge_sources": "elasticsearch"
             }
         ]
         # user_role is USER but should be overridden by SPEED logic
@@ -796,6 +807,70 @@ class TestElasticSearchService(unittest.TestCase):
             call("User under SPEED version is treated as admin"),
             call("User under SPEED version is treated as admin")
         ])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_skips_datamate_sources(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices skips records with knowledge_sources='datamate'.
+
+        This test verifies that:
+        1. Records with knowledge_sources='datamate' are skipped and not included in results
+        2. Records with knowledge_sources='elasticsearch' are included in results
+        3. Only non-datamate knowledgebases are visible to users
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2", "index3"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "test_user",
+                "ingroup_permission": "READ_ONLY",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"  # Should be included
+            },
+            {
+                "index_name": "index2",
+                "embedding_model_name": "test-model",
+                "group_ids": "1",
+                "created_by": "test_user",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "datamate"  # Should be skipped
+            },
+            {
+                "index_name": "index3",
+                "embedding_model_name": "test-model",
+                "group_ids": "2",
+                "created_by": "other_user",
+                "ingroup_permission": "READ_ONLY",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"  # Should be included
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1, 2]
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=False,
+            tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        # Only index1 and index3 should be included (index2 with datamate should be skipped)
+        self.assertEqual(len(result["indices"]), 2)
+        self.assertEqual(result["count"], 2)
+        self.assertIn("index1", result["indices"])
+        self.assertNotIn("index2", result["indices"])  # datamate source should be excluded
+        self.assertIn("index3", result["indices"])
 
     def test_vectorize_documents_success(self):
         """
@@ -2239,8 +2314,9 @@ class TestElasticSearchService(unittest.TestCase):
         mock_response.status_code = 200
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2"},
-            {"index_name": "index2", "embedding_model_name": "test-model", "group_ids": ""}
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+            {"index_name": "index2", "embedding_model_name": "test-model",
+                "group_ids": "", "knowledge_sources": "elasticsearch"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -2430,7 +2506,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Setup
         self.mock_vdb_core.delete_documents.return_value = 5
         # Configure delete_file to return a success response
-        mock_delete_file.return_value = {"success": True, "object_name": "test_path"}
+        mock_delete_file.return_value = {
+            "success": True, "object_name": "test_path"}
 
         # Execute
         result = ElasticSearchService.delete_documents(
@@ -2519,12 +2596,6 @@ class TestElasticSearchService(unittest.TestCase):
             "tenant_id": "tenant1"
         })
         self.assertEqual(result["status"], "exists_in_tenant")
-
-
-
-
-
-
 
     # Note: generate_knowledge_summary_stream function has been removed
     # These tests are no longer relevant as the function was replaced with summary_index_name
@@ -2801,7 +2872,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         from backend.services.vectordatabase_service import _rethrow_or_plain
 
         with self.assertRaises(Exception) as exc:
-            _rethrow_or_plain(Exception('{"error_code":"E123","detail":"boom"}'))
+            _rethrow_or_plain(
+                Exception('{"error_code":"E123","detail":"boom"}'))
         self.assertIn('"error_code": "E123"', str(exc.exception))
 
     def test_get_vector_db_core_unsupported_type(self):
@@ -2812,6 +2884,79 @@ class TestRethrowOrPlain(unittest.TestCase):
             get_vector_db_core(db_type="unsupported")
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.DataMateCore')
+    def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
+        """get_vector_db_core returns DataMateCore for DATAMATE type."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType, DATAMATE_URL
+
+        # Setup mocks
+        mock_tenant_config_manager.get_app_config.return_value = DATAMATE_URL
+        mock_datamate_core.return_value = MagicMock()
+
+        # Execute
+        result = get_vector_db_core(db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+
+        # Assert
+        mock_tenant_config_manager.get_app_config.assert_called_once_with(DATAMATE_URL, tenant_id="test-tenant")
+        mock_datamate_core.assert_called_once_with(base_url=DATAMATE_URL)
+        self.assertEqual(result, mock_datamate_core.return_value)
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.DataMateCore')
+    def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
+        """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType, DATAMATE_URL
+
+        # Setup mocks
+        mock_tenant_config_manager.get_app_config.return_value = "https://datamate.example.com"
+        mock_datamate_instance = MagicMock()
+        mock_datamate_core.return_value = mock_datamate_instance
+
+        # Execute
+        result = get_vector_db_core(
+            db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+
+        # Assert
+        self.assertEqual(result, mock_datamate_instance)
+        mock_tenant_config_manager.get_app_config.assert_called_once_with(
+            DATAMATE_URL, tenant_id="test-tenant")
+        mock_datamate_core.assert_called_once_with(
+            base_url="https://datamate.example.com")
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
+        """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType
+
+        # Setup mock to return None (no URL configured)
+        mock_tenant_config_manager.get_app_config.return_value = None
+
+        # Execute and Assert
+        with self.assertRaises(ValueError) as exc:
+            get_vector_db_core(
+                db_type=VectorDatabaseType.DATAMATE, tenant_id="test-tenant")
+
+        self.assertIn(
+            "DataMate URL not configured for tenant test-tenant", str(exc.exception))
+        mock_tenant_config_manager.get_app_config.assert_called_once()
+
+    def test_get_vector_db_core_datamate_no_tenant_id(self):
+        """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""
+        from backend.services.vectordatabase_service import get_vector_db_core
+        from consts.const import VectorDatabaseType
+
+        # Execute and Assert
+        with self.assertRaises(ValueError) as exc:
+            get_vector_db_core(
+                db_type=VectorDatabaseType.DATAMATE, tenant_id=None)
+
+        self.assertIn("tenant_id must be provided for DataMate",
+                      str(exc.exception))
 
     def test_rethrow_or_plain_parses_error_code(self):
         """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
@@ -2859,7 +3004,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
         # Redis cleanup will raise to hit error branch (lines 289-292)
-        mock_redis.delete_knowledgebase_records.side_effect = Exception("redis boom")
+        mock_redis.delete_knowledgebase_records.side_effect = Exception(
+            "redis boom")
         mock_get_redis.return_value = mock_redis
 
         files_payload = {
@@ -2895,7 +3041,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         # Redis cleanup error should be surfaced
         self.assertIn("error", result["redis_cleanup"])
         mock_list_files.assert_awaited_once()
-        mock_delete_index.assert_awaited_once_with("kb-2", mock_vdb_core, "user-2")
+        mock_delete_index.assert_awaited_once_with(
+            "kb-2", mock_vdb_core, "user-2")
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_knowledge_base_create_index_failure(self, mock_create_record):
@@ -3006,7 +3153,8 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         mock_redis = MagicMock()
         # First call (init) raises, second call (final) raises
-        mock_redis.save_progress_info.side_effect = [Exception("init fail"), Exception("final fail")]
+        mock_redis.save_progress_info.side_effect = [
+            Exception("init fail"), Exception("final fail")]
         mock_redis.is_task_cancelled.return_value = False
         mock_get_redis.return_value = mock_redis
 
@@ -3143,11 +3291,13 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertIn("file-processing", paths)
         self.assertIn("file-failed", paths)
         # Processing file gets progress override
-        proc_file = next(f for f in result["files"] if f["path_or_url"] == "file-processing")
+        proc_file = next(
+            f for f in result["files"] if f["path_or_url"] == "file-processing")
         self.assertEqual(proc_file["processed_chunk_num"], 2)
         self.assertEqual(proc_file["total_chunk_num"], 4)
         # Failed file retains default chunk_count fallback
-        failed_file = next(f for f in result["files"] if f["path_or_url"] == "file-failed")
+        failed_file = next(
+            f for f in result["files"] if f["path_or_url"] == "file-failed")
         self.assertEqual(failed_file.get("chunk_count", 0), 0)
 
     @patch('backend.services.vectordatabase_service.get_all_files_status', return_value={})
