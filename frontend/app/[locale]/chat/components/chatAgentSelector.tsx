@@ -440,7 +440,7 @@ export function ChatAgentSelector({
                             <div className="flex items-center gap-1.5">
                               {/* NEW badge - placed before display_name */}
                               {(agent as any).is_new && agent.display_name && (
-                                <span className=" inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none align-middle translate-y-[-1px]">
+                                <span className="inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none mr-0.5">
                                   <span className="px-0.5">{t("space.new", "NEW")}</span>
                                 </span>
                               )}
