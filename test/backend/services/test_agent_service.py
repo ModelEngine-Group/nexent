@@ -93,7 +93,6 @@ with patch('sqlalchemy.create_engine', return_value=mock_engine), \
         _generate_unique_value_with_suffix,
         _regenerate_agent_value_with_llm,
         clear_agent_new_mark_impl,
-        mark_agents_as_new_impl,
     )
     from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
@@ -7073,88 +7072,4 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
             "clear_agent_new_mark_impl called for agent_id=789, tenant_id=tenant-with-dashes_and_underscores, user_id=user@domain.com, affected_rows=1"
         )
 
-
-@pytest.mark.asyncio
-async def test_mark_agents_as_new_impl_deprecated_behavior():
-    """
-    Test mark_agents_as_new_impl deprecated behavior.
-
-    This test verifies that:
-    1. The function returns None as per deprecation
-    2. No database operations are performed
-    3. Function accepts the expected parameters
-    """
-    # Setup - no mocks needed since function returns None
-
-    # Execute
-    result = await mark_agents_as_new_impl(
-        agent_ids=[1, 2, 3],
-        tenant_id="test_tenant",
-        user_id="test_user"
-    )
-
-    # Assert
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_mark_agents_as_new_impl_empty_list():
-    """
-    Test mark_agents_as_new_impl with empty agent list.
-
-    This test verifies that:
-    1. The function handles empty lists correctly
-    2. Still returns None
-    """
-    # Execute
-    result = await mark_agents_as_new_impl(
-        agent_ids=[],
-        tenant_id="test_tenant",
-        user_id="test_user"
-    )
-
-    # Assert
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_mark_agents_as_new_impl_single_agent():
-    """
-    Test mark_agents_as_new_impl with single agent.
-
-    This test verifies that:
-    1. The function handles single agent lists correctly
-    2. Still returns None due to deprecation
-    """
-    # Execute
-    result = await mark_agents_as_new_impl(
-        agent_ids=[42],
-        tenant_id="single_tenant",
-        user_id="single_user"
-    )
-
-    # Assert
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_mark_agents_as_new_impl_large_list():
-    """
-    Test mark_agents_as_new_impl with large agent list.
-
-    This test verifies that:
-    1. The function handles large lists correctly
-    2. Still returns None due to deprecation
-    """
-    # Setup
-    large_agent_list = list(range(1, 101))  # 100 agents
-
-    # Execute
-    result = await mark_agents_as_new_impl(
-        agent_ids=large_agent_list,
-        tenant_id="large_tenant",
-        user_id="large_user"
-    )
-
-    # Assert
-    assert result is None
+# Deprecated tests for mark_agents_as_new_impl have been removed as the API is cleaned up.
