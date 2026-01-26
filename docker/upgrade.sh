@@ -213,10 +213,37 @@ update_option_value() {
 }
 
 
+prompt_deploy_options() {
+  prompt_option_value "MODE_CHOICE" "Please select deployment mode" "${DEPLOY_OPTIONS[MODE_CHOICE]:-}"
+  prompt_option_value "VERSION_CHOICE" "Please select deployment version" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}"
+  prompt_option_value "IS_MAINLAND" "Is this deployment in Mainland China? (yes/no)" "${DEPLOY_OPTIONS[IS_MAINLAND]:-}"
+  prompt_option_value "ENABLE_TERMINAL" "Enable terminal functionality? (yes/no)" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}"
+}
+
 main() {
   ensure_docker
   load_options
 
+  # Ask user if they want to inherit previous deployment options
+  if [ -f "$OPTIONS_FILE" ] && [ -s "$OPTIONS_FILE" ]; then
+    read -rp "🔄 Do you want to inherit previous deployment options? (yes/no) [yes]: " inherit_choice
+    inherit_choice="${inherit_choice:-yes}"
+    inherit_choice="$(trim_quotes "$inherit_choice")"
+    
+    if [ "$inherit_choice" != "yes" ]; then
+      log "INFO" "📝 Starting fresh configuration..."
+      > "$OPTIONS_FILE"  # Clear existing options file
+      DEPLOY_OPTIONS=()  # Clear existing options
+      
+      # Require basic options
+      require_option "APP_VERSION" "APP_VERSION not detected, please enter the current deployed version"
+      
+      # Prompt for all deployment options
+      prompt_deploy_options
+    fi
+  fi
+  
+  # Ensure required options are present
   require_option "APP_VERSION" "APP_VERSION not detected, please enter the current deployed version"
   require_option "ROOT_DIR" "ROOT_DIR not detected, please enter the absolute deployment directory path"
   CURRENT_APP_VERSION="${DEPLOY_OPTIONS[APP_VERSION]:-}"
