@@ -467,6 +467,8 @@
   "knowledgeBase.list.empty": "暂无知识库，请先创建知识库",
   "knowledgeBase.modal.deleteConfirm.title": "确认删除知识库",
   "knowledgeBase.modal.deleteConfirm.content": "确定要删除这个知识库吗？删除后无法恢复。",
+  "knowledgeBase.modal.deleteDataMate.title": "无法删除DataMate知识库",
+  "knowledgeBase.modal.deleteDataMate.content": "Nexent无法删除DataMate知识库，请前往DataMate页面进行操作。",
   "knowledgeBase.message.deleteSuccess": "删除知识库成功",
   "knowledgeBase.message.deleteError": "删除知识库失败",
   "knowledgeBase.message.syncSuccess": "同步知识库成功",

@@ -1016,3 +1016,8 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (209, 'SPEED', 'RESOURCE', 'GROUP', 'UPDATE'),
 (210, 'SPEED', 'RESOURCE', 'GROUP', 'DELETE')
 ON CONFLICT (role_permission_id) DO NOTHING;
+
+-- Insert SPEED role user into user_tenant_t table if not exists
+INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
+VALUES ('user_id', 'tenant_id', 'SPEED', NULL, 'system', 'system')
+ON CONFLICT (user_id, tenant_id) DO NOTHING;

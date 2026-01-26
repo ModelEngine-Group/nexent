@@ -21,6 +21,8 @@ import { Zap, Maximize2 } from "lucide-react";
 import log from "@/lib/logger";
 import { EditableAgent } from "@/stores/agentConfigStore";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
+import { configService } from "@/services/configService";
+import { ConfigStore } from "@/lib/config";
 import {
   checkAgentName,
   checkAgentDisplayName,
@@ -57,7 +59,7 @@ export default function AgentGenerateDetail({
   const [form] = Form.useForm();
 
   // Model data from React Query
-  const { availableLlmModels, isLoading: loadingModels } = useModelList();
+  const { availableLlmModels, defaultLlmModel, isLoading: loadingModels } = useModelList();
 
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
@@ -70,6 +72,26 @@ export default function AgentGenerateDetail({
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
 
   const userManuallySwitchedTabRef = useRef(false);
+
+  // Ensure tenant config is loaded for default model selection
+  useEffect(() => {
+    const loadConfigIfNeeded = async () => {
+      try {
+        // Check if config is already loaded
+        const configStore = ConfigStore.getInstance();
+        const modelConfig = configStore.getModelConfig();
+
+        // If no LLM model is configured, try to load config from backend
+        if (!modelConfig.llm?.modelName && !modelConfig.llm?.displayName) {
+          await configService.loadConfigToFrontend();
+        }
+      } catch (error) {
+        log.warn("Failed to load tenant config:", error);
+      }
+    };
+
+    loadConfigIfNeeded();
+  }, []);
 
   const stylesObject: TabsProps["styles"] = {
     root: {},
@@ -105,7 +127,7 @@ export default function AgentGenerateDetail({
       agentDisplayName: editedAgent.display_name || "",
       agentAuthor: editedAgent.author || "",
       mainAgentModel:
-        editedAgent.model || availableLlmModels[0]?.displayName || "",
+        editedAgent.model || defaultLlmModel?.displayName || "",
       mainAgentMaxStep: editedAgent.max_step || 5,
       agentDescription: editedAgent.description || "",
       dutyPrompt: editedAgent.duty_prompt || "",
@@ -117,23 +139,23 @@ export default function AgentGenerateDetail({
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:
         editedAgent.business_logic_model_name ||
-        availableLlmModels[0]?.displayName ||
+        defaultLlmModel?.displayName ||
         "",
       businessLogicModelId:
-        editedAgent.business_logic_model_id || availableLlmModels[0]?.id || 0,
+        editedAgent.business_logic_model_id || defaultLlmModel?.id || 0,
     };
     // Initialize local business description state
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
-  }, [currentAgentId, editedAgent, availableLlmModels]);
+  }, [currentAgentId, editedAgent, availableLlmModels, defaultLlmModel]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
     onUpdateBusinessInfo({
       business_description: value,
-      business_logic_model_id: editedAgent.business_logic_model_id || 0,
-      business_logic_model_name: editedAgent.business_logic_model_name || "",
+      business_logic_model_id: businessInfo.businessLogicModelId,
+      business_logic_model_name: businessInfo.businessLogicModelName,
     });
   };
 
