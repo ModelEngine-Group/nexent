@@ -130,6 +130,64 @@ export const addMcpServer = async (mcpUrl: string, serviceName: string) => {
 };
 
 /**
+ * Update MCP server
+ */
+export const updateMcpServer = async (
+  currentServiceName: string,
+  currentMcpUrl: string,
+  newServiceName: string,
+  newMcpUrl: string
+) => {
+  try {
+    const response = await fetch(API_ENDPOINTS.mcp.update, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        current_service_name: currentServiceName,
+        current_mcp_url: currentMcpUrl,
+        new_service_name: newServiceName,
+        new_mcp_url: newMcpUrl,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === "success") {
+      return {
+        success: true,
+        data: data,
+        message: data.message || t("mcpService.message.updateServerSuccess"),
+      };
+    } else {
+      // Handle specific error status codes and error information
+      let errorMessage =
+        data.message || t("mcpService.message.updateServerFailed");
+
+      if (response.status === 409) {
+        errorMessage = t("mcpService.message.nameAlreadyUsed");
+      } else if (response.status === 503) {
+        errorMessage = t("mcpService.message.cannotConnectToServer");
+      } else {
+        errorMessage = t("mcpService.message.updateProxyFailed");
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage,
+      };
+    }
+  } catch (error) {
+    log.error(t("mcpService.debug.updateServerFailed"), error);
+    return {
+      success: false,
+      data: null,
+      message: t("mcpService.message.networkError"),
+    };
+  }
+};
+
+/**
  * Delete MCP server
  */
 export const deleteMcpServer = async (mcpUrl: string, serviceName: string) => {
