@@ -12,6 +12,7 @@ from database.remote_mcp_db import (
     get_mcp_records_by_tenant,
     check_mcp_name_exists,
     update_mcp_status_by_name_and_url,
+    update_mcp_record_by_name_and_url,
 )
 from services.mcp_container_service import MCPContainerManager
 
@@ -69,6 +70,56 @@ async def delete_remote_mcp_server_list(tenant_id: str,
                                       mcp_server=remote_mcp_server,
                                       tenant_id=tenant_id,
                                       user_id=user_id)
+
+
+async def update_remote_mcp_server_list(
+    update_data,
+    tenant_id: str,
+    user_id: str,
+):
+    """
+    Update an existing remote MCP server record.
+
+    Args:
+        update_data: MCPUpdateRequest containing current and new values
+        tenant_id: Tenant ID
+        user_id: User ID
+
+    Raises:
+        MCPNameIllegal: If the new MCP name already exists (and is different from current)
+        MCPConnectionError: If the new MCP server URL is not accessible
+    """
+    # Check if the current record exists by verifying the name exists for this tenant
+    if not check_mcp_name_exists(mcp_name=update_data.current_service_name, tenant_id=tenant_id):
+        logger.error(
+            f"MCP name does not exist, tenant_id: {tenant_id}, current_mcp_server_name: {update_data.current_service_name}")
+        raise MCPNameIllegal("MCP name does not exist")
+
+    # If the new name is different from the current name, check if it already exists
+    if update_data.new_service_name != update_data.current_service_name:
+        if check_mcp_name_exists(mcp_name=update_data.new_service_name, tenant_id=tenant_id):
+            logger.error(
+                f"New MCP name already exists, tenant_id: {tenant_id}, new_mcp_server_name: {update_data.new_service_name}")
+            raise MCPNameIllegal("New MCP name already exists")
+
+    # Check if the new server URL is accessible
+    try:
+        status = await mcp_server_health(remote_mcp_server=update_data.new_mcp_url)
+    except BaseException:
+        status = False
+
+    if not status:
+        logger.error(
+            f"New MCP server health check failed: {update_data.new_mcp_url}")
+        raise MCPConnectionError("New MCP server connection failed")
+
+    # Update the database record
+    update_mcp_record_by_name_and_url(
+        update_data=update_data,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        status=status
+    )
 
 
 async def get_remote_mcp_server_list(tenant_id: str):
