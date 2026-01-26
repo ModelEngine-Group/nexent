@@ -6938,7 +6938,7 @@ async def test_clear_agent_new_mark_impl_success():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 1
-    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
@@ -6968,7 +6968,7 @@ async def test_clear_agent_new_mark_impl_no_rows_affected():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 0
-    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
@@ -6998,7 +6998,7 @@ async def test_clear_agent_new_mark_impl_multiple_rows_affected():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 3
-    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute
@@ -7028,7 +7028,7 @@ async def test_clear_agent_new_mark_impl_database_error():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.side_effect = Exception("Database connection failed")
-    with patch.dict('sys.modules', {'database.agent_db': mock_module}), \
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
          patch('backend.services.agent_service.logger') as mock_logger:
 
         # Execute and Assert
