@@ -9,6 +9,11 @@ import log from "@/lib/logger";
 const fetch = fetchWithAuth;
 
 export class ConfigService {
+  // In-flight dedupe and short-term cache for loadConfigToFrontend
+  private _loadInFlight: Promise<boolean> | null = null;
+  private _lastLoadTs: number | null = null;
+  private readonly _LOAD_TTL_MS = 5 * 1000; // 5 seconds
+
   // Save global configuration to backend
   async saveConfigToBackend(config: GlobalConfig): Promise<boolean> {
     try {
@@ -34,19 +39,28 @@ export class ConfigService {
 
   // Add: Load configuration from backend and write to localStorage
   async loadConfigToFrontend(): Promise<boolean> {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        log.error("Failed to load configuration:", errorData);
-        return false;
-      }
-      const result = await response.json();
-      const config = result.config;
-      if (config) {
+    // Dedupe concurrent calls and avoid repeat calls within short TTL
+    if (this._loadInFlight) return this._loadInFlight;
+    const now = Date.now();
+    if (this._lastLoadTs && now - this._lastLoadTs < this._LOAD_TTL_MS) {
+      return Promise.resolve(true);
+    }
+
+    this._loadInFlight = (async () => {
+      try {
+        const response = await fetch(API_ENDPOINTS.config.load, {
+          method: "GET",
+          headers: getAuthHeaders(),
+        });
+        if (!response.ok) {
+          const errorData = await response.json();
+          log.error("Failed to load configuration:", errorData);
+          this._lastLoadTs = Date.now();
+          return false;
+        }
+        const result = await response.json();
+        const config = result.config;
+        if (config) {
         // Use the conversion function of configStore
         const frontendConfig = ConfigStore.transformBackend2Frontend(config);
 
@@ -64,13 +78,20 @@ export class ConfigService {
           configStore.reloadFromStorage();
         }
 
+        this._lastLoadTs = Date.now();
         return true;
       }
-      return false;
-    } catch (error) {
-      log.error("Load configuration request exception:", error);
-      return false;
-    }
+      } catch (error) {
+        log.error("Load configuration request exception:", error);
+        this._lastLoadTs = Date.now();
+        return false;
+      } finally {
+        // clear in-flight after completion
+        this._loadInFlight = null;
+      }
+    })();
+
+    return this._loadInFlight;
   }
 }
 

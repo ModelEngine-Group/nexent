@@ -2,14 +2,32 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Input, Switch, InputNumber, Tag, Form, message } from "antd";
+import {
+  Modal,
+  Input,
+  Switch,
+  InputNumber,
+  Tag,
+  Form,
+  message,
+  Select,
+  Button,
+  Spin,
+} from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
+
+import KnowledgeBaseList from "../../../../knowledges/components/knowledge/KnowledgeBaseList";
+import { KnowledgeBase } from "@/types/knowledgeBase";
 
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import ToolTestPanel from "./ToolTestPanel";
+import KnowledgeBaseToolConfig from "./KnowledgeBaseToolConfig";
 import { updateToolConfig } from "@/services/agentConfigService";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { configService } from "@/services/configService";
+import { ConfigStore } from "@/lib/config";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -41,6 +59,65 @@ export default function ToolConfigModal({
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
+  const [kbOptions, setKbOptions] = useState<
+    { label: React.ReactNode; value: string; description?: string }[]
+  >([]);
+  const [kbLoading, setKbLoading] = useState(false);
+  const [kbModalVisible, setKbModalVisible] = useState(false);
+  const [kbModalSelected, setKbModalSelected] = useState<string[]>([]);
+  const [kbRawList, setKbRawList] = useState<any[]>([]);
+  // Preload KB list once when modal opens to avoid repeated fetches/ syncing
+  useEffect(() => {
+    let cancelled = false;
+    const loadKbs = async () => {
+      if (!isOpen) return;
+      const toolName = tool?.name;
+      // Only preload for local indices tool to avoid expensive / duplicative DataMate sync.
+      if (toolName !== "knowledge_base_search") {
+        return;
+      }
+
+      setKbLoading(true);
+      try {
+        const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(
+          true,
+          false,
+          true
+        );
+        if (cancelled) return;
+        setKbRawList(kbs);
+        setKbOptions(
+          kbs.map((kb: any) => ({
+            value: kb.id,
+            label: kb.name,
+            description: kb.description || "",
+          }))
+        );
+      } catch (e) {
+        // Non-fatal: leave child to handle DataMate fetch/errors when modal opens
+      } finally {
+        if (!cancelled) setKbLoading(false);
+      }
+    };
+
+    loadKbs();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, tool]);
+
+  const buildKbOptions = (kbs: any[]) => {
+    // For preview/select usage we only need the KB name (no description).
+    return kbs.map((kb) => ({
+      value: kb.id,
+      label: kb.name,
+      description: kb.description || "",
+    }));
+  };
+
+  // Configurable grouping: control which params appear in each group
+  const serverParamNames = ["server_url", "verify_ssl"];
+  const retrievalParamNames = ["top_k", "threshold", "kb_page", "kb_page_size", "search_mode"];
   // Initialize with provided params
   useEffect(() => {
     // Initialize form values
@@ -50,6 +127,37 @@ export default function ToolConfigModal({
       formValues[`param_${index}`] = param.value;
     });
     form.setFieldsValue(formValues);
+
+    // On first load of the tool config modal, attempt to load tenant config
+    // and populate the tool's `server_url` param from tenant `datamateUrl`
+    // if `server_url` exists and is empty.
+    (async () => {
+      try {
+        await configService.loadConfigToFrontend();
+        const appConfig = ConfigStore.getInstance().getAppConfig();
+        const tenantDataMateUrl = appConfig?.datamateUrl;
+        if (tenantDataMateUrl) {
+          const serverIdx = initialParams.findIndex((p) => p.name === "server_url");
+          if (serverIdx !== -1) {
+            const currentVal = initialParams[serverIdx]?.value;
+            if (!currentVal) {
+              const newParams = [...initialParams];
+              newParams[serverIdx] = {
+                ...newParams[serverIdx],
+                value: tenantDataMateUrl,
+              };
+              setCurrentParams(newParams);
+              const fieldName2 = `param_${serverIdx}`;
+              form.setFieldsValue({ [fieldName2]: tenantDataMateUrl });
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal: log and continue
+        // eslint-disable-next-line no-console
+        console.warn("Failed to load tenant config on tool init:", e);
+      }
+    })();
   }, [initialParams]);
 
   // Watch all form values and sync to currentParams
@@ -66,6 +174,8 @@ export default function ToolConfigModal({
       setCurrentParams(newParams);
     }
   }, [formValues]);
+
+  // KB list is loaded lazily when user opens the Select KBs modal (see button handler)
 
   const handleSave = async () => {
     try {
@@ -136,8 +246,7 @@ export default function ToolConfigModal({
         onSave(currentParams);
       }
     } catch (error) {
-      // Form validation failed, error will be shown by antd Form
-      message.error("Form validation failed:");
+      // Form validation failed; AntD Form will display inline errors. No global message needed.
     }
   };
 
@@ -174,7 +283,23 @@ export default function ToolConfigModal({
         case TOOL_PARAM_TYPES.ARRAY:
         case TOOL_PARAM_TYPES.OBJECT:
         default:
-          // Default TextArea for all text-like types and unknown types
+          // Special-case: render `search_mode` as a Select dropdown with fixed options
+          if (param.name === "search_mode") {
+            return (
+              <Select
+                options={[
+                  { label: "hybrid", value: "hybrid" },
+                  { label: "accurate", value: "accurate" },
+                  { label: "semantic", value: "semantic" },
+                ]}
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: param.description,
+                })}
+                allowClear
+              />
+            );
+          }
+          // Default TextArea for all other text-like types and unknown types
           return (
             <Input.TextArea
               placeholder={t(`toolConfig.input.${param.type}.placeholder`, {
@@ -227,7 +352,7 @@ export default function ToolConfigModal({
         width={600}
         confirmLoading={isLoading}
         className="tool-config-modal-content"
-        wrapProps={{ style: { pointerEvents: "auto" } }} 
+        wrapProps={{ style: { pointerEvents: "auto" } }}
         footer={
           <div className="flex justify-end items-center">
             {
@@ -273,95 +398,112 @@ export default function ToolConfigModal({
               wrapperCol={{ span: 18 }}
             >
               <div className="pr-2 mt-3">
-                {currentParams.map((param, index) => {
-                  const fieldName = `param_${index}`;
-                  const rules: any[] = [];
+                {tool?.name === "datamate_search" || tool?.name === "knowledge_base_search" ? (
+                <KnowledgeBaseToolConfig
+                  currentParams={currentParams}
+                  setCurrentParams={setCurrentParams}
+                  form={form}
+                  serverParamNames={serverParamNames}
+                  retrievalParamNames={retrievalParamNames}
+                  renderParamInput={renderParamInput}
+                  externalKbOptions={kbOptions}
+                  externalKbRawList={kbRawList}
+                  externalKbLoading={kbLoading}
+                  includeDataMateSync={tool?.name === "datamate_search"}
+                  toolName={tool?.name}
+                  toolSource={tool?.source}
+                />
+                ) : (
+                  currentParams.map((param, index) => {
+                    const fieldName = `param_${index}`;
+                    const rules: any[] = [];
 
-                  // Add required validation rule
-                  if (param.required) {
-                    rules.push({
-                      required: true,
-                      message: t("toolConfig.validation.required", {
-                        name: param.name,
-                      }),
-                    });
-                  }
-
-                  // Add type-specific validation rules
-                  switch (param.type) {
-                    case TOOL_PARAM_TYPES.ARRAY:
+                    // Add required validation rule
+                    if (param.required) {
                       rules.push({
-                        validator: (_: any, value: any) => {
-                          if (!value) return Promise.resolve();
-                          try {
-                            const parsed =
-                              typeof value === "string"
-                                ? JSON.parse(value)
-                                : value;
-                            if (!Array.isArray(parsed)) {
+                        required: true,
+                        message: t("toolConfig.validation.required", {
+                          name: param.name,
+                        }),
+                      });
+                    }
+
+                    // Add type-specific validation rules
+                    switch (param.type) {
+                      case TOOL_PARAM_TYPES.ARRAY:
+                        rules.push({
+                          validator: (_: any, value: any) => {
+                            if (!value) return Promise.resolve();
+                            try {
+                              const parsed =
+                                typeof value === "string"
+                                  ? JSON.parse(value)
+                                  : value;
+                              if (!Array.isArray(parsed)) {
+                                return Promise.reject(
+                                  t("toolConfig.validation.array.invalid")
+                                );
+                              }
+                            } catch {
                               return Promise.reject(
                                 t("toolConfig.validation.array.invalid")
                               );
                             }
-                          } catch {
-                            return Promise.reject(
-                              t("toolConfig.validation.array.invalid")
-                            );
-                          }
-                        },
-                      });
-                      break;
-                    case TOOL_PARAM_TYPES.OBJECT:
-                      rules.push({
-                        validator: (_: any, value: any) => {
-                          if (!value) return Promise.resolve();
-                          try {
-                            const parsed =
-                              typeof value === "string"
-                                ? JSON.parse(value)
-                                : value;
-                            if (
-                              typeof parsed !== "object" ||
-                              Array.isArray(parsed)
-                            ) {
+                          },
+                        });
+                        break;
+                      case TOOL_PARAM_TYPES.OBJECT:
+                        rules.push({
+                          validator: (_: any, value: any) => {
+                            if (!value) return Promise.resolve();
+                            try {
+                              const parsed =
+                                typeof value === "string"
+                                  ? JSON.parse(value)
+                                  : value;
+                              if (
+                                typeof parsed !== "object" ||
+                                Array.isArray(parsed)
+                              ) {
+                                return Promise.reject(
+                                  t("toolConfig.validation.object.invalid")
+                                );
+                              }
+                              return Promise.resolve();
+                            } catch {
                               return Promise.reject(
                                 t("toolConfig.validation.object.invalid")
                               );
                             }
-                            return Promise.resolve();
-                          } catch {
-                            return Promise.reject(
-                              t("toolConfig.validation.object.invalid")
-                            );
-                          }
-                        },
-                      });
-                      break;
-                  }
+                          },
+                        });
+                        break;
+                    }
 
-                  return (
-                    <Form.Item
-                      key={param.name}
-                      label={
-                        <span
-                          className="inline-block w-full truncate"
-                          title={param.name}
-                        >
-                          {param.name}
-                        </span>
-                      }
-                      name={fieldName}
-                      rules={rules}
-                      tooltip={{
-                        title: param.description,
-                        placement: "topLeft",
-                        styles: { root: { maxWidth: 400 } },
-                      }}
-                    >
-                      {renderParamInput(param, index)}
-                    </Form.Item>
-                  );
-                })}
+                    return (
+                      <Form.Item
+                        key={param.name}
+                        label={
+                          <span
+                            className="inline-block w-full truncate"
+                            title={param.name}
+                          >
+                            {param.name}
+                          </span>
+                        }
+                        name={fieldName}
+                        rules={rules}
+                        tooltip={{
+                          title: param.description,
+                          placement: "topLeft",
+                          styles: { root: { maxWidth: 400 } },
+                        }}
+                      >
+                        {renderParamInput(param, index)}
+                      </Form.Item>
+                    );
+                  })
+                )}
               </div>
             </Form>
           </div>
