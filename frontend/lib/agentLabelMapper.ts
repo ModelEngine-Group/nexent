@@ -82,3 +82,33 @@ export function getCategoryLabel(category: string, t: TFunction): string {
   return getAgentTypeLabel(category, t);
 }
 
+/**
+ * Get localized tool description by tool name
+ * Falls back to original description if no translation key exists
+ * @param toolName - Tool name (e.g., "get_email", "send_email", "datamate_search")
+ * @param originalDescription - Original description from backend (fallback)
+ * @param t - Translation function from i18next
+ * @returns Localized tool description
+ */
+export function getToolDescription(
+  toolName: string,
+  originalDescription: string,
+  t: TFunction
+): string {
+  if (!toolName) {
+    return originalDescription || "";
+  }
+  
+  const translationKey = `tool.description.${toolName}`;
+  const translated = t(translationKey, originalDescription);
+  
+  // If translation key doesn't exist, i18next returns the key itself
+  // In that case, return the original description
+  if (translated === translationKey) {
+    return originalDescription;
+  }
+  
+  // Return the translated value (which should be localized based on current language)
+  return translated;
+}
+

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 // Using AntD Avatar directly in this component
 import { generateAvatarFromName } from "@/lib/avatar";
-import { getToolSourceLabel, getCategoryLabel } from "@/lib/agentLabelMapper";
+import { getToolSourceLabel, getCategoryLabel, getToolDescription } from "@/lib/agentLabelMapper";
 
 interface AgentDetailModalProps {
   visible: boolean;
@@ -191,7 +191,9 @@ export default function AgentDetailModal({
                   <div className="flex-1">
                     <h4 className="font-semibold text-base">{tool.name}</h4>
                     <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-                      {tool.description || t("space.noDescription", "No description")}
+                      {tool.name && tool.description
+                        ? getToolDescription(tool.name, tool.description, t)
+                        : tool.description || t("space.noDescription", "No description")}
                     </p>
                   </div>
                   {tool.is_available ? (

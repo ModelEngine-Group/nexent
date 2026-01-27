@@ -10,6 +10,7 @@ import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
+import { getToolDescription } from "@/lib/agentLabelMapper";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -260,7 +261,9 @@ export default function ToolConfigModal({
         }
       >
         <div className="mb-4">
-          <p className="text-sm text-gray-500 mb-4">{tool?.description}</p>
+          <p className="text-sm text-gray-500 mb-4">
+            {getToolDescription(tool?.name || "", tool?.description || "", t)}
+          </p>
           <div className="text-sm font-medium mb-2">
             {t("toolConfig.title.paramConfig")}
           </div>

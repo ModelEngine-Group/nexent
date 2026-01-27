@@ -12,7 +12,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { MarketAgentDetail } from "@/types/market";
-import { getToolSourceLabel, getGenericLabel } from "@/lib/agentLabelMapper";
+import { getToolSourceLabel, getGenericLabel, getToolDescription } from "@/lib/agentLabelMapper";
 import { getCategoryIcon } from "@/const/marketConfig";
 
 interface MarketAgentDetailModalProps {
@@ -294,8 +294,10 @@ export default function MarketAgentDetailModal({
                       {needsConfig(tool.description) ? (
                         renderFieldValue(tool.description)
                       ) : (
-                        tool.description ||
-                        t("market.detail.toolDescription", "No description")
+                        tool.name && tool.description
+                          ? getToolDescription(tool.name, tool.description, t)
+                          : tool.description ||
+                            t("market.detail.toolDescription", "No description")
                       )}
                     </div>
                   </div>
