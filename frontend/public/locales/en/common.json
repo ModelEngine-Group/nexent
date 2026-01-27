@@ -384,6 +384,8 @@
   "toolConfig.input.model.placeholder": "Please select model",
   "toolConfig.input.string.placeholder": "Please enter {{name}}",
   "toolConfig.input.array.placeholder": "Please enter JSON array",
+  "toolConfig.placeholder.selectKb": "Please select knowledge bases",
+  "toolConfig.validation.selectKb": "Please select at least one knowledge base",
   "toolConfig.input.object.placeholder": "Please enter JSON object",
   "toolConfig.toolTest.toolInfo": "Tool Information",
   "toolConfig.toolTest.configParams": "Parameter Configuration",

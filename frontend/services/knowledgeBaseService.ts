@@ -17,6 +17,20 @@ import log from "@/lib/logger";
 // @ts-ignore
 const fetch: typeof fetchWithAuth = fetchWithAuth;
 
+// Simple in-memory cache and in-flight dedupe for KB info
+let cachedKbInfo: KnowledgeBase[] | null = null;
+let kbCacheExpiry = 0;
+let kbInFlightPromise: Promise<KnowledgeBase[]> | null = null;
+const KB_CACHE_TTL_MS = 30 * 1000; // 30s
+// In-flight dedupe and short cache for DataMate sync
+let datamateInFlightPromise: Promise<any> | null = null;
+let datamateCache: any = null;
+let datamateCacheExpiry = 0;
+const DATAMATE_CACHE_TTL_MS = 30 * 1000; // 30s
+// Persistent id->name map storage
+const KB_ID_NAME_MAP_KEY = "kb_id_name_map_v1";
+const KB_ID_NAME_MAP_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 // Knowledge base service class
 class KnowledgeBaseService {
   // Check Elasticsearch health (force refresh, no caching for setup page)
@@ -48,50 +62,86 @@ class KnowledgeBaseService {
     indices_info: any[];
     created_records: any[];
   }> {
-    try {
-      const response = await fetch(
-        API_ENDPOINTS.datamate.syncDatamateKnowledges,
-        {
-          method: "POST",
-          headers: getAuthHeaders(),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail ||
-            "Failed to sync DataMate knowledge bases and create records"
-        );
-      }
-
-      return data;
-    } catch (error) {
-      log.error(
-        "Failed to sync DataMate knowledge bases and create records:",
-        error
-      );
-      throw error;
+    // Return cached result when fresh
+    const now = Date.now();
+    if (datamateCache && now < datamateCacheExpiry) {
+      return datamateCache;
     }
+
+    if (datamateInFlightPromise) return datamateInFlightPromise;
+
+    datamateInFlightPromise = (async () => {
+      try {
+        const response = await fetch(
+          API_ENDPOINTS.datamate.syncDatamateKnowledges,
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.detail || "Failed to sync DataMate knowledge bases and create records"
+          );
+        }
+
+        // cache result briefly
+        datamateCache = data;
+        datamateCacheExpiry = Date.now() + DATAMATE_CACHE_TTL_MS;
+
+        return data;
+      } catch (error) {
+        log.error(
+          "Failed to sync DataMate knowledge bases and create records:",
+          error
+        );
+        throw error;
+      } finally {
+        datamateInFlightPromise = null;
+      }
+    })();
+
+    return datamateInFlightPromise;
   }
 
   // Get knowledge bases with stats from all sources (very slow, don't use it)
   async getKnowledgeBasesInfo(
     skipHealthCheck = false,
-    includeDataMateSync = true
+    includeDataMateSync = true,
+    forceRefresh = false
   ): Promise<KnowledgeBase[]> {
-    try {
-      const knowledgeBases: KnowledgeBase[] = [];
+    // Return cached result when fresh unless forceRefresh is requested
+    const now = Date.now();
+    if (!forceRefresh && cachedKbInfo && now < kbCacheExpiry) {
+      return cachedKbInfo;
+    }
 
-      // Get knowledge bases from Elasticsearch
+    if (kbInFlightPromise) {
+      return kbInFlightPromise;
+    }
+
+    kbInFlightPromise = (async () => {
       try {
-        // First check Elasticsearch health (unless skipped)
-        if (!skipHealthCheck) {
-          const isElasticsearchHealthy = await this.checkHealth();
-          if (!isElasticsearchHealthy) {
-            log.warn("Elasticsearch service unavailable");
-          } else {
+        const knowledgeBases: KnowledgeBase[] = [];
+
+        // Get knowledge bases from Elasticsearch
+        try {
+          // Decide whether to fetch indices:
+          // - If skipHealthCheck is true, skip health check but still fetch indices.
+          // - If skipHealthCheck is false, only fetch indices when health check passes.
+          let shouldFetchIndices = true;
+          if (!skipHealthCheck) {
+            const isElasticsearchHealthy = await this.checkHealth();
+            if (!isElasticsearchHealthy) {
+              log.warn("Elasticsearch service unavailable");
+              shouldFetchIndices = false;
+            }
+          }
+
+          if (shouldFetchIndices) {
             const response = await fetch(
               `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
               {
@@ -118,7 +168,8 @@ class KnowledgeBaseService {
                     documentCount: stats.doc_count || 0,
                     chunkCount: stats.chunk_count || 0,
                     createdAt: stats.creation_date || null,
-                    updatedAt: stats.update_date || stats.creation_date || null,
+                    updatedAt:
+                      stats.update_date || stats.creation_date || null,
                     embeddingModel: stats.embedding_model || "unknown",
                     avatar: "",
                     chunkNum: 0,
@@ -134,53 +185,151 @@ class KnowledgeBaseService {
               knowledgeBases.push(...esKnowledgeBases);
             }
           }
-        }
-      } catch (error) {
-        log.error("Failed to get Elasticsearch indices:", error);
-      }
-
-      // Sync DataMate knowledge bases and get the synced data (only if enabled)
-      if (includeDataMateSync) {
-        try {
-          const syncResult = await this.syncDataMateAndCreateRecords();
-          if (syncResult.indices_info) {
-            // Convert synced DataMate indices to knowledge base format
-            const datamateKnowledgeBases: KnowledgeBase[] =
-              syncResult.indices_info.map((indexInfo: any) => {
-                const stats = indexInfo.stats?.base_info || {};
-                const kbId = indexInfo.name;
-                const kbName = indexInfo.display_name || indexInfo.name;
-
-                return {
-                  id: kbId,
-                  name: kbName,
-                  description: "DataMate knowledge base",
-                  documentCount: stats.doc_count || 0,
-                  chunkCount: stats.chunk_count || 0,
-                  createdAt: stats.creation_date || null,
-                  updatedAt: stats.update_date || stats.creation_date || null,
-                  embeddingModel: stats.embedding_model || "unknown",
-                  avatar: "",
-                  chunkNum: 0,
-                  language: "",
-                  nickname: "",
-                  parserId: "",
-                  permission: "",
-                  tokenNum: 0,
-                  source: "datamate",
-                };
-              });
-            knowledgeBases.push(...datamateKnowledgeBases);
-          }
         } catch (error) {
-          log.error("Failed to sync DataMate knowledge bases:", error);
+          log.error("Failed to get Elasticsearch indices:", error);
         }
-      }
 
-      return knowledgeBases;
-    } catch (error) {
-      log.error("Failed to get knowledge base list:", error);
-      throw error;
+        // Sync DataMate knowledge bases and get the synced data (only if enabled)
+        if (includeDataMateSync) {
+          try {
+            const syncResult = await this.syncDataMateAndCreateRecords();
+            if (syncResult.indices_info) {
+              // Convert synced DataMate indices to knowledge base format
+              const datamateKnowledgeBases: KnowledgeBase[] =
+                syncResult.indices_info.map((indexInfo: any) => {
+                  const stats = indexInfo.stats?.base_info || {};
+                  const kbId = indexInfo.name;
+                  const kbName = indexInfo.display_name || indexInfo.name;
+
+                  return {
+                    id: kbId,
+                    name: kbName,
+                    description: "DataMate knowledge base",
+                    documentCount: stats.doc_count || 0,
+                    chunkCount: stats.chunk_count || 0,
+                    createdAt: stats.creation_date || null,
+                    updatedAt:
+                      stats.update_date || stats.creation_date || null,
+                    embeddingModel: stats.embedding_model || "unknown",
+                    avatar: "",
+                    chunkNum: 0,
+                    language: "",
+                    nickname: "",
+                    parserId: "",
+                    permission: "",
+                    tokenNum: 0,
+                    source: "datamate",
+                  };
+                });
+              knowledgeBases.push(...datamateKnowledgeBases);
+            }
+          } catch (error) {
+            log.error("Failed to sync DataMate knowledge bases:", error);
+          }
+        }
+
+        // Cache and return
+        cachedKbInfo = knowledgeBases;
+        kbCacheExpiry = Date.now() + KB_CACHE_TTL_MS;
+        return knowledgeBases;
+      } catch (error) {
+        log.error("Failed to get knowledge base list:", error);
+        throw error;
+      } finally {
+        kbInFlightPromise = null;
+      }
+    })();
+
+    return kbInFlightPromise;
+  }
+
+  // Synchronously read id->name map from localStorage if available and fresh
+  getCachedIdNameMapSync(): Record<string, string> | null {
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return null;
+      const raw = window.localStorage.getItem(KB_ID_NAME_MAP_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.ts || !parsed.map) return null;
+      if (Date.now() - parsed.ts > KB_ID_NAME_MAP_TTL_MS) return null;
+      return parsed.map as Record<string, string>;
+    } catch (e) {
+      log.warn("Failed to read KB id->name map from localStorage:", e);
+      return null;
+    }
+  }
+
+  // Ensure id->name map is available; will fetch/build if necessary
+  async ensureIdNameMap(): Promise<Record<string, string>> {
+    // 1. Prefer in-memory cache built from cachedKbInfo
+    if (cachedKbInfo && cachedKbInfo.length > 0) {
+      const map: Record<string, string> = {};
+      cachedKbInfo.forEach((kb) => {
+        map[kb.id] = kb.name;
+      });
+      try {
+        if (typeof window !== "undefined" && window.localStorage) {
+          window.localStorage.setItem(
+            KB_ID_NAME_MAP_KEY,
+            JSON.stringify({ ts: Date.now(), map })
+          );
+        }
+      } catch (e) {
+        log.warn("Failed to write KB id->name map to localStorage:", e);
+      }
+      return map;
+    }
+
+    // 2. Try localStorage sync read
+    const local = this.getCachedIdNameMapSync();
+    if (local) return local;
+
+    // 3. Fallback: fetch KB info and build map
+    try {
+      const kbs = await this.getKnowledgeBasesInfo(true, true);
+      const map: Record<string, string> = {};
+      kbs.forEach((kb) => {
+        map[kb.id] = kb.name;
+      });
+      try {
+        if (typeof window !== "undefined" && window.localStorage) {
+          window.localStorage.setItem(
+            KB_ID_NAME_MAP_KEY,
+            JSON.stringify({ ts: Date.now(), map })
+          );
+        }
+      } catch (e) {
+        log.warn("Failed to write KB id->name map to localStorage:", e);
+      }
+      return map;
+    } catch (e) {
+      log.error("Failed to ensure KB id->name map:", e);
+      return {};
+    }
+  }
+
+  // Force refresh id->name map from server and update cache/storage
+  async refreshIdNameMap(): Promise<Record<string, string>> {
+    try {
+      const kbs = await this.getKnowledgeBasesInfo(true, true);
+      const map: Record<string, string> = {};
+      kbs.forEach((kb) => {
+        map[kb.id] = kb.name;
+      });
+      try {
+        if (typeof window !== "undefined" && window.localStorage) {
+          window.localStorage.setItem(
+            KB_ID_NAME_MAP_KEY,
+            JSON.stringify({ ts: Date.now(), map })
+          );
+        }
+      } catch (e) {
+        log.warn("Failed to write KB id->name map to localStorage:", e);
+      }
+      return map;
+    } catch (e) {
+      log.error("Failed to refresh KB id->name map:", e);
+      return {};
     }
   }
 
