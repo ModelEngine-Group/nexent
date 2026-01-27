@@ -299,6 +299,27 @@ _get_option_value_description() {
 main() {
   ensure_docker
   load_options
+  
+  # Ensure required options are present
+  require_option "APP_VERSION" "APP_VERSION not detected, please enter the current deployed version"
+  require_option "ROOT_DIR" "ROOT_DIR not detected, please enter the absolute deployment directory path"
+  CURRENT_APP_VERSION="${DEPLOY_OPTIONS[APP_VERSION]:-}"
+
+  NEW_APP_VERSION="$(get_const_app_version)"
+  if [ -z "$NEW_APP_VERSION" ]; then
+    log "ERROR" "❌ Unable to parse APP_VERSION from const.py, please verify the file."
+    exit 1
+  fi
+
+  log "INFO" "📦 Current version: $CURRENT_APP_VERSION"
+  log "INFO" "🎯 Target version: $NEW_APP_VERSION"
+
+  local cmp_result
+  cmp_result="$(compare_versions "$NEW_APP_VERSION" "$CURRENT_APP_VERSION")"
+  if [ "$cmp_result" -le 0 ]; then
+    log "INFO" "🚫 Target version ($NEW_APP_VERSION) is not higher than current version ($CURRENT_APP_VERSION), upgrade aborted."
+    exit 1
+  fi
 
   # Ask user if they want to inherit previous deployment options
   if [ -f "$OPTIONS_FILE" ] && [ -s "$OPTIONS_FILE" ]; then
@@ -336,27 +357,6 @@ main() {
       # Prompt for deployment options with existing values as defaults
       prompt_deploy_options
     fi
-  fi
-  
-  # Ensure required options are present
-  require_option "APP_VERSION" "APP_VERSION not detected, please enter the current deployed version"
-  require_option "ROOT_DIR" "ROOT_DIR not detected, please enter the absolute deployment directory path"
-  CURRENT_APP_VERSION="${DEPLOY_OPTIONS[APP_VERSION]:-}"
-
-  NEW_APP_VERSION="$(get_const_app_version)"
-  if [ -z "$NEW_APP_VERSION" ]; then
-    log "ERROR" "❌ Unable to parse APP_VERSION from const.py, please verify the file."
-    exit 1
-  fi
-
-  log "INFO" "📦 Current version: $CURRENT_APP_VERSION"
-  log "INFO" "🎯 Target version: $NEW_APP_VERSION"
-
-  local cmp_result
-  cmp_result="$(compare_versions "$NEW_APP_VERSION" "$CURRENT_APP_VERSION")"
-  if [ "$cmp_result" -le 0 ]; then
-    log "INFO" "🚫 Target version ($NEW_APP_VERSION) is not higher than current version ($CURRENT_APP_VERSION), upgrade aborted."
-    exit 1
   fi
 
   build_deploy_args
