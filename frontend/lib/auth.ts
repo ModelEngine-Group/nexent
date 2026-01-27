@@ -2,10 +2,16 @@
  * Authentication utilities
  */
 
-import { fetchWithErrorHandling } from "@/services/api";
+import { ApiError, fetchWithErrorHandling } from "@/services/api";
 import { STORAGE_KEYS } from "@/const/auth";
 import { generateAvatarUrl as generateAvatar } from "@/lib/avatar";
 import { USER_ROLES } from "@/const/auth";
+import { STATUS_CODES } from "@/const/auth";
+import {
+  checkSessionValid,
+  getSessionFromStorage,
+  handleSessionExpired,
+} from "@/lib/session";
 
 /**
  * Role color mapping - Ant Design color presets
@@ -38,11 +44,19 @@ export function generateAvatarUrl(email: string): string {
  * Expiration should be handled when backend returns 401
  */
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
-  const session =
-    typeof window !== "undefined"
-      ? localStorage.getItem(STORAGE_KEYS.SESSION)
-      : null;
-  const sessionObj = session ? JSON.parse(session) : null;
+  // Frontend pre-check: detect session expiry without hitting backend
+  if (typeof window !== "undefined") {
+    const session = getSessionFromStorage();
+    if (session && !checkSessionValid()) {
+      handleSessionExpired();
+      throw new ApiError(
+        STATUS_CODES.TOKEN_EXPIRED,
+        "Login expired, please login again"
+      );
+    }
+  }
+
+  const sessionObj = getSessionFromStorage();
 
   const isFormData = options.body instanceof FormData;
   const headers = {
