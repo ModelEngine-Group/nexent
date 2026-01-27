@@ -82,12 +82,11 @@ export interface KnowledgeBaseState {
   activeKnowledgeBase: KnowledgeBase | null;
   currentEmbeddingModel: string | null;
   isLoading: boolean;
-  syncLoading: boolean;
   error: string | null;
 }
 
 // Knowledge base action type
-export type KnowledgeBaseAction =
+export type KnowledgeBaseAction = 
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS, payload: KnowledgeBase[] }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE, payload: string[] }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_ACTIVE, payload: KnowledgeBase | null }
@@ -95,7 +94,6 @@ export type KnowledgeBaseAction =
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.DELETE_KNOWLEDGE_BASE, payload: string }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ADD_KNOWLEDGE_BASE, payload: KnowledgeBase }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: boolean }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING, payload: boolean }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: string };
 
 // UI state interface
@@ -125,16 +123,7 @@ export interface AbortableError extends Error {
 
 // User selected knowledge base configuration type
 export interface UserKnowledgeConfig {
-  selectedKbNames?: string[];
-  selectedKbModels?: string[];
-  selectedKbSources?: string[];
-  // Legacy support for grouped format
-  nexent?: string[];
-  datamate?: string[];
-}
-
-// Update knowledge list request type
-export interface UpdateKnowledgeListRequest {
-  nexent?: string[];
-  datamate?: string[];
+  selectedKbNames: string[];
+  selectedKbModels: string[];
+  selectedKbSources: string[];
 }

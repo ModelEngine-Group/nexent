@@ -15,17 +15,9 @@ import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
 import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
-import {
-  ChatMessageType,
-  TaskMessageType,
-  CardItem,
-  MessageHandler,
-} from "@/types/chat";
+import { ChatMessageType, TaskMessageType, CardItem, MessageHandler } from "@/types/chat";
 import { useChatTaskMessage } from "@/hooks/useChatTaskMessage";
-import {
-  storageService,
-  extractObjectNameFromUrl,
-} from "@/services/storageService";
+import { storageService, extractObjectNameFromUrl } from "@/services/storageService";
 import log from "@/lib/logger";
 
 /**
@@ -35,9 +27,7 @@ import log from "@/lib/logger";
  * @param content - Raw code content from stream
  * @returns Object with codeContent and language
  */
-const extractCodeInfo = (
-  content: string
-): { codeContent: string; language: string } => {
+const extractCodeInfo = (content: string): { codeContent: string; language: string } => {
   if (!content || typeof content !== "string") {
     return { codeContent: "", language: "python" };
   }
@@ -137,10 +127,10 @@ const extractCodeInfo = (
     const standardMatch = processed.match(/^```(\w+)\s/);
     let lang = "python";
     if (standardMatch) {
-      lang = standardMatch[1];
-      processed = processed.replace(/^```\w+\s*/, "");
+        lang = standardMatch[1];
+        processed = processed.replace(/^```\w+\s*/, "");
     } else {
-      processed = processed.replace(/^```\s*/, "");
+        processed = processed.replace(/^```\s*/, "");
     }
 
     // Clean tails
@@ -191,9 +181,7 @@ const messageHandlers: MessageHandler[] = [
       let displayContent = message.content;
       if (message.contents && message.contents.length > 0) {
         // Find the latest preprocess content
-        const preprocessContent = message.contents.find(
-          (content: any) => content.type === chatConfig.contentTypes.PREPROCESS
-        );
+        const preprocessContent = message.contents.find((content: any) => content.type === chatConfig.contentTypes.PREPROCESS);
         if (preprocessContent) {
           displayContent = preprocessContent.content;
         }
@@ -225,7 +213,7 @@ const messageHandlers: MessageHandler[] = [
       message.type === chatConfig.messageTypes.GENERATING_CODE ||
       message.type === chatConfig.messageTypes.EXECUTING ||
       message.type === chatConfig.messageTypes.MODEL_OUTPUT_THINKING ||
-      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING,
+      message.type === chatConfig.messageTypes.MODEL_OUTPUT_DEEP_THINKING ,
     render: (message, _t) => (
       <div
         style={{
@@ -246,8 +234,7 @@ const messageHandlers: MessageHandler[] = [
 
   // Add search_content_placeholder type processor - for history records
   {
-    canHandle: (message) =>
-      message.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER,
+    canHandle: (message) => message.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER,
     render: (message, t) => {
       // Find search results in the message context
       const messageContainer = message._messageContainer;
@@ -404,8 +391,7 @@ const messageHandlers: MessageHandler[] = [
             if (
               site.url &&
               site.url !== "#" &&
-              (site.url.startsWith("http://") ||
-                site.url.startsWith("https://")) &&
+              (site.url.startsWith("http://") || site.url.startsWith("https://")) &&
               !site.url.includes("/api/file/download/")
             ) {
               // Direct download from HTTP/HTTPS URL without backend
@@ -426,7 +412,8 @@ const messageHandlers: MessageHandler[] = [
 
             let objectName = site.objectName;
             if (!objectName && site.url) {
-              objectName = extractObjectNameFromUrl(site.url) || undefined;
+              objectName =
+                extractObjectNameFromUrl(site.url) || undefined;
             }
             if (!objectName && site.filename) {
               objectName = site.filename.includes("/")
@@ -504,108 +491,106 @@ const messageHandlers: MessageHandler[] = [
               {siteInfos.map((site) => {
                 const isClickable = site.isKnowledgeBase || site.canOpenWeb;
                 return (
-                  <div
-                    key={site.key}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      padding: "0.25rem 0.5rem",
-                      backgroundColor: "#f9fafb",
-                      borderRadius: "0.25rem",
-                      fontSize: "0.75rem",
-                      color: "#4b5563",
-                      border: "1px solid #e5e7eb",
-                      cursor: isClickable ? "pointer" : "default",
-                      transition: isClickable
-                        ? "background-color 0.2s"
-                        : "none",
-                    }}
-                    onClick={() => {
-                      if (site.isKnowledgeBase) {
-                        handleKnowledgeFileDownload(site);
-                      } else if (site.canOpenWeb && site.url) {
-                        window.open(site.url, "_blank", "noopener,noreferrer");
-                      }
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isClickable) {
-                        e.currentTarget.style.backgroundColor = "#f3f4f6";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (isClickable) {
-                        e.currentTarget.style.backgroundColor = "#f9fafb";
-                      }
-                    }}
-                    title={
-                      site.isKnowledgeBase
-                        ? t("taskWindow.downloadFile", {
-                            name: site.filename || site.displayName,
-                          })
-                        : site.canOpenWeb
-                          ? t("taskWindow.visit", { domain: site.domain })
-                          : site.filename || site.displayName
+                <div
+                  key={site.key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0.25rem 0.5rem",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "0.25rem",
+                    fontSize: "0.75rem",
+                    color: "#4b5563",
+                    border: "1px solid #e5e7eb",
+                    cursor: isClickable ? "pointer" : "default",
+                    transition: isClickable ? "background-color 0.2s" : "none",
+                  }}
+                  onClick={() => {
+                    if (site.isKnowledgeBase) {
+                      handleKnowledgeFileDownload(site);
+                    } else if (site.canOpenWeb && site.url) {
+                      window.open(site.url, "_blank", "noopener,noreferrer");
                     }
-                  >
-                    {site.isKnowledgeBase ? (
-                      <FileText size={16} className="mr-2" color="#6b7280" />
-                    ) : site.useDefaultIcon ? (
-                      <Globe size={16} className="mr-2" color="#6b7280" />
-                    ) : (
-                      <img
-                        src={site.faviconUrl}
-                        alt={site.domain}
-                        style={{
-                          width: "16px",
-                          height: "16px",
-                          marginRight: "0.5rem",
-                          borderRadius: "2px",
-                        }}
-                        onError={(e) => {
-                          // If the icon fails to load, replace it with a React component
-                          const imgElement = e.target as HTMLImageElement;
-                          // Mark the element to prevent duplicate onError triggers
-                          imgElement.style.display = "none";
-                          // Get the parent element
-                          const parent = imgElement.parentElement;
-                          if (parent) {
-                            // Create a placeholder div, as the container of the Globe component
-                            const placeholder = document.createElement("div");
-                            placeholder.style.marginRight = "0.5rem";
-                            placeholder.style.display = "inline-flex";
-                            placeholder.style.alignItems = "center";
-                            placeholder.style.justifyContent = "center";
-                            placeholder.style.width = "16px";
-                            placeholder.style.height = "16px";
-                            // Insert it before the img
-                            parent.insertBefore(placeholder, imgElement);
-                            // Render the Globe icon to this element (this can only be approximated using native methods)
-                            placeholder.innerHTML =
-                              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
-                          }
-                        }}
-                      />
-                    )}
-                    <span
+                  }}
+                  onMouseEnter={(e) => {
+                    if (isClickable) {
+                      e.currentTarget.style.backgroundColor = "#f3f4f6";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (isClickable) {
+                      e.currentTarget.style.backgroundColor = "#f9fafb";
+                    }
+                  }}
+                  title={
+                    site.isKnowledgeBase
+                      ? t("taskWindow.downloadFile", {
+                          name: site.filename || site.displayName,
+                        })
+                      : site.canOpenWeb
+                      ? t("taskWindow.visit", { domain: site.domain })
+                      : site.filename || site.displayName
+                  }
+                >
+                  {site.isKnowledgeBase ? (
+                    <FileText size={16} className="mr-2" color="#6b7280" />
+                  ) : site.useDefaultIcon ? (
+                    <Globe size={16} className="mr-2" color="#6b7280" />
+                  ) : (
+                    <img
+                      src={site.faviconUrl}
+                      alt={site.domain}
                       style={{
-                        color: site.isKnowledgeBase ? "#2563eb" : undefined,
-                        textDecoration: site.isKnowledgeBase
-                          ? "underline"
-                          : "none",
-                        fontWeight: site.isKnowledgeBase ? 600 : undefined,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "0.25rem",
+                        width: "16px",
+                        height: "16px",
+                        marginRight: "0.5rem",
+                        borderRadius: "2px",
                       }}
-                    >
-                      {site.displayName}
-                      {site.isKnowledgeBase && (
-                        <ChevronRight size={14} color="#2563eb" />
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
+                      onError={(e) => {
+                        // If the icon fails to load, replace it with a React component
+                        const imgElement = e.target as HTMLImageElement;
+                        // Mark the element to prevent duplicate onError triggers
+                        imgElement.style.display = "none";
+                        // Get the parent element
+                        const parent = imgElement.parentElement;
+                        if (parent) {
+                          // Create a placeholder div, as the container of the Globe component
+                          const placeholder = document.createElement("div");
+                          placeholder.style.marginRight = "0.5rem";
+                          placeholder.style.display = "inline-flex";
+                          placeholder.style.alignItems = "center";
+                          placeholder.style.justifyContent = "center";
+                          placeholder.style.width = "16px";
+                          placeholder.style.height = "16px";
+                          // Insert it before the img
+                          parent.insertBefore(placeholder, imgElement);
+                          // Render the Globe icon to this element (this can only be approximated using native methods)
+                          placeholder.innerHTML =
+                            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+                        }
+                      }}
+                    />
+                  )}
+                  <span
+                    style={{
+                      color: site.isKnowledgeBase ? "#2563eb" : undefined,
+                      textDecoration: site.isKnowledgeBase
+                        ? "underline"
+                        : "none",
+                      fontWeight: site.isKnowledgeBase ? 600 : undefined,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.25rem",
+                    }}
+                  >
+                    {site.displayName}
+                    {site.isKnowledgeBase && (
+                      <ChevronRight size={14} color="#2563eb" />
+                    )}
+                  </span>
+                </div>
+              );
+            })}
             </div>
           </div>
         </div>
@@ -962,8 +947,7 @@ const messageHandlers: MessageHandler[] = [
 
   // model_output_code type processor - code output with direct code block rendering
   {
-    canHandle: (message) =>
-      message.type === chatConfig.messageTypes.MODEL_OUTPUT_CODE,
+    canHandle: (message) => message.type === chatConfig.messageTypes.MODEL_OUTPUT_CODE,
     render: (message, _t) => {
       // Extract code content and language from the message
       const { codeContent, language } = extractCodeInfo(message.content);
@@ -1028,42 +1012,39 @@ const messageHandlers: MessageHandler[] = [
         // Parse the memory search content
         memoryData = JSON.parse(message.content);
       } catch (error) {
-        log.error("Failed to parse memory search content:", error);
+        log.error('Failed to parse memory search content:', error);
         return null;
       }
 
-      let messageText = memoryData.message || "";
+      let messageText = memoryData.message || '';
       // Map backend placeholders to translated text
       switch (messageText) {
-        case "<MEM_START>":
-          messageText = t("chatStreamHandler.memoryRetrieving");
+        case '<MEM_START>':
+          messageText = t('chatStreamHandler.memoryRetrieving');
           break;
-        case "<MEM_DONE>":
-          messageText = t("chatStreamHandler.memoryRetrieved");
+        case '<MEM_DONE>':
+          messageText = t('chatStreamHandler.memoryRetrieved');
           break;
-        case "<MEM_FAILED>":
-          messageText = t("chatStreamHandler.memoryFailed");
+        case '<MEM_FAILED>':
+          messageText = t('chatStreamHandler.memoryFailed');
           break;
         default:
           break;
       }
 
       return (
-        <div
-          style={{
-            fontFamily:
-              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-            fontSize: "0.875rem",
-            lineHeight: 1.5,
-            color: "#6b7280",
-            fontWeight: 500,
-            paddingTop: "0.5rem",
-          }}
-        >
+        <div style={{
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+          fontSize: "0.875rem",
+          lineHeight: 1.5,
+          color: "#6b7280",
+          fontWeight: 500,
+          paddingTop: "0.5rem"
+        }}>
           <span>{messageText}</span>
         </div>
       );
-    },
+    }
   },
 
   // default processor - should be placed at the end
@@ -1436,10 +1417,7 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
         </div>
 
         {isExpanded && (
-          <div
-            className="px-4 pb-4"
-            style={{ height: `${actualContentHeight}px` }}
-          >
+          <div className="px-4 pb-4" style={{ height: `${actualContentHeight}px` }}>
             {needsScroll ? (
               <ScrollArea className="h-full" ref={scrollAreaRef}>
                 <div className="pb-2" ref={contentRef}>
@@ -1526,35 +1504,35 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
           max-width: none !important;
         }
 
-        /* Override diagram size in task window */
-        .task-message-content .my-4 {
-          max-width: 200px !important;
-          margin: 0 auto !important;
-          display: flex !important;
-          justify-content: center !important;
-        }
+         /* Override diagram size in task window */
+         .task-message-content .my-4 {
+           max-width: 200px !important;
+           margin: 0 auto !important;
+           display: flex !important;
+           justify-content: center !important;
+         }
 
-        .task-message-content .my-4 img {
-          max-width: 200px !important;
-          width: 200px !important;
-          margin: 0 auto !important;
-          display: block !important;
-        }
+         .task-message-content .my-4 img {
+           max-width: 200px !important;
+           width: 200px !important;
+           margin: 0 auto !important;
+           display: block !important;
+         }
 
-        /* More specific selectors for mermaid diagrams */
-        .task-message-content .task-message-content .my-4 {
-          max-width: 200px !important;
-          margin: 0 auto !important;
-          display: flex !important;
-          justify-content: center !important;
-        }
+         /* More specific selectors for mermaid diagrams */
+         .task-message-content .task-message-content .my-4 {
+           max-width: 200px !important;
+           margin: 0 auto !important;
+           display: flex !important;
+           justify-content: center !important;
+         }
 
-        .task-message-content .task-message-content .my-4 img {
-          max-width: 200px !important;
-          width: 200px !important;
-          margin: 0 auto !important;
-          display: block !important;
-        }
+         .task-message-content .task-message-content .my-4 img {
+           max-width: 200px !important;
+           width: 200px !important;
+           margin: 0 auto !important;
+           display: block !important;
+         }
 
         /* Paragraph spacing adjustment */
         .task-message-content p {

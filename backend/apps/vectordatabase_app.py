@@ -25,27 +25,21 @@ service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
 
 
-@router.post("/check_exist")
+@router.get("/check_exist/{index_name}")
 async def check_knowledge_base_exist(
-        request: Dict[str, str] = Body(
-            ..., description="Request body containing knowledge base name"),
+        index_name: str = Path(..., description="Name of the index to check"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
-    """Check if a knowledge base name exists in the current tenant."""
+    """Check if a knowledge base name exists and in which scope."""
     try:
-        knowledge_name = request.get("knowledge_name", "")
-        if not knowledge_name:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST, detail="Knowledge base name is required")
-
         user_id, tenant_id = get_current_user_id(authorization)
-        return check_knowledge_base_exist_impl(knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
+        return check_knowledge_base_exist_impl(index_name=index_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
     except Exception as e:
         logger.error(
-            f"Error checking knowledge base existence for '{knowledge_name}': {str(e)}", exc_info=True)
+            f"Error checking knowledge base existence for '{index_name}': {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error checking existence for knowledge base: {str(e)}")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error checking existence for index: {str(e)}")
 
 
 @router.post("/{index_name}")

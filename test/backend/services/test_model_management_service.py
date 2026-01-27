@@ -559,8 +559,7 @@ async def test_batch_create_models_for_tenant_other_provider():
 
         # Verify prepare_model_dict was called with empty model_url for non-Silicon/ModelEngine provider
         call_args = svc.prepare_model_dict.call_args
-        # Should be empty for other providers
-        assert call_args[1]["model_url"] == ""
+        assert call_args[1]["model_url"] == ""  # Should be empty for other providers
 
 
 @pytest.mark.asyncio
@@ -623,13 +622,11 @@ async def test_batch_create_models_max_tokens_update():
 
     def get_by_display(display_name, tenant_id):
         if display_name == "silicon/model1":
-            # Different from new value
-            return {"model_id": "id1", "max_tokens": 4096}
+            return {"model_id": "id1", "max_tokens": 4096}  # Different from new value
         elif display_name == "silicon/model2":
             return {"model_id": "id2", "max_tokens": 4096}  # Same as new value
         elif display_name == "silicon/model3":
-            # Existing has value, new is None
-            return {"model_id": "id3", "max_tokens": 2048}
+            return {"model_id": "id3", "max_tokens": 2048}  # Existing has value, new is None
         return None
 
     with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
@@ -645,21 +642,16 @@ async def test_batch_create_models_max_tokens_update():
 
         # Should update model1 (max_tokens changed from 4096 to 8192)
         # Note: update_model_record may be called multiple times, so check if it was called with correct args
-        update_calls = [
-            call for call in mock_update.call_args_list if call[0][0] == "id1"]
+        update_calls = [call for call in mock_update.call_args_list if call[0][0] == "id1"]
         if update_calls:
             assert update_calls[0][0][1] == {"max_tokens": 8192}
 
         # Should NOT update model2 (max_tokens same) or model3 (new max_tokens is None)
         # Verify model2 and model3 were not updated
-        model2_calls = [
-            call for call in mock_update.call_args_list if call[0][0] == "id2"]
-        model3_calls = [
-            call for call in mock_update.call_args_list if call[0][0] == "id3"]
-        # model2 should not be updated (same max_tokens)
-        assert len(model2_calls) == 0
-        # model3 should not be updated (new max_tokens is None)
-        assert len(model3_calls) == 0
+        model2_calls = [call for call in mock_update.call_args_list if call[0][0] == "id2"]
+        model3_calls = [call for call in mock_update.call_args_list if call[0][0] == "id3"]
+        assert len(model2_calls) == 0  # model2 should not be updated (same max_tokens)
+        assert len(model3_calls) == 0  # model3 should not be updated (new max_tokens is None)
 
 
 @pytest.mark.asyncio
@@ -776,8 +768,7 @@ async def test_update_single_model_for_tenant_multi_embedding_updates_both():
 
         mock_get.assert_called_once_with("emb_name", "t1")
         # model_type should be stripped from update payload for multi_embedding flow
-        expected_update = {"display_name": "emb_name",
-                           "description": "updated"}
+        expected_update = {"display_name": "emb_name", "description": "updated"}
         mock_update.assert_any_call(10, expected_update, "u1")
         mock_update.assert_any_call(11, expected_update, "u1")
 
@@ -1089,3 +1080,5 @@ async def test_list_llm_models_for_tenant_handles_missing_repo():
         assert len(result) == 2
         assert result[0]["model_name"] == "local-model"  # No repo prefix
         assert result[1]["model_name"] == "another-model"  # No repo prefix
+
+

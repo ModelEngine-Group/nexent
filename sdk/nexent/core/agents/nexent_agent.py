@@ -89,12 +89,6 @@ class NexentAgent:
                 name_resolver = tool_config.metadata.get(
                     "name_resolver", None) if tool_config.metadata else None
                 tools_obj.name_resolver = {} if name_resolver is None else name_resolver
-            elif class_name == "DataMateSearchTool":
-                tools_obj = tool_class(**params)
-                tools_obj.observer = self.observer
-                index_names = tool_config.metadata.get(
-                    "index_names", None) if tool_config.metadata else None
-                tools_obj.index_names = [] if index_names is None else index_names
             elif class_name == "AnalyzeTextFileTool":
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),

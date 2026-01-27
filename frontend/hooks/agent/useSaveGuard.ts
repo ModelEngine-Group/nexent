@@ -103,32 +103,7 @@ export const useSaveGuard = () => {
           queryKey: ["agentInfo", finalAgentId]
         });
         // Get the updated agent data from the refreshed cache
-        let updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
-        
-        // For new agents, the cache might not be populated yet
-        // Construct a minimal Agent object from the edited data
-        if (!updatedAgent && finalAgentId) {
-          updatedAgent = {
-            id: String(finalAgentId),
-            name: currentEditedAgent.name,
-            display_name: currentEditedAgent.display_name,
-            description: currentEditedAgent.description,
-            author: currentEditedAgent.author,
-            model: currentEditedAgent.model,
-            model_id: currentEditedAgent.model_id,
-            max_step: currentEditedAgent.max_step,
-            provide_run_summary: currentEditedAgent.provide_run_summary,
-            tools: currentEditedAgent.tools || [],
-            duty_prompt: currentEditedAgent.duty_prompt,
-            constraint_prompt: currentEditedAgent.constraint_prompt,
-            few_shots_prompt: currentEditedAgent.few_shots_prompt,
-            business_description: currentEditedAgent.business_description,
-            business_logic_model_name: currentEditedAgent.business_logic_model_name,
-            business_logic_model_id: currentEditedAgent.business_logic_model_id,
-            sub_agent_id_list: currentEditedAgent.sub_agent_id_list,
-          };
-        }
-        
+        const updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
         if (updatedAgent) {
           useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
         }

@@ -18,7 +18,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-# Environment variables are now configured in conftest.py
+# Patch environment variables before any imports that might use them
+os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
+os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
+os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
+os.environ.setdefault('MINIO_REGION', 'us-east-1')
+os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
 
 boto3_mock = MagicMock()
 minio_client_mock = MagicMock()
@@ -1005,14 +1010,11 @@ async def test_check_knowledge_base_exist_success(vdb_core_mock, auth_data):
             patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.check_knowledge_base_exist_impl") as mock_impl:
 
-        expected_response = {"status": "exists_in_tenant"}
+        expected_response = {"exist": True, "scope": "tenant"}
         mock_impl.return_value = expected_response
 
-        response = client.post(
-            "/indices/check_exist",
-            json={"knowledge_name": auth_data['index_name']},
-            headers=auth_data["auth_header"]
-        )
+        response = client.get(
+            f"/indices/check_exist/{auth_data['index_name']}", headers=auth_data["auth_header"])
 
         assert response.status_code == 200
         assert response.json() == expected_response
@@ -1029,15 +1031,12 @@ async def test_check_knowledge_base_exist_error(vdb_core_mock, auth_data):
 
         mock_impl.side_effect = Exception("Test error")
 
-        response = client.post(
-            "/indices/check_exist",
-            json={"knowledge_name": auth_data['index_name']},
-            headers=auth_data["auth_header"]
-        )
+        response = client.get(
+            f"/indices/check_exist/{auth_data['index_name']}", headers=auth_data["auth_header"])
 
         assert response.status_code == 500
         assert response.json() == {
-            "detail": "Error checking existence for knowledge base: Test error"}
+            "detail": f"Error checking existence for index: Test error"}
 
 
 @pytest.mark.asyncio

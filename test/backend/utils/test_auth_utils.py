@@ -7,7 +7,11 @@ import types
 import pytest
 
 # Patch environment variables before any imports that might use them
-# Environment variables are now configured in conftest.py
+os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
+os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
+os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
+os.environ.setdefault('MINIO_REGION', 'us-east-1')
+os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
 
 # ---------------------------------------------------------------------------
 # Pre-mock heavy dependencies BEFORE importing the module under test.

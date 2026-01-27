@@ -27,8 +27,7 @@ async def save_config(config: GlobalConfig, authorization: Optional[str] = Heade
         )
     except Exception as e:
         logger.error(f"Failed to save configuration: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                            detail="Failed to save configuration.")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Failed to save configuration.")
 
 
 @router.get("/load_config")
@@ -50,5 +49,4 @@ async def load_config(authorization: Optional[str] = Header(None), request: Requ
         )
     except Exception as e:
         logger.error(f"Failed to load configuration: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                            detail="Failed to load configuration.")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Failed to load configuration.")

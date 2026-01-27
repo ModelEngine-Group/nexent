@@ -7,6 +7,7 @@ from elasticsearch import exceptions
 # Import the class under test
 from sdk.nexent.vector_database.elasticsearch_core import ElasticSearchCore
 
+
 # ----------------------------------------------------------------------------
 # Fixtures
 # ----------------------------------------------------------------------------
@@ -55,12 +56,12 @@ def test_preprocess_documents_with_complete_document(elasticsearch_core_instance
     # Use the second document which has all fields
     complete_doc = [sample_documents[1]]
     content_field = "content"
-
+    
     result = elasticsearch_core_instance._preprocess_documents(complete_doc, content_field)
-
+    
     assert len(result) == 1
     doc = result[0]
-
+    
     # Should preserve existing values
     assert doc["content"] == "This is test content 2"
     assert doc["title"] == "Test Document 2"
@@ -78,33 +79,33 @@ def test_preprocess_documents_with_incomplete_document(elasticsearch_core_instan
     # Use the first document which is missing several fields
     incomplete_doc = [sample_documents[0]]
     content_field = "content"
-
+    
     with patch('time.strftime') as mock_strftime, \
          patch('time.time') as mock_time, \
          patch('time.gmtime') as mock_gmtime:
-
+        
         # Mock time functions
         mock_strftime.side_effect = lambda fmt, t: "2025-01-15T10:30:00" if "T" in fmt else "2025-01-15"
         mock_time.return_value = 1642234567
         mock_gmtime.return_value = None
-
+        
         result = elasticsearch_core_instance._preprocess_documents(incomplete_doc, content_field)
-
+    
     assert len(result) == 1
     doc = result[0]
-
+    
     # Should preserve existing values
     assert doc["content"] == "This is test content 1"
     assert doc["title"] == "Test Document 1"
     assert doc["filename"] == "test1.pdf"
     assert doc["path_or_url"] == "/path/to/test1.pdf"
-
+    
     # Should add missing fields with default values
     assert doc["create_time"] == "2025-01-15T10:30:00"
     assert doc["date"] == "2025-01-15"
     assert doc["file_size"] == 0
     assert doc["process_source"] == "Unstructured"
-
+    
     # Should generate an ID
     assert "id" in doc
     assert doc["id"].startswith("1642234567_")
@@ -114,20 +115,20 @@ def test_preprocess_documents_with_incomplete_document(elasticsearch_core_instan
 def test_preprocess_documents_with_multiple_documents(elasticsearch_core_instance, sample_documents):
     """Test preprocessing multiple documents."""
     content_field = "content"
-
+    
     with patch('time.strftime') as mock_strftime, \
          patch('time.time') as mock_time, \
          patch('time.gmtime') as mock_gmtime:
-
+        
         # Mock time functions
         mock_strftime.side_effect = lambda fmt, t: "2025-01-15T10:30:00" if "T" in fmt else "2025-01-15"
         mock_time.return_value = 1642234567
         mock_gmtime.return_value = None
-
+        
         result = elasticsearch_core_instance._preprocess_documents(sample_documents, content_field)
-
+    
     assert len(result) == 2
-
+    
     # First document should have defaults added
     doc1 = result[0]
     assert doc1["create_time"] == "2025-01-15T10:30:00"
@@ -135,7 +136,7 @@ def test_preprocess_documents_with_multiple_documents(elasticsearch_core_instanc
     assert doc1["file_size"] == 0
     assert doc1["process_source"] == "Unstructured"
     assert "id" in doc1
-
+    
     # Second document should preserve existing values
     doc2 = result[1]
     assert doc2["create_time"] == "2025-01-15T10:30:00"
@@ -154,20 +155,20 @@ def test_preprocess_documents_preserves_original_data(elasticsearch_core_instanc
         }
     ]
     content_field = "content"
-
+    
     with patch('time.strftime') as mock_strftime, \
          patch('time.time') as mock_time, \
          patch('time.gmtime') as mock_gmtime:
-
+        
         mock_strftime.side_effect = lambda fmt, t: "2025-01-15T10:30:00" if "T" in fmt else "2025-01-15"
         mock_time.return_value = 1642234567
         mock_gmtime.return_value = None
-
+        
         result = elasticsearch_core_instance._preprocess_documents(original_docs, content_field)
-
+    
     # Original document should remain unchanged
     assert original_docs[0] == {"content": "Original content", "title": "Original title"}
-
+    
     # Result should be a new document with added fields
     assert result[0]["content"] == "Original content"
     assert result[0]["title"] == "Original title"
@@ -181,9 +182,9 @@ def test_preprocess_documents_preserves_original_data(elasticsearch_core_instanc
 def test_preprocess_documents_with_empty_list(elasticsearch_core_instance):
     """Test preprocessing an empty list of documents."""
     content_field = "content"
-
+    
     result = elasticsearch_core_instance._preprocess_documents([], content_field)
-
+    
     assert result == []
 
 
@@ -195,27 +196,27 @@ def test_preprocess_documents_id_generation(elasticsearch_core_instance):
         {"content": "Content 1"}  # Same content as first
     ]
     content_field = "content"
-
+    
     with patch('time.strftime') as mock_strftime, \
          patch('time.time') as mock_time, \
          patch('time.gmtime') as mock_gmtime:
-
+        
         mock_strftime.side_effect = lambda fmt, t: "2025-01-15T10:30:00" if "T" in fmt else "2025-01-15"
         mock_time.return_value = 1642234567
         mock_gmtime.return_value = None
-
+        
         result = elasticsearch_core_instance._preprocess_documents(docs, content_field)
-
+    
     assert len(result) == 3
-
+    
     # All documents should have IDs
     assert "id" in result[0]
     assert "id" in result[1]
     assert "id" in result[2]
-
+    
     # IDs should be different for different content
     assert result[0]["id"] != result[1]["id"]
-
+    
     # Same content should generate same hash part (but might be different due to time)
     id1_parts = result[0]["id"].split("_")
     id3_parts = result[2]["id"].split("_")
@@ -236,19 +237,19 @@ def test_preprocess_documents_with_none_values(elasticsearch_core_instance):
         }
     ]
     content_field = "content"
-
+    
     with patch('time.strftime') as mock_strftime, \
          patch('time.time') as mock_time, \
          patch('time.gmtime') as mock_gmtime:
-
+        
         mock_strftime.side_effect = lambda fmt, t: "2025-01-15T10:30:00" if "T" in fmt else "2025-01-15"
         mock_time.return_value = 1642234567
         mock_gmtime.return_value = None
-
+        
         result = elasticsearch_core_instance._preprocess_documents(docs, content_field)
-
+    
     doc = result[0]
-
+    
     # None values should be replaced with defaults
     assert doc["file_size"] == 0
     assert doc["create_time"] == "2025-01-15T10:30:00"
@@ -269,19 +270,19 @@ def test_preprocess_documents_with_zero_values(elasticsearch_core_instance):
         }
     ]
     content_field = "content"
-
+    
     with patch('time.strftime') as mock_strftime, \
          patch('time.time') as mock_time, \
          patch('time.gmtime') as mock_gmtime:
-
+        
         mock_strftime.side_effect = lambda fmt, t: "2025-01-15T10:30:00" if "T" in fmt else "2025-01-15"
         mock_time.return_value = 1642234567
         mock_gmtime.return_value = None
-
+        
         result = elasticsearch_core_instance._preprocess_documents(docs, content_field)
-
+    
     doc = result[0]
-
+    
     # Zero values should be preserved
     assert doc["file_size"] == 0
     assert doc["create_time"] == "2025-01-15T10:30:00"
@@ -759,12 +760,12 @@ def test_create_chunk_exception(elasticsearch_core_instance):
     """Test create_chunk raises exception when client.index fails."""
     elasticsearch_core_instance.client = MagicMock()
     elasticsearch_core_instance.client.index.side_effect = Exception("Index operation failed")
-
+    
     payload = {"id": "chunk-1", "content": "A"}
-
+    
     with pytest.raises(Exception) as exc_info:
         elasticsearch_core_instance.create_chunk("kb-index", payload)
-
+    
     assert "Index operation failed" in str(exc_info.value)
     elasticsearch_core_instance.client.index.assert_called_once()
 
@@ -778,10 +779,10 @@ def test_update_chunk_exception_from_resolve(elasticsearch_core_instance):
         side_effect=Exception("Resolve failed"),
     ):
         updates = {"content": "updated"}
-
+        
         with pytest.raises(Exception) as exc_info:
             elasticsearch_core_instance.update_chunk("kb-index", "chunk-1", updates)
-
+        
         assert "Resolve failed" in str(exc_info.value)
         elasticsearch_core_instance.client.update.assert_not_called()
 
@@ -795,12 +796,12 @@ def test_update_chunk_exception_from_update(elasticsearch_core_instance):
         return_value="es-id-1",
     ):
         elasticsearch_core_instance.client.update.side_effect = Exception("Update operation failed")
-
+        
         updates = {"content": "updated"}
-
+        
         with pytest.raises(Exception) as exc_info:
             elasticsearch_core_instance.update_chunk("kb-index", "chunk-1", updates)
-
+        
         assert "Update operation failed" in str(exc_info.value)
         elasticsearch_core_instance.client.update.assert_called_once()
 
@@ -815,7 +816,7 @@ def test_delete_chunk_exception_from_resolve(elasticsearch_core_instance):
     ):
         with pytest.raises(Exception) as exc_info:
             elasticsearch_core_instance.delete_chunk("kb-index", "chunk-1")
-
+        
         assert "Resolve failed" in str(exc_info.value)
         elasticsearch_core_instance.client.delete.assert_not_called()
 
@@ -829,10 +830,10 @@ def test_delete_chunk_exception_from_delete(elasticsearch_core_instance):
         return_value="es-id-1",
     ):
         elasticsearch_core_instance.client.delete.side_effect = Exception("Delete operation failed")
-
+        
         with pytest.raises(Exception) as exc_info:
             elasticsearch_core_instance.delete_chunk("kb-index", "chunk-1")
-
+        
         assert "Delete operation failed" in str(exc_info.value)
         elasticsearch_core_instance.client.delete.assert_called_once()
 

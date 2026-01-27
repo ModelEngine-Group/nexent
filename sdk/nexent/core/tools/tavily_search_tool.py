@@ -27,7 +27,7 @@ class TavilySearchTool(Tool):
 
     def __init__(self, tavily_api_key:str=Field(description="Tavily API key"),
                  observer: MessageObserver=Field(description="Message observer", default=None, exclude=True),
-                 max_results:int=Field(description="Maximum number of search results", default=3),
+                 max_results:int=Field(description="Maximum number of search results", default=5),
                  image_filter: bool = Field(description="Whether to enable image filtering", default=True)
      ):
 

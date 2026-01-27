@@ -1,5 +1,5 @@
 import { API_ENDPOINTS } from './api';
-import { UserKnowledgeConfig, UpdateKnowledgeListRequest } from '../types/knowledgeBase';
+import { UserKnowledgeConfig } from '../types/knowledgeBase';
 
 import { fetchWithAuth, getAuthHeaders } from '@/lib/auth';
 // @ts-ignore
@@ -29,28 +29,25 @@ export class UserConfigService {
   }
 
   // Update user selected knowledge base list
-  async updateKnowledgeList(request: UpdateKnowledgeListRequest): Promise<UserKnowledgeConfig | null> {
+  async updateKnowledgeList(knowledgeList: string[]): Promise<boolean> {
     try {
       const response = await fetch(
         API_ENDPOINTS.tenantConfig.updateKnowledgeList,
         {
           method: "POST",
           headers: getAuthHeaders(),
-          body: JSON.stringify(request),
+          body: JSON.stringify(knowledgeList),
         }
       );
 
       if (!response.ok) {
-        return null;
+        return false;
       }
 
       const result = await response.json();
-      if (result.status === 'success') {
-        return result.content;
-      }
-      return null;
+      return result.status === 'success';
     } catch (error) {
-      return null;
+      return false;
     }
   }
 }

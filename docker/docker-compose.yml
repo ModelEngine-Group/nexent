@@ -35,25 +35,21 @@ services:
     volumes:
       - ${ROOT_DIR}/elasticsearch:/usr/share/elasticsearch/data
     ports:
-      - "9210:9200" # HTTP API
-      - "9310:9300" # Cluster communication port
+      - "9210:9200"  # HTTP API
+      - "9310:9300"  # Cluster communication port
     networks:
       - nexent
     restart: always
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'curl -sf -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health | grep -qE ''"status":"(green|yellow)"'' || exit 1',
-        ]
+      test: ["CMD-SHELL", "curl -sf -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"' || exit 1"]
       interval: 5s
       timeout: 10s
       retries: 20
     logging:
       driver: "json-file"
       options:
-        max-size: "100m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "100m"  # Maximum size of a single log file
+        max-file: "3"     # Maximum number of log files to keep
 
   nexent-postgresql:
     image: ${POSTGRESQL_IMAGE}
@@ -73,8 +69,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "100m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "100m"  # Maximum size of a single log file
+        max-file: "3"     # Maximum number of log files to keep
     networks:
       - nexent
 
@@ -83,11 +79,11 @@ services:
     container_name: nexent-config
     restart: always
     ports:
-      - "5010:5010" # Config service port
+      - "5010:5010"  # Config service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket for MCP container management
     environment:
       <<: [*minio-vars, *es-vars]
       skip_proxy: "true"
@@ -101,8 +97,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
     networks:
       - nexent
     entrypoint: ["/bin/bash", "-c", "python backend/config_service.py"]
@@ -112,7 +108,7 @@ services:
     container_name: nexent-runtime
     restart: always
     ports:
-      - "5014:5014" # Runtime service port
+      - "5014:5014"  # Runtime service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
@@ -129,8 +125,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
     networks:
       - nexent
     entrypoint: ["/bin/bash", "-c", "python backend/runtime_service.py"]
@@ -140,7 +136,7 @@ services:
     container_name: nexent-mcp
     restart: always
     ports:
-      - "5011:5011" # MCP service port
+      - "5011:5011"  # MCP service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
@@ -157,8 +153,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
     networks:
       - nexent
     entrypoint: ["/bin/bash", "-c", "python backend/mcp_service.py"]
@@ -168,7 +164,7 @@ services:
     container_name: nexent-northbound
     restart: always
     ports:
-      - "5013:5013" # Northbound service port
+      - "5013:5013"  # Northbound service port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
@@ -185,8 +181,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
     networks:
       - nexent
     entrypoint: ["/bin/bash", "-c", "python backend/northbound_service.py"]
@@ -205,12 +201,11 @@ services:
       - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - MARKET_BACKEND=https://market.nexent.tech
-      - MODEL_ENGINE_ENABLED=${MODEL_ENGINE_ENABLED:-false}
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
 
   nexent-data-process:
     image: ${NEXENT_DATA_PROCESS_IMAGE}
@@ -220,8 +215,8 @@ services:
     privileged: true
     ports:
       - "5012:5012"
-      - "5555:5555" # Celery Flower port
-      - "8265:8265" # Ray Dashboardport
+      - "5555:5555"  # Celery Flower port
+      - "8265:8265"  # Ray Dashboardport
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
     environment:
@@ -258,7 +253,7 @@ services:
     volumes:
       - ${ROOT_DIR}/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -271,8 +266,8 @@ services:
     container_name: nexent-minio
     command: server /data
     ports:
-      - "9010:9000" # MinIO API port
-      - "9011:9001" # MinIO Console port
+      - "9010:9000"  # MinIO API port
+      - "9011:9001"  # MinIO Console port
     environment:
       <<: [*minio-vars, *proxy-vars]
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -285,8 +280,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "100m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "100m"  # Maximum size of a single log file
+        max-file: "3"     # Maximum number of log files to keep
     entrypoint: >
       /bin/sh -c "
         minio server /etc/minio/data --address ':9000' --console-address ':9001' &
@@ -308,7 +303,7 @@ services:
       - DEV_USER=${SSH_USERNAME:-linuxserver.io}
       - DEV_PASSWORD=${SSH_PASSWORD:-nexent123}
     ports:
-      - "2222:22" # SSH port
+      - "2222:22"  # SSH port
     volumes:
       - ${TERMINAL_MOUNT_DIR:-./workspace}:/opt/terminal
     networks:
@@ -317,8 +312,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"  # Maximum size of a single log file
+        max-file: "3"    # Maximum number of log files to keep
     profiles:
       - terminal
 

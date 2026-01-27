@@ -1,43 +1,19 @@
 import sys
-import os
 import types
 import unittest
 from unittest.mock import MagicMock, patch
 
-# Add backend directory to Python path for proper imports
-project_root = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '../../../'))
-backend_dir = os.path.join(project_root, 'backend')
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+fake_client = types.ModuleType("database.client")
+fake_client.as_dict = lambda x: x
+fake_client.get_db_session = MagicMock()
+fake_client.MinioClient = MagicMock()  # 避免真实连接 MinIO
+sys.modules["database.client"] = fake_client
 
-# Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Apply critical patches before importing any modules
-# This prevents real AWS/MinIO/Elasticsearch calls during import
-patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-minio_client_mock._ensure_bucket_exists = MagicMock()
-minio_client_mock.client = MagicMock()
-
-# Mock the entire MinIOStorageConfig class to avoid validation
-minio_config_mock = MagicMock()
-minio_config_mock.validate = MagicMock()
-
-# Import backend modules after all patches are applied
-# Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
-        patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.services.tenant_config_service import (
-        get_selected_knowledge_list,
-        update_selected_knowledge,
-        delete_selected_knowledge_by_index_name,
-    )
+from backend.services.tenant_config_service import (
+    get_selected_knowledge_list,
+    update_selected_knowledge,
+    delete_selected_knowledge_by_index_name,
+)
 
 
 class TestTenantConfigService(unittest.TestCase):
@@ -66,8 +42,7 @@ class TestTenantConfigService(unittest.TestCase):
         self, mock_get_knowledge_info, mock_get_config
     ):
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id,
-                "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
         mock_get_knowledge_info.return_value = [
             {"knowledge_id": self.knowledge_id, "name": "Test Knowledge"}
@@ -76,8 +51,7 @@ class TestTenantConfigService(unittest.TestCase):
         result = get_selected_knowledge_list(self.tenant_id, self.user_id)
 
         self.assertEqual(
-            result, [{"knowledge_id": self.knowledge_id,
-                      "name": "Test Knowledge"}]
+            result, [{"knowledge_id": self.knowledge_id, "name": "Test Knowledge"}]
         )
         mock_get_knowledge_info.assert_called_once_with([self.knowledge_id])
 
@@ -108,8 +82,7 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = []
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id,
-                "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = True
 
@@ -127,14 +100,12 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = ["knowledge_id_2"]
         mock_get_config.return_value = [
-            {"config_value": "knowledge_id_1",
-                "tenant_config_id": "tenant_config_id_1"}
+            {"config_value": "knowledge_id_1", "tenant_config_id": "tenant_config_id_1"}
         ]
         mock_insert.return_value = True
         mock_delete.return_value = True
 
-        result = update_selected_knowledge(
-            self.tenant_id, self.user_id, ["new_index"])
+        result = update_selected_knowledge(self.tenant_id, self.user_id, ["new_index"])
         self.assertTrue(result)
         mock_insert.assert_called_once()
         mock_delete.assert_called_once_with("tenant_config_id_1")
@@ -165,8 +136,7 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = []
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id,
-                "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = False
 
@@ -182,8 +152,7 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = [self.knowledge_id]
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id,
-                "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = True
 
@@ -201,8 +170,7 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = ["different_id"]
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id,
-                "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
 
         result = delete_selected_knowledge_by_index_name(
@@ -219,8 +187,7 @@ class TestTenantConfigService(unittest.TestCase):
     ):
         mock_get_ids.return_value = [self.knowledge_id]
         mock_get_config.return_value = [
-            {"config_value": self.knowledge_id,
-                "tenant_config_id": self.tenant_config_id}
+            {"config_value": self.knowledge_id, "tenant_config_id": self.tenant_config_id}
         ]
         mock_delete.return_value = False
 

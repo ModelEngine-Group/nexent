@@ -167,7 +167,6 @@
   scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
 }
 
-
 /* Tool Pool Tabs scroll fix */
 .tool-pool-tabs .ant-tabs-content-holder {
   overflow: hidden;
@@ -307,6 +306,17 @@
   width: max-content;
   min-width: 0;
 }
+
+/* Responsive button text - global utility */
+@media (max-width: 1279px) {
+  .button-text-full {
+    display: none !important;
+  }
+  .button-text-short {
+    display: inline !important;
+  }
+}
+
 
 .button-text-full {
   display: inline !important;

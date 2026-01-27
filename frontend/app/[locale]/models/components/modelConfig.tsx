@@ -1,15 +1,13 @@
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useState,
-  useRef,
-  ReactNode,
-} from "react";
-import { useTranslation } from "react-i18next";
+import { forwardRef, useEffect, useImperativeHandle, useState, useRef, ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
-import { Button, Card, Col, Row, Space, App } from "antd";
-import { Plus, ShieldCheck, RefreshCw, PenLine } from "lucide-react";
+import { Button, Card, Col, Row, Space, App } from 'antd'
+import { 
+  Plus,
+  ShieldCheck,
+  RefreshCw,
+  PenLine
+} from "lucide-react";
 
 import {
   MODEL_TYPES,
@@ -18,10 +16,10 @@ import {
   CARD_THEMES,
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
-import { configStore } from "@/lib/config";
 import { modelService } from "@/services/modelService";
 import { configService } from "@/services/configService";
 import { ModelOption, ModelType } from "@/types/modelConfig";
+import { configStore } from "@/lib/config";
 import log from "@/lib/logger";
 
 import { ModelListCard } from "./model/ModelListCard";
@@ -36,7 +34,9 @@ type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
 const getModelData = (t: any) => ({
   llm: {
     title: t("modelConfig.category.llm"),
-    options: [{ id: "main", name: t("modelConfig.option.mainModel") }],
+    options: [
+      { id: "main", name: t('modelConfig.option.mainModel') },
+    ],
   },
   embedding: {
     title: t("modelConfig.category.embedding"),
@@ -96,16 +96,14 @@ export const ModelConfigSection = forwardRef<
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { skipVerification = false, canAccessProtectedData = false } = props;
-  const { modelConfig, updateModelConfig, appConfig } = useConfig();
-  const modelEngineEnable = appConfig.modelEngineEnabled;
+  const { modelConfig, updateModelConfig } = useConfig();
   const modelData = getModelData(t);
   const { confirm } = useConfirmModal();
 
   // State management
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] =
-    useState<boolean>(false);
+  const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] = useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -269,6 +267,7 @@ export const ModelConfigSection = forwardRef<
           )
         : true;
 
+
       const embedding = modelConfig.embedding.displayName;
       const embeddingExists = embedding
         ? allModels.some(
@@ -348,6 +347,7 @@ export const ModelConfigSection = forwardRef<
           apiConfig: { apiKey: "", modelUrl: "" },
         };
       }
+
 
       if (!embeddingExists && embedding) {
         configUpdates.embedding = {
@@ -453,7 +453,12 @@ export const ModelConfigSection = forwardRef<
       const hasStt = !!modelConfig.stt.modelName;
 
       hasSelectedModels =
-        hasLlmMain || hasEmbedding || hasReranker || hasVlm || hasTts || hasStt;
+        hasLlmMain ||
+        hasEmbedding ||
+        hasReranker ||
+        hasVlm ||
+        hasTts ||
+        hasStt;
 
       if (hasSelectedModels) {
         // Override current selected models with models from configuration
@@ -734,7 +739,7 @@ export const ModelConfigSection = forwardRef<
       if (configKey === "embedding" || configKey === "multiEmbedding") {
         configUpdate[configKey].dimension = modelInfo?.maxTokens || 0;
       }
-    }
+    };
 
     // embedding needs dimension field
     if (configKey === "embedding" || configKey === "multiEmbedding") {
@@ -837,22 +842,20 @@ export const ModelConfigSection = forwardRef<
           }}
         >
           <Row gutter={[8, 8]} style={{ width: "100%" }}>
-            {modelEngineEnable && (
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                <Button
-                  type="primary"
-                  size="middle"
-                  onClick={handleSyncModels}
-                  style={{ width: "100%" }}
-                  icon={<RefreshCw size={16} />}
-                  block
-                >
-                  <span className="button-text-full">
-                    {t("modelConfig.button.syncModelEngine")}
-                  </span>
-                </Button>
-              </Col>
-            )}
+            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Button
+                type="primary"
+                size="middle"
+                onClick={handleSyncModels}
+                style={{ width: "100%" }}
+                icon={<RefreshCw size={16} />}
+                block
+              >
+                <span className="button-text-full">
+                  {t("modelConfig.button.syncModelEngine")}
+                </span>
+              </Button>
+            </Col>
             <Col xs={24} sm={12} md={6} lg={6} xl={6}>
               <Button
                 type="primary"
@@ -986,11 +989,11 @@ export const ModelConfigSection = forwardRef<
                               ? MODEL_TYPES.TTS
                               : MODEL_TYPES.STT
                             : key === "multimodal"
-                              ? MODEL_TYPES.VLM
-                              : key === MODEL_TYPES.EMBEDDING &&
-                                  option.id === MODEL_TYPES.MULTI_EMBEDDING
-                                ? MODEL_TYPES.MULTI_EMBEDDING
-                                : (key as ModelType)
+                            ? MODEL_TYPES.VLM
+                            : key === MODEL_TYPES.EMBEDDING &&
+                              option.id === MODEL_TYPES.MULTI_EMBEDDING
+                            ? MODEL_TYPES.MULTI_EMBEDDING
+                            : (key as ModelType)
                         }
                         modelId={option.id}
                         modelTypeName={option.name}
@@ -1036,6 +1039,8 @@ export const ModelConfigSection = forwardRef<
           }}
           models={models}
         />
+
+
       </div>
     </>
   );

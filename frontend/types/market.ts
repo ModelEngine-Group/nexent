@@ -29,12 +29,11 @@ export interface MarketAgentListItem {
   display_name: string;
   description: string;
   author?: string;
-  category?: MarketCategory;
+  category: MarketCategory;
   tags: MarketTag[];
   download_count: number;
   created_at: string;
-  tool_count?: number;
-  is_featured: boolean;
+  tool_count: number;
 }
 
 export interface MarketAgentTool {
@@ -91,8 +90,6 @@ export interface MarketPagination {
 export interface MarketAgentListResponse {
   items: MarketAgentListItem[];
   pagination: MarketPagination;
-  // Optional featured items returned by the API when requested
-  featured_items?: MarketAgentListItem[];
 }
 
 export interface MarketAgentListParams {

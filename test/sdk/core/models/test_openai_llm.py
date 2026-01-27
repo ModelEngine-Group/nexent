@@ -5,58 +5,6 @@ from pathlib import Path
 # Ensure SDK package is importable by adding sdk/ to sys.path (do not fallback to stubs)
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "sdk"))
 
-# Ensure minimal `nexent` package structure exists in sys.modules so string-based
-# patch targets like "nexent.core.models.openai_llm.asyncio.to_thread" can be
-# resolved by unittest.mock during tests that run outside the temporary patch
-# contexts used below.
-_sdk_root = Path(__file__).resolve().parents[4] / "sdk" / "nexent"
-if "nexent" not in sys.modules:
-    _top_pkg = types.ModuleType("nexent")
-    _top_pkg.__path__ = [str(_sdk_root)]
-    sys.modules["nexent"] = _top_pkg
-if "nexent.core" not in sys.modules:
-    _core_pkg = types.ModuleType("nexent.core")
-    _core_pkg.__path__ = [str(_sdk_root / "core")]
-    sys.modules["nexent.core"] = _core_pkg
-if "nexent.core.models" not in sys.modules:
-    _models_pkg = types.ModuleType("nexent.core.models")
-    _models_pkg.__path__ = [str(_sdk_root / "core" / "models")]
-    sys.modules["nexent.core.models"] = _models_pkg
-
-# Ensure the package attributes exist on the top-level `nexent` module so that
-# string-based patch targets (e.g. "nexent.core.models.openai_llm.asyncio.to_thread")
-# resolve via getattr during unittest.mock's import lookup.
-try:
-    top_mod = sys.modules.get("nexent")
-    core_mod = sys.modules.get("nexent.core")
-    models_mod = sys.modules.get("nexent.core.models")
-    if top_mod and core_mod and not hasattr(top_mod, "core"):
-        setattr(top_mod, "core", core_mod)
-    if core_mod and models_mod and not hasattr(core_mod, "models"):
-        setattr(core_mod, "models", models_mod)
-except Exception:
-    # If anything goes wrong, do not fail test import phase; the test will create
-    # the necessary entries later within its patch context.
-    pass
-
-# Ensure the concrete openai_llm submodule is available in sys.modules so that
-# string-based patch targets resolve outside of temporary patch contexts.
-try:
-    _openai_name = "nexent.core.models.openai_llm"
-    _openai_path = Path(__file__).resolve().parents[4] / "sdk" / "nexent" / "core" / "models" / "openai_llm.py"
-    if _openai_path.exists() and _openai_name not in sys.modules:
-        _spec = importlib.util.spec_from_file_location(_openai_name, _openai_path)
-        _mod = importlib.util.module_from_spec(_spec)
-        sys.modules[_openai_name] = _mod
-        assert _spec and _spec.loader
-        _spec.loader.exec_module(_mod)
-        pkg = sys.modules.get("nexent.core.models")
-        if pkg is not None and not hasattr(pkg, "openai_llm"):
-            setattr(pkg, "openai_llm", _mod)
-except Exception:
-    # Best-effort only; if this fails tests will still attempt to load/open the module later.
-    pass
-
 # Dynamically load the openai_llm module to avoid importing full sdk package
 MODULE_NAME = "nexent.core.models.openai_llm"
 MODULE_PATH = (
@@ -327,15 +275,6 @@ with patch.dict("sys.modules", module_mocks):
     sys.modules[MODULE_NAME] = openai_llm_module
     assert spec and spec.loader
     spec.loader.exec_module(openai_llm_module)
-    # Expose the loaded submodule as an attribute on the package object so that
-    # string-based patch targets like "nexent.core.models.openai_llm.asyncio.to_thread"
-    # resolve via getattr during unittest.mock's import lookup.
-    try:
-        models_pkg = sys.modules.get("nexent.core.models")
-        if models_pkg is not None:
-            setattr(models_pkg, "openai_llm", openai_llm_module)
-    except Exception:
-        pass
     ImportedOpenAIModel = openai_llm_module.OpenAIModel
 
     # -----------------------------------------------------------------------

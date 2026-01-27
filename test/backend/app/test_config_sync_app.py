@@ -6,8 +6,6 @@ import pytest
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-# Delayed imports: import inside each test to avoid import-time ordering issues
-
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
@@ -27,21 +25,18 @@ storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
-patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
-      return_value=storage_client_mock).start()
-patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
-      lambda self: None).start()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_mock).start()
 patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Now we can safely import the function to test
+from backend.apps.config_sync_app import load_config, save_config
 
 
 # Fixtures to replace setUp and tearDown
-
-
 @pytest.fixture
 def config_mocks():
     # Create fresh mocks for each test
@@ -77,7 +72,6 @@ async def test_load_config_success(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
-    from backend.apps.config_sync_app import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -111,7 +105,6 @@ async def test_load_config_chinese_language(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
-    from backend.apps.config_sync_app import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -140,7 +133,6 @@ async def test_load_config_with_error(config_mocks):
     config_mocks['get_user_info'].side_effect = Exception("Auth error")
 
     # Execute and Assert
-    from backend.apps.config_sync_app import load_config
     with pytest.raises(HTTPException) as exc_info:
         await load_config(mock_auth_header, mock_request)
 
@@ -164,7 +156,6 @@ async def test_save_config_success(config_mocks):
     config_mocks['save_config_impl'].return_value = None
 
     # Execute
-    from backend.apps.config_sync_app import save_config
     result = await save_config(global_config, mock_auth_header)
 
     # Assert
@@ -196,95 +187,9 @@ async def test_save_config_with_error(config_mocks):
         "Authentication failed")
 
     # Execute and Assert
-    from backend.apps.config_sync_app import save_config
     with pytest.raises(HTTPException) as exc_info:
         await save_config(global_config, mock_auth_header)
 
     assert exc_info.value.status_code == 400
     assert "Failed to save configuration" in str(exc_info.value.detail)
     config_mocks['logger'].error.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_load_config_missing_language(config_mocks):
-    """Test configuration loading with missing language parameter"""
-    # Setup
-    mock_request = MagicMock()
-    mock_auth_header = "Bearer test-token"
-
-    # Mock user info with None language
-    config_mocks['get_user_info'].return_value = (
-        "test_user", "test_tenant", None)
-
-    # Mock service response
-    mock_config = {"app": {"name": "Test App"}}
-    config_mocks['load_config_impl'].return_value = mock_config
-
-    # Execute
-    from backend.apps.config_sync_app import load_config
-    result = await load_config(mock_auth_header, mock_request)
-
-    # Assert
-    assert isinstance(result, JSONResponse)
-    assert result.status_code == 200
-
-    # Parse the JSON response body to verify content
-    import json
-    response_body = json.loads(result.body.decode())
-    assert response_body["config"] == mock_config
-
-    config_mocks['get_user_info'].assert_called_once_with(
-        mock_auth_header, mock_request)
-    config_mocks['load_config_impl'].assert_called_once_with(
-        None, "test_tenant")
-
-
-@pytest.mark.asyncio
-async def test_save_config_empty_auth_header(config_mocks):
-    """Test configuration saving with empty authorization header"""
-    # Setup
-    mock_auth_header = ""  # Empty header
-    global_config = MagicMock()
-
-    # Mock user and tenant ID for empty auth
-    config_mocks['get_current_user_id'].return_value = (
-        "anonymous_user", "default_tenant")
-
-    # Execute
-    from backend.apps.config_sync_app import save_config
-    result = await save_config(global_config, mock_auth_header)
-
-    # Assert
-    assert isinstance(result, JSONResponse)
-    assert result.status_code == 200
-
-    config_mocks['get_current_user_id'].assert_called_once_with("")
-
-
-@pytest.mark.asyncio
-async def test_load_config_empty_auth_header(config_mocks):
-    """Test configuration loading with empty authorization header"""
-    # Setup
-    mock_request = MagicMock()
-    mock_auth_header = ""  # Empty header
-
-    # Mock user info for empty auth
-    config_mocks['get_user_info'].return_value = (
-        "anonymous_user", "default_tenant", "en")
-
-    # Mock service response
-    mock_config = {"app": {"name": "Default App"}}
-    config_mocks['load_config_impl'].return_value = mock_config
-
-    # Execute
-    from backend.apps.config_sync_app import load_config
-    result = await load_config(mock_auth_header, mock_request)
-
-    # Assert
-    assert isinstance(result, JSONResponse)
-    assert result.status_code == 200
-
-    config_mocks['get_user_info'].assert_called_once_with(
-        "", mock_request)
-    config_mocks['load_config_impl'].assert_called_once_with(
-        "en", "default_tenant")

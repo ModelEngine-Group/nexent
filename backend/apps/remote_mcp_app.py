@@ -7,7 +7,7 @@ from http import HTTPStatus
 
 from consts.const import NEXENT_MCP_DOCKER_IMAGE, ENABLE_UPLOAD_IMAGE
 from consts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError
-from consts.model import MCPConfigRequest, MCPUpdateRequest
+from consts.model import MCPConfigRequest
 from services.remote_mcp_service import (
     add_remote_mcp_server_list,
     delete_remote_mcp_server_list,
@@ -15,7 +15,6 @@ from services.remote_mcp_service import (
     check_mcp_health_and_update_db,
     delete_mcp_by_container_id,
     upload_and_start_mcp_image,
-    update_remote_mcp_server_list,
 )
 from database.remote_mcp_db import check_mcp_name_exists
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
@@ -106,38 +105,6 @@ async def delete_remote_proxies(
         logger.error(f"Failed to delete remote MCP proxy: {e}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Failed to delete remote MCP proxy")
-
-
-@router.put("/update")
-async def update_remote_proxy(
-    update_data: MCPUpdateRequest,
-    authorization: Optional[str] = Header(None)
-):
-    """ Used to update an existing remote MCP server """
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        await update_remote_mcp_server_list(
-            update_data=update_data,
-            tenant_id=tenant_id,
-            user_id=user_id
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"message": "Successfully updated remote MCP proxy",
-                     "status": "success"}
-        )
-    except MCPNameIllegal as e:
-        logger.error(f"Failed to update remote MCP proxy: {e}")
-        raise HTTPException(status_code=HTTPStatus.CONFLICT,
-                            detail=str(e))
-    except MCPConnectionError as e:
-        logger.error(f"Failed to update remote MCP proxy: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                            detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to update remote MCP proxy: {e}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail="Failed to update remote MCP proxy")
 
 
 @router.get("/list")

@@ -67,46 +67,33 @@ exceptions_mock = MagicMock()
 sys.modules['consts.exceptions'] = exceptions_mock
 sys.modules['backend.consts.exceptions'] = exceptions_mock
 
-# Mock SQLAlchemy exception for testing
-class MockSQLAlchemyError(Exception):
-    """Mock SQLAlchemy exception for testing database errors"""
-    pass
-
-# Mock sqlalchemy.exc module
-sqlalchemy_mock = MagicMock()
-sqlalchemy_mock.exc.SQLAlchemyError = MockSQLAlchemyError
-sys.modules['sqlalchemy'] = sqlalchemy_mock
-sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
-
 # Now import the functions to be tested
 from backend.database.user_tenant_db import (
     get_user_tenant_by_user_id,
-    get_all_tenant_ids,
     insert_user_tenant,
-    get_users_by_tenant_id,
-    update_user_tenant_role,
+    get_all_tenant_ids,
     soft_delete_user_tenant_by_user_id,
 )
 
 class MockUserTenant:
-    def __init__(self, user_id="test_user_id", user_email="test@example.com", user_role="USER"):
-        self.user_id = user_id
+    def __init__(self):
+        self.user_id = "test_user_id"
         self.tenant_id = "test_tenant_id"
-        self.user_email = user_email
-        self.user_role = user_role
+        self.group_ids = "1,2,3"  # New field
+        self.user_role = "USER"  # New field with correct role value
         self.delete_flag = "N"
-        self.created_by = user_id
-        self.updated_by = user_id
+        self.created_by = "test_user_id"
+        self.updated_by = "test_user_id"
         self.create_time = "2024-01-01 00:00:00"
         self.update_time = "2024-01-01 00:00:00"
         self.__dict__ = {
-            "user_id": user_id,
+            "user_id": "test_user_id",
             "tenant_id": "test_tenant_id",
-            "user_email": user_email,
-            "user_role": user_role,
+            "group_ids": "1,2,3",
+            "user_role": "USER",
             "delete_flag": "N",
-            "created_by": user_id,
-            "updated_by": user_id,
+            "created_by": "test_user_id",
+            "updated_by": "test_user_id",
             "create_time": "2024-01-01 00:00:00",
             "update_time": "2024-01-01 00:00:00"
         }
@@ -141,6 +128,7 @@ def test_get_user_tenant_by_user_id_success(monkeypatch, mock_session):
     assert result is not None
     assert result["user_id"] == "test_user_id"
     assert result["tenant_id"] == "test_tenant_id"
+    assert result["group_ids"] == "1,2,3"
     assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
 
@@ -235,7 +223,6 @@ def test_insert_user_tenant_with_empty_user_id(monkeypatch, mock_session):
         user_id="",
         tenant_id="test_tenant_id",
         user_role="USER",
-        user_email=None,
         created_by="",
         updated_by=""
     )
@@ -265,7 +252,6 @@ def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
         user_id="test_user_id",
         tenant_id="",
         user_role="USER",
-        user_email=None,
         created_by="test_user_id",
         updated_by="test_user_id"
     )
@@ -308,6 +294,7 @@ def test_user_tenant_lifecycle(monkeypatch, mock_session):
     assert result is not None
     assert result["user_id"] == "test_user_id"
     assert result["tenant_id"] == "test_tenant_id"
+    assert result["group_ids"] == "1,2,3"
     assert result["user_role"] == "USER"
     assert result["delete_flag"] == "N"
 
@@ -395,7 +382,7 @@ def test_soft_delete_user_tenant_by_user_id_success(monkeypatch, mock_session):
     monkeypatch.setattr(
         "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
 
-    ok = soft_delete_user_tenant_by_user_id("user123", "actor1")
+    ok = soft_delete_user_tenant_by_user_id("user123", actor="actor1")
     assert ok is True
     mock_query.filter.assert_called_once()
     mock_query.filter.return_value.update.assert_called_once()
@@ -414,140 +401,5 @@ def test_soft_delete_user_tenant_by_user_id_no_rows(monkeypatch, mock_session):
     monkeypatch.setattr(
         "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
 
-    ok = soft_delete_user_tenant_by_user_id("none", "test_user")
+    ok = soft_delete_user_tenant_by_user_id("none")
     assert ok is False
-
-
-def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
-    """Test successfully getting users by tenant ID with pagination"""
-    session, query = mock_session
-
-    # Mock the pagination query result
-    mock_paginated_results = [
-        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN"),
-        MockUserTenant(user_id="user2", user_email="user2@example.com", user_role="USER"),
-    ]
-
-    # Mock session.query to return different objects for different calls
-    call_count = 0
-    def mock_query(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:  # First call for count
-            mock_q = MagicMock()
-            mock_count_filter = MagicMock()
-            mock_count_filter.count.return_value = 5
-            mock_q.filter.return_value = mock_count_filter
-            return mock_q
-        else:  # Second call for paginated results
-            mock_q = MagicMock()
-            mock_paginated_filter = MagicMock()
-            mock_paginated_order_by = MagicMock()
-            mock_paginated_offset = MagicMock()
-            mock_paginated_limit = MagicMock()
-            mock_paginated_limit.all.return_value = mock_paginated_results
-            mock_paginated_offset.limit.return_value = mock_paginated_limit
-            mock_paginated_order_by.offset.return_value = mock_paginated_offset
-            mock_paginated_filter.order_by.return_value = mock_paginated_order_by
-            mock_q.filter.return_value = mock_paginated_filter
-            return mock_q
-
-    session.query = mock_query
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
-
-    result = get_users_by_tenant_id("test_tenant", page=2, page_size=10)
-
-    assert result["total"] == 5
-    assert len(result["users"]) == 2
-    assert result["users"][0]["user_id"] == "user1"
-    assert result["users"][0]["user_email"] == "user1@example.com"
-    assert result["users"][0]["user_role"] == "ADMIN"
-    assert result["users"][1]["user_id"] == "user2"
-    assert result["users"][1]["user_email"] == "user2@example.com"
-    assert result["users"][1]["user_role"] == "USER"
-
-
-def test_get_users_by_tenant_id_empty_result(monkeypatch, mock_session):
-    """Test getting users by tenant ID when no users exist"""
-    session, query = mock_session
-
-    # Mock count query returning 0
-    mock_count_query = MagicMock()
-    mock_count_query.count.return_value = 0
-    query.filter.return_value = mock_count_query
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
-
-    result = get_users_by_tenant_id("empty_tenant", page=1, page_size=20)
-
-    assert result["total"] == 0
-    assert result["users"] == []
-
-
-def test_update_user_tenant_role_success(monkeypatch, mock_session):
-    """Test successfully updating user tenant role"""
-    session, query = mock_session
-
-    # Mock update query
-    mock_update_query = MagicMock()
-    mock_update_query.update.return_value = 1  # 1 row affected
-    query.filter.return_value = mock_update_query
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-
-    result = update_user_tenant_role("user123", "ADMIN", "updater456")
-
-    assert result is True
-    # Verify the update was called with correct parameters
-    mock_update_query.update.assert_called_once_with({
-        "user_role": "ADMIN",
-        "updated_by": "updater456",
-        "update_time": "NOW()"
-    })
-
-
-def test_update_user_tenant_role_no_user_found(monkeypatch, mock_session):
-    """Test updating user tenant role when user not found"""
-    session, query = mock_session
-
-    # Mock update query returning 0 (no rows affected)
-    mock_update_query = MagicMock()
-    mock_update_query.update.return_value = 0  # No rows affected
-    query.filter.return_value = mock_update_query
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-
-    result = update_user_tenant_role("nonexistent_user", "ADMIN", "updater456")
-
-    assert result is False
-
-
-def test_update_user_tenant_role_database_error(monkeypatch, mock_session):
-    """Test database error handling for update_user_tenant_role"""
-    session, query = mock_session
-
-    # Mock query.filter to raise an error
-    query.filter.side_effect = MockSQLAlchemyError("Database connection failed")
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
-
-    with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
-        update_user_tenant_role("user123", "ADMIN", "updater456")

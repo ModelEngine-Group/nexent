@@ -1,104 +1,33 @@
-"""
-Unit tests for backend/database/knowledge_db.py
-Tests knowledge database utility functions
-"""
-
 import sys
-import os
-import types
-from datetime import datetime
-from unittest.mock import MagicMock, patch, call
 import pytest
+from unittest.mock import patch, MagicMock
 
-# Add backend directory to Python path for proper imports
-project_root = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '../../../'))
-backend_dir = os.path.join(project_root, 'backend')
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
-
-# Patch boto3 and other dependencies before importing anything from backend
-boto3_mock = MagicMock()
-sys.modules['boto3'] = boto3_mock
-
-# Apply critical patches before importing any modules
-# This prevents real AWS/MinIO/Elasticsearch calls during import
-patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
-
-# Patch storage factory and MinIO config validation to avoid errors during initialization
-storage_client_mock = MagicMock()
-minio_client_mock = MagicMock()
-minio_client_mock._ensure_bucket_exists = MagicMock()
-minio_client_mock.client = MagicMock()
-
-# Mock the entire MinIOStorageConfig class to avoid validation
-minio_config_mock = MagicMock()
-minio_config_mock.validate = MagicMock()
-
-# Import backend modules after all patches are applied
-# Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
-        patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.database.knowledge_db import (
-        create_knowledge_record,
-        update_knowledge_record,
-        delete_knowledge_record,
-        get_knowledge_record,
-        get_knowledge_info_by_knowledge_ids,
-        get_knowledge_ids_by_index_names,
-        get_knowledge_info_by_tenant_id,
-        update_model_name_by_index_name,
-        get_index_name_by_knowledge_name,
-        get_knowledge_info_by_tenant_and_source,
-        upsert_knowledge_record,
-        _generate_index_name
-    )
-
-
-# Add project root to Python path
-sys.path.insert(0, os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', '..')))
-
-# Mock consts module to use conftest environment variables
+# First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set constants to match conftest.py values
-consts_mock.const.MINIO_ENDPOINT = 'http://localhost:9000'
-consts_mock.const.MINIO_ACCESS_KEY = 'minioadmin'
-consts_mock.const.MINIO_SECRET_KEY = 'minioadmin'
-consts_mock.const.MINIO_REGION = 'us-east-1'
-consts_mock.const.MINIO_DEFAULT_BUCKET = 'test-bucket'
-consts_mock.const.POSTGRES_HOST = 'localhost'
-consts_mock.const.POSTGRES_USER = 'test_user'
-consts_mock.const.NEXENT_POSTGRES_PASSWORD = 'test_password'
-consts_mock.const.POSTGRES_DB = 'test_db'
-consts_mock.const.POSTGRES_PORT = '5432'
-consts_mock.const.DEFAULT_TENANT_ID = 'default_tenant'
+# Set required constants in consts.const
+consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
+consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
+consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
+consts_mock.const.MINIO_REGION = "us-east-1"
+consts_mock.const.MINIO_DEFAULT_BUCKET = "test-bucket"
+consts_mock.const.POSTGRES_HOST = "localhost"
+consts_mock.const.POSTGRES_USER = "test_user"
+consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
+consts_mock.const.POSTGRES_DB = "test_db"
+consts_mock.const.POSTGRES_PORT = 5432
+consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
+# Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
-
-# Mock MinioClient to prevent connection attempts
-minio_client_mock = MagicMock()
-postgres_client_mock = MagicMock()
-
-# Mock the entire client module
-client_mock = MagicMock()
-client_mock.MinioClient = minio_client_mock
-client_mock.PostgresClient = postgres_client_mock
-client_mock.db_client = MagicMock()
-client_mock.get_db_session = MagicMock()
-client_mock.as_dict = MagicMock()
-client_mock.filter_property = MagicMock()
 
 # Mock utils module
 utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
-utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(
-    return_value="test_user_id")
+utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 utils_mock.str_utils = MagicMock()
-utils_mock.str_utils.convert_list_to_string = MagicMock(
-    side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
+utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
@@ -110,17 +39,27 @@ sys.modules['utils.str_utils'] = utils_mock.str_utils
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
+# Mock the entire client module
+client_mock = MagicMock()
+client_mock.MinioClient = MagicMock()
+client_mock.PostgresClient = MagicMock()
+client_mock.db_client = MagicMock()
+client_mock.get_db_session = MagicMock()
+client_mock.as_dict = MagicMock()
+client_mock.filter_property = MagicMock()
+
+# Add the mocked client module to sys.modules
+sys.modules['database.client'] = client_mock
+sys.modules['backend.database.client'] = client_mock
+
 # Mock sqlalchemy module
 sqlalchemy_mock = MagicMock()
 sqlalchemy_mock.func = MagicMock()
-sqlalchemy_mock.func.current_timestamp = MagicMock(
-    return_value="2023-01-01 00:00:00")
+sqlalchemy_mock.func.current_timestamp = MagicMock(return_value="2023-01-01 00:00:00")
 sqlalchemy_mock.exc = MagicMock()
-
 
 class MockSQLAlchemyError(Exception):
     pass
-
 
 sqlalchemy_mock.exc.SQLAlchemyError = MockSQLAlchemyError
 
@@ -131,27 +70,22 @@ sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 # Mock db_models module
 db_models_mock = MagicMock()
 
-
 class MockKnowledgeRecord:
     def __init__(self, **kwargs):
         self.knowledge_id = kwargs.get('knowledge_id', 1)
         self.index_name = kwargs.get('index_name', 'test_index')
         self.knowledge_name = kwargs.get('knowledge_name', 'test_index')
-        self.knowledge_describe = kwargs.get(
-            'knowledge_describe', 'test description')
+        self.knowledge_describe = kwargs.get('knowledge_describe', 'test description')
         self.created_by = kwargs.get('created_by', 'test_user')
         self.updated_by = kwargs.get('updated_by', 'test_user')
-        self.knowledge_sources = kwargs.get(
-            'knowledge_sources', 'elasticsearch')
+        self.knowledge_sources = kwargs.get('knowledge_sources', 'elasticsearch')
         self.tenant_id = kwargs.get('tenant_id', 'test_tenant')
-        self.embedding_model_name = kwargs.get(
-            'embedding_model_name', 'test_model')
+        self.embedding_model_name = kwargs.get('embedding_model_name', 'test_model')
         self.group_ids = kwargs.get('group_ids', '1,2,3')  # New field
-        self.ingroup_permission = kwargs.get(
-            'ingroup_permission', 'READ_ONLY')  # New field, corrected name
+        self.ingroup_permission = kwargs.get('ingroup_permission', 'READ_ONLY')  # New field, corrected name
         self.delete_flag = kwargs.get('delete_flag', 'N')
         self.update_time = kwargs.get('update_time', "2023-01-01 00:00:00")
-
+        
     # Mock SQLAlchemy column attributes
     knowledge_id = MagicMock(name="knowledge_id_column")
     index_name = MagicMock(name="index_name_column")
@@ -163,11 +97,9 @@ class MockKnowledgeRecord:
     tenant_id = MagicMock(name="tenant_id_column")
     embedding_model_name = MagicMock(name="embedding_model_name_column")
     group_ids = MagicMock(name="group_ids_column")  # New field
-    ingroup_permission = MagicMock(
-        name="ingroup_permission_column")  # New field, corrected name
+    ingroup_permission = MagicMock(name="ingroup_permission_column")  # New field, corrected name
     delete_flag = MagicMock(name="delete_flag_column")
     update_time = MagicMock(name="update_time_column")
-
 
 db_models_mock.KnowledgeRecord = MockKnowledgeRecord
 
@@ -175,13 +107,19 @@ db_models_mock.KnowledgeRecord = MockKnowledgeRecord
 sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
-# Add the mocked client module to sys.modules before importing knowledge_db
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
-
-# Import functions after mocks are set up
-
 # Now we can safely import the module under test
+from backend.database.knowledge_db import (
+    create_knowledge_record,
+    update_knowledge_record,
+    delete_knowledge_record,
+    get_knowledge_record,
+    get_knowledge_info_by_knowledge_ids,
+    get_knowledge_ids_by_index_names,
+    get_knowledge_info_by_tenant_id,
+    update_model_name_by_index_name,
+    get_index_name_by_knowledge_name,
+    _generate_index_name
+)
 
 
 @pytest.fixture
@@ -196,25 +134,18 @@ def mock_session():
 def test_create_knowledge_record_success(monkeypatch, mock_session):
     """Test successful creation of knowledge record"""
     session, _ = mock_session
-
+    
     # Create mock knowledge record
     mock_record = MockKnowledgeRecord(knowledge_name="test_knowledge")
     mock_record.knowledge_id = 123
     mock_record.index_name = "test_knowledge"
-
+    
     # Mock database session context
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     # Prepare test data
     test_query = {
         "index_name": "test_knowledge",
@@ -226,11 +157,11 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
         "group_ids": [1, 2, 3],
         "ingroup_permission": "READ_ONLY"
     }
-
+    
     # Mock KnowledgeRecord constructor
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
-
+    
     assert result == {
         "knowledge_id": 123,
         "index_name": "test_knowledge",
@@ -253,15 +184,8 @@ def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
     # Mock database session context
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     # Prepare test data with group_ids as list
     test_query = {
@@ -287,8 +211,7 @@ def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
     # Verify KnowledgeRecord was called with group_ids converted to string
     mock_constructor.assert_called_once()
     call_kwargs = mock_constructor.call_args[1]  # Get kwargs from the call
-    # Should be converted to comma-separated string
-    assert call_kwargs["group_ids"] == "1,2,3"
+    assert call_kwargs["group_ids"] == "1,2,3"  # Should be converted to comma-separated string
     session.add.assert_called_once_with(mock_record)
     assert session.flush.call_count == 1
     session.commit.assert_called_once()
@@ -298,19 +221,12 @@ def test_create_knowledge_record_exception(monkeypatch, mock_session):
     """Test exception during knowledge record creation"""
     session, _ = mock_session
     session.add.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge",
         "knowledge_describe": "Test knowledge description",
@@ -318,12 +234,12 @@ def test_create_knowledge_record_exception(monkeypatch, mock_session):
         "tenant_id": "test_tenant",
         "embedding_model_name": "test_model"
     }
-
+    
     mock_record = MockKnowledgeRecord()
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
         with pytest.raises(MockSQLAlchemyError, match="Database error"):
             create_knowledge_record(test_query)
-
+    
     session.rollback.assert_called_once()
 
 
@@ -336,19 +252,11 @@ def test_create_knowledge_record_generates_index_name(monkeypatch, mock_session)
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
 
     # Deterministic index name
-    monkeypatch.setattr(
-        "backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
+    monkeypatch.setattr("backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
 
     test_query = {
         "knowledge_describe": "desc",
@@ -374,36 +282,29 @@ def test_create_knowledge_record_generates_index_name(monkeypatch, mock_session)
 def test_update_knowledge_record_success(monkeypatch, mock_session):
     """Test successful update of knowledge record"""
     session, query = mock_session
-
+    
     # Create mock knowledge record
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_describe = "old description"
     mock_record.embedding_model_name = "old_model"
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge",
         "knowledge_describe": "Updated description",
         "user_id": "test_user"
     }
-
+    
     result = update_knowledge_record(test_query)
-
+    
     assert result is True
     assert mock_record.knowledge_describe == "Updated description"
     assert mock_record.updated_by == "test_user"
@@ -414,31 +315,24 @@ def test_update_knowledge_record_success(monkeypatch, mock_session):
 def test_update_knowledge_record_not_found(monkeypatch, mock_session):
     """Test updating non-existent knowledge record"""
     session, query = mock_session
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "nonexistent_knowledge",
         "knowledge_describe": "Updated description",
         "user_id": "test_user"
     }
-
+    
     result = update_knowledge_record(test_query)
-
+    
     assert result is False
 
 
@@ -446,67 +340,53 @@ def test_update_knowledge_record_exception(monkeypatch, mock_session):
     """Test exception during knowledge record update"""
     session, query = mock_session
     session.flush.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_record = MockKnowledgeRecord()
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge",
         "knowledge_describe": "Updated description",
         "user_id": "test_user"
     }
-
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         update_knowledge_record(test_query)
-
+    
     session.rollback.assert_called_once()
 
 
 def test_delete_knowledge_record_success(monkeypatch, mock_session):
     """Test successful deletion of knowledge record (soft delete)"""
     session, query = mock_session
-
+    
     # Create mock knowledge record
     mock_record = MockKnowledgeRecord()
     mock_record.delete_flag = 'N'
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge",
         "user_id": "test_user"
     }
-
+    
     result = delete_knowledge_record(test_query)
-
+    
     assert result is True
     assert mock_record.delete_flag == 'Y'
     assert mock_record.updated_by == "test_user"
@@ -517,30 +397,23 @@ def test_delete_knowledge_record_success(monkeypatch, mock_session):
 def test_delete_knowledge_record_not_found(monkeypatch, mock_session):
     """Test deleting non-existent knowledge record"""
     session, query = mock_session
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "nonexistent_knowledge",
         "user_id": "test_user"
     }
-
+    
     result = delete_knowledge_record(test_query)
-
+    
     assert result is False
 
 
@@ -548,141 +421,110 @@ def test_delete_knowledge_record_exception(monkeypatch, mock_session):
     """Test exception during knowledge record deletion"""
     session, query = mock_session
     session.flush.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_record = MockKnowledgeRecord()
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge",
         "user_id": "test_user"
     }
-
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         delete_knowledge_record(test_query)
-
+    
     session.rollback.assert_called_once()
 
 
 def test_get_knowledge_record_found(monkeypatch, mock_session):
     """Test successfully retrieving knowledge record"""
     session, query = mock_session
-
+    
     # Create mock knowledge record
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_id = 123
     mock_record.index_name = "test_knowledge"
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     # Mock as_dict function
     expected_result = {
         "knowledge_id": 123,
         "index_name": "test_knowledge",
         "knowledge_describe": "test description"
     }
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
-
+    monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda x: expected_result)
+    
     test_query = {
         "index_name": "test_knowledge",
         "tenant_id": "test_tenant"
     }
-
+    
     result = get_knowledge_record(test_query)
-
+    
     assert result == expected_result
 
 
 def test_get_knowledge_record_not_found(monkeypatch, mock_session):
     """Test retrieving non-existent knowledge record"""
     session, query = mock_session
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
-    mock_filter.filter.return_value = mock_filter  # Support chaining
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "nonexistent_knowledge"
     }
-
+    
     result = get_knowledge_record(test_query)
-
+    
     assert result == {}
 
 
 def test_get_knowledge_record_without_tenant_id(monkeypatch, mock_session):
     """Test retrieving knowledge record without tenant_id"""
     session, query = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     expected_result = {"knowledge_id": 1}
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
-
+    monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda x: expected_result)
+    
     test_query = {
         "index_name": "test_knowledge"
         # Note: no tenant_id
     }
-
+    
     result = get_knowledge_record(test_query)
-
+    
     assert result == expected_result
 
 
@@ -690,23 +532,16 @@ def test_get_knowledge_record_exception(monkeypatch, mock_session):
     """Test exception during knowledge record retrieval"""
     session, query = mock_session
     query.filter.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge"
     }
-
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_record(test_query)
 
@@ -714,60 +549,40 @@ def test_get_knowledge_record_exception(monkeypatch, mock_session):
 def test_get_knowledge_record_with_none_query(monkeypatch, mock_session):
     """Test get_knowledge_record with None query raises TypeError"""
     session, query = mock_session
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    # When query is None, checking 'index_name' in query will raise TypeError
-    with pytest.raises(TypeError, match="argument of type 'NoneType' is not iterable"):
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
+    # When query is None, accessing query['index_name'] will raise TypeError
+    with pytest.raises(TypeError, match="'NoneType' object is not subscriptable"):
         get_knowledge_record(None)
 
 
 def test_get_knowledge_record_without_index_name_key(monkeypatch, mock_session):
-    """Test get_knowledge_record with query missing index_name and knowledge_name keys"""
+    """Test get_knowledge_record with query missing index_name key raises KeyError"""
     session, query = mock_session
-
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = None
-    mock_filter.filter.return_value = mock_filter  # Support chaining
-    query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    # When query doesn't have 'index_name' or 'knowledge_name' key, no specific filter is applied
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
+    # When query doesn't have 'index_name' key, accessing query['index_name'] will raise KeyError
     test_query = {
         "tenant_id": "test_tenant"
-        # Missing index_name and knowledge_name keys
+        # Missing index_name key
     }
-
-    result = get_knowledge_record(test_query)
-
-    assert result == {}
+    
+    with pytest.raises(KeyError):
+        get_knowledge_record(test_query)
 
 
 def test_get_knowledge_info_by_knowledge_ids_success(monkeypatch, mock_session):
     """Test retrieving knowledge info by knowledge ID list"""
     session, query = mock_session
-
+    
     # Create a list of mock knowledge records
     mock_record1 = MockKnowledgeRecord()
     mock_record1.knowledge_id = 1
@@ -775,33 +590,26 @@ def test_get_knowledge_info_by_knowledge_ids_success(monkeypatch, mock_session):
     mock_record1.knowledge_name = "Knowledge Base 1"
     mock_record1.knowledge_sources = "elasticsearch"
     mock_record1.embedding_model_name = "model1"
-
+    
     mock_record2 = MockKnowledgeRecord()
     mock_record2.knowledge_id = 2
     mock_record2.index_name = "knowledge2"
     mock_record2.knowledge_name = "Knowledge Base 2"
     mock_record2.knowledge_sources = "vectordb"
     mock_record2.embedding_model_name = "model2"
-
+    
     mock_filter = MagicMock()
     mock_filter.all.return_value = [mock_record1, mock_record2]
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     knowledge_ids = ["1", "2"]
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
-
+    
     expected = [
         {
             "knowledge_id": 1,
@@ -818,7 +626,7 @@ def test_get_knowledge_info_by_knowledge_ids_success(monkeypatch, mock_session):
             "embedding_model_name": "model2"
         }
     ]
-
+    
     assert result == expected
 
 
@@ -826,21 +634,14 @@ def test_get_knowledge_info_by_knowledge_ids_exception(monkeypatch, mock_session
     """Test exception when retrieving knowledge info by knowledge ID list"""
     session, query = mock_session
     query.filter.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     knowledge_ids = ["1", "2"]
-
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_info_by_knowledge_ids(knowledge_ids)
 
@@ -848,41 +649,34 @@ def test_get_knowledge_info_by_knowledge_ids_exception(monkeypatch, mock_session
 def test_get_knowledge_ids_by_index_names_success(monkeypatch, mock_session):
     """Test retrieving knowledge IDs by index name list"""
     session, _ = mock_session
-
+    
     # Mock query results
     class MockResult:
         def __init__(self, knowledge_id):
             self.knowledge_id = knowledge_id
-
+    
     mock_results = [MockResult("1"), MockResult("2")]
-
+    
     # Create a new mock for this specific function since it uses session.query(KnowledgeRecord.knowledge_id)
     mock_specific_query = MagicMock()
     mock_filter = MagicMock()
     mock_filter.all.return_value = mock_results
     mock_specific_query.filter.return_value = mock_filter
-
+    
     # Reset session.query return value to handle specific query parameters
     def mock_query_func(*args, **kwargs):
         return mock_specific_query
-
+    
     session.query = mock_query_func
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     index_names = ["knowledge1", "knowledge2"]
     result = get_knowledge_ids_by_index_names(index_names)
-
+    
     assert result == ["1", "2"]
 
 
@@ -890,21 +684,14 @@ def test_get_knowledge_ids_by_index_names_exception(monkeypatch, mock_session):
     """Test exception when retrieving knowledge IDs by index name list"""
     session, query = mock_session
     query.filter.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     index_names = ["knowledge1", "knowledge2"]
-
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_ids_by_index_names(index_names)
 
@@ -912,45 +699,38 @@ def test_get_knowledge_ids_by_index_names_exception(monkeypatch, mock_session):
 def test_get_knowledge_info_by_tenant_id_success(monkeypatch, mock_session):
     """Test retrieving knowledge info by tenant ID"""
     session, query = mock_session
-
+    
     mock_record1 = MockKnowledgeRecord()
     mock_record1.knowledge_id = 1
     mock_record1.tenant_id = "tenant1"
-
+    
     mock_record2 = MockKnowledgeRecord()
     mock_record2.knowledge_id = 2
     mock_record2.tenant_id = "tenant1"
-
+    
     mock_filter = MagicMock()
     mock_filter.all.return_value = [mock_record1, mock_record2]
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     # Mock as_dict function
     def mock_as_dict(record):
         return {"knowledge_id": record.knowledge_id, "tenant_id": record.tenant_id}
-
+    
     monkeypatch.setattr("backend.database.knowledge_db.as_dict", mock_as_dict)
-
+    
     tenant_id = "tenant1"
     result = get_knowledge_info_by_tenant_id(tenant_id)
-
+    
     expected = [
         {"knowledge_id": 1, "tenant_id": "tenant1"},
         {"knowledge_id": 2, "tenant_id": "tenant1"}
     ]
-
+    
     assert result == expected
 
 
@@ -958,21 +738,14 @@ def test_get_knowledge_info_by_tenant_id_exception(monkeypatch, mock_session):
     """Test exception when retrieving knowledge info by tenant ID"""
     session, query = mock_session
     query.filter.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     tenant_id = "tenant1"
-
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_info_by_tenant_id(tenant_id)
 
@@ -980,30 +753,21 @@ def test_get_knowledge_info_by_tenant_id_exception(monkeypatch, mock_session):
 def test_update_model_name_by_index_name_success(monkeypatch, mock_session):
     """Test updating model name by index name"""
     session, query = mock_session
-
+    
     mock_update = MagicMock()
     mock_filter = MagicMock()
     mock_filter.update = mock_update
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    result = update_model_name_by_index_name(
-        "test_index", "new_model", "tenant1", "user1")
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
+    result = update_model_name_by_index_name("test_index", "new_model", "tenant1", "user1")
+    
     assert result is True
-    mock_update.assert_called_once_with(
-        {"embedding_model_name": "new_model", "updated_by": "user1"})
+    mock_update.assert_called_once_with({"embedding_model_name": "new_model", "updated_by": "user1"})
     session.commit.assert_called_once()
 
 
@@ -1014,46 +778,30 @@ def test_update_model_name_by_index_name_exception(monkeypatch, mock_session):
     mock_filter = MagicMock()
     mock_filter.update = mock_update
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        update_model_name_by_index_name(
-            "test_index", "new_model", "tenant1", "user1")
+        update_model_name_by_index_name("test_index", "new_model", "tenant1", "user1")
 
 
 def test_create_knowledge_record_with_index_name_only(monkeypatch, mock_session):
     """Test create_knowledge_record when only index_name is provided (no knowledge_name)"""
     session, _ = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_id = 123
     mock_record.index_name = "test_index"
-    # Should use index_name as knowledge_name
-    mock_record.knowledge_name = "test_index"
-
+    mock_record.knowledge_name = "test_index"  # Should use index_name as knowledge_name
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_index",
         "knowledge_describe": "Test description",
@@ -1062,10 +810,10 @@ def test_create_knowledge_record_with_index_name_only(monkeypatch, mock_session)
         "embedding_model_name": "test_model"
         # No knowledge_name provided
     }
-
+    
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
-
+    
     assert result == {
         "knowledge_id": 123,
         "index_name": "test_index",
@@ -1079,24 +827,17 @@ def test_create_knowledge_record_with_index_name_only(monkeypatch, mock_session)
 def test_create_knowledge_record_without_user_id(monkeypatch, mock_session):
     """Test create_knowledge_record without user_id"""
     session, _ = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_id = 123
     mock_record.index_name = "test_index"
     mock_record.knowledge_name = "test_kb"
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_index",
         "knowledge_name": "test_kb",
@@ -1105,10 +846,10 @@ def test_create_knowledge_record_without_user_id(monkeypatch, mock_session):
         "embedding_model_name": "test_model"
         # No user_id provided
     }
-
+    
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
-
+    
     assert result["knowledge_id"] == 123
     session.add.assert_called_once_with(mock_record)
     session.commit.assert_called_once()
@@ -1117,27 +858,19 @@ def test_create_knowledge_record_without_user_id(monkeypatch, mock_session):
 def test_create_knowledge_record_without_index_name_and_knowledge_name(monkeypatch, mock_session):
     """Test create_knowledge_record when neither index_name nor knowledge_name is provided"""
     session, _ = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_id = 7
     mock_record.knowledge_name = None  # Both are None, so knowledge_name will be None
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     # Deterministic index name
-    monkeypatch.setattr(
-        "backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
-
+    monkeypatch.setattr("backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
+    
     test_query = {
         "knowledge_describe": "desc",
         "user_id": "user-1",
@@ -1145,10 +878,10 @@ def test_create_knowledge_record_without_index_name_and_knowledge_name(monkeypat
         "embedding_model_name": "model-x"
         # Neither index_name nor knowledge_name provided
     }
-
+    
     with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
-
+    
     assert result == {
         "knowledge_id": 7,
         "index_name": "7-generated",
@@ -1162,35 +895,28 @@ def test_create_knowledge_record_without_index_name_and_knowledge_name(monkeypat
 def test_update_knowledge_record_without_user_id(monkeypatch, mock_session):
     """Test update_knowledge_record without user_id"""
     session, query = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_describe = "old description"
     mock_record.updated_by = "original_user"
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge",
         "knowledge_describe": "Updated description"
         # No user_id provided
     }
-
+    
     result = update_knowledge_record(test_query)
-
+    
     assert result is True
     assert mock_record.knowledge_describe == "Updated description"
     # updated_by should remain unchanged when user_id is not provided
@@ -1202,34 +928,27 @@ def test_update_knowledge_record_without_user_id(monkeypatch, mock_session):
 def test_delete_knowledge_record_without_user_id(monkeypatch, mock_session):
     """Test delete_knowledge_record without user_id"""
     session, query = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.delete_flag = 'N'
     mock_record.updated_by = "original_user"
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     test_query = {
         "index_name": "test_knowledge"
         # No user_id provided
     }
-
+    
     result = delete_knowledge_record(test_query)
-
+    
     assert result is True
     assert mock_record.delete_flag == 'Y'
     # updated_by should remain unchanged when user_id is not provided
@@ -1241,173 +960,76 @@ def test_delete_knowledge_record_without_user_id(monkeypatch, mock_session):
 def test_get_knowledge_record_with_tenant_id_none(monkeypatch, mock_session):
     """Test get_knowledge_record with tenant_id explicitly set to None"""
     session, query = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_id = 123
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     expected_result = {"knowledge_id": 123}
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
-
+    monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda x: expected_result)
+    
     test_query = {
         "index_name": "test_knowledge",
         "tenant_id": None  # Explicitly None
     }
-
+    
     result = get_knowledge_record(test_query)
-
+    
     assert result == expected_result
     # Should not add tenant_id filter when tenant_id is None
     assert query.filter.call_count >= 1
 
 
-def test_get_knowledge_record_by_knowledge_name_success(monkeypatch, mock_session):
-    """Test successfully retrieving knowledge record by knowledge_name"""
-    session, query = mock_session
-
-    # Create mock knowledge record
-    mock_record = MockKnowledgeRecord()
-    mock_record.knowledge_id = 123
-    mock_record.knowledge_name = "test_kb"
-
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = mock_record
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    # Mock as_dict function
-    expected_result = {
-        "knowledge_id": 123,
-        "knowledge_name": "test_kb",
-        "index_name": "test_index"
-    }
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
-
-    test_query = {
-        "knowledge_name": "test_kb",
-        "tenant_id": "test_tenant"
-    }
-
-    result = get_knowledge_record(test_query)
-
-    assert result == expected_result
-
-
-def test_get_knowledge_record_by_knowledge_name_not_found(monkeypatch, mock_session):
-    """Test retrieving knowledge record by knowledge_name when not found"""
-    session, query = mock_session
-
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = None
-    mock_filter.filter.return_value = mock_filter  # Support chaining
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    test_query = {
-        "knowledge_name": "nonexistent_kb",
-        "tenant_id": "test_tenant"
-    }
-
-    result = get_knowledge_record(test_query)
-
-    assert result == {}
-
-
 def test_get_knowledge_info_by_knowledge_ids_empty_list(monkeypatch, mock_session):
     """Test get_knowledge_info_by_knowledge_ids with empty list"""
     session, query = mock_session
-
+    
     mock_filter = MagicMock()
     mock_filter.all.return_value = []
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     knowledge_ids = []
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
-
+    
     assert result == []
 
 
 def test_get_knowledge_info_by_knowledge_ids_includes_knowledge_name(monkeypatch, mock_session):
     """Test get_knowledge_info_by_knowledge_ids includes knowledge_name field"""
     session, query = mock_session
-
+    
     mock_record1 = MockKnowledgeRecord()
     mock_record1.knowledge_id = 1
     mock_record1.index_name = "knowledge1"
     mock_record1.knowledge_name = "Knowledge Base 1"
     mock_record1.knowledge_sources = "elasticsearch"
     mock_record1.embedding_model_name = "model1"
-
+    
     mock_filter = MagicMock()
     mock_filter.all.return_value = [mock_record1]
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     knowledge_ids = ["1"]
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
-
+    
     expected = [
         {
             "knowledge_id": 1,
@@ -1417,7 +1039,7 @@ def test_get_knowledge_info_by_knowledge_ids_includes_knowledge_name(monkeypatch
             "embedding_model_name": "model1"
         }
     ]
-
+    
     assert result == expected
     assert "knowledge_name" in result[0]
 
@@ -1425,33 +1047,26 @@ def test_get_knowledge_info_by_knowledge_ids_includes_knowledge_name(monkeypatch
 def test_get_knowledge_info_by_knowledge_ids_with_none_knowledge_name(monkeypatch, mock_session):
     """Test get_knowledge_info_by_knowledge_ids when knowledge_name is None"""
     session, query = mock_session
-
+    
     mock_record1 = MockKnowledgeRecord()
     mock_record1.knowledge_id = 1
     mock_record1.index_name = "knowledge1"
     mock_record1.knowledge_name = None  # None knowledge_name
     mock_record1.knowledge_sources = "elasticsearch"
     mock_record1.embedding_model_name = "model1"
-
+    
     mock_filter = MagicMock()
     mock_filter.all.return_value = [mock_record1]
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     knowledge_ids = ["1"]
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
-
+    
     expected = [
         {
             "knowledge_id": 1,
@@ -1461,7 +1076,7 @@ def test_get_knowledge_info_by_knowledge_ids_with_none_knowledge_name(monkeypatc
             "embedding_model_name": "model1"
         }
     ]
-
+    
     assert result == expected
     assert result[0]["knowledge_name"] is None
 
@@ -1469,54 +1084,40 @@ def test_get_knowledge_info_by_knowledge_ids_with_none_knowledge_name(monkeypatc
 def test_get_index_name_by_knowledge_name_success(monkeypatch, mock_session):
     """Test successfully getting index_name by knowledge_name"""
     session, query = mock_session
-
+    
     mock_record = MockKnowledgeRecord()
     mock_record.knowledge_name = "My Knowledge Base"
     mock_record.index_name = "123-abc123def456"
     mock_record.tenant_id = "tenant1"
     mock_record.delete_flag = 'N'
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = mock_record
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     result = get_index_name_by_knowledge_name("My Knowledge Base", "tenant1")
-
+    
     assert result == "123-abc123def456"
 
 
 def test_get_index_name_by_knowledge_name_not_found(monkeypatch, mock_session):
     """Test get_index_name_by_knowledge_name when knowledge base is not found"""
     session, query = mock_session
-
+    
     mock_filter = MagicMock()
     mock_filter.first.return_value = None
     query.filter.return_value = mock_filter
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     with pytest.raises(ValueError, match="Knowledge base 'Nonexistent KB' not found for the current tenant"):
         get_index_name_by_knowledge_name("Nonexistent KB", "tenant1")
 
@@ -1525,19 +1126,12 @@ def test_get_index_name_by_knowledge_name_exception(monkeypatch, mock_session):
     """Test exception when getting index_name by knowledge_name"""
     session, query = mock_session
     query.filter.side_effect = MockSQLAlchemyError("Database error")
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_index_name_by_knowledge_name("My Knowledge Base", "tenant1")
 
@@ -1547,11 +1141,10 @@ def test_generate_index_name_format(monkeypatch):
     # Mock uuid to get deterministic result
     mock_uuid = MagicMock()
     mock_uuid.hex = "abc123def456"
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.uuid.uuid4", lambda: mock_uuid)
-
+    monkeypatch.setattr("backend.database.knowledge_db.uuid.uuid4", lambda: mock_uuid)
+    
     result = _generate_index_name(123)
-
+    
     assert result == "123-abc123def456"
     assert result.startswith("123-")
     assert len(result) == len("123-abc123def456")
@@ -1560,257 +1153,23 @@ def test_generate_index_name_format(monkeypatch):
 def test_get_knowledge_ids_by_index_names_empty_list(monkeypatch, mock_session):
     """Test get_knowledge_ids_by_index_names with empty list"""
     session, _ = mock_session
-
+    
     mock_specific_query = MagicMock()
     mock_filter = MagicMock()
     mock_filter.all.return_value = []
     mock_specific_query.filter.return_value = mock_filter
-
+    
     def mock_query_func(*args, **kwargs):
         return mock_specific_query
-
+    
     session.query = mock_query_func
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    
     index_names = []
     result = get_knowledge_ids_by_index_names(index_names)
-
-    assert result == []
-
-
-def test_upsert_knowledge_record_create_new(monkeypatch, mock_session):
-    """Test upsert_knowledge_record creates new record when not exists"""
-    session, query = mock_session
-
-    # Mock that no existing record is found
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = None
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    # Mock create_knowledge_record to return expected result
-    expected_result = {
-        "knowledge_id": 123,
-        "index_name": "test_index",
-        "knowledge_name": "test_kb"
-    }
-
-    with patch('backend.database.knowledge_db.create_knowledge_record', return_value=expected_result):
-        test_query = {
-            "index_name": "test_index",
-            "tenant_id": "test_tenant",
-            "knowledge_name": "test_kb",
-            "knowledge_describe": "Test description",
-            "knowledge_sources": "elasticsearch",
-            "embedding_model_name": "test_model",
-            "user_id": "test_user"
-        }
-
-        result = upsert_knowledge_record(test_query)
-
-        assert result == expected_result
-
-
-def test_upsert_knowledge_record_update_existing(monkeypatch, mock_session):
-    """Test upsert_knowledge_record updates existing record"""
-    session, query = mock_session
-
-    # Create mock existing record
-    mock_existing_record = MockKnowledgeRecord()
-    mock_existing_record.knowledge_id = 123
-    mock_existing_record.index_name = "test_index"
-    mock_existing_record.knowledge_name = "old_name"
-    mock_existing_record.knowledge_describe = "old description"
-    mock_existing_record.knowledge_sources = "old_source"
-    mock_existing_record.embedding_model_name = "old_model"
-    mock_existing_record.updated_by = "old_user"
-
-    mock_filter = MagicMock()
-    mock_filter.first.return_value = mock_existing_record
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    test_query = {
-        "index_name": "test_index",
-        "tenant_id": "test_tenant",
-        "knowledge_name": "updated_kb",
-        "knowledge_describe": "Updated description",
-        "knowledge_sources": "datamate",
-        "embedding_model_name": "updated_model",
-        "user_id": "updated_user"
-    }
-
-    result = upsert_knowledge_record(test_query)
-
-    assert result == {
-        "knowledge_id": 123,
-        "index_name": "test_index",
-        "knowledge_name": "updated_kb"
-    }
-    assert mock_existing_record.knowledge_name == "updated_kb"
-    assert mock_existing_record.knowledge_describe == "Updated description"
-    assert mock_existing_record.knowledge_sources == "datamate"
-    assert mock_existing_record.embedding_model_name == "updated_model"
-    assert mock_existing_record.updated_by == "updated_user"
-    session.flush.assert_called_once()
-    session.commit.assert_called_once()
-
-
-def test_upsert_knowledge_record_exception(monkeypatch, mock_session):
-    """Test exception during upsert_knowledge_record"""
-    session, query = mock_session
-    query.filter.side_effect = MockSQLAlchemyError("Database error")
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    test_query = {
-        "index_name": "test_index",
-        "tenant_id": "test_tenant",
-        "knowledge_name": "test_kb",
-        "user_id": "test_user"
-    }
-
-    with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        upsert_knowledge_record(test_query)
-
-    session.rollback.assert_called_once()
-
-
-def test_get_knowledge_info_by_tenant_and_source_success(monkeypatch, mock_session):
-    """Test retrieving knowledge info by tenant and source"""
-    session, query = mock_session
-
-    mock_record1 = MockKnowledgeRecord()
-    mock_record1.knowledge_id = 1
-    mock_record1.tenant_id = "tenant1"
-    mock_record1.knowledge_sources = "datamate"
-
-    mock_record2 = MockKnowledgeRecord()
-    mock_record2.knowledge_id = 2
-    mock_record2.tenant_id = "tenant1"
-    mock_record2.knowledge_sources = "datamate"
-
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = [mock_record1, mock_record2]
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    # Mock as_dict function
-    def mock_as_dict(record):
-        return {
-            "knowledge_id": record.knowledge_id,
-            "tenant_id": record.tenant_id,
-            "knowledge_sources": record.knowledge_sources
-        }
-
-    monkeypatch.setattr("backend.database.knowledge_db.as_dict", mock_as_dict)
-
-    result = get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
-
-    expected = [
-        {"knowledge_id": 1, "tenant_id": "tenant1",
-            "knowledge_sources": "datamate"},
-        {"knowledge_id": 2, "tenant_id": "tenant1", "knowledge_sources": "datamate"}
-    ]
-
-    assert result == expected
-
-
-def test_get_knowledge_info_by_tenant_and_source_empty_result(monkeypatch, mock_session):
-    """Test retrieving knowledge info by tenant and source returns empty list"""
-    session, query = mock_session
-
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = []
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    result = get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
-
-    assert result == []
-
-
-def test_get_knowledge_info_by_tenant_and_source_exception(monkeypatch, mock_session):
-    """Test exception when retrieving knowledge info by tenant and source"""
-    session, query = mock_session
-    query.filter.side_effect = MockSQLAlchemyError("Database error")
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    # Mock the context manager to call rollback on exception, like the real get_db_session does
-
-    def mock_exit(exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            session.rollback()
-        return None  # Don't suppress the exception
-    mock_ctx.__exit__.side_effect = mock_exit
-    monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-
-    with pytest.raises(MockSQLAlchemyError, match="Database error"):
-        get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
+    
+    assert result == [] 

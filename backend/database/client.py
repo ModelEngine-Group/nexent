@@ -73,7 +73,7 @@ class PostgresClient:
 class MinioClient:
     """
     MinIO client wrapper using storage SDK
-
+    
     This class maintains backward compatibility with the existing MinioClient interface
     while using the new storage SDK under the hood.
     """
@@ -86,8 +86,7 @@ class MinioClient:
 
     def __init__(self):
         # Determine if endpoint uses HTTPS
-        secure = MINIO_ENDPOINT.startswith(
-            'https://') if MINIO_ENDPOINT else True
+        secure = MINIO_ENDPOINT.startswith('https://') if MINIO_ENDPOINT else True
         # Initialize storage client using SDK factory
         self.storage_config = MinIOStorageConfig(
             endpoint=MINIO_ENDPOINT,
@@ -97,8 +96,7 @@ class MinioClient:
             default_bucket=MINIO_DEFAULT_BUCKET,
             secure=secure
         )
-        self._storage_client = create_storage_client_from_config(
-            self.storage_config)
+        self._storage_client = create_storage_client_from_config(self.storage_config)
 
     def upload_file(
             self,
@@ -241,9 +239,7 @@ def get_db_session(db_session=None):
 
 
 def as_dict(obj):
-
-    # Handle SQLAlchemy ORM objects (both TableBase and other DeclarativeBase subclasses)
-    if hasattr(obj, '__class__') and hasattr(obj.__class__, '__mapper__'):
+    if isinstance(obj, TableBase):
         return {c.key: getattr(obj, c.key) for c in class_mapper(obj.__class__).columns}
 
     # noinspection PyProtectedMember

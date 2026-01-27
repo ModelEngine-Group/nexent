@@ -502,7 +502,7 @@ def _validate_local_tool(
         user_id: User ID for knowledge base tools (optional)
 
     Returns:
-        Dict[str, Any]: The actual result returned by the tool's forward method,
+        Dict[str, Any]: The actual result returned by the tool's forward method, 
                        serving as proof that the tool works correctly
 
     Raises:
@@ -541,7 +541,8 @@ def _validate_local_tool(
                 raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
             knowledge_info_list = get_selected_knowledge_list(
                 tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if knowledge_info.get('knowledge_sources') == 'elasticsearch']
+            index_names = [knowledge_info.get("index_name")
+                           for knowledge_info in knowledge_info_list]
             name_resolver = build_knowledge_name_mapping(
                 tenant_id=tenant_id, user_id=user_id)
 
@@ -570,19 +571,6 @@ def _validate_local_tool(
                 'name_resolver': name_resolver,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
-            }
-            tool_instance = tool_class(**params)
-        elif tool_name == "datamate_search":
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if
-                           knowledge_info.get('knowledge_sources') == 'datamate']
-
-            params = {
-                **instantiation_params,
-                'index_names': index_names,
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":

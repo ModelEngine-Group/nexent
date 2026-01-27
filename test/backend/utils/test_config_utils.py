@@ -1,23 +1,19 @@
 import pytest
 import json
 import sys
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
-# Setup common mocks
-from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
+# Mock the database modules that config_utils uses
+sys.modules['database.tenant_config_db'] = MagicMock()
+sys.modules['database.model_management_db'] = MagicMock()
 
-# Initialize common mocks
-mocks = setup_common_mocks()
-
-# Patch storage factory before importing
-with patch_minio_client_initialization():
-    from backend.utils.config_utils import (
-        safe_value,
-        safe_list,
-        get_env_key,
-        get_model_name_from_config,
-        TenantConfigManager
-    )
+from backend.utils.config_utils import (
+    safe_value,
+    safe_list,
+    get_env_key,
+    get_model_name_from_config,
+    TenantConfigManager
+)
 
 
 class TestSafeValue:

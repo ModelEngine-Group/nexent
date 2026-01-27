@@ -8,9 +8,9 @@ TEST_ROOT = Path(__file__).resolve().parents[2]
 if str(TEST_ROOT) not in sys.path:
     sys.path.append(str(TEST_ROOT))
 
-from test.common.test_mocks import bootstrap_test_env
+from test.common.env_test_utils import bootstrap_env
 
-helpers_env = bootstrap_test_env()
+helpers_env = bootstrap_env()
 
 
 helpers_env["mock_const"].DATA_PROCESS_SERVICE = "http://mock-data-process-service"

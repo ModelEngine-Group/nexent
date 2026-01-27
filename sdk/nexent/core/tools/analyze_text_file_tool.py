@@ -26,14 +26,14 @@ logger = logging.getLogger("analyze_text_file_tool")
 
 class AnalyzeTextFileTool(Tool):
     """Tool for analyzing text file content using a large language model"""
-
+    
     name = "analyze_text_file"
     description = (
         "Extract content from text files and analyze them using a large language model based on your query. "
         "Supports multiple files from S3 URLs (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs. "
         "The tool will extract the text content from each file and return an analysis based on your question."
     )
-
+    
     inputs = {
         "file_url_list": {
             "type": "array",
@@ -75,7 +75,6 @@ class AnalyzeTextFileTool(Tool):
         self.llm_model = llm_model
         self.data_process_service_url = data_process_service_url
         self.mm = LoadSaveObjectManager(storage_client=self.storage_client)
-        self.time_out = 60 * 5
 
         self.running_prompt_zh = "正在分析文件..."
         self.running_prompt_en = "Analyzing file..."
@@ -138,7 +137,7 @@ class AnalyzeTextFileTool(Tool):
                     analysis_results.append(str(analysis_error))
 
             return analysis_results
-
+            
         except Exception as e:
             logger.error(f"Error analyzing text file: {str(e)}", exc_info=True)
             error_msg = f"Error analyzing text file: {str(e)}"
@@ -161,9 +160,9 @@ class AnalyzeTextFileTool(Tool):
             }
             data = {
                 'chunking_strategy': 'basic',
-                'timeout': self.time_out,
+                'timeout': 60
             }
-            with httpx.Client(timeout=self.time_out) as client:
+            with httpx.Client(timeout=60) as client:
                 response = client.post(api_url, files=files, data=data)
 
             if response.status_code == 200:

@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from 'react';
 
-import { GlobalConfig, AppConfig, ModelConfig } from "@/types/modelConfig";
-import { ConfigStore } from "@/lib/config";
-import { getAvatarUrl } from "@/lib/avatar";
+import { GlobalConfig, AppConfig, ModelConfig } from '@/types/modelConfig';
+import { ConfigStore } from '@/lib/config';
+import { getAvatarUrl } from '@/lib/avatar';
 
 const configStore = ConfigStore.getInstance();
 
@@ -18,9 +18,9 @@ export function useConfig() {
       setConfig(newConfig);
     };
 
-    window.addEventListener("configChanged", handleConfigChanged);
+    window.addEventListener('configChanged', handleConfigChanged);
     return () => {
-      window.removeEventListener("configChanged", handleConfigChanged);
+      window.removeEventListener('configChanged', handleConfigChanged);
     };
   }, []);
 
@@ -54,12 +54,9 @@ export function useConfig() {
   }, []);
 
   // Get avatar URL
-  const getAppAvatarUrl = useCallback(
-    (size?: number) => {
-      return getAvatarUrl(config.app, size);
-    },
-    [config.app]
-  );
+  const getAppAvatarUrl = useCallback((size?: number) => {
+    return getAvatarUrl(config.app, size);
+  }, [config.app]);
 
   return {
     config,
@@ -72,6 +69,6 @@ export function useConfig() {
     appConfig: config.app,
     modelConfig: config.models,
     // Avatar related functionality
-    getAppAvatarUrl,
+    getAppAvatarUrl
   };
-}
+} 

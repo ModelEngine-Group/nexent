@@ -1,8 +1,7 @@
 import sys
 import types
-import pytest
-from unittest.mock import MagicMock
-from pytest_mock import MockFixture
+import unittest
+from unittest.mock import MagicMock, patch
 
 # Mock boto3 and other external dependencies before importing modules under test
 boto3_mock = MagicMock()
@@ -25,16 +24,12 @@ storage_client_factory_module = types.ModuleType("nexent.storage.storage_client_
 sys.modules['nexent.storage.storage_client_factory'] = storage_client_factory_module
 storage_pkg.storage_client_factory = storage_client_factory_module
 storage_client_factory_module.create_storage_client_from_config = MagicMock()
-
-
 class _FakeMinIOStorageConfig:  # pylint: disable=too-few-public-methods
     def __init__(self, *args, **kwargs):
         pass
 
     def validate(self):
         return None
-
-
 storage_client_factory_module.MinIOStorageConfig = _FakeMinIOStorageConfig
 
 minio_config_module = types.ModuleType("nexent.storage.minio_config")
@@ -55,35 +50,24 @@ vector_db_es_module.Elasticsearch = MagicMock()
 
 # Stub nexent.core.utils.observer MessageObserver used by llm_utils
 observer_mod = types.ModuleType("nexent.core.utils.observer")
-
-
 def _make_message_observer(*a, **k):
     return types.SimpleNamespace(
         add_model_new_token=lambda t: None,
         add_model_reasoning_content=lambda r: None,
         flush_remaining_tokens=lambda: None,
     )
-
-
 observer_mod.MessageObserver = _make_message_observer
-observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"),
-                                                 MODEL_OUTPUT_THINKING=types.SimpleNamespace(
-                                                     value="model_output_thinking"))
+observer_mod.ProcessType = types.SimpleNamespace(MODEL_OUTPUT_CODE=types.SimpleNamespace(value="model_output_code"), MODEL_OUTPUT_THINKING=types.SimpleNamespace(value="model_output_thinking"))
 sys.modules["nexent.core.utils.observer"] = observer_mod
 
 # Minimal nexent.core.models.OpenAIModel stub to satisfy imports (tests will patch behavior)
 models_mod = types.ModuleType("nexent.core.models")
-
-
 class _SimpleOpenAIModel:
     def __init__(self, *a, **k):
         self.client = MagicMock()
         self.model_id = k.get("model_id", "")
-
     def _prepare_completion_kwargs(self, *a, **k):
         return {}
-
-
 models_mod.OpenAIModel = _SimpleOpenAIModel
 sys.modules["nexent.core.models"] = models_mod
 
@@ -91,15 +75,37 @@ sys.modules["nexent.core.models"] = models_mod
 import backend.database.client  # noqa: E402,F401
 import database.client  # noqa: E402,F401
 
+patch('botocore.client.BaseClient._make_api_call', return_value={}).start()
+
+storage_client_mock = MagicMock()
+minio_client_mock = MagicMock()
+minio_client_mock._ensure_bucket_exists = MagicMock()
+minio_client_mock.client = MagicMock()
+patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
+patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
+patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('database.client.MinioClient', return_value=minio_client_mock).start()
+patch('backend.database.client.minio_client', minio_client_mock).start()
+patch('nexent.vector_database.elasticsearch_core.ElasticSearchCore', return_value=MagicMock()).start()
+patch('nexent.vector_database.elasticsearch_core.Elasticsearch', return_value=MagicMock()).start()
+patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
+
 from backend.utils.llm_utils import call_llm_for_system_prompt, _process_thinking_tokens
 
 
-class TestCallLLMForSystemPrompt:
-    def test_call_llm_for_system_prompt_success(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+class TestCallLLMForSystemPrompt(unittest.TestCase):
+    def setUp(self):
+        self.test_model_id = 1
 
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_success(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         mock_model_config = {
             "base_url": "http://example.com",
             "api_key": "fake-key",
@@ -118,14 +124,14 @@ class TestCallLLMForSystemPrompt:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
         mock_get_model_by_id.assert_called_once_with(
-            model_id=1,
+            model_id=self.test_model_id,
             tenant_id=None,
         )
         mock_openai.assert_called_once_with(
@@ -138,11 +144,15 @@ class TestCallLLMForSystemPrompt:
             ssl_verify=True,
         )
 
-    def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_exception(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         mock_model_config = {
             "base_url": "http://example.com",
             "api_key": "fake-key",
@@ -155,17 +165,17 @@ class TestCallLLMForSystemPrompt:
         mock_llm_instance.client.chat.completions.create.side_effect = Exception("LLM error")
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
-        with pytest.raises(Exception) as exc_info:
+        with self.assertRaises(Exception) as context:
             call_llm_for_system_prompt(
-                1,
+                self.test_model_id,
                 "user prompt",
                 "system prompt",
             )
 
-        assert "LLM error" in str(exc_info.value)
+        self.assertIn("LLM error", str(context.exception))
 
 
-class TestProcessThinkingTokens:
+class TestProcessThinkingTokens(unittest.TestCase):
     def test_process_thinking_tokens_normal_token(self):
         token_join = []
         callback_calls = []
@@ -175,9 +185,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("Hello", False, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == ["Hello"]
-        assert callback_calls == ["Hello"]
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["Hello"])
+        self.assertEqual(callback_calls, ["Hello"])
 
     def test_process_thinking_tokens_start_thinking(self):
         token_join = []
@@ -188,9 +198,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("<think>", False, token_join, mock_callback)
 
-        assert is_thinking is True
-        assert token_join == []
-        assert callback_calls == []
+        self.assertTrue(is_thinking)
+        self.assertEqual(token_join, [])
+        self.assertEqual(callback_calls, [])
 
     def test_process_thinking_tokens_content_while_thinking(self):
         token_join = ["Hello"]
@@ -206,9 +216,9 @@ class TestProcessThinkingTokens:
             mock_callback,
         )
 
-        assert is_thinking is True
-        assert token_join == ["Hello"]
-        assert callback_calls == []
+        self.assertTrue(is_thinking)
+        self.assertEqual(token_join, ["Hello"])
+        self.assertEqual(callback_calls, [])
 
     def test_process_thinking_tokens_end_thinking(self):
         token_join = ["Hello"]
@@ -219,9 +229,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("</think>", True, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == ["Hello"]
-        assert callback_calls == []
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["Hello"])
+        self.assertEqual(callback_calls, [])
 
     def test_process_thinking_tokens_content_after_thinking(self):
         token_join = ["Hello"]
@@ -232,9 +242,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("World", False, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == ["Hello", "World"]
-        assert callback_calls == ["HelloWorld"]
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["Hello", "World"])
+        self.assertEqual(callback_calls, ["HelloWorld"])
 
     def test_process_thinking_tokens_complete_flow(self):
         token_join = []
@@ -244,33 +254,33 @@ class TestProcessThinkingTokens:
             callback_calls.append(text)
 
         is_thinking = _process_thinking_tokens("Start ", False, token_join, mock_callback)
-        assert is_thinking is False
+        self.assertFalse(is_thinking)
 
         is_thinking = _process_thinking_tokens("<think>", False, token_join, mock_callback)
-        assert is_thinking is True
+        self.assertTrue(is_thinking)
 
         is_thinking = _process_thinking_tokens("thinking", True, token_join, mock_callback)
-        assert is_thinking is True
+        self.assertTrue(is_thinking)
 
         is_thinking = _process_thinking_tokens(" more", True, token_join, mock_callback)
-        assert is_thinking is True
+        self.assertTrue(is_thinking)
 
         is_thinking = _process_thinking_tokens("</think>", True, token_join, mock_callback)
-        assert is_thinking is False
+        self.assertFalse(is_thinking)
 
         is_thinking = _process_thinking_tokens(" End", False, token_join, mock_callback)
-        assert is_thinking is False
+        self.assertFalse(is_thinking)
 
-        assert token_join == ["Start ", " End"]
-        assert callback_calls == ["Start ", "Start  End"]
+        self.assertEqual(token_join, ["Start ", " End"])
+        self.assertEqual(callback_calls, ["Start ", "Start  End"])
 
     def test_process_thinking_tokens_no_callback(self):
         token_join = []
 
         is_thinking = _process_thinking_tokens("Hello", False, token_join, None)
 
-        assert is_thinking is False
-        assert token_join == ["Hello"]
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["Hello"])
 
     def test_process_thinking_tokens_empty_token(self):
         token_join = []
@@ -281,9 +291,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("", False, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == []
-        assert callback_calls == []
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, [])
+        self.assertEqual(callback_calls, [])
 
     def test_process_thinking_tokens_end_tag_without_starting(self):
         """Test end tag when never in thinking mode - should clear token_join"""
@@ -295,9 +305,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("</think>", False, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == []
-        assert callback_calls == [""]
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, [])
+        self.assertEqual(callback_calls, [""])
 
     def test_process_thinking_tokens_end_tag_without_starting_no_callback(self):
         """Test end tag when never in thinking mode without callback"""
@@ -305,8 +315,8 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("</think>", False, token_join, None)
 
-        assert is_thinking is False
-        assert token_join == []
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, [])
 
     def test_process_thinking_tokens_end_tag_with_content_after(self):
         """Test end tag followed by content in the same token"""
@@ -318,9 +328,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("</think>World", True, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == ["Hello", "World"]
-        assert callback_calls == ["HelloWorld"]
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["Hello", "World"])
+        self.assertEqual(callback_calls, ["HelloWorld"])
 
     def test_process_thinking_tokens_start_tag_with_content_after(self):
         """Test start tag followed by content in the same token"""
@@ -332,9 +342,9 @@ class TestProcessThinkingTokens:
 
         is_thinking = _process_thinking_tokens("<think>thinking", False, token_join, mock_callback)
 
-        assert is_thinking is True
-        assert token_join == ["Hello"]
-        assert callback_calls == []
+        self.assertTrue(is_thinking)
+        self.assertEqual(token_join, ["Hello"])
+        self.assertEqual(callback_calls, [])
 
     def test_process_thinking_tokens_both_tags_in_same_token(self):
         """Test both start and end tags in the same token"""
@@ -360,9 +370,9 @@ class TestProcessThinkingTokens:
         # Start tag check on "World": no match, is_thinking stays False
         # Then "World" is added to token_join
         # Note: When end tag clears token_join, callback("") is called, but empty string is not added to token_join
-        assert is_thinking is False
-        assert token_join == ["World"]
-        assert callback_calls == ["", "World"]
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["World"])
+        self.assertEqual(callback_calls, ["", "World"])
 
     def test_process_thinking_tokens_new_token_empty_after_processing(self):
         """Test when new_token becomes empty after processing tags"""
@@ -375,125 +385,32 @@ class TestProcessThinkingTokens:
         # End tag with no content after
         is_thinking = _process_thinking_tokens("</think>", True, token_join, mock_callback)
 
-        assert is_thinking is False
-        assert token_join == ["Hello"]
-        assert callback_calls == []
+        self.assertFalse(is_thinking)
+        self.assertEqual(token_join, ["Hello"])
+        self.assertEqual(callback_calls, [])
 
 
-class AdditionalLLMUtilsTests:
-    def test_process_thinking_tokens_append_and_callback(self):
-        token_join = []
-        calls = []
+class TestCallLLMForSystemPromptExtended(unittest.TestCase):
+    """Extended tests for call_llm_for_system_prompt to achieve 100% coverage"""
 
-        def cb(text):
-            calls.append(text)
+    def setUp(self):
+        self.test_model_id = 1
 
-        is_thinking = _process_thinking_tokens("Hello", False, token_join, cb)
-        assert is_thinking is False
-        assert token_join == ["Hello"]
-        assert calls == ["Hello"]
-
-    def test_process_thinking_tokens_start_tag(self):
-        token_join = []
-        calls = []
-
-        def cb(text):
-            calls.append(text)
-
-        is_thinking = _process_thinking_tokens("<think>inner", False, token_join, cb)
-        assert is_thinking is True
-        # start tag should not append to token_join
-        assert token_join == []
-        assert calls == []
-
-    def test_process_thinking_tokens_is_thinking_without_end(self):
-        token_join = ["x"]
-        # when already thinking and token does NOT contain end tag, should remain thinking
-        is_thinking = _process_thinking_tokens("still thinking", True, token_join, None)
-        assert is_thinking is True
-        assert token_join == ["x"]
-
-    def test_process_thinking_tokens_is_thinking_with_end(self):
-        token_join = ["x"]
-        # when already thinking and token contains end tag, should return False (stop thinking)
-        is_thinking = _process_thinking_tokens("</think>done", True, token_join, None)
-        assert is_thinking is False
-        # token_join is not modified by the function in this code path
-        assert token_join == ["x", "done"]
-
-    def test_process_thinking_tokens_empty_token_with_callback(self):
-        token_join = []
-        calls = []
-
-        def cb(text):
-            calls.append(text)
-
-        is_thinking = _process_thinking_tokens("", False, token_join, cb)
-        # empty string is appended and callback is invoked with the joined token list
-        assert is_thinking is False
-        assert token_join == []
-        assert calls == []
-
-    def test_call_llm_for_system_prompt_skips_none_tokens_and_joins(self, mocker: MockFixture):
-        # Setup model config and OpenAIModel behavior
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
-        mock_get_model_name.return_value = "gpt-5"
-
-        mock_instance = mock_openai.return_value
-        # chunk1: None content (should be skipped), chunk2: actual content
-        chunk1 = MagicMock()
-        chunk1.choices = [MagicMock()]
-        chunk1.choices[0].delta.content = None
-
-        chunk2 = MagicMock()
-        chunk2.choices = [MagicMock()]
-        chunk2.choices[0].delta.content = "OK"
-
-        mock_instance.client = MagicMock()
-        mock_instance.client.chat.completions.create.return_value = [chunk1, chunk2]
-        mock_instance._prepare_completion_kwargs.return_value = {}
-
-        res = call_llm_for_system_prompt(1, "u", "s")
-        assert res == "OK"
-        # Ensure OpenAIModel constructed with expected args
-        mock_openai.assert_called_once()
-
-    def test_call_llm_for_system_prompt_generator_like_response(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://y", "api_key": "k2"}
-        mock_get_model_name.return_value = "gpt-6"
-
-        mock_instance = mock_openai.return_value
-
-        # Provide an object that is iterable (generator-like)
-        def gen():
-            for txt in ("A", "B", None, "C"):
-                ch = MagicMock()
-                ch.choices = [MagicMock()]
-                ch.choices[0].delta.content = txt
-                yield ch
-
-        mock_instance.client = MagicMock()
-        mock_instance.client.chat.completions.create.return_value = gen()
-        mock_instance._prepare_completion_kwargs.return_value = {}
-
-        res = call_llm_for_system_prompt(2, "u2", "s2")
-        assert res == "ABC"
-
-    def test_call_llm_for_system_prompt_with_callback(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_with_callback(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with callback"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -511,23 +428,31 @@ class AdditionalLLMUtilsTests:
             callback_calls.append(text)
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
             callback=mock_callback,
         )
 
-        assert result == "Generated prompt"
-        assert len(callback_calls) == 1
-        assert callback_calls[0] == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
+        self.assertEqual(len(callback_calls), 1)
+        self.assertEqual(callback_calls[0], "Generated prompt")
 
-    def test_call_llm_for_system_prompt_with_reasoning_content(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_with_reasoning_content(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with reasoning_content"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -541,20 +466,28 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
 
-    def test_call_llm_for_system_prompt_multiple_chunks(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_multiple_chunks(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with multiple chunks"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -573,20 +506,28 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
 
-    def test_call_llm_for_system_prompt_with_none_content(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_with_none_content(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with delta.content as None"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -600,20 +541,28 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == ""
+        self.assertEqual(result, "")
 
-    def test_call_llm_for_system_prompt_with_thinking_tags(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_with_thinking_tags(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with thinking tags"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -641,7 +590,7 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
@@ -651,16 +600,25 @@ class AdditionalLLMUtilsTests:
         #   end tag clears token_join (since is_thinking=False), new_token becomes ""
         # chunk3: " End" -> added to token_join
         # Final result should be " End" (chunk1 content was cleared by chunk2's end tag)
-        assert result == " End"
+        self.assertEqual(result, " End")
 
-    def test_call_llm_for_system_prompt_empty_result_with_tokens(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    @patch('backend.utils.llm_utils.logger')
+    def test_call_llm_for_system_prompt_empty_result_with_tokens(
+        self,
+        mock_logger,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with empty result but processed tokens"""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -675,25 +633,33 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == ""
+        self.assertEqual(result, "")
         # Verify warning was logged
         mock_logger.warning.assert_called_once()
         call_args = mock_logger.warning.call_args[0][0]
-        assert "empty but" in call_args
-        assert "content tokens were processed" in call_args
+        self.assertIn("empty but", call_args)
+        self.assertIn("content tokens were processed", call_args)
 
-    def test_call_llm_for_system_prompt_with_tenant_id(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_with_tenant_id(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with tenant_id"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -706,24 +672,28 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
             tenant_id="test-tenant",
         )
 
-        assert result == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
         mock_get_model_by_id.assert_called_once_with(
-            model_id=1,
+            model_id=self.test_model_id,
             tenant_id="test-tenant",
         )
 
-    def test_call_llm_for_system_prompt_with_none_model_config(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    def test_call_llm_for_system_prompt_with_none_model_config(
+        self,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt with None model config"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
         mock_get_model_by_id.return_value = None
         mock_get_model_name.return_value = "gpt-4"
 
@@ -737,12 +707,12 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
         # Verify OpenAIModel was called with empty strings when model_config is None
         mock_openai.assert_called_once_with(
             model_id="",
@@ -754,14 +724,23 @@ class AdditionalLLMUtilsTests:
             ssl_verify=True,
         )
 
-    def test_call_llm_for_system_prompt_reasoning_content_logging(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    @patch('backend.utils.llm_utils.logger')
+    def test_call_llm_for_system_prompt_reasoning_content_logging(
+        self,
+        mock_logger,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt logs when reasoning_content is received"""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -775,25 +754,34 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
         result = call_llm_for_system_prompt(
-            1,
+            self.test_model_id,
             "user prompt",
             "system prompt",
         )
 
-        assert result == "Generated prompt"
+        self.assertEqual(result, "Generated prompt")
         # Verify debug log was called for reasoning_content
         mock_logger.debug.assert_called_once()
         call_args = mock_logger.debug.call_args[0][0]
-        assert "reasoning_content" in call_args
+        self.assertIn("reasoning_content", call_args)
 
-    def test_call_llm_for_system_prompt_exception_logging(self, mocker: MockFixture):
+    @patch('backend.utils.llm_utils.OpenAIModel')
+    @patch('backend.utils.llm_utils.get_model_name_from_config')
+    @patch('backend.utils.llm_utils.get_model_by_model_id')
+    @patch('backend.utils.llm_utils.logger')
+    def test_call_llm_for_system_prompt_exception_logging(
+        self,
+        mock_logger,
+        mock_get_model_by_id,
+        mock_get_model_name,
+        mock_openai,
+    ):
         """Test call_llm_for_system_prompt exception handling and logging"""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
-        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
-
-        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_model_config = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+        }
+        mock_get_model_by_id.return_value = mock_model_config
         mock_get_model_name.return_value = "gpt-4"
 
         mock_llm_instance = mock_openai.return_value
@@ -801,15 +789,20 @@ class AdditionalLLMUtilsTests:
         mock_llm_instance.client.chat.completions.create.side_effect = Exception("LLM error")
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
-        with pytest.raises(Exception) as exc_info:
+        with self.assertRaises(Exception) as context:
             call_llm_for_system_prompt(
-                1,
+                self.test_model_id,
                 "user prompt",
                 "system prompt",
             )
 
-        assert "LLM error" in str(exc_info.value)
+        self.assertIn("LLM error", str(context.exception))
         # Verify error was logged
         mock_logger.error.assert_called_once()
         call_args = mock_logger.error.call_args[0][0]
-        assert "Failed to generate prompt" in call_args
+        self.assertIn("Failed to generate prompt", call_args)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
