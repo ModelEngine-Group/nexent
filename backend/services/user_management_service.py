@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, Dict, List
 
 import aiohttp
 from fastapi import Header
@@ -12,15 +12,20 @@ from utils.auth_utils import (
     calculate_expires_at,
     get_jwt_expiry_seconds,
 )
-from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
+from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT_ID
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 
 from database.model_management_db import create_model_record
-from database.user_tenant_db import insert_user_tenant, soft_delete_user_tenant_by_user_id
+from database.user_tenant_db import insert_user_tenant, soft_delete_user_tenant_by_user_id, get_user_tenant_by_user_id
 from database.memory_config_db import soft_delete_all_configs_by_user_id
 from database.conversation_db import soft_delete_all_conversations_by_user
+from database.group_db import query_group_ids_by_user
+from database.client import as_dict, get_db_session
+from database.db_models import RolePermission
 from utils.memory_utils import build_memory_config
 from nexent.memory.memory_service import clear_memory
+from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
+from services.group_service import add_user_to_groups
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -144,7 +149,7 @@ async def signup_user(email: EmailStr,
         tenant_id = user_id if is_admin else "tenant_id"
 
         # Create user tenant relationship
-        insert_user_tenant(user_id=user_id, tenant_id=tenant_id)
+        insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_email=email)
 
         logging.info(
             f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}")
@@ -153,6 +158,120 @@ async def signup_user(email: EmailStr,
             await generate_tts_stt_4_admin(tenant_id, user_id)
 
         return await parse_supabase_response(is_admin, response, user_role)
+    else:
+        logging.error(
+            "Supabase registration request returned no user object")
+        raise UserRegistrationException(
+            "Registration service is temporarily unavailable, please try again later")
+
+
+async def signup_user_with_invitation(email: EmailStr,
+                                      password: str,
+                                      invite_code: Optional[str] = None):
+    """User registration with invitation code support"""
+    client = get_supabase_client()
+    logging.info(
+        f"Receive registration request: email={email}, invite_code={'provided' if invite_code else 'not provided'}")
+
+    # Default user role is USER
+    user_role = "USER"
+    invitation_info = None
+
+    # Validate invitation code if provided (without using it yet)
+    if invite_code:
+        try:
+            # Convert invite code to upper case for consistency
+            invite_code = invite_code.upper()
+
+            # Check if invitation is available
+            if not check_invitation_available(invite_code):
+                raise IncorrectInviteCodeException(
+                    f"Invitation code {invite_code} is not available")
+
+            # Get invitation code details
+            invitation_info = get_invitation_by_code(invite_code)
+            if not invitation_info:
+                raise IncorrectInviteCodeException(
+                    f"Invitation code {invite_code} not found")
+
+            # Determine user role based on invitation code type
+            code_type = invitation_info["code_type"]
+            if code_type == "ADMIN_INVITE":
+                user_role = "ADMIN"
+            elif code_type == "DEV_INVITE":
+                user_role = "DEV"
+
+            logging.info(
+                f"Invitation code {invite_code} validated successfully, will assign role: {user_role}")
+
+        except IncorrectInviteCodeException:
+            raise
+        except Exception as e:
+            logging.error(
+                f"Invitation code {invite_code} validation failed: {str(e)}")
+            raise IncorrectInviteCodeException(
+                f"Invalid invitation code: {str(e)}")
+
+    # Set user metadata, including role information
+    response = client.auth.sign_up({
+        "email": email,
+        "password": password
+    })
+
+    if response.user:
+        user_id = response.user.id
+
+        # Determine tenant_id based on invitation code
+        if invitation_info:
+            tenant_id = invitation_info["tenant_id"]
+        else:
+            tenant_id = DEFAULT_TENANT_ID
+
+        # Create user tenant relationship
+        logging.debug(f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
+        insert_user_tenant(
+            user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
+        logging.debug(f"User tenant relationship created successfully for user {user_id}")
+
+        # Use invitation code now that we have the real user_id
+        if invitation_info:
+            try:
+                invitation_result = use_invitation_code(invite_code, user_id)
+                logging.debug(
+                    f"Invitation code {invite_code} used successfully for user {user_id}")
+
+                # Add user to groups specified in invitation code
+                group_ids = invitation_result.get("group_ids", [])
+                if group_ids:
+                    try:
+                        # Convert group_ids from string to list if needed
+                        if isinstance(group_ids, str):
+                            from utils.str_utils import convert_string_to_list
+                            group_ids = convert_string_to_list(group_ids)
+
+                        if group_ids:
+                            group_results = add_user_to_groups(user_id, group_ids, user_id)
+                            successful_adds = [
+                                r for r in group_results if not r.get("error")]
+                            logging.info(
+                                f"User {user_id} added to {len(successful_adds)} groups from invitation code")
+
+                    except Exception as e:
+                        logging.error(
+                            f"Failed to add user {user_id} to invitation groups: {str(e)}")
+
+            except Exception as e:
+                # If using invitation code fails after registration, log error but don't fail registration
+                logging.error(
+                    f"Failed to use invitation code {invite_code} for user {user_id}: {str(e)}")
+
+        logging.info(
+            f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}")
+
+        if user_role == "ADMIN":
+            await generate_tts_stt_4_admin(tenant_id, user_id)
+
+        return await parse_supabase_response(False, response, user_role)
     else:
         logging.error(
             "Supabase registration request returned no user object")
@@ -379,3 +498,94 @@ async def revoke_regular_user(user_id: str, tenant_id: str) -> None:
         logging.error(
             f"Unexpected error in revoke_regular_user for {user_id}: {e}")
         # swallow to keep idempotent behavior
+
+
+async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get user information including user ID, group IDs, tenant ID, user role, permissions, and accessible routes.
+    All information is retrieved from PostgreSQL database.
+
+    Args:
+        user_id (str): User ID to query
+
+    Returns:
+        Optional[Dict[str, Any]]: User information dictionary containing:
+            - user: User object with user_id, group_ids, tenant_id, user_email, user_role, permissions, accessibleRoutes
+        Returns None if user not found
+    """
+    try:
+        # Get user tenant relationship
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant:
+            return None
+
+        tenant_id = user_tenant["tenant_id"]
+        user_role = user_tenant["user_role"]
+
+        # Get group IDs
+        group_ids = query_group_ids_by_user(user_id)
+
+        # Get user permissions directly from database
+        with get_db_session() as session:
+            permission_records = session.query(RolePermission).filter(
+                RolePermission.user_role == user_role
+            ).all()
+            permissions = [as_dict(record) for record in permission_records]
+
+        permissions_data = format_role_permissions(permissions)
+
+        # Get user email from Supabase (placeholder for now)
+        # TODO: Implement user email retrieval from Supabase user object
+        user_email = "user@example.com"  # Placeholder
+
+        return {
+            "user": {
+                "user_id": user_id,
+                "group_ids": group_ids,
+                "tenant_id": tenant_id,
+                "user_email": user_email,
+                "user_role": user_role,
+                "permissions": permissions_data["permissions"],
+                "accessibleRoutes": permissions_data["accessibleRoutes"]
+            }
+        }
+
+    except Exception as e:
+        logging.error(
+            f"Failed to get user info for user {user_id}: {str(e)}")
+        return None
+
+
+def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """
+    Format role permissions into permissions and accessibleRoutes lists.
+
+    - permissions: List of permission strings (permission_type:permission_subtype for RESOURCE category)
+    - accessibleRoutes: List of accessible route subtypes (permission_subtype for LEFT_NAV_MENU permission_type)
+
+    Args:
+        permissions (List[Dict[str, Any]]): Raw permission records from database
+
+    Returns:
+        Dict[str, List[str]]: Dictionary containing permissions and accessibleRoutes lists
+    """
+    formatted_permissions = []
+    accessible_routes = []
+
+    for perm in permissions:
+        permission_category = perm.get("permission_category", "")
+        permission_type = perm.get("permission_type", "")
+        permission_subtype = perm.get("permission_subtype", "")
+
+        if permission_category == "RESOURCE" and permission_type and permission_subtype:
+            # Format as "permission_type:permission_subtype"
+            formatted_permissions.append(
+                f"{permission_type}:{permission_subtype}")
+        elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
+            # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
+            accessible_routes.append(permission_subtype)
+
+    return {
+        "permissions": formatted_permissions,
+        "accessibleRoutes": accessible_routes
+    }

@@ -16,11 +16,13 @@ import {
   App,
 } from "antd";
 import type { TabsProps } from "antd";
-import { Zap } from "lucide-react";
+import { Zap, Maximize2 } from "lucide-react";
 
 import log from "@/lib/logger";
 import { EditableAgent } from "@/stores/agentConfigStore";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
+import { configService } from "@/services/configService";
+import { ConfigStore } from "@/lib/config";
 import {
   checkAgentName,
   checkAgentDisplayName,
@@ -32,6 +34,7 @@ import {
 import { generatePromptStream } from "@/services/promptService";
 import { useAuth } from "@/hooks/useAuth";
 import { useModelList } from "@/hooks/model/useModelList";
+import ExpandEditModal from "./ExpandEditModal";
 
 const { TextArea } = Input;
 
@@ -56,7 +59,7 @@ export default function AgentGenerateDetail({
   const [form] = Form.useForm();
 
   // Model data from React Query
-  const { availableLlmModels, isLoading: loadingModels } = useModelList();
+  const { availableLlmModels, defaultLlmModel, isLoading: loadingModels } = useModelList();
 
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
@@ -64,8 +67,31 @@ export default function AgentGenerateDetail({
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Modal states
+  const [expandModalOpen, setExpandModalOpen] = useState(false);
+  const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
 
   const userManuallySwitchedTabRef = useRef(false);
+
+  // Ensure tenant config is loaded for default model selection
+  useEffect(() => {
+    const loadConfigIfNeeded = async () => {
+      try {
+        // Check if config is already loaded
+        const configStore = ConfigStore.getInstance();
+        const modelConfig = configStore.getModelConfig();
+
+        // If no LLM model is configured, try to load config from backend
+        if (!modelConfig.llm?.modelName && !modelConfig.llm?.displayName) {
+          await configService.loadConfigToFrontend();
+        }
+      } catch (error) {
+        log.warn("Failed to load tenant config:", error);
+      }
+    };
+
+    loadConfigIfNeeded();
+  }, []);
 
   const stylesObject: TabsProps["styles"] = {
     root: {},
@@ -94,8 +120,6 @@ export default function AgentGenerateDetail({
     businessLogicModelId: 0,
   });
 
-  
-
   // Initialize form values when component mounts or currentAgentId changes
   useEffect(() => {
     const initialAgentInfo = {
@@ -103,7 +127,7 @@ export default function AgentGenerateDetail({
       agentDisplayName: editedAgent.display_name || "",
       agentAuthor: editedAgent.author || "",
       mainAgentModel:
-        editedAgent.model || availableLlmModels[0]?.displayName || "",
+        editedAgent.model || defaultLlmModel?.displayName || "",
       mainAgentMaxStep: editedAgent.max_step || 5,
       agentDescription: editedAgent.description || "",
       dutyPrompt: editedAgent.duty_prompt || "",
@@ -115,23 +139,23 @@ export default function AgentGenerateDetail({
       businessDescription: editedAgent.business_description || "",
       businessLogicModelName:
         editedAgent.business_logic_model_name ||
-        availableLlmModels[0]?.displayName ||
+        defaultLlmModel?.displayName ||
         "",
       businessLogicModelId:
-        editedAgent.business_logic_model_id || availableLlmModels[0]?.id || 0,
+        editedAgent.business_logic_model_id || defaultLlmModel?.id || 0,
     };
     // Initialize local business description state
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
-  }, [currentAgentId, editedAgent, availableLlmModels]);
+  }, [currentAgentId, editedAgent, availableLlmModels, defaultLlmModel]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
     onUpdateBusinessInfo({
       business_description: value,
-      business_logic_model_id: editedAgent.business_logic_model_id || 0,
-      business_logic_model_name: editedAgent.business_logic_model_name || "",
+      business_logic_model_id: businessInfo.businessLogicModelId,
+      business_logic_model_name: businessInfo.businessLogicModelName,
     });
   };
 
@@ -145,6 +169,61 @@ export default function AgentGenerateDetail({
       business_logic_model_id: selectedModel?.id || 0,
       business_logic_model_name: modelName,
     });
+  };
+
+  // Handle expand modal functions
+  const handleOpenExpandModal = (type: 'duty' | 'constraint' | 'few-shots') => {
+    setExpandModalType(type);
+    setExpandModalOpen(true);
+  };
+
+  const handleCloseExpandModal = () => {
+    setExpandModalOpen(false);
+    setExpandModalType(null);
+  };
+
+  const handleSaveExpandModal = (content: string) => {
+    switch (expandModalType) {
+      case 'duty':
+        form.setFieldsValue({ dutyPrompt: content });
+        onUpdateProfile({ duty_prompt: content });
+        break;
+      case 'constraint':
+        form.setFieldsValue({ constraintPrompt: content });
+        onUpdateProfile({ constraint_prompt: content });
+        break;
+      case 'few-shots':
+        form.setFieldsValue({ fewShotsPrompt: content });
+        onUpdateProfile({ few_shots_prompt: content });
+        break;
+    }
+    handleCloseExpandModal();
+  };
+
+  const getExpandModalTitle = () => {
+    switch (expandModalType) {
+      case 'duty':
+        return t("systemPrompt.card.duty.title");
+      case 'constraint':
+        return t("systemPrompt.card.constraint.title");
+      case 'few-shots':
+        return t("systemPrompt.card.fewShots.title");
+      default:
+        return "";
+    }
+  };
+
+  const getExpandModalContent = () => {
+    switch (expandModalType) {
+      case 'duty':
+        return form.getFieldValue("dutyPrompt") || "";
+      case 'constraint':
+        return form.getFieldValue("constraintPrompt") || "";
+      case 'few-shots':
+        return form.getFieldValue("fewShotsPrompt") || "";
+      default:
+        return "";
+    }
   };
 
   // Custom validator for agent name uniqueness
@@ -473,7 +552,16 @@ export default function AgentGenerateDetail({
       key: "duty",
       label: t("systemPrompt.card.duty.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full relative">
+          <div className="absolute top-2 right-2 z-10">
+            <Button
+              onClick={() => handleOpenExpandModal('duty')}
+              title={t("systemPrompt.button.expand")}
+              icon={<Maximize2 size={12} />}
+              size="small"
+              type="text"
+            />
+          </div>
           <Form
             form={form}
             layout="vertical"
@@ -504,7 +592,16 @@ export default function AgentGenerateDetail({
       key: "constraint",
       label: t("systemPrompt.card.constraint.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full relative">
+          <div className="absolute top-2 right-2 z-10">
+            <Button
+              onClick={() => handleOpenExpandModal('constraint')}
+              title={t("systemPrompt.button.expand")}
+              icon={<Maximize2 size={12} />}
+              size="small"
+              type="text"
+            />
+          </div>
           <Form
             form={form}
             layout="vertical"
@@ -537,7 +634,16 @@ export default function AgentGenerateDetail({
       key: "few-shots",
       label: t("systemPrompt.card.fewShots.title"),
       children: (
-        <div className="overflow-y-auto overflow-x-hidden h-full">
+        <div className="overflow-y-auto overflow-x-hidden h-full relative">
+          <div className="absolute top-2 right-2 z-10">
+            <Button
+              onClick={() => handleOpenExpandModal('few-shots')}
+              title={t("systemPrompt.button.expand")}
+              icon={<Maximize2 size={12} />}
+              size="small"
+              type="text"
+            />
+          </div>
           <Form
             form={form}
             layout="vertical"
@@ -613,8 +719,8 @@ export default function AgentGenerateDetail({
               />
 
               {/* Control area */}
-              <Flex justify="space-between" align="center">
-                <div>
+              <Flex style={{ width: "100%" }} align="center">
+                <div style={{ flex: 1, display: "flex", alignItems: "center", minWidth: 0 }}>
                   <span className="text-xs text-gray-600 mr-3">
                     {t("model.type.llm")}:
                   </span>
@@ -623,24 +729,34 @@ export default function AgentGenerateDetail({
                     onChange={handleModelChange}
                     loading={loadingModels}
                     placeholder={t("model.select.placeholder")}
-                    style={{ width: 200 }}
                     options={modelSelectOptions}
                     size="middle"
                     disabled={!editable || isGenerating}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      maxWidth: '300px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
                   />
                 </div>
-
-                <button
-                  onClick={handleGenerateAgent}
-                  disabled={!editable || loadingModels || isGenerating}
-                  className="px-3 py-1.5 rounded-md flex items-center justify-center text-sm bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ border: "none" }}
-                >
-                  <Zap size={16} className="mr-1" />
-                  {isGenerating
-                    ? t("businessLogic.config.button.generating")
-                    : t("businessLogic.config.button.generatePrompt")}
-                </button>
+                <div style={{ marginLeft: 12 }}>
+                   <Button
+                    type="primary"
+                    size="middle"
+                    onClick={handleGenerateAgent}
+                    disabled={!editable || loadingModels || isGenerating}
+                    icon={<Zap size={16} />}
+                  >
+                    <span className="button-text-full">
+                      {isGenerating
+                        ? t("businessLogic.config.button.generating")
+                        : t("businessLogic.config.button.generatePrompt")}
+                    </span>
+                  </Button>
+                </div>
               </Flex>
             </Card>
           </Flex>
@@ -742,6 +858,15 @@ export default function AgentGenerateDetail({
           height: 100% !important;
         }
       `}</style>
+
+      {/* Expand Edit Modal */}
+      <ExpandEditModal
+        open={expandModalOpen}
+        title={getExpandModalTitle()}
+        content={getExpandModalContent()}
+        onClose={handleCloseExpandModal}
+        onSave={handleSaveExpandModal}
+      />
     </Flex>
   );
 }

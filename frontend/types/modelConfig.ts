@@ -53,6 +53,8 @@ export interface AppConfig {
   iconType: "preset" | "custom";
   customIconUrl: string | null;
   avatarUri: string | null;
+  modelEngineEnabled: boolean;
+  datamateUrl: string | null;
 }
 
 // Model API configuration interface
@@ -90,5 +92,5 @@ export interface GlobalConfig {
 export interface ModelValidationResponse {
   connectivity: boolean;
   model_name: string;
-  error?: string;  // Error message when connectivity fails
+  error?: string; // Error message when connectivity fails
 }

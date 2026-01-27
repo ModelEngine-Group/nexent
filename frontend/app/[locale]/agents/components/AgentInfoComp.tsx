@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Row, Col, Flex, Badge, Divider, Button, Drawer, App } from "antd";
 import { Bug, Save, Info } from "lucide-react";
@@ -25,7 +25,8 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
-  const editable = !!(currentAgentId || isCreatingMode);
+  const editable =
+    (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
 
   // Save guard hook
   const saveGuard = useSaveGuard();
@@ -55,7 +56,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
                 gap={8}
                 style={{ marginBottom: "4px" }}
               >
-                <Badge count={1} color="blue" />
+                <Badge count={3} color="blue" />
                 <h2 className="text-lg font-medium">
                   {t("guide.steps.describeBusinessLogic.title")}
                 </h2>
@@ -150,7 +151,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
         }}
       >
         <div className="h-full">
-          <DebugConfig agentId={currentAgentId || 0} />
+          <DebugConfig agentId={currentAgentId} />
         </div>
       </Drawer>
     </>

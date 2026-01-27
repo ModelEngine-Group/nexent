@@ -148,7 +148,6 @@ def get_all_tenant_ids():
     """
     with get_db_session() as session:
         result = session.query(TenantConfig.tenant_id).filter(
-            TenantConfig.config_key == "TENANT_NAME",
             TenantConfig.delete_flag == "N"
         ).distinct().all()
 

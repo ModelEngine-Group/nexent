@@ -256,3 +256,48 @@ def query_invitation_status(invitation_code: str) -> Optional[str]:
         ).first()
 
         return invitation.status if invitation else None
+
+
+def query_invitations_with_pagination(
+    tenant_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+) -> Dict[str, Any]:
+    """
+    Query invitations with pagination support
+
+    Args:
+        tenant_id (Optional[str]): Tenant ID to filter by, None for all tenants
+        page (int): Page number (1-based)
+        page_size (int): Number of items per page
+
+    Returns:
+        Dict[str, Any]: Dictionary containing items list and total count
+    """
+    with get_db_session() as session:
+        query = session.query(TenantInvitationCode).filter(
+            TenantInvitationCode.delete_flag == "N"
+        )
+
+        # Apply tenant filter if provided
+        if tenant_id:
+            query = query.filter(TenantInvitationCode.tenant_id == tenant_id)
+
+        # Get total count
+        total = query.count()
+
+        # Apply pagination
+        offset = (page - 1) * page_size
+        results = query.offset(offset).limit(page_size).all()
+
+        # Convert to dict format
+        items = [as_dict(record) for record in results]
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            # Ceiling division
+            "total_pages": (total + page_size - 1) // page_size
+        }

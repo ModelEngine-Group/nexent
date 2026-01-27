@@ -114,6 +114,38 @@ def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
         return mcp_record.mcp_server if mcp_record else ""
 
 
+def update_mcp_record_by_name_and_url(
+    update_data,
+    tenant_id: str,
+    user_id: str,
+    status: bool = None
+):
+    """
+    Update MCP record by current name and URL
+
+    :param update_data: MCPUpdateRequest containing current and new values
+    :param tenant_id: Tenant ID
+    :param user_id: User ID
+    :param status: Optional status to update
+    """
+    update_fields = {
+        "mcp_name": update_data.new_service_name,
+        "mcp_server": update_data.new_mcp_url,
+        "updated_by": user_id
+    }
+
+    if status is not None:
+        update_fields["status"] = status
+
+    with get_db_session() as session:
+        session.query(McpRecord).filter(
+            McpRecord.mcp_name == update_data.current_service_name,
+            McpRecord.mcp_server == update_data.current_mcp_url,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).update(update_fields)
+
+
 def check_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
     """
     Check if MCP name already exists for a tenant

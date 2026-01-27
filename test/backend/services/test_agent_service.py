@@ -19,11 +19,7 @@ from backend.consts.model import (
 
 
 # Patch environment variables before any imports that might use them
-os.environ.setdefault('MINIO_ENDPOINT', 'http://localhost:9000')
-os.environ.setdefault('MINIO_ACCESS_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_SECRET_KEY', 'minioadmin')
-os.environ.setdefault('MINIO_REGION', 'us-east-1')
-os.environ.setdefault('MINIO_DEFAULT_BUCKET', 'test-bucket')
+# Environment variables are now configured in conftest.py
 
 # Mock boto3 before importing the module under test
 boto3_mock = MagicMock()
@@ -63,7 +59,7 @@ with patch('sqlalchemy.create_engine', return_value=mock_engine), \
      patch('backend.database.client.get_db_session', side_effect=mock_get_db_session), \
      patch('backend.database.client.MinioClient', return_value=minio_client_mock) as minio_mock, \
      patch('elasticsearch.Elasticsearch', return_value=MagicMock()) as es_mock:
-    
+
     import backend.services.agent_service as agent_service
     from backend.services.agent_service import update_agent_info_impl
     from backend.services.agent_service import get_creating_sub_agent_info_impl
@@ -305,10 +301,10 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
 
     mock_sub_agent_ids = [456, 789]
     mock_query_sub_agents_id.return_value = mock_sub_agent_ids
-    
+
     # Mock get_model_by_model_id - return None for model_id=None
     mock_get_model_by_model_id.return_value = None
-    
+
     # Mock check_agent_availability - agent is available
     mock_check_availability.return_value = (True, [])
 
@@ -373,7 +369,7 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
     }
     mock_get_enable_tools.return_value = [1, 2]
     mock_query_sub_agents_id.return_value = [789]
-    
+
     # Mock get_model_by_model_id - return None for model_id=None
     mock_get_model_by_model_id.return_value = None
 
@@ -883,6 +879,122 @@ async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, 
     assert "Failed to delete agent" in str(context.value)
 
 
+@patch('backend.services.agent_service.query_group_ids_by_user')
+def test_get_user_group_ids_success(mock_get_group_ids):
+    """
+    Test successful retrieval of user's group IDs as comma-separated string.
+
+    This test verifies that:
+    1. The _get_user_group_ids function calls get_group_ids_by_user
+    2. Returns a comma-separated string of group IDs
+    3. Uses convert_list_to_string utility function
+    """
+    # Setup
+    from backend.services.agent_service import _get_user_group_ids
+    mock_get_group_ids.return_value = [1, 2, 3]
+
+    # Execute
+    result = _get_user_group_ids("test_user", "test_tenant")
+
+    # Assert
+    assert result == "1,2,3"
+    mock_get_group_ids.assert_called_once_with("test_user")
+
+
+@patch('backend.services.agent_service.query_group_ids_by_user')
+def test_get_user_group_ids_empty_groups(mock_get_group_ids):
+    """
+    Test _get_user_group_ids with empty group list.
+
+    This test verifies that:
+    1. When user has no groups, returns empty string
+    """
+    # Setup
+    from backend.services.agent_service import _get_user_group_ids
+    mock_get_group_ids.return_value = []
+
+    # Execute
+    result = _get_user_group_ids("test_user", "test_tenant")
+
+    # Assert
+    assert result == ""
+    mock_get_group_ids.assert_called_once_with("test_user")
+
+
+@patch('backend.services.agent_service.query_group_ids_by_user')
+def test_get_user_group_ids_exception_handling(mock_get_group_ids):
+    """
+    Test _get_user_group_ids exception handling.
+
+    This test verifies that:
+    1. When get_group_ids_by_user raises exception, logs warning and returns empty string
+    """
+    # Setup
+    from backend.services.agent_service import _get_user_group_ids
+    mock_get_group_ids.side_effect = Exception("Database error")
+
+    # Execute
+    result = _get_user_group_ids("test_user", "test_tenant")
+
+    # Assert
+    assert result == ""
+    mock_get_group_ids.assert_called_once_with("test_user")
+
+
+@patch('backend.services.agent_service.query_group_ids_by_user')
+@patch('backend.services.agent_service.create_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_current_user_info, mock_create_agent, mock_get_group_ids):
+    """
+    Test creating a new agent with automatic group_ids assignment.
+
+    This test verifies that:
+    1. When agent_id is None, a new agent is created
+    2. The group_ids are automatically set to the current user's groups
+    3. The create_agent function is called with the correct parameters including group_ids
+    """
+    # Setup
+    from backend.services.agent_service import update_agent_info_impl
+    mock_get_current_user_info.return_value = (
+        "test_user", "test_tenant", "en")
+    mock_get_group_ids.return_value = [1, 2, 3]
+    mock_create_agent.return_value = {"agent_id": 456}
+
+    # Create a mock AgentInfoRequest object
+    request = MagicMock()
+    request.agent_id = None  # This triggers create mode
+    request.name = "New Agent"
+    request.display_name = "New Display Name"
+    request.business_description = "New agent description"
+    request.author = "test_author"
+    request.model_id = 1
+    request.model_name = "test-model"
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = 10
+    request.provide_run_summary = True
+    request.duty_prompt = "Test duty"
+    request.constraint_prompt = "Test constraint"
+    request.few_shots_prompt = "Test few shots"
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+
+    # Execute
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    # Assert
+    assert result["agent_id"] == 456
+    mock_get_group_ids.assert_called_once_with("test_user")
+    mock_create_agent.assert_called_once()
+    # Verify that group_ids is included in the agent_info dict passed to create_agent
+    # agent_info keyword argument
+    call_args = mock_create_agent.call_args[1]["agent_info"]
+    # Should be comma-separated string
+    assert call_args["group_ids"] == "1,2,3"
+
+
 @patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
 @patch('backend.services.agent_service.ExportAndImportDataFormat')
 @patch('backend.services.agent_service.export_agent_by_agent_id')
@@ -1200,7 +1312,7 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "provider": "openai"
     }
     mock_get_model_by_model_id.return_value = mock_model_info
-    
+
     # Mock check_agent_availability - agent is available
     mock_check_availability.return_value = (True, [])
 
@@ -1366,14 +1478,14 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "display_name": "GPT-4",
         "provider": "openai"
     }
-    
+
     # Mock model info for business logic model
     mock_business_logic_model_info = {
         "model_id": 789,
         "display_name": "Claude-3.5",
         "provider": "anthropic"
     }
-    
+
     # Mock get_model_by_model_id to return different values based on input
     def mock_get_model(model_id):
         if model_id == 456:
@@ -1381,7 +1493,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         elif model_id == 789:
             return mock_business_logic_model_info
         return None
-    
+
     mock_get_model_by_model_id.side_effect = mock_get_model
     mock_check_availability.return_value = (True, [])
 
@@ -1402,7 +1514,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "unavailable_reasons": []
     }
     assert result == expected_result
-    
+
     # Verify both models were looked up
     assert mock_get_model_by_model_id.call_count == 2
     mock_get_model_by_model_id.assert_any_call(456)
@@ -1444,7 +1556,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "display_name": "GPT-4",
         "provider": "openai"
     }
-    
+
     # Mock get_model_by_model_id to return None for business_logic_model_id
     def mock_get_model(model_id):
         if model_id == 456:
@@ -1452,7 +1564,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         elif model_id == 789:
             return None  # Business logic model not found
         return None
-    
+
     mock_get_model_by_model_id.side_effect = mock_get_model
     mock_check_availability.return_value = (True, [])
 
@@ -1473,7 +1585,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "unavailable_reasons": []
     }
     assert result == expected_result
-    
+
     # Verify both models were looked up
     assert mock_get_model_by_model_id.call_count == 2
     mock_get_model_by_model_id.assert_any_call(456)
@@ -1515,14 +1627,14 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "display_name": "GPT-4",
         "provider": "openai"
     }
-    
+
     # Mock model info for business logic model without display_name
     mock_business_logic_model_info = {
         "model_id": 789,
         "provider": "anthropic"
         # No display_name field
     }
-    
+
     # Mock get_model_by_model_id to return different values based on input
     def mock_get_model(model_id):
         if model_id == 456:
@@ -1530,7 +1642,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         elif model_id == 789:
             return mock_business_logic_model_info
         return None
-    
+
     mock_get_model_by_model_id.side_effect = mock_get_model
     mock_check_availability.return_value = (True, [])
 
@@ -1551,7 +1663,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "unavailable_reasons": []
     }
     assert result == expected_result
-    
+
     # Verify both models were looked up
     assert mock_get_model_by_model_id.call_count == 2
     mock_get_model_by_model_id.assert_any_call(456)
@@ -1575,14 +1687,16 @@ async def test_list_all_agent_info_impl_success():
             "name": "Agent 1",
             "display_name": "Display Agent 1",
             "description": "First test agent",
-            "enabled": True
+            "enabled": True,
+            "group_ids": ""
         },
         {
             "agent_id": 2,
             "name": "Agent 2",
             "display_name": "Display Agent 2",
             "description": "Second test agent",
-            "enabled": True
+            "enabled": True,
+            "group_ids": "1,2,3"
         }
     ]
 
@@ -1610,11 +1724,13 @@ async def test_list_all_agent_info_impl_success():
         assert result[0]["display_name"] == "Display Agent 1"
         assert result[0]["is_available"] == True
         assert result[0]["unavailable_reasons"] == []
+        assert result[0]["group_ids"] == []
         assert result[1]["agent_id"] == 2
         assert result[1]["name"] == "Agent 2"
         assert result[1]["display_name"] == "Display Agent 2"
         assert result[1]["is_available"] == True
         assert result[1]["unavailable_reasons"] == []
+        assert result[1]["group_ids"] == [1, 2, 3]
 
         # Verify mock calls
         mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
@@ -1644,14 +1760,16 @@ async def test_list_all_agent_info_impl_with_unavailable_tools():
             "name": "Agent 1",
             "display_name": "Display Agent 1",
             "description": "Agent with available tools",
-            "enabled": True
+            "enabled": True,
+            "group_ids": ""
         },
         {
             "agent_id": 2,
             "name": "Agent 2",
             "display_name": "Display Agent 2",
             "description": "Agent with unavailable tools",
-            "enabled": True
+            "enabled": True,
+            "group_ids": "5,6"
         }
     ]
 
@@ -1677,8 +1795,10 @@ async def test_list_all_agent_info_impl_with_unavailable_tools():
         assert len(result) == 2
         assert result[0]["is_available"] == True
         assert result[0]["unavailable_reasons"] == []
+        assert result[0]["group_ids"] == []
         assert result[1]["is_available"] == False
         assert result[1]["unavailable_reasons"] == ["tool_unavailable"]
+        assert result[1]["group_ids"] == [5, 6]
 
         # Verify mock calls
         mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
@@ -1714,7 +1834,8 @@ async def test_list_all_agent_info_impl_model_unavailable():
             "display_name": "Display Agent 1",
             "description": "Agent with unavailable model",
             "enabled": True,
-            "model_id": 101
+            "model_id": 101,
+            "group_ids": "7,8,9"
         }
     ]
 
@@ -1732,6 +1853,7 @@ async def test_list_all_agent_info_impl_model_unavailable():
         assert len(result) == 1
         assert result[0]["is_available"] is False
         assert result[0]["unavailable_reasons"] == ["model_unavailable"]
+        assert result[0]["group_ids"] == [7, 8, 9]
 
 
 async def test_list_all_agent_info_impl_duplicate_names():
@@ -1742,7 +1864,8 @@ async def test_list_all_agent_info_impl_duplicate_names():
             "create_time": "2024-01-01T00:00:00",
             "display_name": "Agent Display 1",
             "description": "First agent",
-            "enabled": True
+            "enabled": True,
+            "group_ids": "10"
         },
         {
             "agent_id": 2,
@@ -1750,7 +1873,8 @@ async def test_list_all_agent_info_impl_duplicate_names():
             "create_time": "2024-02-01T00:00:00",
             "display_name": "Agent Display 2",
             "description": "Second agent",
-            "enabled": True
+            "enabled": True,
+            "group_ids": "10,11"
         }
     ]
 
@@ -1767,11 +1891,13 @@ async def test_list_all_agent_info_impl_duplicate_names():
         agent1 = next(a for a in result if a["agent_id"] == 1)
         assert agent1["is_available"] is True
         assert "duplicate_name" not in agent1["unavailable_reasons"]
+        assert agent1["group_ids"] == [10]
 
         # The later created agent (agent_id=2) should be unavailable due to duplication
         agent2 = next(a for a in result if a["agent_id"] == 2)
         assert agent2["is_available"] is False
         assert "duplicate_name" in agent2["unavailable_reasons"]
+        assert agent2["group_ids"] == [10, 11]
 
 
 @patch('backend.services.agent_service.query_sub_agents_id_list')
@@ -3698,21 +3824,24 @@ async def test_list_all_agent_info_impl_with_disabled_agents():
             "name": "Enabled Agent 1",
             "display_name": "Display Enabled Agent 1",
             "description": "First enabled agent",
-            "enabled": True
+            "enabled": True,
+            "group_ids": "12"
         },
         {
             "agent_id": 2,
             "name": "Disabled Agent",
             "display_name": "Display Disabled Agent",
             "description": "Disabled agent that should be skipped",
-            "enabled": False
+            "enabled": False,
+            "group_ids": "13"
         },
         {
             "agent_id": 3,
             "name": "Enabled Agent 2",
             "display_name": "Display Enabled Agent 2",
             "description": "Second enabled agent",
-            "enabled": True
+            "enabled": True,
+            "group_ids": "12,14"
         }
     ]
 
@@ -3739,11 +3868,13 @@ async def test_list_all_agent_info_impl_with_disabled_agents():
         assert result[0]["name"] == "Enabled Agent 1"
         assert result[0]["display_name"] == "Display Enabled Agent 1"
         assert result[0]["is_available"] == True
+        assert result[0]["group_ids"] == [12]
 
         assert result[1]["agent_id"] == 3
         assert result[1]["name"] == "Enabled Agent 2"
         assert result[1]["display_name"] == "Display Enabled Agent 2"
         assert result[1]["is_available"] == True
+        assert result[1]["group_ids"] == [12, 14]
 
         # Verify mock calls
         mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
@@ -3773,14 +3904,16 @@ async def test_list_all_agent_info_impl_all_disabled_agents():
             "name": "Disabled Agent 1",
             "display_name": "Display Disabled Agent 1",
             "description": "First disabled agent",
-            "enabled": False
+            "enabled": False,
+            "group_ids": "15"
         },
         {
             "agent_id": 2,
             "name": "Disabled Agent 2",
             "display_name": "Display Disabled Agent 2",
             "description": "Second disabled agent",
-            "enabled": False
+            "enabled": False,
+            "group_ids": "16,17"
         }
     ]
 
@@ -4325,7 +4458,7 @@ async def test_main_model_fallback_to_quick_config(
 ):
     """
     Test that when main model is not found, system falls back to quick config LLM model
-    
+
     Scenario:
     - Agent config specifies "Qwen/Qwen3-8B" as main model
     - Model not found in target tenant
@@ -4334,39 +4467,39 @@ async def test_main_model_fallback_to_quick_config(
     """
     # Setup: No tools to process
     mock_query_tools.return_value = []
-    
+
     # Setup: Model not found by display name, but quick config exists
     mock_get_model_id.side_effect = [
         None,  # Main model not found
         50  # Business logic model found
     ]
-    
+
     mock_tenant_config_manager.get_model_config.return_value = sample_quick_config_model
-    
+
     mock_create_agent.return_value = {
         "agent_id": 999,
         "name": sample_agent_info["name"]
     }
-    
+
     # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=mock_import_agent_info,
         tenant_id=mock_tenant_id,
         user_id=mock_user_id
     )
-    
+
     # Verify: Quick config model was requested
     from consts.const import MODEL_CONFIG_MAPPING
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=mock_tenant_id
     )
-    
+
     # Verify: Agent was created with quick config model_id
     mock_create_agent.assert_called_once()
     call_args = mock_create_agent.call_args
     agent_info = call_args.kwargs["agent_info"]
-    
+
     assert agent_info["model_id"] == sample_quick_config_model["model_id"]
     assert result == 999
 
@@ -4389,7 +4522,7 @@ async def test_business_logic_model_fallback_to_quick_config(
 ):
     """
     Test that when business logic model is not found, system falls back to quick config LLM model
-    
+
     Scenario:
     - Agent config specifies "Qwen/QwQ-32B" as business logic model
     - Business logic model not found in target tenant
@@ -4398,40 +4531,40 @@ async def test_business_logic_model_fallback_to_quick_config(
     """
     # Setup: No tools to process
     mock_query_tools.return_value = []
-    
+
     # Setup: Main model found, but business logic model not found
     main_model_id = 50
     mock_get_model_id.side_effect = [
         main_model_id,  # Main model found
         None  # Business logic model not found
     ]
-    
+
     mock_tenant_config_manager.get_model_config.return_value = sample_quick_config_model
-    
+
     mock_create_agent.return_value = {
         "agent_id": 888,
         "name": sample_agent_info["name"]
     }
-    
+
     # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=mock_import_agent_info,
         tenant_id=mock_tenant_id,
         user_id=mock_user_id
     )
-    
+
     # Verify: Quick config model was requested for business logic model
     from consts.const import MODEL_CONFIG_MAPPING
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=mock_tenant_id
     )
-    
+
     # Verify: Agent was created with correct model IDs
     mock_create_agent.assert_called_once()
     call_args = mock_create_agent.call_args
     agent_info = call_args.kwargs["agent_info"]
-    
+
     assert agent_info["model_id"] == main_model_id
     assert agent_info["business_logic_model_id"] == sample_quick_config_model["model_id"]
     assert result == 888
@@ -4455,7 +4588,7 @@ async def test_both_models_fallback_to_quick_config(
 ):
     """
     Test that both main and business logic models fallback to quick config when not found
-    
+
     Scenario:
     - Neither main model nor business logic model found in target tenant
     - Both should fallback to quick config LLM model
@@ -4463,35 +4596,35 @@ async def test_both_models_fallback_to_quick_config(
     """
     # Setup: No tools to process
     mock_query_tools.return_value = []
-    
+
     # Setup: Both models not found
     mock_get_model_id.side_effect = [
         None,  # Main model not found
         None  # Business logic model not found
     ]
-    
+
     mock_tenant_config_manager.get_model_config.return_value = sample_quick_config_model
-    
+
     mock_create_agent.return_value = {
         "agent_id": 777,
         "name": sample_agent_info["name"]
     }
-    
+
     # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=mock_import_agent_info,
         tenant_id=mock_tenant_id,
         user_id=mock_user_id
     )
-    
+
     # Verify: Quick config model was requested twice (once for each model)
     assert mock_tenant_config_manager.get_model_config.call_count == 2
-    
+
     # Verify: Agent was created with quick config model_id for both fields
     mock_create_agent.assert_called_once()
     call_args = mock_create_agent.call_args
     agent_info = call_args.kwargs["agent_info"]
-    
+
     assert agent_info["model_id"] == sample_quick_config_model["model_id"]
     assert agent_info["business_logic_model_id"] == sample_quick_config_model["model_id"]
     assert result == 777
@@ -4514,7 +4647,7 @@ async def test_no_quick_config_model_available(
 ):
     """
     Test behavior when model not found and no quick config model is available
-    
+
     Scenario:
     - Main model not found in target tenant
     - Quick config LLM model also not configured
@@ -4522,39 +4655,39 @@ async def test_no_quick_config_model_available(
     """
     # Setup: No tools to process
     mock_query_tools.return_value = []
-    
+
     # Setup: Model not found and no quick config
     mock_get_model_id.side_effect = [
         None,  # Main model not found
         50  # Business logic model found
     ]
-    
+
     mock_tenant_config_manager.get_model_config.return_value = None  # No quick config
-    
+
     mock_create_agent.return_value = {
         "agent_id": 666,
         "name": sample_agent_info["name"]
     }
-    
+
     # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=mock_import_agent_info,
         tenant_id=mock_tenant_id,
         user_id=mock_user_id
     )
-    
+
     # Verify: Quick config was attempted
     from consts.const import MODEL_CONFIG_MAPPING
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=mock_tenant_id
     )
-    
+
     # Verify: Agent was created with model_id = None
     mock_create_agent.assert_called_once()
     call_args = mock_create_agent.call_args
     agent_info = call_args.kwargs["agent_info"]
-    
+
     assert agent_info["model_id"] is None
     assert agent_info["business_logic_model_id"] == 50
     assert result == 666
@@ -4577,7 +4710,7 @@ async def test_model_found_no_fallback_needed(
 ):
     """
     Test that quick config fallback is NOT used when model is found
-    
+
     Scenario:
     - Both main model and business logic model found in target tenant
     - Quick config should NOT be called
@@ -4585,36 +4718,36 @@ async def test_model_found_no_fallback_needed(
     """
     # Setup: No tools to process
     mock_query_tools.return_value = []
-    
+
     # Setup: Both models found
     main_model_id = 30
     business_logic_model_id = 40
-    
+
     mock_get_model_id.side_effect = [
         main_model_id,  # Main model found
         business_logic_model_id  # Business logic model found
     ]
-    
+
     mock_create_agent.return_value = {
         "agent_id": 555,
         "name": sample_agent_info["name"]
     }
-    
+
     # Execute
     result = await import_agent_by_agent_id(
         import_agent_info=mock_import_agent_info,
         tenant_id=mock_tenant_id,
         user_id=mock_user_id
     )
-    
+
     # Verify: Quick config was NOT called
     mock_tenant_config_manager.get_model_config.assert_not_called()
-    
+
     # Verify: Agent was created with found model IDs
     mock_create_agent.assert_called_once()
     call_args = mock_create_agent.call_args
     agent_info = call_args.kwargs["agent_info"]
-    
+
     assert agent_info["model_id"] == main_model_id
     assert agent_info["business_logic_model_id"] == business_logic_model_id
     assert result == 555
@@ -4665,7 +4798,7 @@ async def test_import_agent_includes_model_names(
 
     # Create import data with model_name and business_logic_model_name
     from nexent.core.agents.agent_model import ToolConfig as NexentToolConfig
-    
+
     tool_config = NexentToolConfig(
         class_name="TestTool",
         name="Test Tool",
@@ -4895,7 +5028,7 @@ async def test_import_agent_model_not_found_in_target_tenant(
 
     # Simulate model not found in target tenant
     mock_get_model_id.return_value = None
-    
+
     # Mock the tenant config manager to return None (no quick config fallback)
     mock_tenant_config_manager.get_model_config.return_value = None
 
@@ -5390,7 +5523,7 @@ def test_regenerate_agent_value_with_llm_empty_user_prompt(monkeypatch):
     )
 
     builder_called = {"called": False}
-    
+
     def default_user_prompt_builder(ctx):
         builder_called["called"] = True
         # Verify context is passed correctly
@@ -5779,7 +5912,7 @@ async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
         raising=False,
     )
 
-    
+
 
     request = AgentNameBatchRegenerateRequest(
         items=[
@@ -5910,10 +6043,10 @@ class TestResolveModelWithFallback:
         """Test successful model resolution when model exists in tenant."""
         # Arrange
         mock_get_model_id.return_value = "resolved_model_123"
-        
+
         # Import the function
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name="GPT-4",
@@ -5921,7 +6054,7 @@ class TestResolveModelWithFallback:
             model_label="Model",
             tenant_id="tenant_001"
         )
-        
+
         # Assert
         assert result == "resolved_model_123"
         mock_get_model_id.assert_called_once_with("GPT-4", "tenant_001")
@@ -5942,9 +6075,9 @@ class TestResolveModelWithFallback:
             "model_id": "quick_config_model_789",
             "display_name": "Default LLM Model"
         }
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name="NonExistentModel",
@@ -5952,7 +6085,7 @@ class TestResolveModelWithFallback:
             model_label="Model",
             tenant_id="tenant_002"
         )
-        
+
         # Assert
         assert result == "quick_config_model_789"
         mock_get_model_id.assert_called_once_with("NonExistentModel", "tenant_002")
@@ -5970,9 +6103,9 @@ class TestResolveModelWithFallback:
         # Arrange
         mock_get_model_id.return_value = None
         mock_get_model_config.return_value = None  # No quick config model
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name="NonExistentModel",
@@ -5980,7 +6113,7 @@ class TestResolveModelWithFallback:
             model_label="Model",
             tenant_id="tenant_003"
         )
-        
+
         # Assert
         assert result is None
         mock_get_model_id.assert_called_once_with("NonExistentModel", "tenant_003")
@@ -5997,7 +6130,7 @@ class TestResolveModelWithFallback:
         """Test when model_name is None."""
         # Arrange
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name=None,
@@ -6005,7 +6138,7 @@ class TestResolveModelWithFallback:
             model_label="Model",
             tenant_id="tenant_004"
         )
-        
+
         # Assert
         assert result is None
         mock_get_model_id.assert_not_called()
@@ -6022,7 +6155,7 @@ class TestResolveModelWithFallback:
         """Test when model_name is an empty string."""
         # Arrange
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name="",
@@ -6030,7 +6163,7 @@ class TestResolveModelWithFallback:
             model_label="Model",
             tenant_id="tenant_005"
         )
-        
+
         # Assert
         assert result is None
         mock_get_model_id.assert_not_called()
@@ -6047,9 +6180,9 @@ class TestResolveModelWithFallback:
         """Test successful resolution of business logic model."""
         # Arrange
         mock_get_model_id.return_value = "business_model_555"
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name="Qwen/QwQ-32B",
@@ -6057,7 +6190,7 @@ class TestResolveModelWithFallback:
             model_label="Business logic model",
             tenant_id="tenant_006"
         )
-        
+
         # Assert
         assert result == "business_model_555"
         mock_get_model_id.assert_called_once_with("Qwen/QwQ-32B", "tenant_006")
@@ -6078,9 +6211,9 @@ class TestResolveModelWithFallback:
             "display_name": "Default Model",
             # No model_id field
         }
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act
         result = _resolve_model_with_fallback(
             model_display_name="SomeModel",
@@ -6088,7 +6221,7 @@ class TestResolveModelWithFallback:
             model_label="Model",
             tenant_id="tenant_007"
         )
-        
+
         # Assert
         assert result is None  # Should return None when model_id is missing
         mock_get_model_id.assert_called_once_with("SomeModel", "tenant_007")
@@ -6105,9 +6238,9 @@ class TestResolveModelWithFallback:
         """Test that different model_labels are handled correctly."""
         # Arrange
         mock_get_model_id.return_value = "model_111"
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act & Assert - Test with "Model" label
         result1 = _resolve_model_with_fallback(
             model_display_name="TestModel",
@@ -6116,11 +6249,11 @@ class TestResolveModelWithFallback:
             tenant_id="tenant_008"
         )
         assert result1 == "model_111"
-        
+
         # Reset mock
         mock_get_model_id.reset_mock()
         mock_get_model_id.return_value = "model_222"
-        
+
         # Act & Assert - Test with "Business logic model" label
         result2 = _resolve_model_with_fallback(
             model_display_name="TestModel2",
@@ -6141,9 +6274,9 @@ class TestResolveModelWithFallback:
         """Test that exceptions from database calls are propagated."""
         # Arrange
         mock_get_model_id.side_effect = Exception("Database connection error")
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act & Assert
         with pytest.raises(Exception, match="Database connection error"):
             _resolve_model_with_fallback(
@@ -6152,7 +6285,7 @@ class TestResolveModelWithFallback:
                 model_label="Model",
                 tenant_id="tenant_010"
             )
-        
+
         mock_get_model_config.assert_not_called()
 
     @pytest.mark.asyncio
@@ -6167,9 +6300,9 @@ class TestResolveModelWithFallback:
         # Arrange
         mock_get_model_id.return_value = None
         mock_get_model_config.side_effect = Exception("Config service error")
-        
+
         from backend.services.agent_service import _resolve_model_with_fallback
-        
+
         # Act & Assert
         with pytest.raises(Exception, match="Config service error"):
             _resolve_model_with_fallback(
@@ -6254,18 +6387,18 @@ def test_check_agent_availability_all_available(
 ):
     """Test check_agent_availability when all tools and models are available."""
     from backend.services.agent_service import check_agent_availability
-    
+
     mock_agent_info = {"agent_id": 123, "model_id": 456}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}, {"tool_id": 2}]
     mock_check_tool.return_value = [True, True]
     mock_collect_model_reasons.return_value = []
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant"
     )
-    
+
     assert is_available is True
     assert reasons == []
     mock_search_agent_info.assert_called_once_with(123, "test_tenant")
@@ -6285,18 +6418,18 @@ def test_check_agent_availability_tool_unavailable(
 ):
     """Test check_agent_availability when some tools are unavailable."""
     from backend.services.agent_service import check_agent_availability
-    
+
     mock_agent_info = {"agent_id": 123, "model_id": 456}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}, {"tool_id": 2}]
     mock_check_tool.return_value = [True, False]  # One tool unavailable
     mock_collect_model_reasons.return_value = []
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant"
     )
-    
+
     assert is_available is False
     assert reasons == ["tool_unavailable"]
 
@@ -6313,18 +6446,18 @@ def test_check_agent_availability_model_unavailable(
 ):
     """Test check_agent_availability when model is unavailable."""
     from backend.services.agent_service import check_agent_availability
-    
+
     mock_agent_info = {"agent_id": 123, "model_id": 456}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
     mock_collect_model_reasons.return_value = ["model_unavailable"]
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant"
     )
-    
+
     assert is_available is False
     assert reasons == ["model_unavailable"]
 
@@ -6341,18 +6474,18 @@ def test_check_agent_availability_both_unavailable(
 ):
     """Test check_agent_availability when both tools and model are unavailable."""
     from backend.services.agent_service import check_agent_availability
-    
+
     mock_agent_info = {"agent_id": 123, "model_id": 456}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [False]
     mock_collect_model_reasons.return_value = ["model_unavailable"]
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant"
     )
-    
+
     assert is_available is False
     assert "tool_unavailable" in reasons
     assert "model_unavailable" in reasons
@@ -6368,17 +6501,17 @@ def test_check_agent_availability_no_tools(
 ):
     """Test check_agent_availability when agent has no tools."""
     from backend.services.agent_service import check_agent_availability
-    
+
     mock_agent_info = {"agent_id": 123, "model_id": 456}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = []  # No tools
     mock_collect_model_reasons.return_value = []
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant"
     )
-    
+
     assert is_available is True
     assert reasons == []
 
@@ -6387,14 +6520,14 @@ def test_check_agent_availability_no_tools(
 def test_check_agent_availability_agent_not_found(mock_search_agent_info):
     """Test check_agent_availability when agent is not found."""
     from backend.services.agent_service import check_agent_availability
-    
+
     mock_search_agent_info.return_value = None
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=999,
         tenant_id="test_tenant"
     )
-    
+
     assert is_available is False
     assert reasons == ["agent_not_found"]
 
@@ -6409,18 +6542,18 @@ def test_check_agent_availability_with_pre_fetched_agent_info(
 ):
     """Test check_agent_availability with pre-fetched agent_info (avoids duplicate DB query)."""
     from backend.services.agent_service import check_agent_availability
-    
+
     pre_fetched_agent_info = {"agent_id": 123, "model_id": 456}
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
     mock_collect_model_reasons.return_value = []
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant",
         agent_info=pre_fetched_agent_info
     )
-    
+
     assert is_available is True
     assert reasons == []
     # search_agent_info_by_agent_id should NOT be called since agent_info was provided
@@ -6437,20 +6570,20 @@ def test_check_agent_availability_with_model_cache(
 ):
     """Test check_agent_availability with pre-populated model cache."""
     from backend.services.agent_service import check_agent_availability
-    
+
     pre_fetched_agent_info = {"agent_id": 123, "model_id": 456}
     model_cache = {456: {"connect_status": "available"}}
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
     mock_collect_model_reasons.return_value = []
-    
+
     is_available, reasons = check_agent_availability(
         agent_id=123,
         tenant_id="test_tenant",
         agent_info=pre_fetched_agent_info,
         model_cache=model_cache
     )
-    
+
     assert is_available is True
     assert reasons == []
     # Verify model_cache was passed to _collect_model_availability_reasons
@@ -6484,9 +6617,9 @@ async def test_get_agent_info_impl_with_unavailable_agent(
     mock_get_model_by_model_id.return_value = {"display_name": "GPT-4"}
     # Agent is unavailable due to tool issues
     mock_check_availability.return_value = (False, ["tool_unavailable"])
-    
+
     result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
-    
+
     assert result["is_available"] is False
     assert result["unavailable_reasons"] == ["tool_unavailable"]
 

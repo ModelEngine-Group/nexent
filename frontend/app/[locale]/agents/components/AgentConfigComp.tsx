@@ -24,7 +24,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
 
-  const editable = !!(currentAgentId || isCreatingMode);
+  const editable = currentAgentId || isCreatingMode;
 
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -50,7 +50,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
       setIsRefreshing(false);
     }
   }, [invalidate]);
-
 
   return (
     <>
@@ -144,7 +143,7 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
             <ToolManagement
               toolGroups={groupedTools}
               isCreatingMode={isCreatingMode}
-              currentAgentId={currentAgentId?? undefined}
+              currentAgentId={currentAgentId ?? undefined}
             />
           </Col>
         </Row>

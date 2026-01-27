@@ -6,7 +6,7 @@
 
 - [文件工具](./file-tools)：创建/读取/移动/删除文件与目录，树形列目录。
 - [邮件工具](./email-tools)：收取 IMAP 邮件，发送 HTML 邮件（支持抄送/密送）。
-- [搜索工具](./search-tools)：本地/ DataMate 知识库检索与 Exa/Tavily/Linkup 公网搜索。
+- [搜索工具](./search-tools)：本地/DataMate/Dify 知识库检索与 Exa/Tavily/Linkup 公网搜索。
 - [多模态工具](./multimodal-tools)：文本文件与图片的下载、解析、模型分析。
 - [终端工具](./terminal-tool)：持久化 SSH 会话，远程执行命令。
 

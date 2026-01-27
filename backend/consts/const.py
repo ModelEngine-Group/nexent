@@ -14,11 +14,7 @@ TEST_VOICE_PATH = os.path.join(os.path.dirname(
 # Vector database providers
 class VectorDatabaseType(str, Enum):
     ELASTICSEARCH = "elasticsearch"
-
-
-# ModelEngine Configuration
-MODEL_ENGINE_HOST = os.getenv('MODEL_ENGINE_HOST')
-MODEL_ENGINE_APIKEY = os.getenv('MODEL_ENGINE_APIKEY')
+    DATAMATE = "datamate"
 
 
 # Elasticsearch Configuration
@@ -27,7 +23,6 @@ ES_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
 ES_PASSWORD = os.getenv("ELASTIC_PASSWORD")
 ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
-
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
@@ -129,8 +124,10 @@ DISABLE_RAY_DASHBOARD = os.getenv(
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
-NEXENT_MCP_DOCKER_IMAGE = os.getenv("NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
-ENABLE_UPLOAD_IMAGE = os.getenv("ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
+NEXENT_MCP_DOCKER_IMAGE = os.getenv(
+    "NEXENT_MCP_DOCKER_IMAGE", "nexent/nexent-mcp:latest")
+ENABLE_UPLOAD_IMAGE = os.getenv(
+    "ENABLE_UPLOAD_IMAGE", "false").lower() == "true"
 
 
 # Celery Configuration
@@ -185,6 +182,9 @@ INVITE_CODE = os.getenv("INVITE_CODE")
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
+
+# User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
+USER_INFO_QUERY_SOURCE = os.getenv('USER_INFO_QUERY_SOURCE', 'supabase').lower()
 
 # Memory Search Status Messages (for i18n placeholders)
 MEMORY_SEARCH_START_MSG = "<MEM_START>"
@@ -250,6 +250,10 @@ APP_DESCRIPTION = "APP_DESCRIPTION"
 ICON_TYPE = "ICON_TYPE"
 AVATAR_URI = "AVATAR_URI"
 CUSTOM_ICON_URL = "CUSTOM_ICON_URL"
+TENANT_NAME = "TENANT_NAME"
+TENANT_ID = "TENANT_ID"
+DEFAULT_GROUP_ID = "DEFAULT_GROUP_ID"
+DATAMATE_URL = "DATAMATE_URL"
 
 # Task Status Constants
 TASK_STATUS = {
@@ -286,5 +290,8 @@ DEFAULT_ZH_TITLE = "新对话"
 DEFAULT_EN_TITLE = "New Conversation"
 
 
+# Model Engine Configuration
+MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
+
 # APP Version
-APP_VERSION = "v1.7.9.1"
+APP_VERSION = "v1.7.9.3"

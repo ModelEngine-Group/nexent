@@ -49,23 +49,50 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
             return groups
 
 
-def query_groups_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
+def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
+                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
-    Query all groups for a tenant
+    Query groups for a tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
+        page (int): Page number (1-based)
+        page_size (int): Number of items per page
+        sort_by (str): Field to sort by
+        sort_order (str): Sort order (asc or desc)
 
     Returns:
-        List[Dict[str, Any]]: List of group records
+        Dict[str, Any]: Dictionary containing groups list and total count
     """
+    offset = (page - 1) * page_size
+
     with get_db_session() as session:
-        result = session.query(TenantGroupInfo).filter(
+        # Get total count
+        total = session.query(TenantGroupInfo).filter(
             TenantGroupInfo.tenant_id == tenant_id,
             TenantGroupInfo.delete_flag == "N"
-        ).all()
+        ).count()
 
-        return [as_dict(record) for record in result]
+        # Build base query
+        query = session.query(TenantGroupInfo).filter(
+            TenantGroupInfo.tenant_id == tenant_id,
+            TenantGroupInfo.delete_flag == "N"
+        )
+
+        # Add sorting
+        if sort_by == "created_at":
+            if sort_order == "desc":
+                query = query.order_by(TenantGroupInfo.create_time.desc())
+            else:
+                query = query.order_by(TenantGroupInfo.create_time.asc())
+
+        # Get paginated results
+        result = query.offset(offset).limit(page_size).all()
+
+        return {
+            "groups": [as_dict(record) for record in result],
+            "total": total
+        }
 
 
 def add_group(tenant_id: str, group_name: str, group_description: Optional[str] = None,
@@ -291,5 +318,29 @@ def count_group_users(group_id: int) -> int:
             TenantGroupUser.group_id == group_id,
             TenantGroupUser.delete_flag == "N"
         ).count()
+
+        return result
+
+
+def remove_user_from_all_groups(user_id: str, removed_by: str) -> int:
+    """
+    Remove user from all groups (soft delete)
+
+    Args:
+        user_id (str): User ID to remove
+        removed_by (str): User who performed the removal
+
+    Returns:
+        int: Number of group memberships removed
+    """
+    with get_db_session() as session:
+        result = session.query(TenantGroupUser).filter(
+            TenantGroupUser.user_id == user_id,
+            TenantGroupUser.delete_flag == "N"
+        ).update({
+            "delete_flag": "Y",
+            "updated_by": removed_by,
+            "update_time": "NOW()"  # This will be handled by the database trigger
+        })
 
         return result
