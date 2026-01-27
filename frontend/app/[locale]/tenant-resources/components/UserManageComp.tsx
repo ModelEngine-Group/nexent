@@ -30,7 +30,7 @@ import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { USER_ROLES } from "@/const/modelConfig";
 
 // Removed mockTenants - now using real data from API
 
@@ -214,10 +214,10 @@ export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { isSpeedMode } = useDeployment();
-  const { user } = useAuthorization()
+  const { user } = useAuth()
 
   // Check if user is super admin (speed mode or admin role)
-  const isSuperAdmin = isSpeedMode || user?.role === "ADMIN";
+  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   // Get real tenant data from API
   const {
