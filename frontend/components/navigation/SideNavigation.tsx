@@ -10,13 +10,14 @@ import {
   Zap,
   Settings,
   BookOpen,
-  Users,
+  User,
   Database,
   ShoppingBag,
   Code,
   Home,
   Puzzle,
   Activity,
+  Building2,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuth } from "@/hooks/useAuth";
@@ -146,11 +147,11 @@ export function SideNavigation({
       false,
       true
     ),
-    createMenuItem("9", "/users", Users, "sidebar.userManagement", false, true),
+    createMenuItem("9", "/users", User, "sidebar.userManagement", false, true),
     createMenuItem(
       "12",
       "/tenant-resources",
-      Database,
+      Building2,
       "sidebar.tenantResources",
       false,
       true

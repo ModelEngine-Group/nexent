@@ -16,7 +16,7 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Users, Plus, Edit, Trash2 } from "lucide-react";
+import { Users, Plus, Edit, Trash2, Building2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
@@ -253,7 +253,7 @@ export default function UserManageComp() {
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
-                <Users className="h-6 w-6 text-white" />
+                <Building2 className="h-6 w-6 text-white" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
