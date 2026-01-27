@@ -89,7 +89,6 @@ export interface AuthEvents {
   [AUTH_EVENTS.REGISTER_SUCCESS]: void;
   [AUTH_EVENTS.LOGOUT]: void;
   [AUTH_EVENTS.SESSION_EXPIRED]: void;
-  [AUTH_EVENTS.PERMISSION_DENIED]: { pathname: string } | void;
   [AUTH_EVENTS.TOKEN_REFRESHED]: void;
   [AUTH_EVENTS.SERVICE_UNAVAILABLE]: void;
   [AUTH_EVENTS.BACK_TO_HOME]: void;
@@ -97,6 +96,7 @@ export interface AuthEvents {
 
 // Authorization Events
 export interface AuthzEvents {
+  [AUTHZ_EVENTS.PERMISSION_DENIED]: { pathname: string } | void;
   [AUTHZ_EVENTS.PERMISSIONS_READY]: User & {
     permissions: string[];
     accessibleRoutes: string[];
