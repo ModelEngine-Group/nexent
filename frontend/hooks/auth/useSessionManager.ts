@@ -1,19 +1,16 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useRef } from "react";
 
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { sessionService } from "@/services/sessionService";
 import {
   getSessionFromStorage,
   saveSessionToStorage,
-  removeSessionFromStorage,
-  checkSessionValid as checkSessionValidFn,
-  checkSessionExpired as checkSessionExpiredFn,
+  checkSessionValid,
+  checkSessionExpired,
   handleSessionExpired,
 } from "@/lib/session";
-import { authEventUtils } from "@/lib/authEvents";
 import {
   TOKEN_REFRESH_BEFORE_EXPIRY_MS,
   MIN_ACTIVITY_CHECK_INTERVAL_MS,
@@ -21,14 +18,6 @@ import {
 import log from "@/lib/logger";
 
 import type { Session } from "@/types/auth";
-
-// ============================================================================
-// Utility functions - Session status checking
-// ============================================================================
-
-// Re-export from lib/session for convenience
-export const checkSessionValid = checkSessionValidFn;
-export const checkSessionExpired = checkSessionExpiredFn;
 
 /**
  * Check if token is expiring soon (within threshold)
@@ -44,36 +33,12 @@ export const isSessionExpiringSoon = (): boolean => {
   return msUntilExpiry > 0 && msUntilExpiry <= TOKEN_REFRESH_BEFORE_EXPIRY_MS;
 };
 
-// ============================================================================
-// Session operations
-// ============================================================================
-
-/**
- * Save session to localStorage
- */
-export const saveSession = (session: Session): void => {
-  saveSessionToStorage(session);
-  log.info("Session saved to localStorage");
-};
-
-/**
- * Clear session and emit expired event
- * Unified handling for session expiration
- */
-export const clearSession = (): void => {
-  handleSessionExpired();
-};
-
-// ============================================================================
-// Business logic functions
-// ============================================================================
-
 /**
  * Refresh session if needed (token expiring soon)
  * Uses refresh_token to get new access_token
  * @returns Whether refresh was successful
  */
-export const refreshSessionIfNeeded = async (): Promise<boolean> => {
+export const refreshSession = async (): Promise<boolean> => {
   const session = getSessionFromStorage();
   if (!session?.refresh_token) {
     return false;
@@ -81,7 +46,7 @@ export const refreshSessionIfNeeded = async (): Promise<boolean> => {
 
   const newSession = await sessionService.refreshToken(session.refresh_token);
   if (newSession) {
-    saveSession(newSession);
+    saveSessionToStorage(newSession);
     log.info("Session refreshed successfully");
     return true;
   }
@@ -90,26 +55,23 @@ export const refreshSessionIfNeeded = async (): Promise<boolean> => {
   return false;
 };
 
-/**
- * Unified handler for session expiration
- * Called when session is confirmed expired
- */
-export const sessionExpiredHandler = (): void => {
-  log.info("Handling session expiration");
-  handleSessionExpired();
-};
-
   // ============================================================================
   // Hook implementation
   // ============================================================================
 
 export function useSessionManager() {
   const { isSpeedMode } = useDeployment();
+  const reconcileExpiryRef = useRef<() => void>(() => {});
 
   // Initialize session management when hook is used
   useEffect(() => {
     // In speed mode, skip session validation
     if (isSpeedMode) return;
+
+    const session = getSessionFromStorage();
+    if (!session) {
+      return;
+    }
 
     if (checkSessionValid()) {
       // Session is valid, no action needed
@@ -118,6 +80,85 @@ export function useSessionManager() {
 
     // Session is expired or invalid
     handleSessionExpired();
+  }, [isSpeedMode]);
+
+  /**
+   * Proactive session expiry watcher
+   * Triggers session-expired even if user does not make any API request
+   */
+  useEffect(() => {
+    if (isSpeedMode) return;
+
+    let timeoutId: number | null = null;
+    let intervalId: number | null = null;
+
+    const clearTimers = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const scheduleExpiryCheck = () => {
+      clearTimers();
+
+      const session = getSessionFromStorage();
+      if (!session?.expires_at) {
+        return;
+      }
+
+      const now = Date.now();
+      const delayMs = session.expires_at * 1000 - now;
+
+      if (delayMs <= 0) {
+        handleSessionExpired();
+        return;
+      }
+
+      // Schedule an accurate one-shot check at expiry time
+      timeoutId = window.setTimeout(() => {
+        if (!checkSessionValid()) {
+          handleSessionExpired();
+        }
+      }, delayMs);
+
+      // Also reschedule periodically to account for token refresh extending expires_at
+      intervalId = window.setInterval(() => {
+        const s = getSessionFromStorage();
+        if (!s) {
+          clearTimers();
+          return;
+        }
+        if (!checkSessionValid()) {
+          handleSessionExpired();
+          return;
+        }
+        if (s.expires_at !== session.expires_at) {
+          scheduleExpiryCheck();
+        }
+      }, 30_000);
+    };
+
+    const reconcileExpiry = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (!checkSessionValid() && getSessionFromStorage()) {
+        handleSessionExpired();
+        return;
+      }
+      scheduleExpiryCheck();
+    };
+
+    reconcileExpiryRef.current = reconcileExpiry;
+    scheduleExpiryCheck();
+
+    return () => {
+      reconcileExpiryRef.current = () => {};
+      clearTimers();
+    };
   }, [isSpeedMode]);
 
   /**
@@ -132,6 +173,9 @@ export function useSessionManager() {
 
     const maybeRefreshOnActivity = async () => {
       try {
+        // Keep expiry timer in sync when the page becomes active again
+        reconcileExpiryRef.current();
+
         // Throttle activity-driven checks
         const now = Date.now();
         if (now - lastActivityCheckAt < MIN_ACTIVITY_CHECK_INTERVAL_MS) return;
@@ -142,7 +186,7 @@ export function useSessionManager() {
 
         // Check if token is expiring soon
         if (isSessionExpiringSoon()) {
-          const success = await refreshSessionIfNeeded();
+          const success = await refreshSession();
 
           // If refresh failed, it means refresh_token is also invalid
           // The session will be cleared when backend returns 401 or when fetchWithAuth checks
@@ -196,19 +240,10 @@ export function useSessionManager() {
   }, [setupTokenAutoRefresh]);
 
   return {
-    // Utility functions
-    checkSessionValid,
-    checkSessionExpired,
     isSessionExpiringSoon,
 
-    // Session operations
-    saveSession,
-    clearSession,
-    handleSessionExpired,
-
     // Business logic
-    refreshSessionIfNeeded,
-    sessionExpiredHandler,
+    refreshSession,
 
     // Legacy functions
     setupTokenAutoRefresh,

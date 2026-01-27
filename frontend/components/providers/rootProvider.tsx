@@ -17,8 +17,11 @@ import { LoginModal } from "@/components/auth/loginModal";
 import { RegisterModal } from "@/components/auth/registerModal";
 import { FullScreenLoading } from "@/components/ui/loading";
 import { useDeployment } from "./deploymentProvider";
+import { useSessionManager } from "@/hooks/auth/useSessionManager";
 
 function AppReadyWrapper({ children }: { children?: ReactNode }) {
+  useSessionManager();
+
   const { isDeploymentReady, isSpeedMode } = useDeployment();
   const auth = useAuthenticationContext();
   const authz = useAuthorizationContext();

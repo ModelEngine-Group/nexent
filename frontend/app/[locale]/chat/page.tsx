@@ -13,9 +13,6 @@ import { ChatInterface } from "./internal/chatInterface";
  */
 export default function ChatContent() {
   const { appConfig } = useConfig();
-  const { user, isLoading: userLoading } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
-  const sessionExpiredTriggeredRef = useRef(false);
 
   useEffect(() => {
     // Load config from backend when entering chat page
@@ -25,24 +22,6 @@ export default function ChatContent() {
       document.title = `${appConfig.appName}`;
     }
   }, [appConfig.appName]);
-
-  // Require login on chat page when unauthenticated (skip in speed mode)
-  // Note: SESSION_EXPIRED event is triggered by useSessionManager.ts on initialization
-  useEffect(() => {
-    if (isSpeedMode) {
-      sessionExpiredTriggeredRef.current = false;
-      return;
-    }
-
-    if (user) {
-      sessionExpiredTriggeredRef.current = false;
-      return;
-    }
-
-    // Session expiration is handled by useSessionManager.ts
-    // Don't trigger SESSION_EXPIRED here to avoid duplicate handling
-  }, [isSpeedMode, user, userLoading]);
-
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
