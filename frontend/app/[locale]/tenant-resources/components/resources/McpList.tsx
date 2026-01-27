@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
   Button,
   Input,
+  InputNumber,
   Table,
   Space,
   Typography,
@@ -23,8 +23,6 @@ import {
   Eye,
   Plus,
   LoaderCircle,
-  Maximize,
-  Minimize,
   RefreshCw,
   FileText,
   Container,
@@ -37,59 +35,55 @@ import {
 } from "lucide-react";
 import { UploadFile } from "antd/es/upload/interface";
 
-import {
-  getMcpServerList,
-  addMcpServer,
-  updateMcpServer,
-  deleteMcpServer,
-  getMcpTools,
-  updateToolList,
-  checkMcpServerHealth,
-  addMcpFromConfig,
-  uploadMcpImage,
-  getMcpContainers,
-  getMcpContainerLogs,
-  deleteMcpContainer,
-} from "@/services/mcpService";
-import { McpServer, McpTool, McpContainer, AgentRefreshEvent } from "@/types/agentConfig";
-import log from "@/lib/logger";
+import { McpServer, McpTool, McpContainer } from "@/types/agentConfig";
+import { useMcpConfig } from "@/hooks/useMcpConfig";
+import McpToolListModal from "@/components/mcp/McpToolListModal";
+import McpEditServerModal from "@/components/mcp/McpEditServerModal";
+import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 
 const { Text, Title } = Typography;
 
 export default function McpList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const queryClient = useQueryClient();
 
-  // List data
-  const [serverList, setServerList] = useState<McpServer[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [containerList, setContainerList] = useState<McpContainer[]>([]);
-  
+  // Use shared hook for MCP config logic
+  const {
+    serverList,
+    loading,
+    containerList,
+    enableUploadImage,
+    updatingTools,
+    healthCheckLoading,
+    loadServerList,
+    loadContainerList,
+    handleAddServer,
+    handleDeleteServer,
+    handleViewTools,
+    handleCheckHealth,
+    handleUpdateServer,
+    handleAddContainer,
+    handleUploadImage,
+    handleDeleteContainer,
+    handleViewLogs,
+  } = useMcpConfig();
+
   // Add Modal State
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
-  const [enableUploadImage, setEnableUploadImage] = useState(false);
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
-  
+
   // Tools Modal State
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<McpTool[]>([]);
   const [currentServerName, setCurrentServerName] = useState("");
   const [loadingTools, setLoadingTools] = useState(false);
-  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
 
   // Edit Server State
   const [editServerModalVisible, setEditServerModalVisible] = useState(false);
   const [editingServer, setEditingServer] = useState<McpServer | null>(null);
-  const [editServiceName, setEditServiceName] = useState("");
-  const [editMcpUrl, setEditMcpUrl] = useState("");
   const [updatingServer, setUpdatingServer] = useState(false);
-
-  // Common State
-  const [updatingTools, setUpdatingTools] = useState(false);
-  const [healthCheckLoading, setHealthCheckLoading] = useState<{ [key: string]: boolean }>({});
 
   // Container Add/Logs State
   const [addingContainer, setAddingContainer] = useState(false);
@@ -99,7 +93,6 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [currentContainerLogs, setCurrentContainerLogs] = useState("");
   const [currentContainerId, setCurrentContainerId] = useState("");
   const [loadingLogs, setLoadingLogs] = useState(false);
-  const delayedContainerRefreshRef = useRef<number | undefined>(undefined);
 
   // Upload State
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -109,68 +102,14 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
 
-  // Helper function to refresh tools and agents
-  const refreshToolsAndAgents = async () => {
-    setUpdatingTools(true);
-    try {
-      const updateResult = await updateToolList();
-      if (updateResult.success) {
-        window.dispatchEvent(new CustomEvent("toolsUpdated"));
-      }
-      window.dispatchEvent(new CustomEvent("refreshAgentList") as AgentRefreshEvent);
-    } catch (error) {
-      log.error("Failed to refresh tools and agents:", error);
-    } finally {
-      setUpdatingTools(false);
-    }
-  };
-
-  // Load MCP server list
-  const loadServerList = async () => {
-    setLoading(true);
-    try {
-      // Note: tenantId is not currently used by the API, but passed for future compatibility
-      const result = await getMcpServerList();
-      if (result.success) {
-        setServerList(result.data);
-        setEnableUploadImage(result.enable_upload_image || false);
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.loadServerListFailed"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load container list
-  const loadContainerList = async () => {
-    try {
-      const result = await getMcpContainers();
-      if (result.success) {
-        setContainerList(result.data);
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.loadContainerFailed"));
-    }
-  };
-
   // Initial load
   useEffect(() => {
     loadServerList();
     loadContainerList();
-    return () => {
-      if (delayedContainerRefreshRef.current) {
-        window.clearTimeout(delayedContainerRefreshRef.current);
-      }
-    };
-  }, [tenantId]);
+  }, [tenantId, loadServerList, loadContainerList]);
 
   // Handlers (Add Server)
-  const handleAddServer = async () => {
+  const onAddServer = async () => {
     if (!newServerName.trim() || !newServerUrl.trim()) {
       message.error(t("mcpConfig.message.completeServerInfo"));
       return;
@@ -190,106 +129,92 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     }
 
     setAddingServer(true);
-    try {
-      const result = await addMcpServer(newServerUrl.trim(), serverName);
-      if (result.success) {
-        setNewServerName("");
-        setNewServerUrl("");
-        await loadServerList();
-        await refreshToolsAndAgents();
-        queryClient.invalidateQueries({ queryKey: ["tools"] });
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-        message.success(t("mcpService.message.addServerSuccess"));
-        setAddModalVisible(false);
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.addServerFailed"));
-    } finally {
-      setAddingServer(false);
+    const result = await handleAddServer(newServerUrl.trim(), serverName);
+    if (result.success) {
+      setNewServerName("");
+      setNewServerUrl("");
+      setAddModalVisible(false);
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
+    } else {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addServerFailed")));
     }
+    setAddingServer(false);
   };
 
   // Handlers (Delete Server)
-  const handleDeleteServer = async (server: McpServer) => {
-    try {
-      const result = await deleteMcpServer(server.mcp_url, server.service_name);
-      if (result.success) {
-        await loadServerList();
-        message.success(t("mcpService.message.deleteServerSuccess"));
-        refreshToolsAndAgents().catch(e => log.error("Refresh failed:", e));
-        queryClient.invalidateQueries({ queryKey: ["tools"] });
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.deleteServerFailed"));
+  const onDeleteServer = async (server: McpServer) => {
+    const result = await handleDeleteServer(server);
+    if (!result.success) {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.deleteServerFailed")));
+    } else {
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.deleteServerSuccess"));
     }
   };
 
   // Handlers (View Tools)
-  const handleViewTools = async (server: McpServer) => {
+  const onViewTools = async (server: McpServer) => {
     setCurrentServerName(server.service_name);
     setLoadingTools(true);
     setToolsModalVisible(true);
-    setExpandedDescriptions(new Set());
-    try {
-      const result = await getMcpTools(server.service_name, server.mcp_url);
-      if (result.success) {
-        setCurrentServerTools(result.data);
-      } else {
-        message.error(result.message);
-        setCurrentServerTools([]);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.getToolsFailed"));
+
+    const result = await handleViewTools(server);
+    if (result.success) {
+      setCurrentServerTools(result.data);
+    } else {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getToolsFailed")));
       setCurrentServerTools([]);
-    } finally {
-      setLoadingTools(false);
     }
+    setLoadingTools(false);
   };
 
   // Handlers (Health Check)
-  const handleCheckHealth = async (server: McpServer) => {
-    const key = `${server.service_name}__${server.mcp_url}`;
-    message.info(t("mcpConfig.message.healthChecking", { name: server.service_name }));
-    setHealthCheckLoading(prev => ({ ...prev, [key]: true }));
+  const onCheckHealth = async (server: McpServer) => {
+    const key = "healthCheck";
+    message.info({
+      content: t("mcpConfig.message.healthChecking", {
+        name: server.service_name,
+      }),
+      key,
+    });
+
     try {
-      const result = await checkMcpServerHealth(server.mcp_url, server.service_name);
-      const isSuccess = result.success;
-      if (isSuccess) message.success(t("mcpConfig.message.healthCheckSuccess"));
-      else message.error(result.message || t("mcpConfig.message.healthCheckFailed"));
-      
-      await loadServerList();
-      await refreshToolsAndAgents();
-      queryClient.invalidateQueries({ queryKey: ["tools"] });
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      const result = await handleCheckHealth(server);
+      if (result.success) {
+        message.success({
+          content: result.messageKey
+            ? t(result.messageKey)
+            : t("mcpConfig.message.healthCheckSuccess"),
+          key,
+        });
+      } else {
+        message.error({
+          content: result.messageKey
+            ? t(result.messageKey)
+            : result.message || t("mcpConfig.message.healthCheckFailed"),
+          key,
+        });
+      }
     } catch (error) {
-      message.error(t("mcpConfig.message.healthCheckFailed"));
-      await loadServerList();
-      await refreshToolsAndAgents();
-    } finally {
-      setHealthCheckLoading(prev => ({ ...prev, [key]: false }));
+      message.error({
+        content: t("mcpConfig.message.healthCheckFailed"),
+        key,
+      });
     }
   };
 
   // Handlers (Edit Server)
-  const handleEditServer = (server: McpServer) => {
+  const onEditServer = (server: McpServer) => {
     setEditingServer(server);
-    setEditServiceName(server.service_name);
-    setEditMcpUrl(server.mcp_url);
     setEditServerModalVisible(true);
   };
 
-  const handleSaveEditedServer = async () => {
+  const onSaveEditedServer = async (name: string, url: string) => {
     if (!editingServer) return;
-    if (!editServiceName.trim() || !editMcpUrl.trim()) {
+    if (!name.trim() || !url.trim()) {
       message.error(t("mcpConfig.message.nameAndUrlRequired"));
       return;
     }
-    const serverName = editServiceName.trim();
+    const serverName = name.trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(serverName)) {
       message.error(t("mcpConfig.message.invalidServerName"));
       return;
@@ -300,40 +225,24 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     }
 
     setUpdatingServer(true);
-    try {
-      const result = await updateMcpServer(
-        editingServer.service_name,
-        editingServer.mcp_url,
-        editServiceName.trim(),
-        editMcpUrl.trim()
-      );
-      if (result.success) {
-        message.success(t("mcpService.message.updateServerSuccess"));
-        setEditServerModalVisible(false);
-        setEditingServer(null);
-        await loadServerList();
-        // Optimistic update status
-        setTimeout(() => {
-          setServerList(prev => prev.map(s => 
-            s.service_name === editServiceName.trim() && s.mcp_url === editMcpUrl.trim()
-              ? { ...s, status: true } : s
-          ));
-        }, 300);
-        await refreshToolsAndAgents();
-        queryClient.invalidateQueries({ queryKey: ["tools"] });
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-      } else {
-        message.error(result.message || t("mcpService.message.updateServerFailed"));
-      }
-    } catch (error) {
-      message.error(t("mcpService.message.updateServerFailed"));
-    } finally {
-      setUpdatingServer(false);
+    const result = await handleUpdateServer(
+      editingServer.service_name,
+      editingServer.mcp_url,
+      name.trim(),
+      url.trim()
+    );
+    if (result.success) {
+      setEditServerModalVisible(false);
+      setEditingServer(null);
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.updateServerSuccess"));
+    } else {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpService.message.updateServerFailed")));
     }
+    setUpdatingServer(false);
   };
 
   // Handlers (Container)
-  const handleAddContainer = async () => {
+  const onAddContainer = async () => {
     if (!containerConfigJson.trim()) {
       message.error(t("mcpConfig.message.containerConfigRequired"));
       return;
@@ -354,46 +263,20 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       return;
     }
 
-    const configWithPorts = {
-      mcpServers: Object.fromEntries(
-        Object.entries(config.mcpServers).map(([key, value]: [string, any]) => [
-          key,
-          { ...value, port: containerPort },
-        ])
-      ),
-    };
-
-    if (delayedContainerRefreshRef.current) {
-      window.clearTimeout(delayedContainerRefreshRef.current);
-    }
-    delayedContainerRefreshRef.current = window.setTimeout(() => {
-      loadContainerList().catch(e => log.error("Failed to refresh containers:", e));
-    }, 3000);
-
     setAddingContainer(true);
-    try {
-      const result = await addMcpFromConfig(configWithPorts);
-      if (result.success) {
-        setContainerConfigJson("");
-        setContainerPort(undefined);
-        await loadContainerList();
-        await loadServerList();
-        await refreshToolsAndAgents();
-        queryClient.invalidateQueries({ queryKey: ["tools"] });
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-        message.success(t("mcpService.message.addContainerSuccess"));
-        setAddModalVisible(false);
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.addContainerFailed"));
-    } finally {
-      setAddingContainer(false);
+    const result = await handleAddContainer(config, containerPort);
+    if (result.success) {
+      setContainerConfigJson("");
+      setContainerPort(undefined);
+      setAddModalVisible(false);
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addContainerSuccess"));
+    } else {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addContainerFailed")));
     }
+    setAddingContainer(false);
   };
 
-  const handleUploadImage = async () => {
+  const onUploadImage = async () => {
     if (uploadFileList.length === 0) {
       message.error(t("mcpConfig.message.uploadImageFileRequired"));
       return;
@@ -413,65 +296,42 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     }
 
     setUploadingImage(true);
-    try {
-      const result = await uploadMcpImage(file, uploadPort, uploadServiceName.trim() || undefined);
-      if (result.success) {
-        setUploadFileList([]);
-        setUploadPort(undefined);
-        setUploadServiceName("");
-        await loadContainerList();
-        await loadServerList();
-        await refreshToolsAndAgents();
-        queryClient.invalidateQueries({ queryKey: ["tools"] });
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-        message.success(t("mcpService.message.uploadImageSuccess"));
-        setAddModalVisible(false);
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.uploadImageFailed"));
-    } finally {
-      setUploadingImage(false);
+    const result = await handleUploadImage(file, uploadPort, uploadServiceName.trim() || undefined);
+    if (result.success) {
+      setUploadFileList([]);
+      setUploadPort(undefined);
+      setUploadServiceName("");
+      setAddModalVisible(false);
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.uploadImageSuccess"));
+    } else {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.uploadImageFailed")));
+    }
+    setUploadingImage(false);
+  };
+
+  const onDeleteContainer = async (container: McpContainer) => {
+    const result = await handleDeleteContainer(container);
+    if (!result.success) {
+      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.deleteContainerFailed")));
+    } else {
+      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.deleteContainerSuccess"));
     }
   };
 
-  const handleDeleteContainer = async (container: McpContainer) => {
-    try {
-      const result = await deleteMcpContainer(container.container_id);
-      if (result.success) {
-        await loadContainerList();
-        await loadServerList();
-        message.success(t("mcpService.message.deleteContainerSuccess"));
-        refreshToolsAndAgents().catch(e => log.error("Refresh failed:", e));
-        queryClient.invalidateQueries({ queryKey: ["tools"] });
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-      } else {
-        message.error(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.deleteContainerFailed"));
-    }
-  };
-
-  const handleViewLogs = async (containerId: string) => {
+  const onViewLogs = async (containerId: string) => {
     setCurrentContainerId(containerId);
     setLoadingLogs(true);
     setLogsModalVisible(true);
     setCurrentContainerLogs("");
-    try {
-      const result = await getMcpContainerLogs(containerId, 500);
-      if (result.success) setCurrentContainerLogs(result.data);
-      else {
-        message.error(result.message);
-        setCurrentContainerLogs(result.message);
-      }
-    } catch (error) {
-      message.error(t("mcpConfig.message.getContainerLogsFailed"));
+
+    const result = await handleViewLogs(containerId, 500);
+    if (result.success) {
+      setCurrentContainerLogs(result.data);
+    } else {
+      message.error(result.messageKey ? t(result.messageKey) : t("mcpConfig.message.getContainerLogsFailed"));
       setCurrentContainerLogs(t("mcpConfig.message.getContainerLogsFailed"));
-    } finally {
-      setLoadingLogs(false);
     }
+    setLoadingLogs(false);
   };
 
   // Columns for Server Table
@@ -530,7 +390,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               <Button
                 type="text"
                 icon={<RefreshCw className={`h-4 w-4 ${healthCheckLoading[key] ? "animate-spin" : ""}`} />}
-                onClick={() => handleCheckHealth(record)}
+                onClick={() => onCheckHealth(record)}
                 size="small"
                 loading={healthCheckLoading[key]}
                 disabled={actionsLocked}
@@ -541,7 +401,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 <Button
                   type="text"
                   icon={<Eye className="h-4 w-4" />}
-                  onClick={() => handleViewTools(record)}
+                  onClick={() => onViewTools(record)}
                   size="small"
                   disabled={!record.status || actionsLocked}
                 />
@@ -551,7 +411,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               <Button
                 type="text"
                 icon={<Edit className="h-4 w-4" />}
-                onClick={() => handleEditServer(record)}
+                onClick={() => onEditServer(record)}
                 size="small"
                 disabled={actionsLocked}
               />
@@ -559,7 +419,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             <Popconfirm
               title={t("mcpConfig.delete.confirmTitle")}
               description={t("mcpConfig.delete.confirmContent", { name: record.service_name })}
-              onConfirm={() => handleDeleteServer(record)}
+              onConfirm={() => onDeleteServer(record)}
               okText={t("common.delete")}
               cancelText={t("common.cancel")}
             >
@@ -636,7 +496,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             <Button
               type="text"
               icon={<FileText className="h-4 w-4" />}
-              onClick={() => handleViewLogs(record.container_id)}
+              onClick={() => onViewLogs(record.container_id)}
               size="small"
               disabled={updatingTools}
             />
@@ -644,7 +504,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           <Popconfirm
             title={t("mcpConfig.deleteContainer.confirmTitle")}
             description={t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id })}
-            onConfirm={() => handleDeleteContainer(record)}
+            onConfirm={() => onDeleteContainer(record)}
             okText={t("common.delete")}
             cancelText={t("common.cancel")}
           >
@@ -660,44 +520,6 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           </Popconfirm>
         </div>
       ),
-    },
-  ];
-
-  const toolColumns = [
-    { title: t("mcpConfig.toolsList.column.name"), dataIndex: "name", key: "name", width: "30%" },
-    {
-      title: t("mcpConfig.toolsList.column.description"),
-      dataIndex: "description",
-      key: "description",
-      width: "70%",
-      render: (text: string, record: McpTool) => {
-        const isExpanded = expandedDescriptions.has(record.name);
-        const maxLength = 100;
-        const needsExpansion = text && text.length > maxLength;
-        return (
-          <div>
-            <div style={{ marginBottom: needsExpansion ? 8 : 0 }}>
-              {needsExpansion && !isExpanded ? `${text.substring(0, maxLength)}...` : text}
-            </div>
-            {needsExpansion && (
-              <Button
-                type="link"
-                size="small"
-                icon={isExpanded ? <Minimize size={16} /> : <Maximize size={16} />}
-                onClick={() => {
-                  const newExpanded = new Set(expandedDescriptions);
-                  if (newExpanded.has(record.name)) newExpanded.delete(record.name);
-                  else newExpanded.add(record.name);
-                  setExpandedDescriptions(newExpanded);
-                }}
-                style={{ padding: 0, height: "auto" }}
-              >
-                {isExpanded ? t("mcpConfig.toolsList.button.collapse") : t("mcpConfig.toolsList.button.expand")}
-              </Button>
-            )}
-          </div>
-        );
-      },
     },
   ];
 
@@ -780,7 +602,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                     />
                     <Button
                       type="primary"
-                      onClick={handleAddServer}
+                      onClick={onAddServer}
                       loading={addingServer || updatingTools}
                       disabled={actionsLocked}
                       icon={addingServer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
@@ -813,29 +635,28 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                     />
                     <div className="flex items-center gap-2">
                       <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.port")}:</Text>
-                      <Input
-                        type="number"
+                      <InputNumber
                         placeholder={t("mcpConfig.addContainer.portPlaceholder")}
                         value={containerPort}
-                        onChange={(e) => {
-                          const port = parseInt(e.target.value);
-                          setContainerPort(isNaN(port) ? undefined : port);
+                        onChange={(value) => {
+                          setContainerPort(value === null ? undefined : value);
                         }}
                         min={1}
                         max={65535}
                         style={{ width: 150 }}
                         disabled={actionsLocked}
+                        controls={false}
                       />
                       <div className="flex-1" />
                       <Button
-                        type="primary"
-                        onClick={handleAddContainer}
-                        loading={addingContainer || updatingTools}
-                        disabled={actionsLocked}
-                        icon={addingContainer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
-                      >
-                        {t("mcpConfig.addContainer.button.add")}
-                      </Button>
+                          type="primary"
+                          onClick={onAddContainer}
+                          loading={addingContainer || updatingTools}
+                          disabled={actionsLocked}
+                          icon={addingContainer || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
+                        >
+                          {t("mcpConfig.addContainer.button.add")}
+                        </Button>
                     </div>
                   </Space>
                 </Card>
@@ -866,17 +687,17 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       </Button>
                     </Upload>
                     <div className="flex items-center gap-2">
-                      <Input
+                      <InputNumber
                         placeholder={t("mcpConfig.uploadImage.portPlaceholder")}
-                        value={uploadPort || ""}
-                        onChange={(e) => {
-                            const val = parseInt(e.target.value);
-                            if (e.target.value === "") setUploadPort(undefined);
-                            else if (!isNaN(val) && val >= 1 && val <= 65535) setUploadPort(val);
+                        value={uploadPort}
+                        onChange={(value) => {
+                            setUploadPort(value === null ? undefined : value);
                         }}
                         style={{ width: 150 }}
                         disabled={actionsLocked}
-                        type="number"
+                        min={1}
+                        max={65535}
+                        controls={false}
                       />
                       <Input
                         placeholder={t("mcpConfig.uploadImage.serviceNamePlaceholder")}
@@ -887,7 +708,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       />
                       <Button
                         type="primary"
-                        onClick={handleUploadImage}
+                        onClick={onUploadImage}
                         loading={uploadingImage || updatingTools}
                         disabled={actionsLocked}
                         icon={uploadingImage || updatingTools ? <LoaderCircle className="animate-spin size-4" /> : <Plus className="size-4" />}
@@ -904,73 +725,32 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       </Modal>
 
       {/* Tools Modal */}
-      <Modal
-        title={`${currentServerName} - ${t("mcpConfig.toolsList.title")}`}
+      <McpToolListModal
         open={toolsModalVisible}
         onCancel={() => setToolsModalVisible(false)}
-        width={800}
-        footer={[<Button key="close" onClick={() => setToolsModalVisible(false)}>{t("mcpConfig.modal.close")}</Button>]}
-      >
-        {loadingTools ? (
-          <div className="text-center py-10">
-            <LoaderCircle className="animate-spin inline mr-2" size={16} />
-            <Text>{t("mcpConfig.toolsList.loading")}</Text>
-          </div>
-        ) : (
-          <Table
-            columns={toolColumns}
-            dataSource={currentServerTools}
-            rowKey="name"
-            size="small"
-            pagination={false}
-            locale={{ emptyText: t("mcpConfig.toolsList.empty") }}
-            scroll={{ y: 500 }}
-          />
-        )}
-      </Modal>
+        loading={loadingTools}
+        tools={currentServerTools}
+        serverName={currentServerName}
+      />
 
       {/* Edit Server Modal */}
-      <Modal
-        title={t("mcpConfig.editServer.title")}
+      <McpEditServerModal
         open={editServerModalVisible}
         onCancel={() => setEditServerModalVisible(false)}
-        onOk={handleSaveEditedServer}
-        okButtonProps={{ loading: updatingServer }}
-        okText={t("common.save")}
-        cancelText={t("common.cancel")}
-      >
-        <Space direction="vertical" className="w-full">
-            <div>
-                <Text strong>{t("mcpConfig.editServer.serviceName")}</Text>
-                <Input value={editServiceName} onChange={(e) => setEditServiceName(e.target.value)} className="mt-2" />
-            </div>
-            <div>
-                <Text strong>{t("mcpConfig.editServer.mcpUrl")}</Text>
-                <Input value={editMcpUrl} onChange={(e) => setEditMcpUrl(e.target.value)} className="mt-2" />
-            </div>
-        </Space>
-      </Modal>
+        onSave={onSaveEditedServer}
+        initialName={editingServer?.service_name || ""}
+        initialUrl={editingServer?.mcp_url || ""}
+        loading={updatingServer}
+      />
 
       {/* Logs Modal */}
-      <Modal
-        title={`${t("mcpConfig.containerLogs.title")} - ${currentContainerId?.substring(0, 12)}`}
+      <McpContainerLogsModal
         open={logsModalVisible}
         onCancel={() => setLogsModalVisible(false)}
-        width={800}
-        footer={[<Button key="close" onClick={() => setLogsModalVisible(false)}>{t("mcpConfig.modal.close")}</Button>]}
-      >
-        {loadingLogs ? (
-          <div className="text-center py-10">
-            <LoaderCircle className="animate-spin" size={16} />
-            <Text>{t("mcpConfig.containerLogs.loading")}</Text>
-          </div>
-        ) : (
-          <pre className="bg-gray-100 p-4 rounded max-h-[500px] overflow-auto whitespace-pre-wrap text-xs font-mono">
-            {currentContainerLogs || t("mcpConfig.containerLogs.empty")}
-          </pre>
-        )}
-      </Modal>
+        loading={loadingLogs}
+        logs={currentContainerLogs}
+        containerId={currentContainerId}
+      />
     </div>
   );
 }
-
