@@ -236,6 +236,82 @@ prompt_deploy_options() {
   fi
 }
 
+# Get friendly description for option keys
+_get_option_description() {
+  local key="$1"
+  case "$key" in
+    "MODE_CHOICE") echo "Deployment Mode" ;;
+    "VERSION_CHOICE") echo "Deployment Version" ;;
+    "IS_MAINLAND") echo "Mainland China Network" ;;
+    "ENABLE_TERMINAL") echo "Terminal Tool Container" ;;
+    "APP_VERSION") echo "Application Version" ;;
+    "ROOT_DIR") echo "Root Directory" ;;
+    *) echo "$key" ;;
+  esac
+}
+
+# Get friendly value for option values
+_get_option_value_description() {
+  local key="$1"
+  local value="$2"
+  
+  case "$key" in
+    "MODE_CHOICE")
+      case "$value" in
+        "1") echo "1 - Development Mode" ;;
+        "2") echo "2 - Infrastructure Mode" ;;
+        "3") echo "3 - Production Mode" ;;
+        *) echo "$value" ;;
+      esac
+      ;;
+    "VERSION_CHOICE")
+      case "$value" in
+        "1") echo "1 - Speed Version" ;;
+        "2") echo "2 - Full Version" ;;
+        *) echo "$value" ;;
+      esac
+      ;;
+    "IS_MAINLAND")
+      case "$value" in
+        "Y") echo "Yes" ;;
+        "N") echo "No" ;;
+        *) echo "$value" ;;
+      esac
+      ;;
+    "ENABLE_TERMINAL")
+      case "$value" in
+        "Y") echo "Yes" ;;
+        "N") echo "No" ;;
+        *) echo "$value" ;;
+      esac
+      ;;
+    *) echo "$value" ;;
+  esac
+}
+
+prompt_deploy_options() {
+  # Only prompt for options that already exist in DEPLOY_OPTIONS
+  if [[ -n "${DEPLOY_OPTIONS[MODE_CHOICE]:-}" ]]; then
+    echo "🎛️  Please select deployment mode:"
+    echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
+    echo "   2) 🏗️  Infrastructure mode - Only start infrastructure services"
+    echo "   3) 🚀 Production mode - Only expose port 3000 for security"
+    prompt_option_value "MODE_CHOICE" "Please select deployment mode [1/2/3]" "${DEPLOY_OPTIONS[MODE_CHOICE]:-}"
+  fi
+  if [[ -n "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}" ]]; then
+    echo "🚀 Please select deployment version:"
+    echo "   1) ⚡️  Speed version - Lightweight deployment with essential features"
+    echo "   2) 🎯  Full version - Full-featured deployment with all capabilities"
+    prompt_option_value "VERSION_CHOICE" "Please select deployment version [1/2]" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}"
+  fi
+  if [[ -n "${DEPLOY_OPTIONS[IS_MAINLAND]:-}" ]]; then
+    prompt_option_value "IS_MAINLAND" "Is your server network located in mainland China? (yes/no)" "${DEPLOY_OPTIONS[IS_MAINLAND]:-}"
+  fi
+  if [[ -n "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}" ]]; then
+    prompt_option_value "ENABLE_TERMINAL" "Do you want to create Terminal tool container? (yes/no)" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}"
+  fi
+}
+
 main() {
   ensure_docker
   load_options
@@ -244,12 +320,14 @@ main() {
   if [ -f "$OPTIONS_FILE" ] && [ -s "$OPTIONS_FILE" ]; then
     # Display current deployment options in a readable format
     log "INFO" "📋 Current deployment options:"
-    echo "   ┌───────────────────────────────────────────┐"
+    echo "   ┌────────────────────────────────────────────────────────────┐"
     for key in "${!DEPLOY_OPTIONS[@]}"; do
       value="${DEPLOY_OPTIONS[$key]}"
-      printf "   │ %-25s : %-20s │\n" "$key" "$value"
+      desc=$(_get_option_description "$key")
+      value_desc=$(_get_option_value_description "$key" "$value")
+      printf "   │ %-20s : %-35s │\n" "$desc" "$value_desc"
     done
-    echo "   └───────────────────────────────────────────┘"
+    echo "   └────────────────────────────────────────────────────────────┘"
     echo ""
     
     read -rp "🔄 Do you want to inherit previous deployment options? (yes/no) [yes]: " inherit_choice
