@@ -11,7 +11,7 @@ import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import { ChatStreamFinalMessage } from "@/app/chat/streaming/chatStreamFinalMessage";
 import { TaskWindow } from "@/app/chat/streaming/taskWindow";
 import { transformMessagesToTaskMessages } from "@/app/chat/streaming/messageTransformer";
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { MESSAGE_ROLES } from "@/const/chatConfig";
 import log from "@/lib/logger";
 
 // Agent debugging component Props interface
@@ -71,14 +71,14 @@ function AgentDebugging({
           {messages.map((message, index) => {
             // Process the task content of the current message
             const currentTaskMessages =
-              message.role === ROLE_ASSISTANT
+              message.role === MESSAGE_ROLES.ASSISTANT
                 ? processMessageSteps(message)
                 : [];
 
             return (
               <div key={message.id || index} className="flex flex-col gap-2">
                 {/* User message */}
-                {message.role === "user" && (
+                {message.role === MESSAGE_ROLES.USER && (
                   <ChatStreamFinalMessage
                     message={message}
                     onSelectMessage={() => {}}
@@ -92,7 +92,7 @@ function AgentDebugging({
                 )}
 
                 {/* Assistant message task window */}
-                {message.role === ROLE_ASSISTANT &&
+                {message.role === MESSAGE_ROLES.ASSISTANT &&
                   currentTaskMessages.length > 0 && (
                     <TaskWindow
                       messages={currentTaskMessages}
@@ -101,7 +101,7 @@ function AgentDebugging({
                   )}
 
                 {/* Assistant message final answer */}
-                {message.role === ROLE_ASSISTANT && (
+                {message.role === MESSAGE_ROLES.ASSISTANT && (
                   <ChatStreamFinalMessage
                     message={message}
                     onSelectMessage={() => {}}
@@ -217,7 +217,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     setMessages((prev) => {
       const newMessages = [...prev];
       const lastMsg = newMessages[newMessages.length - 1];
-      if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
         lastMsg.isComplete = true;
         lastMsg.thinking = undefined; // Explicitly clear thinking state
         lastMsg.content = t("agent.debug.stopped");
@@ -236,7 +236,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     // Add user message
     const userMessage: ChatMessageType = {
       id: Date.now().toString(),
-      role: "user",
+      role: MESSAGE_ROLES.USER,
       content: question,
       timestamp: new Date(),
     };
@@ -244,7 +244,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     // Add assistant message (initial state)
     const assistantMessage: ChatMessageType = {
       id: (Date.now() + 1).toString(),
-      role: ROLE_ASSISTANT,
+      role: MESSAGE_ROLES.ASSISTANT,
       content: "",
       timestamp: new Date(),
       isComplete: false,
@@ -304,7 +304,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         setMessages((prev) => {
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
             lastMsg.content = t("agent.debug.stopped");
             lastMsg.isComplete = true;
             lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -321,7 +321,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         setMessages((prev) => {
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
             lastMsg.content = errorMessage;
             lastMsg.isComplete = true;
             lastMsg.error = errorMessage;

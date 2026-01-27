@@ -5,8 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import { USER_ROLES } from "@/const/modelConfig";
+import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatMessageType, ProcessedMessages, ChatStreamMainProps } from "@/types/chat";
 
 import { ChatInput } from "../components/chatInput";
@@ -103,7 +102,7 @@ export function ChatStreamMain({
 
     // Track the latest user message ID for scroll behavior
     messages.forEach((message) => {
-      if (message.role === USER_ROLES.USER && message.id) {
+      if (message.role === MESSAGE_ROLES.USER && message.id) {
         lastUserMessageIdRef.current = message.id;
       }
     });
@@ -111,11 +110,11 @@ export function ChatStreamMain({
     // Process all messages, distinguish user messages and final answers
     messages.forEach((message) => {
       // User messages are directly added to the final message array
-      if (message.role === USER_ROLES.USER) {
+      if (message.role === MESSAGE_ROLES.USER) {
         finalMsgs.push(message);
       }
       // Assistant messages - if there is a final answer or content, add it to the final message array
-      else if (message.role === ROLE_ASSISTANT) {
+      else if (message.role === MESSAGE_ROLES.ASSISTANT) {
         if (message.finalAnswer || message.content !== undefined) {
           finalMsgs.push(message);
         }
@@ -397,7 +396,7 @@ export function ChatStreamMain({
                     currentConversationId={currentConversationId}
                     onCitationHover={onCitationHover}
                   />
-                  {message.role === "user" &&
+                  {message.role === MESSAGE_ROLES.USER &&
                     processedMessages.conversationGroups.has(message.id!) && (
                       <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
                         <TaskWindow
