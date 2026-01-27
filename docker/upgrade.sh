@@ -60,18 +60,38 @@ prompt_option_value() {
   local input=""
 
   while true; do
-    if [ -n "$default_value" ]; then
-      read -rp "${prompt_msg} [${default_value}]: " input
-      input="${input:-$default_value}"
-    else
-      read -rp "${prompt_msg}: " input
-    fi
+    read -rp "${prompt_msg}: " input
 
     input="$(trim_quotes "$input")"
-    if [ -n "$input" ]; then
-      DEPLOY_OPTIONS[$key]="$input"
-      update_option_value "$key" "$input"
-      break
+    
+    # Handle yes/no type inputs
+    if [[ "$key" == "ENABLE_TERMINAL" || "$key" == "IS_MAINLAND" ]]; then
+      # Convert to uppercase for consistency
+      input=$(echo "$input" | tr '[:lower:]' '[:upper:]')
+      
+      # Validate input
+      if [[ "$input" =~ ^[YN]$ ]]; then
+        DEPLOY_OPTIONS[$key]="$input"
+        update_option_value "$key" "$input"
+        break
+      elif [ -z "$input" ] && [ -n "$default_value" ]; then
+        # Use default value if input is empty
+        DEPLOY_OPTIONS[$key]="$default_value"
+        update_option_value "$key" "$default_value"
+        break
+      fi
+    else
+      # Handle other types of inputs
+      if [ -n "$input" ]; then
+        DEPLOY_OPTIONS[$key]="$input"
+        update_option_value "$key" "$input"
+        break
+      elif [ -z "$input" ] && [ -n "$default_value" ]; then
+        # Use default value if input is empty
+        DEPLOY_OPTIONS[$key]="$default_value"
+        update_option_value "$key" "$default_value"
+        break
+      fi
     fi
 
     log "WARN" "⚠️  ${key} cannot be empty, please enter a value."
@@ -219,20 +239,20 @@ prompt_deploy_options() {
     echo "🚀 Please select deployment version:"
     echo "   1) ⚡️  Speed version - Lightweight deployment with essential features"
     echo "   2) 🎯  Full version - Full-featured deployment with all capabilities"
-    prompt_option_value "VERSION_CHOICE" "Please select deployment version [1/2]" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}"
+    prompt_option_value "VERSION_CHOICE" "Enter your choice [1/2] (default: ${DEPLOY_OPTIONS[VERSION_CHOICE]:-1})" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-1}"
   fi
   if [[ -n "${DEPLOY_OPTIONS[MODE_CHOICE]:-}" ]]; then
     echo "🎛️  Please select deployment mode:"
     echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
     echo "   2) 🏗️  Infrastructure mode - Only start infrastructure services"
     echo "   3) 🚀 Production mode - Only expose port 3000 for security"
-    prompt_option_value "MODE_CHOICE" "Please select deployment mode [1/2/3]" "${DEPLOY_OPTIONS[MODE_CHOICE]:-}"
+    prompt_option_value "MODE_CHOICE" "Enter your choice [1/2/3] (default: ${DEPLOY_OPTIONS[MODE_CHOICE]:-1})" "${DEPLOY_OPTIONS[MODE_CHOICE]:-1}"
   fi
   if [[ -n "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}" ]]; then
-    prompt_option_value "ENABLE_TERMINAL" "Do you want to create Terminal tool container? (yes/no)" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}"
+    prompt_option_value "ENABLE_TERMINAL" "Do you want to create Terminal tool container? [Y/N] (default: ${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-N})" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-N}"
   fi
   if [[ -n "${DEPLOY_OPTIONS[IS_MAINLAND]:-}" ]]; then
-    prompt_option_value "IS_MAINLAND" "Is your server network located in mainland China? (yes/no)" "${DEPLOY_OPTIONS[IS_MAINLAND]:-}"
+    prompt_option_value "IS_MAINLAND" "Is your server network located in mainland China? [Y/N] (default: ${DEPLOY_OPTIONS[IS_MAINLAND]:-N})" "${DEPLOY_OPTIONS[IS_MAINLAND]:-N}"
   fi
 }
 
@@ -349,7 +369,7 @@ main() {
     inherit_choice="$(trim_quotes "$inherit_choice")"
     
     if [ "$inherit_choice" != "yes" ]; then
-      log "INFO" "📝 Starting configuration with previous defaults..."
+      log "INFO" "📝 Starting configuration..."
       # Prompt for deployment options with existing values as defaults
       prompt_deploy_options
     fi
