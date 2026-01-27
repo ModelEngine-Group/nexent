@@ -73,12 +73,6 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
 export const DEFAULT_PROVIDER_ICON = "/default-icon.png";
 
-// User role constants
-export const USER_ROLES = {
-  USER: "user",
-  ADMIN: "admin",
-} as const;
-
 // Memory tab key constants
 export const MEMORY_TAB_KEYS = {
   BASE: "base",
