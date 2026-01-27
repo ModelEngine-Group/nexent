@@ -6,22 +6,25 @@ import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd";
 import { UserRound, LogOut, LogIn, Power, UserRoundPlus } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
+import { USER_ROLES } from "@/const/auth";
 
 export function AvatarDropdown() {
-  const { user, isLoading, logout, revoke, openLoginModal, openRegisterModal } =
-    useAuth();
+  const { user, isAuthzReady } = useAuthorizationContext();
+  const { isLoading, logout, revoke, openLoginModal, openRegisterModal } =
+    useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
   const { modal } = App.useApp();
   const { confirm } = useConfirmModal();
 
+  // Show loading while authentication is in progress
   if (isLoading) {
     return <Spin size="small" />;
   }
-
   if (!user) {
     const items: ItemType[] = [
       {
@@ -91,7 +94,7 @@ export function AvatarDropdown() {
           <div className="font-medium">{user.email}</div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
-              {t(user.role === "admin" ? "auth.admin" : "auth.user")}
+              {t(`auth.${(user.role).toLowerCase()}`)}
             </Tag>
           </div>
         </div>
@@ -126,7 +129,7 @@ export function AvatarDropdown() {
       // danger: true,
       className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
       onClick: () => {
-        if (user.role === "admin") {
+        if (user.role === USER_ROLES.ADMIN) {
           modal.error({
             title: t("auth.refuseRevoke"),
             content: t("auth.refuseRevokePrompt"),
@@ -159,7 +162,7 @@ export function AvatarDropdown() {
         )}
       >
         <Avatar
-          src={user.avatar_url}
+          src={user.avatarUrl}
           className="cursor-pointer"
           size="default"
           icon={<UserRound size={18} />}

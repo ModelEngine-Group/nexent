@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { configService } from "@/services/configService";
-import { EVENTS } from "@/const/auth";
 import { ChatInterface } from "./internal/chatInterface";
 
 /**
@@ -13,24 +13,21 @@ import { ChatInterface } from "./internal/chatInterface";
  */
 export default function ChatContent() {
   const { appConfig } = useConfig();
-  const { user, isLoading: userLoading, isSpeedMode } = useAuth();
-  const canAccessProtectedData = isSpeedMode || (!userLoading && !!user);
+  const { user, isLoading: userLoading } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const sessionExpiredTriggeredRef = useRef(false);
 
   useEffect(() => {
-    if (!canAccessProtectedData) {
-      return;
-    }
     // Load config from backend when entering chat page
     configService.loadConfigToFrontend();
 
     if (appConfig.appName) {
       document.title = `${appConfig.appName}`;
     }
-  }, [appConfig.appName, canAccessProtectedData]);
+  }, [appConfig.appName]);
 
-  // Require login on chat page when unauthenticated (full mode only)
-  // Trigger SESSION_EXPIRED event to show "Login Expired" modal instead of directly opening login modal
+  // Require login on chat page when unauthenticated (skip in speed mode)
+  // Note: SESSION_EXPIRED event is triggered by useSessionManager.ts on initialization
   useEffect(() => {
     if (isSpeedMode) {
       sessionExpiredTriggeredRef.current = false;
@@ -42,20 +39,10 @@ export default function ChatContent() {
       return;
     }
 
-    if (!userLoading && !sessionExpiredTriggeredRef.current) {
-      sessionExpiredTriggeredRef.current = true;
-      window.dispatchEvent(
-        new CustomEvent(EVENTS.SESSION_EXPIRED, {
-          detail: { message: "Session expired, please sign in again" },
-        })
-      );
-    }
+    // Session expiration is handled by useSessionManager.ts
+    // Don't trigger SESSION_EXPIRED here to avoid duplicate handling
   }, [isSpeedMode, user, userLoading]);
 
-  // Avoid rendering and backend calls when unauthenticated (full mode only)
-  if (!canAccessProtectedData) {
-    return null;
-  }
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">

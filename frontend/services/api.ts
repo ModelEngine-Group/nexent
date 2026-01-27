@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
+import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 
 const API_BASE_URL = "/api";
@@ -11,6 +12,7 @@ export const API_ENDPOINTS = {
     logout: `${API_BASE_URL}/user/logout`,
     session: `${API_BASE_URL}/user/session`,
     currentUserId: `${API_BASE_URL}/user/current_user_id`,
+    currentUserInfo: `${API_BASE_URL}/user/current_user_info`,
     serviceHealth: `${API_BASE_URL}/user/service_health`,
     revoke: `${API_BASE_URL}/user/revoke`,
   },
@@ -359,36 +361,6 @@ export const fetchWithErrorHandling = async (
   }
 };
 
-// Method to handle session expiration
-function handleSessionExpired() {
-  // Prevent duplicate triggers
-  if (window.__isHandlingSessionExpired) {
-    return;
-  }
-
-  // Mark as processing
-  window.__isHandlingSessionExpired = true;
-
-  // Clear locally stored session information
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("session");
-
-    // Use custom events to notify other components in the app (such as SessionExpiredListener)
-    if (window.dispatchEvent) {
-      // Ensure using event name consistent with EVENTS.SESSION_EXPIRED constant
-      window.dispatchEvent(
-        new CustomEvent("session-expired", {
-          detail: { message: "Login expired, please login again" },
-        })
-      );
-    }
-
-    // Reset flag after 300ms to allow future triggers
-    setTimeout(() => {
-      window.__isHandlingSessionExpired = false;
-    }, 300);
-  }
-}
 
 // Add global interface extensions for TypeScript
 declare global {

@@ -17,7 +17,6 @@ import {
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { Users, Plus, Edit, Trash2, Building2 } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
@@ -30,7 +29,8 @@ import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { USER_ROLES } from "@/const/modelConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 
 // Removed mockTenants - now using real data from API
 
@@ -213,11 +213,11 @@ function TenantList({
 export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
-  const { user } = useAuth()
 
   // Check if user is super admin (speed mode or admin role)
-  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
+  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
 
   // Get real tenant data from API
   const {

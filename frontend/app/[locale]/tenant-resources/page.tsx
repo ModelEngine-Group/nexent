@@ -14,20 +14,15 @@ import UserManageComp from "./components/UserManageComp";
  * - Layout uses Flex for responsive design and proper content flow.
  */
 export default function TenantResourcesPage() {
-  const { canAccessProtectedData } = useSetupFlow({
-    requireAdmin: true,
-  });
 
   return (
     <>
-      {canAccessProtectedData ? (
-        <Flex
-          vertical
-          className="h-full w-full overflow-hidden"
-        >
-          <UserManageComp />
-        </Flex>
-      ) : null}
+      <Flex
+        vertical
+        className="h-full w-full overflow-hidden"
+      >
+        <UserManageComp />
+      </Flex>
     </>
   );
 }

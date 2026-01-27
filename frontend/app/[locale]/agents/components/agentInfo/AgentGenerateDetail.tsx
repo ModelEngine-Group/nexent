@@ -32,7 +32,8 @@ import {
   GENERATE_PROMPT_STREAM_TYPES,
 } from "@/const/agentConfig";
 import { generatePromptStream } from "@/services/promptService";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
 import ExpandEditModal from "./ExpandEditModal";
 
@@ -55,7 +56,8 @@ export default function AgentGenerateDetail({
 }: AgentGenerateDetailProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { user, isSpeedMode } = useAuth();
+  const { user } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const [form] = Form.useForm();
 
   // Model data from React Query
