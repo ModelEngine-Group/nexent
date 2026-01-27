@@ -328,11 +328,10 @@ main() {
     done
     echo ""
     
-    read -rp "🔄 Do you want to inherit previous deployment options? (yes/no) [yes]: " inherit_choice
-    inherit_choice="${inherit_choice:-yes}"
+    read -rp "🔄 Do you want to inherit previous deployment options? [Y/N] (default: Y): " inherit_choice
+    inherit_choice="${inherit_choice:-Y}"
     inherit_choice="$(trim_quotes "$inherit_choice")"
-    
-    if [ "$inherit_choice" != "yes" ]; then
+    if [[ "$inherit_choice" =~ ^[Nn]$ ]]; then
       log "INFO" "📝 Starting configuration..."
       # Prompt for deployment options with existing values as defaults
       prompt_deploy_options
