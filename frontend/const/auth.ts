@@ -1,4 +1,12 @@
 // Status codes for authentication
+export enum USER_ROLES {
+  SU = "SU",
+  ADMIN = "ADMIN",
+  DEV = "DEV",
+  USER = "USER",
+  SPEED = "SPEED",
+}
+
 export const STATUS_CODES = {
   SUCCESS: 200,
   

@@ -165,6 +165,11 @@
     "更精准的问答体验"
   ],
   "page.loginPrompt.githubSupport": "⭐️ Nexent还在成长中，帮帮我到<1>GitHub</1>加星支持我吧，谢谢你。",
+  "page.loginPrompt.title": "欢迎使用 Nexent",
+  "page.loginPrompt.register": "注册账户",
+  "page.loginPrompt.login": "登录账户",
+  "page.loginPrompt.intro": "请登录您的账户以访问此页面。",
+  "page.loginPrompt.githubSupport": "在 GitHub 上支持我们",
   "page.loginPrompt.noAccount": "还没有账号？点击\"注册\"按钮创建您的专属账号~",
   "page.adminPrompt.title": "啊哦，您不是管理员",
   "page.adminPrompt.close": "好的",
@@ -177,6 +182,8 @@
     "制作和发布专属智能Agent",
     "集成和配置自有工具"
   ],
+  "page.adminPrompt.title": "暂无权限",
+  "page.adminPrompt.intro": "您暂时没有权限访问该页面，请联系管理员为您提升权限。",
   "page.adminPrompt.githubSupport": "⭐️ Nexent还在成长中，帮帮我到<1>GitHub</1>加星支持我吧，谢谢你。",
   "page.adminPrompt.becomeAdmin": "💡 想成为管理员？请访问<1>官网联系页</1>，申请管理员账号。",
 
@@ -834,6 +841,7 @@
   "auth.adminRegisterSuccessManualLogin": "管理员账号注册成功！请登录以获取管理权限",
   "auth.logoutSuccess": "您已成功退出登录",
   "auth.logoutFailed": "退出失败，请重试",
+  "auth.accessDenied": "您没有权限访问此页面",
   "auth.revoke": "删除账号",
   "auth.confirmRevoke": "确认删除账号",
   "auth.confirmRevokePrompt": "确定要彻底删除当前账号吗？此操作不可恢复！",
@@ -846,6 +854,9 @@
   "auth.adminAccountDescription": "管理员拥有更多权限，可以配置模型、创建智能体等",
   "auth.admin": "管理员",
   "auth.user": "普通用户",
+  "auth.su": "超级管理员",
+  "auth.dev": "开发者",
+  "auth.speed": "默认角色",
   "auth.inviteCodeLabel": "邀请码",
   "auth.inviteCodeRequired": "请输入管理员邀请码",
   "auth.registerAdmin": "注册管理员账号",
