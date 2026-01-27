@@ -333,33 +333,15 @@ main() {
       max_desc_width=20
     fi
     
-    # Calculate total table width
-    total_width=$((max_desc_width + 40))  # 40 for value column and padding
-    
-    # Create table top border
-    table_top="   ┌"
-    for ((i=0; i<total_width; i++)); do
-      table_top+="─"
-    done
-    table_top+="┐"
-    
-    # Create table bottom border
-    table_bottom="   └"
-    for ((i=0; i<total_width; i++)); do
-      table_bottom+="─"
-    done
-    table_bottom+="┘"
-    
     # Display current deployment options in a readable format
     log "INFO" "📋 Current deployment options:"
-    echo "$table_top"
+    echo ""
     for key in "${!DEPLOY_OPTIONS[@]}"; do
       value="${DEPLOY_OPTIONS[$key]}"
       desc=$(_get_option_description "$key")
       value_desc=$(_get_option_value_description "$key" "$value")
-      printf "   │ %-${max_desc_width}s : %-35s │\n" "$desc" "$value_desc"
+      printf "   • %-${max_desc_width}s : %s\n" "$desc" "$value_desc"
     done
-    echo "$table_bottom"
     echo ""
     
     read -rp "🔄 Do you want to inherit previous deployment options? (yes/no) [yes]: " inherit_choice
