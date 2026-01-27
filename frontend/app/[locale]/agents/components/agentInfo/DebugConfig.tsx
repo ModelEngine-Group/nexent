@@ -18,6 +18,7 @@ import log from "@/lib/logger";
 interface AgentDebuggingProps {
   onAskQuestion: (question: string) => void;
   onStop: () => void;
+  onClear: () => void;
   isStreaming: boolean;
   messages: ChatMessageType[];
 }
@@ -33,6 +34,7 @@ interface DebugConfigProps {
 function AgentDebugging({
   onAskQuestion,
   onStop,
+  onClear,
   isStreaming,
   messages,
 }: AgentDebuggingProps) {
@@ -127,6 +129,15 @@ function AgentDebugging({
           onPressEnter={handleSend}
           disabled={isStreaming}
         />
+        {/* Clear history button */}
+        <button
+          onClick={onClear}
+          disabled={isStreaming}
+          className="min-w-[56px] px-4 py-1.5 rounded-md flex items-center justify-center text-sm bg-gray-200 hover:bg-gray-300 text-gray-800 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ border: "none" }}
+        >
+          {t("agent.debug.clear")}
+        </button>
         {isStreaming ? (
           <button
             onClick={onStop}
@@ -224,6 +235,12 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       }
       return newMessages;
     });
+  };
+
+  // Clear local history and reset the step counter
+  const handleClearHistory = async () => {
+    setMessages([]);
+    stepIdCounter.current.current = 0;
   };
 
   // Process test question
@@ -347,6 +364,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         key={agentId} // Re-render when agentId changes to ensure state resets
         onAskQuestion={handleTestQuestion}
         onStop={handleStop}
+        onClear={handleClearHistory}
         isStreaming={isStreaming}
         messages={messages}
       />

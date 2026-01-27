@@ -15,7 +15,7 @@ import { configService } from "@/services/configService";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
 import { ModelType, SingleModelConfig } from "@/types/modelConfig";
-import { MODEL_TYPES } from "@/const/modelConfig";
+import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
 import log from "@/lib/logger";
 import {
@@ -1143,42 +1143,62 @@ export const ModelAddDialog = ({
             <div className="mt-2 ml-6 flex items-center">
               <span>{t("model.dialog.label.currentlySupported")}</span>
               <Tooltip title="ModelEngine">
-                <img
-                  src="/modelengine-logo.png"
-                  alt="ModelEngine"
-                  className="h-4 ml-1.5"
-                />
+                <a
+                  href={PROVIDER_LINKS.modelengine}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    src="/modelengine-logo.png"
+                    alt="ModelEngine"
+                    className="h-4 ml-1.5 cursor-pointer"
+                  />
+                </a>
               </Tooltip>
               {form.isBatchImport && (
                 <Tooltip title="SiliconFlow">
-                  <img
-                    src="/siliconflow.png"
-                    alt="SiliconFlow"
-                    className="h-4 ml-1.5"
-                  />
+                  <a
+                    href={PROVIDER_LINKS.siliconflow}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <img
+                      src="/siliconflow.png"
+                      alt="SiliconFlow"
+                      className="h-4 ml-1.5 cursor-pointer"
+                    />
+                  </a>
                 </Tooltip>
               )}
               {form.type === "llm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <img
-                      src="/openai.png"
-                      alt="OpenAI"
-                      className="h-4 ml-1.5"
-                    />
+                    <a href={PROVIDER_LINKS.openai} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src="/openai.png"
+                        alt="OpenAI"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Kimi">
-                    <img src="/kimi.png" alt="Kimi" className="h-4 ml-1.5" />
+                    <a href={PROVIDER_LINKS.kimi} target="_blank" rel="noopener noreferrer">
+                      <img src="/kimi.png" alt="Kimi" className="h-4 ml-1.5 cursor-pointer" />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <img
-                      src="/deepseek.png"
-                      alt="Deepseek"
-                      className="h-4 ml-1.5"
-                    />
+                    <a href={PROVIDER_LINKS.deepseek} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src="/deepseek.png"
+                        alt="Deepseek"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Qwen">
-                    <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5" />
+                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
+                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
                 </>
@@ -1186,20 +1206,28 @@ export const ModelAddDialog = ({
               {form.type === "embedding" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <img
-                      src="/openai.png"
-                      alt="OpenAI"
-                      className="h-4 ml-1.5"
-                    />
+                    <a href={PROVIDER_LINKS.openai} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src="/openai.png"
+                        alt="OpenAI"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Qwen">
-                    <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5" />
+                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
+                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Jina">
-                    <img src="/jina.png" alt="Jina" className="h-4 ml-1.5" />
+                    <a href={PROVIDER_LINKS.jina} target="_blank" rel="noopener noreferrer">
+                      <img src="/jina.png" alt="Jina" className="h-4 ml-1.5 cursor-pointer" />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Baai">
-                    <img src="/baai.png" alt="Baai" className="h-4 ml-1.5" />
+                    <a href={PROVIDER_LINKS.baai} target="_blank" rel="noopener noreferrer">
+                      <img src="/baai.png" alt="Baai" className="h-4 ml-1.5 cursor-pointer" />
+                    </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
                 </>
@@ -1207,14 +1235,18 @@ export const ModelAddDialog = ({
               {form.type === "vlm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="Qwen">
-                    <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5" />
+                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
+                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    </a>
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <img
-                      src="/deepseek.png"
-                      alt="Deepseek"
-                      className="h-4 ml-1.5"
-                    />
+                    <a href={PROVIDER_LINKS.deepseek} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src="/deepseek.png"
+                        alt="Deepseek"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
+                    </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
                 </>
