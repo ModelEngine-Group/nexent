@@ -58,7 +58,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
   { path: "/monitoring", Icon: Activity, labelKey: "sidebar.monitoringManagement", order: 8 },
   { path: "/models", Icon: Settings, labelKey: "sidebar.modelManagement", order: 9 },
   { path: "/memory", Icon: Database, labelKey: "sidebar.memoryManagement", order: 10 },
-  { path: "/users", Icon: Users, labelKey: "sidebar.userManagement", order: 11 },
+  { path: "/users", Icon: User, labelKey: "sidebar.userManagement", order: 11 },
 ];
 
 /**
