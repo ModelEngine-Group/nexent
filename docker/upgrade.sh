@@ -215,6 +215,12 @@ update_option_value() {
 
 prompt_deploy_options() {
   # Only prompt for options that already exist in DEPLOY_OPTIONS
+  if [[ -n "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}" ]]; then
+    echo "🚀 Please select deployment version:"
+    echo "   1) ⚡️  Speed version - Lightweight deployment with essential features"
+    echo "   2) 🎯  Full version - Full-featured deployment with all capabilities"
+    prompt_option_value "VERSION_CHOICE" "Please select deployment version [1/2]" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}"
+  fi
   if [[ -n "${DEPLOY_OPTIONS[MODE_CHOICE]:-}" ]]; then
     echo "🎛️  Please select deployment mode:"
     echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
@@ -222,17 +228,11 @@ prompt_deploy_options() {
     echo "   3) 🚀 Production mode - Only expose port 3000 for security"
     prompt_option_value "MODE_CHOICE" "Please select deployment mode [1/2/3]" "${DEPLOY_OPTIONS[MODE_CHOICE]:-}"
   fi
-  if [[ -n "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}" ]]; then
-    echo "🚀 Please select deployment version:"
-    echo "   1) ⚡️  Speed version - Lightweight deployment with essential features"
-    echo "   2) 🎯  Full version - Full-featured deployment with all capabilities"
-    prompt_option_value "VERSION_CHOICE" "Please select deployment version [1/2]" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}"
+  if [[ -n "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}" ]]; then
+    prompt_option_value "ENABLE_TERMINAL" "Do you want to create Terminal tool container? (yes/no)" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}"
   fi
   if [[ -n "${DEPLOY_OPTIONS[IS_MAINLAND]:-}" ]]; then
     prompt_option_value "IS_MAINLAND" "Is your server network located in mainland China? (yes/no)" "${DEPLOY_OPTIONS[IS_MAINLAND]:-}"
-  fi
-  if [[ -n "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}" ]]; then
-    prompt_option_value "ENABLE_TERMINAL" "Do you want to create Terminal tool container? (yes/no)" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}"
   fi
 }
 
