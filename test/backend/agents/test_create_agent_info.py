@@ -849,7 +849,228 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
-        pass
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.ElasticSearchService"
+            ) as mock_es_service,
+            patch(
+                "backend.agents.create_agent_info.logger"
+            ) as mock_logger,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+
+            kb_tool_1 = Mock()
+            kb_tool_1.class_name = "KnowledgeBaseSearchTool"
+            kb_tool_1.name = "kb_tool_1"
+            kb_tool_1.params = {"index_names": ["idx_a", "idx_b"]}
+
+            other_tool = Mock()
+            other_tool.class_name = "OtherTool"
+            other_tool.name = "other_tool"
+            other_tool.params = {}
+
+            kb_tool_2 = Mock()
+            kb_tool_2.class_name = "KnowledgeBaseSearchTool"
+            kb_tool_2.name = "kb_tool_2"
+            kb_tool_2.params = {"index_names": ["idx_c"]}
+
+            mock_create_tools.return_value = [kb_tool_1, other_tool, kb_tool_2]
+            mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            mock_es_instance = Mock()
+            mock_es_instance.get_summary.side_effect = [
+                {"summary": "AAA"},
+                Exception("boom"),
+            ]
+            mock_es_service.return_value = mock_es_instance
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            assert mock_es_instance.get_summary.call_args_list == [
+                ((), {"index_name": "idx_a"}),
+                ((), {"index_name": "idx_b"}),
+            ]
+            mock_logger.warning.assert_called_once()
+            assert "idx_b" in mock_logger.warning.call_args[0][0]
+
+            mock_prepare_templates.assert_called_once()
+            assert mock_prepare_templates.call_args[1]["system_prompt"] == "**idx_a**: AAA\n\n"
+
+            # Ensure only the first KnowledgeBaseSearchTool is processed.
+            assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
+
+    @pytest.mark.parametrize(
+        "language,expected_message",
+        [
+            ("zh", "当前没有可用的知识库索引。\n"),
+            ("en", "No knowledge base indexes are currently available.\n"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_create_agent_config_knowledge_base_summary_no_indexes_message(
+        self, language, expected_message
+    ):
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.ElasticSearchService"
+            ) as mock_es_service,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+
+            kb_tool = Mock()
+            kb_tool.class_name = "KnowledgeBaseSearchTool"
+            kb_tool.name = "kb_tool"
+            kb_tool.params = {"index_names": []}
+            mock_create_tools.return_value = [kb_tool]
+
+            mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            await create_agent_config(
+                "agent_1", "tenant_1", "user_1", language, "test query"
+            )
+
+            mock_es_service.assert_not_called()
+            assert mock_prepare_templates.call_args[1]["system_prompt"] == expected_message
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_knowledge_base_summary_error(self):
+        """Test case for error handling during knowledge base summary build"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.logger') as mock_logger:
+
+            # Set mock return values
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = []
+            
+            # Create a tool that raises exception when accessing class_name
+            mock_tool = MagicMock()
+            type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
+            mock_create_tools.return_value = [mock_tool]
+
+            mock_get_template.return_value = {
+                "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"}
+            mock_tenant_config.get_app_config.side_effect = [
+                "TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1"
+            )
+            mock_prepare_templates.return_value = {
+                "system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            # Verify that error was logged
+            mock_logger.error.assert_called_with("Failed to build knowledge base summary: Test Error")
 
 
 class TestCreateModelConfigList:
