@@ -21,6 +21,9 @@ description: Page layer rules for Next.js App Router pages and layouts
 
 - Client components: `const { t } = useTranslation('namespace')`
 - Server components: `getTranslations` from `next-intl`
+
+
+
 - Organize translation keys by feature/namespace
 
 ### Data Fetching

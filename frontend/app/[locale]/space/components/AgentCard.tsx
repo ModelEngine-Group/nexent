@@ -133,9 +133,11 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
     setShowRelationship(true);
   };
 
-  // Handle chat
   const handleChat = () => {
-    router.push("/chat");
+    if (agent.id) {
+      sessionStorage.setItem("selectedAgentId", agent.id);
+      router.push("/chat");
+    }
   };
 
   // Handle edit - navigate to agents view

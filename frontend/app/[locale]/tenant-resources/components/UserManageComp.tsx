@@ -12,7 +12,6 @@ import {
   Input,
   Popconfirm,
   message,
-  Flex,
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -28,6 +27,8 @@ import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
+import InvitationList from "./resources/InvitationList";
+import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -231,20 +232,16 @@ export default function UserManageComp() {
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
   // For non-super admins, use their current tenant (from user metadata or default)
-  const [tenantId, setTenantId] = useState<string | null>(
-    isSuperAdmin ? tenants[0]?.tenant_id : "default"
-  );
+  const [tenantId, setTenantId] = useState<string | null>(tenants[0]?.tenant_id || null);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
-  const currentTenantName = tenantId
-    ? (currentTenant?.tenant_name || t("tenantResources.tenants.unnamed"))
-    : t("tenantResources.noTenantSelected", "No tenant selected");
+  const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
 
   return (
-    <Flex vertical className="h-full w-full">
+    <div className="w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="flex-shrink-0 w-full px-4 md:px-8 lg:px-16 py-6">
+      <div className="w-full px-4 md:px-8 lg:px-16 py-6">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: -8 }}
@@ -268,140 +265,88 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-
-      {/* Main content area with scrolling */}
-      <div className="flex-1 overflow-hidden">
-        {isSuperAdmin ? (
-          // Super admin layout: tenant list + resource tabs
-          <Row className="h-full" gutter={[0, 0]}>
-            <Col flex="300px" className="h-full">
-              <div className="h-full pr-6 overflow-y-auto">
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                  <TenantList
-                    selected={tenantId}
-                    onSelect={(id) => setTenantId(id === tenantId ? null : id)}
-                    tenants={tenants}
-                    onTenantsChange={setTenantsState}
-                    onTenantsRefetch={refetchTenants}
-                    loading={tenantsLoading}
-                    t={t}
-                  />
-                </div>
-              </div>
-            </Col>
-            <Col flex="auto" className="h-full">
-              <div className="h-full p-6 overflow-y-auto">
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4">
-                  {/* Tenant name header */}
-                  <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {currentTenantName}
-                    </h2>
-                  </div>
-
-                  {tenantId ? (
-                    <Tabs
-                      defaultActiveKey="users"
-                      items={[
-                        {
-                          key: "users",
-                          label: t("tenantResources.tabs.users") || "Users",
-                          children: <UserList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "groups",
-                          label: t("tenantResources.tabs.groups") || "Groups",
-                          children: <GroupList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "models",
-                          label: t("tenantResources.tabs.models") || "Models",
-                          children: <ModelList tenantId={tenantId} />,
-                        },
-                        {
-                          key: "knowledge",
-                          label:
-                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                          children: <KnowledgeList tenantId={tenantId} />,
-                        },
-                      ]}
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                        <Users className="h-8 w-8 text-gray-400" />
-                      </div>
-                      <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        {t("tenantResources.selectTenantFirst") ||
-                          "Please select a tenant"}
-                      </h3>
-                      <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                        {t("tenantResources.selectTenantDescription") ||
-                          "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Col>
-          </Row>
-        ) : (
-          // Regular user layout: only resource tabs (no tenant selection)
-          <div className="h-full p-6 overflow-y-auto">
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4">
-              {/* Tenant name header */}
-              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {currentTenantName}
-                </h2>
-              </div>
-
-              {tenantId ? (
-                <Tabs
-                  defaultActiveKey="users"
-                  items={[
-                    {
-                      key: "users",
-                      label: t("tenantResources.tabs.users") || "Users",
-                      children: <UserList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "groups",
-                      label: t("tenantResources.tabs.groups") || "Groups",
-                      children: <GroupList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "models",
-                      label: t("tenantResources.tabs.models") || "Models",
-                      children: <ModelList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "knowledge",
-                      label:
-                        t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                      children: <KnowledgeList tenantId={tenantId} />,
-                    },
-                  ]}
+      <Row className="h-full">
+        <Col className="h-full" style={{ width: 300 }}>
+          <div className="h-full pr-6">
+            <div className="sticky top-6">
+              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                <TenantList
+                  selected={tenantId}
+                  onSelect={(id) => setTenantId(id)}
+                  tenants={tenants}
+                  onTenantsChange={setTenantsState}
+                  onTenantsRefetch={refetchTenants}
+                  loading={tenantsLoading}
+                  t={t}
                 />
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                    <Users className="h-8 w-8 text-gray-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                    {t("tenantResources.noTenantAssigned") ||
-                      "No tenant assigned"}
-                  </h3>
-                  <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                    {t("tenantResources.contactAdmin") ||
-                      "Please contact your administrator to assign a tenant."}
-                  </p>
-                </div>
-              )}
+              </div>
             </div>
           </div>
-        )}
-      </div>
-    </Flex>
+        </Col>
+        <Col className="flex-1 p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+            {/* Tenant name header */}
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {currentTenantName}
+              </h2>
+            </div>
+
+            {tenantId ? (
+              <Tabs
+                defaultActiveKey="users"
+                items={[
+                  {
+                    key: "users",
+                    label: t("tenantResources.tabs.users") || "Users",
+                    children: <UserList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "groups",
+                    label: t("tenantResources.tabs.groups") || "Groups",
+                    children: <GroupList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "models",
+                    label: t("tenantResources.tabs.models") || "Models",
+                    children: <ModelList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "knowledge",
+                    label:
+                      t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                    children: <KnowledgeList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "invitations",
+                    label: t("tenantResources.invitation.tab") || "Invitations",
+                    children: <InvitationList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "mcp",
+                    label: t("tenantResources.tabs.mcp") || "MCP",
+                    children: <McpList tenantId={tenantId} />,
+                  },
+                ]}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                  <Users className="h-8 w-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                  {t("tenantResources.selectTenantFirst") ||
+                    "Please select a tenant"}
+                </h3>
+                <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+                  {t("tenantResources.selectTenantDescription") ||
+                    "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
+                </p>
+              </div>
+            )}
+          </div>
+        </Col>
+      </Row>
+    </div>
   );
 }

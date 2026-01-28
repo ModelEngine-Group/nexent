@@ -140,6 +140,15 @@ export function ChatInterface() {
   const [agentsLoaded, setAgentsLoaded] = useState(false);
   const [deploymentVersionLoaded, setDeploymentVersionLoaded] = useState(false);
 
+  useEffect(() => {
+    const agentId = sessionStorage.getItem("selectedAgentId");
+    // Set selected agent ID from sessionStorage if it exists and is a valid number
+    if (agentId) {
+        setSelectedAgentId(Number(agentId));
+        sessionStorage.removeItem("selectedAgentId");
+    }
+  },[]);
+
   // Reset scroll to bottom state
   useEffect(() => {
     if (shouldScrollToBottom) {

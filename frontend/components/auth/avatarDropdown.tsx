@@ -2,9 +2,11 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd";
-import { UserRound, LogOut, LogIn, Power, UserRoundPlus } from "lucide-react";
+import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
+import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
+import Link from "next/link";
+import { App } from "antd";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -103,6 +105,17 @@ export function AvatarDropdown() {
       style: {
         backgroundColor: "transparent",
         cursor: "default",
+      },
+    },
+    {
+      type: "divider",
+    },
+    {
+      key: "profile",
+      icon: <UserCircle size={16} />,
+      label: <Link href="/users">{t("sidebar.userManagement")}</Link>,
+      onClick: () => {
+        setDropdownOpen(false);
       },
     },
     {

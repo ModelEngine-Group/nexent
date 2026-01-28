@@ -45,6 +45,8 @@ export interface AgentGenerateDetailProps {
   currentAgentId?: number | null;
   onUpdateProfile: (updates: AgentProfileInfo) => void;
   onUpdateBusinessInfo: (updates: AgentBusinessInfo) => void;
+  isGenerating: boolean;
+  setIsGenerating: (value: boolean) => void;
 }
 
 export default function AgentGenerateDetail({
@@ -53,6 +55,8 @@ export default function AgentGenerateDetail({
   currentAgentId,
   onUpdateProfile,
   onUpdateBusinessInfo,
+  isGenerating,
+  setIsGenerating,
 }: AgentGenerateDetailProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -66,14 +70,10 @@ export default function AgentGenerateDetail({
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
 
-  // Generation state
-  const [isGenerating, setIsGenerating] = useState(false);
-
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
 
-  const userManuallySwitchedTabRef = useRef(false);
 
   // Ensure tenant config is loaded for default model selection
   useEffect(() => {
@@ -288,8 +288,7 @@ export default function AgentGenerateDetail({
     }
 
     setIsGenerating(true);
-    userManuallySwitchedTabRef.current = false; // Reset manual switch tracking when generation starts
-
+    setActiveTab("few-shots");
     try {
       await generatePromptStream(
         {
@@ -307,33 +306,27 @@ export default function AgentGenerateDetail({
         },
         (data) => {
           // Process streaming response data
-
+          
           switch (data.type) {
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
-              !userManuallySwitchedTabRef.current && setActiveTab("duty");
               form.setFieldsValue({ dutyPrompt: data.content });
               break;
             case GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT:
               form.setFieldsValue({ constraintPrompt: data.content });
-              !userManuallySwitchedTabRef.current && setActiveTab("constraint");
               break;
             case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-              !userManuallySwitchedTabRef.current && setActiveTab("few-shots");
+              
               form.setFieldsValue({ fewShotsPrompt: data.content });
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
-              !userManuallySwitchedTabRef.current && setActiveTab("agent-info");
-              // Only update if current agent name is empty
               if (!form.getFieldValue("agentName")?.trim()) {
                 form.setFieldsValue({ agentName: data.content });
               }
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
-              !userManuallySwitchedTabRef.current && setActiveTab("agent-info");
               form.setFieldsValue({ agentDescription: data.content });
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
-              !userManuallySwitchedTabRef.current && setActiveTab("agent-info");
               // Only update if current agent display name is empty
               if (!form.getFieldValue("agentDisplayName")?.trim()) {
                 form.setFieldsValue({ agentDisplayName: data.content });
@@ -345,7 +338,6 @@ export default function AgentGenerateDetail({
           log.error("Generate prompt stream error:", error);
           message.error(t("businessLogic.config.message.generateError"));
           setIsGenerating(false);
-          userManuallySwitchedTabRef.current = false; // Reset manual switch tracking when generation fails
         },
         () => {
           // After generation completes, get all form values and update parent component state
@@ -367,14 +359,12 @@ export default function AgentGenerateDetail({
 
           message.success(t("businessLogic.config.message.generateSuccess"));
           setIsGenerating(false);
-          userManuallySwitchedTabRef.current = false; // Reset manual switch tracking when generation completes
         }
       );
     } catch (error) {
       log.error("Generate agent error:", error);
       message.error(t("businessLogic.config.message.generateError"));
       setIsGenerating(false);
-      userManuallySwitchedTabRef.current = false; // Reset manual switch tracking when generation fails
     }
   };
 
@@ -782,10 +772,6 @@ export default function AgentGenerateDetail({
             activeKey={activeTab}
             onChange={(key) => {
               setActiveTab(key);
-              // If user manually switches tabs during generation, track it
-              if (isGenerating) {
-                userManuallySwitchedTabRef.current = true;
-              }
             }}
             items={tabItems}
             size="middle"
