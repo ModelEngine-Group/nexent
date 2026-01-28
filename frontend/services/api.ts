@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import log from "@/lib/logger";
+import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
 
@@ -206,13 +207,7 @@ export const API_ENDPOINTS = {
     },
   },
   market: {
-    agents: (params?: {
-      page?: number;
-      page_size?: number;
-      category?: string;
-      tag?: string;
-      search?: string;
-    }) => {
+    agents: (params?: MarketAgentListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.page) queryParams.append("page", params.page.toString());
       if (params?.page_size)
@@ -220,6 +215,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
+      if (params?.lang) queryParams.append("lang", (params as any).lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
