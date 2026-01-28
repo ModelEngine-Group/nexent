@@ -40,7 +40,8 @@ from database.agent_db import (
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
     update_agent,
-    update_related_agents
+    update_related_agents,
+    clear_agent_new_mark
 )
 from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
@@ -1114,6 +1115,9 @@ async def import_agent_impl(
             agent_stack.append(need_import_agent_id)
             agent_stack.extend(managed_agents)
 
+    # Return the mapping of original IDs to new IDs
+    return mapping_agent_id
+
 
 async def import_agent_by_agent_id(
     import_agent_info: ExportAndImportAgentInfo,
@@ -1221,6 +1225,22 @@ def load_default_agents_json_file(default_agent_path):
     return all_json_files
 
 
+async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Clear the NEW mark for an agent
+
+    Args:
+        agent_id (int): Agent ID
+        tenant_id (str): Tenant ID
+        user_id (str): User ID (for audit purposes)
+    """
+    rowcount = clear_agent_new_mark(agent_id, tenant_id, user_id)
+    logger.info(f"clear_agent_new_mark_impl called for agent_id={agent_id}, tenant_id={tenant_id}, user_id={user_id}, affected_rows={rowcount}")
+    return rowcount
+
+
+
+
 async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
     """
     list all agent info
@@ -1275,6 +1295,7 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
                 "author": agent.get("author"),
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
+                "is_new": agent.get("is_new", False),
                 "group_ids": convert_string_to_list(agent.get("group_ids"))
             })
 

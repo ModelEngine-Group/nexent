@@ -231,6 +231,11 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
   const [showAutoDeselectModal, setShowAutoDeselectModal] = useState(false);
   const [newlyCreatedKbId, setNewlyCreatedKbId] = useState<string | null>(null); // Track newly created KB waiting for documents
+
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<string[]>([]);
+  const [modelFilter, setModelFilter] = useState<string[]>([]);
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   // Open warning modal when single Embedding model is not configured (ignore multi-embedding)
@@ -1053,6 +1058,21 @@ function DataConfig({ isActive }: DataConfigProps) {
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
+              // Search and filter props
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              sourceFilter={sourceFilter}
+              onSourceFilterChange={(values) =>
+                setSourceFilter(
+                  Array.isArray(values) ? values : values ? [values] : []
+                )
+              }
+              modelFilter={modelFilter}
+              onModelFilterChange={(values) =>
+                setModelFilter(
+                  Array.isArray(values) ? values : values ? [values] : []
+                )
+              }
             />
           </Col>
 

@@ -636,3 +636,159 @@ def test_update_related_agents_no_changes(monkeypatch, mock_session):
     # Verify: no deletions, no additions
     session.add.assert_not_called()
     session.commit.assert_called_once() 
+
+
+def test_clear_agent_new_mark_success(monkeypatch):
+    """Test successful clearing of agent NEW mark"""
+    from backend.database.agent_db import clear_agent_new_mark
+
+    # Mock the entire update operation
+    mock_update_result = MagicMock()
+    mock_update_result.rowcount = 1
+
+    mock_update = MagicMock(return_value=mock_update_result)
+    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+
+    # Mock session
+    mock_session = MagicMock()
+    mock_session.execute.return_value = mock_update_result
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute
+    result = clear_agent_new_mark(1, "tenant1", "user1")
+
+    # Verify
+    assert result == 1
+    mock_session.execute.assert_called_once()
+
+
+def test_clear_agent_new_mark_no_rows_affected(monkeypatch):
+    """Test clearing agent NEW mark when no rows are affected"""
+    from backend.database.agent_db import clear_agent_new_mark
+
+    # Mock the entire update operation
+    mock_update_result = MagicMock()
+    mock_update_result.rowcount = 0
+
+    mock_update = MagicMock(return_value=mock_update_result)
+    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+
+    # Mock session
+    mock_session = MagicMock()
+    mock_session.execute.return_value = mock_update_result
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute
+    result = clear_agent_new_mark(999, "tenant1", "user1")
+
+    # Verify
+    assert result == 0
+    mock_session.execute.assert_called_once()
+
+
+def test_mark_agents_as_new_success(monkeypatch):
+    """Test successful marking agents as new"""
+    from backend.database.agent_db import mark_agents_as_new
+
+    # Mock the update function
+    mock_update = MagicMock()
+    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+
+    # Mock session
+    mock_session = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute
+    mark_agents_as_new([1, 2, 3], "tenant1", "user1")
+
+    # Verify
+    mock_session.execute.assert_called_once()
+
+
+def test_mark_agents_as_new_empty_list(monkeypatch):
+    """Test marking agents as new with empty list"""
+    from backend.database.agent_db import mark_agents_as_new
+
+    # Mock session
+    mock_session = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute with empty list
+    mark_agents_as_new([], "tenant1", "user1")
+
+    # Verify - should not execute any database operations
+    mock_session.execute.assert_not_called()
+
+
+def test_clear_agent_new_mark_sqlalchemy_error(monkeypatch):
+    """Test clear_agent_new_mark with SQLAlchemy error"""
+    from backend.database.agent_db import clear_agent_new_mark
+    from sqlalchemy.exc import SQLAlchemyError
+
+    # Mock the update function
+    mock_update = MagicMock()
+    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+
+    # Mock session to raise SQLAlchemy error
+    mock_session = MagicMock()
+    mock_session.execute.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute and expect exception
+    with pytest.raises(SQLAlchemyError):
+        clear_agent_new_mark(1, "tenant1", "user1")
+
+
+def test_mark_agents_as_new_sqlalchemy_error(monkeypatch):
+    """Test mark_agents_as_new with SQLAlchemy error"""
+    from backend.database.agent_db import mark_agents_as_new
+    from sqlalchemy.exc import SQLAlchemyError
+
+    # Mock the update function
+    mock_update = MagicMock()
+    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+
+    # Mock session to raise SQLAlchemy error
+    mock_session = MagicMock()
+    mock_session.execute.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    # Execute and expect exception
+    with pytest.raises(SQLAlchemyError):
+        mark_agents_as_new([1, 2, 3], "tenant1", "user1")
+
+
+def test_clear_agent_new_mark_database_connection_error(monkeypatch):
+    """Test clear_agent_new_mark with database connection error"""
+    from backend.database.agent_db import clear_agent_new_mark
+
+    # Mock get_db_session to raise an exception
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: (_ for _ in ()).throw(Exception("Connection failed")))
+
+    # Execute and expect exception
+    with pytest.raises(Exception):
+        clear_agent_new_mark(1, "tenant1", "user1")

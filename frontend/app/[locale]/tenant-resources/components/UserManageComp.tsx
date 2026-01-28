@@ -29,6 +29,7 @@ import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
+import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { USER_ROLES } from "@/const/modelConfig";
 
@@ -320,6 +321,11 @@ export default function UserManageComp() {
                     key: "invitations",
                     label: t("tenantResources.invitation.tab") || "Invitations",
                     children: <InvitationList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "mcp",
+                    label: t("tenantResources.tabs.mcp") || "MCP",
+                    children: <McpList tenantId={tenantId} />,
                   },
                 ]}
               />
