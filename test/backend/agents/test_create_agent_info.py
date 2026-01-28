@@ -851,6 +851,58 @@ class TestCreateAgentConfig:
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
         pass
 
+    @pytest.mark.asyncio
+    async def test_create_agent_config_knowledge_base_summary_error(self):
+        """Test case for error handling during knowledge base summary build"""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
+                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
+                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.logger') as mock_logger:
+
+            # Set mock return values
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True
+            }
+            mock_query_sub.return_value = []
+            
+            # Create a tool that raises exception when accessing class_name
+            mock_tool = MagicMock()
+            type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
+            mock_create_tools.return_value = [mock_tool]
+
+            mock_get_template.return_value = {
+                "system_prompt": "{{duty}} {{constraint}} {{few_shots}}"}
+            mock_tenant_config.get_app_config.side_effect = [
+                "TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1"
+            )
+            mock_prepare_templates.return_value = {
+                "system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            # Verify that error was logged
+            mock_logger.error.assert_called_with("Failed to build knowledge base summary: Test Error")
+
 
 class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
