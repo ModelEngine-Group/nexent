@@ -73,6 +73,18 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
 export const DEFAULT_PROVIDER_ICON = "/default-icon.png";
 
+// Provider official website links
+export const PROVIDER_LINKS: Record<string, string> = {
+  modelengine: "https://modelengine-ai.net/",
+  siliconflow: "https://siliconflow.ai/",
+  openai: "https://platform.openai.com/",
+  kimi: "https://platform.moonshot.ai/",
+  deepseek: "https://platform.deepseek.com/",
+  qwen: "https://bailian.console.aliyun.com/",
+  jina: "https://jina.ai/",
+  baai: "https://www.baai.ac.cn/"
+};
+
 // User role constants
 export const USER_ROLES = {
   USER: "user",

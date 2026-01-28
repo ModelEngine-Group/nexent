@@ -320,6 +320,7 @@
   "agent.error.modelUnavailable": "大语言模型{{modelName}}不可用，请修改",
   "agent.debug.placeholder": "输入测试问题...",
   "agent.debug.stop": "停止",
+  "agent.debug.clear": "清空",
   "agent.debug.send": "发送",
   "agent.debug.userStop": "用户手动停止调试",
   "agent.debug.cancelError": "取消请求时出错",

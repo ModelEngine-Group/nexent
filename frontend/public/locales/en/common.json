@@ -319,6 +319,7 @@
   "agent.error.modelUnavailable": "LLM {{modelName}} is unavailable, please modify",
   "agent.debug.placeholder": "Enter test question...",
   "agent.debug.stop": "Stop",
+  "agent.debug.clear": "Clear",
   "agent.debug.send": "Send",
   "agent.debug.userStop": "User manually stopped debugging",
   "agent.debug.cancelError": "Error while canceling request",
