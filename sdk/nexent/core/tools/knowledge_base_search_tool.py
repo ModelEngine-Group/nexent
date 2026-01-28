@@ -55,7 +55,7 @@ class KnowledgeBaseSearchTool(Tool):
         """Initialize the KBSearchTool.
 
         Args:
-            top_k (int, optional): Number of results to return. Defaults to 5.
+            top_k (int, optional): Number of results to return. Defaults to 3.
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
 
         Raises:

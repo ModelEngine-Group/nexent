@@ -10,13 +10,14 @@ import {
   Zap,
   Settings,
   BookOpen,
-  Users,
+  User,
   Database,
   ShoppingBag,
   Code,
   Home,
   Puzzle,
   Activity,
+  Building2,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuth } from "@/hooks/useAuth";
@@ -59,6 +60,7 @@ export function SideNavigation({
     "/models": "models",
     "/memory": "memory",
     "/users": "users",
+    "/tenant-resources": "tenant-resources",
   };
 
   // 添加useEffect来监听pathname变化并更新selectedKey
@@ -145,7 +147,15 @@ export function SideNavigation({
       false,
       true
     ),
-    createMenuItem("9", "/users", Users, "sidebar.userManagement", false, true),
+    createMenuItem("9", "/users", User, "sidebar.userManagement", false, true),
+    createMenuItem(
+      "12",
+      "/tenant-resources",
+      Building2,
+      "sidebar.tenantResources",
+      false,
+      true
+    ),
   ];
 
   return (

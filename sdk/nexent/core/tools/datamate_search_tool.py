@@ -14,6 +14,15 @@ from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, 
 logger = logging.getLogger("datamate_search_tool")
 
 
+def _normalize_index_names(index_names: Optional[Union[str, List[str]]]) -> List[str]:
+    """Normalize index_names to list; accept single string and keep None as empty list."""
+    if index_names is None:
+        return []
+    if isinstance(index_names, str):
+        return [index_names]
+    return list(index_names)
+
+
 class DataMateSearchTool(Tool):
     """DataMate knowledge base search tool"""
     name = "datamate_search"

@@ -10,14 +10,15 @@ from starlette.responses import JSONResponse
 
 from consts.model import (
     GroupCreateRequest, GroupUpdateRequest,
-    GroupUserRequest, GroupListRequest, SetDefaultGroupRequest
+    GroupUserRequest, GroupListRequest, SetDefaultGroupRequest,
+    GroupMembersUpdateRequest
 )
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 from services.group_service import (
     create_group, get_group_info, update_group, delete_group,
     add_user_to_single_group, remove_user_from_single_group, get_group_users,
     add_user_to_groups, get_tenant_default_group_id, set_tenant_default_group_id,
-    get_groups_by_tenant
+    get_groups_by_tenant, update_group_members
 )
 from services.tenant_service import get_tenant_info
 from utils.auth_utils import get_current_user_id
@@ -140,11 +141,13 @@ async def get_groups_endpoint(
     try:
         # Validate tenant exists
         get_tenant_info(request.tenant_id)
-        # Get groups under given tenant with pagination
+        # Get groups under given tenant with pagination and sorting
         result = get_groups_by_tenant(
             tenant_id=request.tenant_id,
             page=request.page,
-            page_size=request.page_size
+            page_size=request.page_size,
+            sort_by=request.sort_by,
+            sort_order=request.sort_order
         )
 
         return JSONResponse(
@@ -483,6 +486,70 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve group users"
+        )
+
+
+@router.put("/{group_id}/members")
+async def update_group_members_endpoint(
+    group_id: int,
+    request: GroupMembersUpdateRequest,
+    authorization: Optional[str] = Header(None)
+) -> JSONResponse:
+    """
+    Update group members by setting the exact list of users.
+
+    Args:
+        group_id: Group identifier
+        request: Request containing the list of user IDs to set as group members
+        authorization: Bearer token for authentication
+
+    Returns:
+        JSONResponse: Update results with counts
+    """
+    try:
+        # Get current user ID from token
+        current_user_id, _ = get_current_user_id(authorization)
+
+        # Update group members
+        result = update_group_members(
+            group_id=group_id,
+            user_ids=request.user_ids,
+            current_user_id=current_user_id
+        )
+
+        logger.info(f"Updated group {group_id} members by user {current_user_id}: {result}")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "Group members updated successfully",
+                "data": result
+            }
+        )
+
+    except NotFoundException as exc:
+        logger.warning(f"Group not found for member update: {group_id}")
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc)
+        )
+    except ValidationError as exc:
+        logger.warning(f"Group members update validation error: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc)
+        )
+    except UnauthorizedError as exc:
+        logger.warning(f"Unauthorized group members update attempt: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail=str(exc)
+        )
+    except Exception as exc:
+        logger.error(f"Unexpected error during group members update: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to update group members"
         )
 
 
