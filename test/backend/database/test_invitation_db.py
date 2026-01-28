@@ -523,14 +523,16 @@ def test_query_invitations_with_pagination_success(monkeypatch, mock_session):
     mock_invitation2 = MockTenantInvitationCode(invitation_id=2, invitation_code="code2")
     mock_results = [(mock_invitation1, 3), (mock_invitation2, 0)]  # invitation1 used 3 times, invitation2 used 0 times
 
-    # Mock query chain
+    # Mock query chain: query -> outerjoin -> filter -> count/offset
+    mock_outerjoin = MagicMock()
     mock_filter = MagicMock()
     mock_filter.count.return_value = 5  # Total count
     mock_offset = MagicMock()
     mock_offset.limit.return_value = mock_offset
     mock_offset.all.return_value = mock_results
     mock_filter.offset.return_value = mock_offset
-    query.filter.return_value = mock_filter
+    mock_outerjoin.filter.return_value = mock_filter
+    query.outerjoin.return_value = mock_outerjoin
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -555,14 +557,16 @@ def test_query_invitations_with_pagination_empty_results(monkeypatch, mock_sessi
     """Test querying invitations with pagination when no results"""
     session, query = mock_session
 
-    # Mock empty results
+    # Mock empty results - use query -> outerjoin -> filter -> count/offset chain
+    mock_outerjoin = MagicMock()
     mock_filter = MagicMock()
     mock_filter.count.return_value = 0  # Total count
     mock_offset = MagicMock()
     mock_offset.limit.return_value = mock_offset
     mock_offset.all.return_value = []
     mock_filter.offset.return_value = mock_offset
-    query.filter.return_value = mock_filter
+    mock_outerjoin.filter.return_value = mock_filter
+    query.outerjoin.return_value = mock_outerjoin
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -587,7 +591,8 @@ def test_query_invitations_with_pagination_with_tenant_filter(monkeypatch, mock_
     mock_invitation = MockTenantInvitationCode(invitation_id=1, invitation_code="code1", tenant_id="test_tenant")
     mock_result = (mock_invitation, 2)  # invitation used 2 times
 
-    # Mock query chain with tenant filter
+    # Mock query chain with tenant filter: query -> outerjoin -> filter -> filter -> count/offset
+    mock_outerjoin = MagicMock()
     mock_tenant_filter = MagicMock()
     mock_tenant_filter.count.return_value = 1
     mock_offset = MagicMock()
@@ -595,9 +600,12 @@ def test_query_invitations_with_pagination_with_tenant_filter(monkeypatch, mock_
     mock_offset.all.return_value = [mock_result]
     mock_tenant_filter.offset.return_value = mock_offset
 
+    # First filter (delete_flag filter)
     mock_base_filter = MagicMock()
     mock_base_filter.filter.return_value = mock_tenant_filter
-    query.filter.return_value = mock_base_filter
+
+    mock_outerjoin.filter.return_value = mock_base_filter
+    query.outerjoin.return_value = mock_outerjoin
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -624,14 +632,16 @@ def test_query_invitations_with_pagination_second_page(monkeypatch, mock_session
     mock_invitation = MockTenantInvitationCode(invitation_id=3, invitation_code="code3")
     mock_result = (mock_invitation, 1)  # invitation used 1 time
 
-    # Mock query chain
+    # Mock query chain: query -> outerjoin -> filter -> count/offset
+    mock_outerjoin = MagicMock()
     mock_filter = MagicMock()
     mock_filter.count.return_value = 5  # Total count
     mock_offset = MagicMock()
     mock_offset.limit.return_value = mock_offset
     mock_offset.all.return_value = [mock_result]
     mock_filter.offset.return_value = mock_offset
-    query.filter.return_value = mock_filter
+    mock_outerjoin.filter.return_value = mock_filter
+    query.outerjoin.return_value = mock_outerjoin
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
