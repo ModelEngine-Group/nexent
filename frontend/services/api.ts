@@ -43,6 +43,7 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
+    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,

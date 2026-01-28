@@ -17,7 +17,8 @@ from services.agent_service import (
     list_all_agent_info_impl,
     run_agent_stream,
     stop_agent_tasks,
-    get_agent_call_relationship_impl
+    get_agent_call_relationship_impl,
+    clear_agent_new_mark_impl
 )
 from utils.auth_utils import get_current_user_info, get_current_user_id
 
@@ -146,6 +147,21 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent import error.")
+
+
+@agent_config_router.put("/clear_new/{agent_id}")
+async def clear_agent_new_mark_api(agent_id: int, authorization: Optional[str] = Header(None)):
+    """
+    Clear the NEW mark for an agent
+    """
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization)
+        affected_rows = await clear_agent_new_mark_impl(agent_id, tenant_id, user_id)
+        return {"message": "Agent NEW mark cleared successfully", "affected_rows": affected_rows}
+    except Exception as e:
+        logger.error(f"Failed to clear agent NEW mark: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to clear agent NEW mark.")
 
 
 @agent_config_router.post("/check_name")
