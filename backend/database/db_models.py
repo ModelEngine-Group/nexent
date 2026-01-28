@@ -222,6 +222,7 @@ class AgentInfo(TableBase):
     business_logic_model_name = Column(String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
     group_ids = Column(String, doc="Agent group IDs list")
+    is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
 
 
 class ToolInstance(TableBase):

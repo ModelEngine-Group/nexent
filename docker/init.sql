@@ -314,6 +314,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     tenant_id VARCHAR(100),
     group_ids VARCHAR,
     enabled BOOLEAN DEFAULT FALSE,
+    is_new BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -364,6 +365,12 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.is_new IS 'Whether this agent is marked as new for the user';
+
+-- Create index for is_new queries
+CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
+ON nexent.ag_tenant_agent_t (tenant_id, is_new)
+WHERE delete_flag = 'N';
 
 
 -- Create the ag_tool_instance_t table in the nexent schema
