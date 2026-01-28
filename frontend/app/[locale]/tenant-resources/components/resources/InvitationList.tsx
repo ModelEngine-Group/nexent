@@ -208,10 +208,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         key: "code_type",
         width: 80,
         render: (type: string) => {
-          const color =
-            type === "ADMIN_INVITE" ? "magenta" :
-            type === "DEV_INVITE" ? "geekblue" : "cyan";
-          return <Tag color={color}>{t(`tenantResources.invitation.codeType.${type}`)}</Tag>;
+          return <Tag color="default">{t(`tenantResources.invitation.codeType.${type}`)}</Tag>;
         },
       },
       {
@@ -277,9 +274,9 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         width: 120,
         render: (status: string) => {
           const color =
-            status === "IN_USE" ? "green" :
-            status === "EXPIRE" ? "gray" :
-            status === "RUN_OUT" ? "gray" : "volcano";
+            status === "IN_USE" ? "#229954" :
+            status === "EXPIRE" ? "#AEB6BF" :
+            status === "RUN_OUT" ? "#E74C3C" : "#2E4053";
 
           const icon = status === "IN_USE" ? <CheckCircle className="w-3 h-3 mr-1" /> :
                       status === "EXPIRE" ? <Clock className="w-3 h-3 mr-1" /> :
