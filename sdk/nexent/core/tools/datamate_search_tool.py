@@ -14,15 +14,6 @@ from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, 
 logger = logging.getLogger("datamate_search_tool")
 
 
-def _normalize_index_names(index_names: Optional[Union[str, List[str]]]) -> List[str]:
-    """Normalize index_names to list; accept single string and keep None as empty list."""
-    if index_names is None:
-        return []
-    if isinstance(index_names, str):
-        return [index_names]
-    return list(index_names)
-
-
 class DataMateSearchTool(Tool):
     """DataMate knowledge base search tool"""
     name = "datamate_search"
@@ -37,23 +28,6 @@ class DataMateSearchTool(Tool):
         "query": {
             "type": "string",
             "description": "The search query to perform.",
-        },
-        "top_k": {
-            "type": "integer",
-            "description": "Maximum number of search results to return.",
-            "default": 3,
-            "nullable": True,
-        },
-        "threshold": {
-            "type": "number",
-            "description": "Similarity threshold for search results.",
-            "default": 0.2,
-            "nullable": True,
-        },
-        "index_names": {
-            "type": "array",
-            "description": "The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.",
-            "nullable": True,
         },
         "kb_page": {
             "type": "integer",
@@ -80,9 +54,13 @@ class DataMateSearchTool(Tool):
         verify_ssl: bool = Field(
             description="Whether to verify SSL certificates for HTTPS connections", default=False),
         index_names: List[str] = Field(
-            description="The list of index names to search", default=None, exclude=True),
+            description="The list of index names to search", default=None),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
+        top_k: int = Field(
+            description="Default maximum number of search results to return", default=3),
+        threshold: float = Field(
+            description="Default similarity threshold for search results", default=0.2),
     ):
         """Initialize the DataMateSearchTool.
 
@@ -106,6 +84,8 @@ class DataMateSearchTool(Tool):
         self.use_https = parsed_url["use_https"]
         self.server_base_url = parsed_url["base_url"]
         self.index_names = [] if index_names is None else index_names
+        self.top_k = top_k
+        self.threshold = threshold
 
         # Determine SSL verification setting
         if verify_ssl is None:
@@ -177,9 +157,6 @@ class DataMateSearchTool(Tool):
     def forward(
         self,
         query: str,
-        top_k: int = 3,
-        threshold: float = 0.2,
-        index_names: Union[str, List[str], None] = None,
         kb_page: int = 0,
         kb_page_size: int = 20,
     ) -> str:
@@ -187,9 +164,6 @@ class DataMateSearchTool(Tool):
 
         Args:
             query: Search query text.
-            top_k: Optional override for maximum number of search results.
-            threshold: Optional override for similarity threshold.
-            index_names: The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.
             kb_page: Optional override for knowledge base list page index.
             kb_page_size: Optional override for knowledge base list page size.
         """
@@ -207,15 +181,12 @@ class DataMateSearchTool(Tool):
 
         logger.info(
             f"DataMateSearchTool called with query: '{query}', base_url: '{self.server_base_url}', "
-            f"top_k: {top_k}, threshold: {threshold}, index_names: {index_names}"
+            f"top_k: {self.top_k}, threshold: {self.threshold}, index_names: {self.index_names}"
         )
 
         try:
             # Step 1: Determine knowledge base IDs to search
-            # Use provided index_names if available, otherwise use default
-            knowledge_base_ids = _normalize_index_names(
-                index_names if index_names is not None else self.index_names)
-
+            knowledge_base_ids = self.index_names
             if len(knowledge_base_ids) == 0:
                 return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
@@ -225,8 +196,8 @@ class DataMateSearchTool(Tool):
                 kb_search = self.datamate_core.hybrid_search(
                     query_text=query,
                     index_names=[knowledge_base_id],
-                    top_k=top_k,
-                    weight_accurate=threshold,
+                    top_k=self.top_k,
+                    weight_accurate=self.threshold,
                 )
                 if not kb_search:
                     raise Exception(

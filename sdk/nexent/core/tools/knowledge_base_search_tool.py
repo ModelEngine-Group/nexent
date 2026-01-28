@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Optional, Union
+from typing import List
 
 from pydantic import Field
 from smolagents.tools import Tool
@@ -28,34 +28,29 @@ class KnowledgeBaseSearchTool(Tool):
     )
     inputs = {
         "query": {"type": "string", "description": "The search query to perform."},
-        "search_mode": {
-            "type": "string",
-            "description": "the search mode, optional values: hybrid, combining accurate matching and semantic search results across multiple indices.; accurate, Search for documents using fuzzy text matching across multiple indices; semantic, Search for similar documents using vector similarity across multiple indices.",
-            "default": "hybrid",
-            "nullable": True,
-        },
-        "index_names": {
-            "type": "array",
-            "description": "The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.",
-            "nullable": True,
-        },
     }
     output_type = "string"
-    category = ToolCategory.SEARCH.value 
+    category = ToolCategory.SEARCH.value
 
     # Used to distinguish different index sources for summaries
     tool_sign = ToolSign.KNOWLEDGE_BASE.value
 
     def __init__(
         self,
-        top_k: int = Field(description="Maximum number of search results", default=3),
-        index_names: List[str] = Field(description="The list of index names to search", default=None, exclude=True),
-        name_resolver: Optional[Dict[str, str]] = Field(
-            description="Mapping from knowledge_name to index_name", default=None, exclude=True
+        top_k: int = Field(
+            description="Maximum number of search results", default=3),
+        index_names: List[str] = Field(
+            description="The list of index names to search", default=None),
+        search_mode: str = Field(
+            description="the search mode, optional values: hybrid, accurate, semantic",
+            default="hybrid",
         ),
-        observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
-        embedding_model: BaseEmbedding = Field(description="The embedding model to use", default=None, exclude=True),
-        vdb_core: VectorDatabaseCore = Field(description="Vector database client", default=None, exclude=True),
+        observer: MessageObserver = Field(
+            description="Message observer", default=None, exclude=True),
+        embedding_model: BaseEmbedding = Field(
+            description="The embedding model to use", default=None, exclude=True),
+        vdb_core: VectorDatabaseCore = Field(
+            description="Vector database client", default=None, exclude=True),
     ):
         """Initialize the KBSearchTool.
 
@@ -71,36 +66,15 @@ class KnowledgeBaseSearchTool(Tool):
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
-        self.name_resolver: Dict[str, str] = name_resolver or {}
+        self.search_mode = search_mode
         self.embedding_model = embedding_model
 
         self.record_ops = 1  # To record serial number
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
 
-    def update_name_resolver(self, new_mapping: Dict[str, str]) -> None:
-        """Update the mapping from knowledge_name to index_name at runtime."""
-        self.name_resolver = new_mapping or {}
 
-    def _resolve_names(self, names: List[str]) -> List[str]:
-        """Resolve user-facing knowledge names to internal index names."""
-        if not names:
-            return []
-        if not self.name_resolver:
-            logger.warning(
-                "No name resolver provided, returning original names")
-            return names
-        return [self.name_resolver.get(name, name) for name in names]
-
-    def _normalize_index_names(self, index_names: Optional[Union[str, List[str]]]) -> List[str]:
-        """Normalize index_names to list; accept single string and keep None as empty list."""
-        if index_names is None:
-            return []
-        if isinstance(index_names, str):
-            return [index_names]
-        return list(index_names)
-
-    def forward(self, query: str, search_mode: str = "hybrid", index_names: Union[str, List[str], None] = None) -> str:
+    def forward(self, query: str) -> str:
         # Send tool run message
         if self.observer:
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
@@ -108,10 +82,9 @@ class KnowledgeBaseSearchTool(Tool):
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
-        # Use provided index_names if available, otherwise use default
-        search_index_names = self._normalize_index_names(
-            index_names if index_names is not None else self.index_names)
-        search_index_names = self._resolve_names(search_index_names)
+        # Use the instance index_names and search_mode
+        search_index_names = self.index_names
+        search_mode = self.search_mode
 
         # Log the index_names being used for this search
         logger.info(
