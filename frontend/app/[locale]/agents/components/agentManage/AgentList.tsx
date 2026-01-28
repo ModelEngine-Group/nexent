@@ -12,7 +12,7 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
 import {
   searchAgentInfo,
-  updateAgent,
+  updateAgentInfo,
   deleteAgent,
   exportAgent,
   updateToolConfig,
@@ -71,7 +71,7 @@ export default function AgentList({
 
   // Mutations
   const updateAgentMutation = useMutation({
-    mutationFn: (payload: any[]) => updateAgent(...payload),
+    mutationFn: (payload: any) => updateAgentInfo(payload),
   });
 
   const deleteAgentMutation = useMutation({
@@ -153,26 +153,26 @@ export default function AgentList({
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
-      const createResult = await updateAgentMutation.mutateAsync([
-        undefined,
-        copyName,
-        detail.description,
-        detail.model,
-        detail.max_step,
-        detail.provide_run_summary,
-        detail.enabled,
-        detail.business_description,
-        detail.duty_prompt,
-        detail.constraint_prompt,
-        detail.few_shots_prompt,
-        copyDisplayName,
-        detail.model_id ?? undefined,
-        detail.business_logic_model_name ?? undefined,
-        detail.business_logic_model_id ?? undefined,
-        enabledToolIds,
-        subAgentIds,
-        detail.author,
-      ]);
+      const createResult = await updateAgentMutation.mutateAsync({
+        agent_id: undefined, // create
+        name: copyName,
+        display_name: copyDisplayName,
+        description: detail.description,
+        author: detail.author,
+        model_name: detail.model,
+        model_id: detail.model_id ?? undefined,
+        max_steps: detail.max_step,
+        provide_run_summary: detail.provide_run_summary,
+        enabled: detail.enabled,
+        business_description: detail.business_description,
+        duty_prompt: detail.duty_prompt,
+        constraint_prompt: detail.constraint_prompt,
+        few_shots_prompt: detail.few_shots_prompt,
+        business_logic_model_name: detail.business_logic_model_name ?? undefined,
+        business_logic_model_id: detail.business_logic_model_id ?? undefined,
+        enabled_tool_ids: enabledToolIds,
+        related_agent_ids: subAgentIds,
+      });
 
       if (!createResult.success || !createResult.data?.agent_id) {
         message.error(

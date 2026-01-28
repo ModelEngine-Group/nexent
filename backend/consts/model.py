@@ -278,6 +278,7 @@ class AgentInfoRequest(BaseModel):
     business_logic_model_id: Optional[int] = None
     enabled_tool_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
+    group_ids: Optional[List[int]] = None
 
 
 class AgentIDRequest(BaseModel):
