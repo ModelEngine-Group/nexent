@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
 import { App } from "antd";
@@ -12,7 +12,10 @@ import {
   CheckCircle,
   XCircle,
   Edit,
+  Sparkles,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 import { Avatar } from "antd";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
@@ -21,6 +24,7 @@ import {
   deleteAgent,
   exportAgent,
   searchAgentInfo,
+  clearAgentNewMark,
 } from "@/services/agentConfigService";
 import { generateAvatarFromName } from "@/lib/avatar";
 import { useAuth } from "@/hooks/useAuth";
@@ -53,6 +57,14 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
 
   // Generate avatar URL from agent name
   const avatarUrl = generateAvatarFromName(agent.display_name || agent.name);
+
+  // Check if agent is new (marked as new in database)
+  const [isNewAgent, setIsNewAgent] = useState(() => agent.is_new || false);
+
+  // Keep local isNewAgent state in sync when prop changes (e.g., after refresh)
+  useEffect(() => {
+    setIsNewAgent(agent.is_new || false);
+  }, [agent.is_new]);
 
   // Handle delete agent
   const handleDelete = () => {
@@ -131,8 +143,24 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
     router.push("/agents");
   };
 
+  const queryClient = useQueryClient();
+
   // Handle view detail
   const handleViewDetail = async () => {
+    // Mark agent as viewed (clear NEW marker in database)
+    if (isNewAgent) {
+      try {
+        const result = await clearAgentAndSync(agent.id, queryClient);
+        if (result?.success) {
+          setIsNewAgent(false); 
+        } else {
+          log.warn("Failed to clear NEW mark for agent", agent.id, result);
+        }
+      } catch (error) {
+        log.error("Error clearing NEW mark:", error);
+      }
+    }
+
     setShowDetail(true);
     setIsLoadingDetails(true);
     try {
@@ -153,7 +181,11 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
   return (
     <>
       <div
-        className="w-full h-full bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700 transition-all duration-300 p-4 flex flex-col group cursor-pointer"
+        className={`w-full h-full rounded-lg border transition-all duration-300 p-4 flex flex-col group cursor-pointer ${
+          isNewAgent
+            ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700"
+            : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-700"
+        }`}
         onClick={handleViewDetail}
       >
         {/* Avatar and Status badge */}
@@ -164,8 +196,17 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
             </span>
           </Avatar>
 
-          {/* Status badge */}
-          <div className="flex-1 flex justify-end">
+          {/* Status badge and NEW marker */}
+          <div className="flex-1 flex justify-end items-center gap-2">
+            {/* NEW marker */}
+            {isNewAgent && (
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-xs font-medium border border-amber-200">
+                <Sparkles className="h-3 w-3 flex-shrink-0" />
+                <span className="tracking-wide">{t("space.new", "NEW")}</span>
+              </div>
+            )}
+
+            {/* Status badge */}
             {agent.is_available ? (
               <div className="flex items-center gap-1 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs">
                 <CheckCircle className="h-3 w-3" />
