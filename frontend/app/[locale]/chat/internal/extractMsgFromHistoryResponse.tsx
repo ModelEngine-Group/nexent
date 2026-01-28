@@ -1,7 +1,6 @@
 "use client";
 
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import { chatConfig } from "@/const/chatConfig";
+import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import {
   ApiMessage,
   SearchResult,
@@ -240,7 +239,7 @@ export function extractAssistantMsgFromResponse(
   // create the formatted assistant message
   const formattedAssistantMsg: ChatMessageType = {
     id: `assistant-${index}-${Date.now()}`,
-    role: ROLE_ASSISTANT,
+    role: MESSAGE_ROLES.ASSISTANT,
     message_id: dialog_msg.message_id,
     content: "",
     opinion_flag: dialog_msg.opinion_flag,
@@ -297,7 +296,7 @@ export function extractUserMsgFromResponse(
 
   const formattedUserMsg: ChatMessageType = {
     id: `user-${index}-${Date.now()}`,
-    role: "user",
+    role: MESSAGE_ROLES.USER,
     message_id: dialog_msg.message_id,
     content: userContent,
     opinion_flag: dialog_msg.opinion_flag, // user message does not have the like/dislike status

@@ -7,9 +7,7 @@ import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import { chatConfig } from "@/const/chatConfig";
-import { USER_ROLES } from "@/const/modelConfig";
+import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useAuth } from "@/hooks/useAuth";
 import { conversationService } from "@/services/conversationService";
@@ -343,7 +341,7 @@ export function ChatInterface() {
     // Create user message object
     const userMessage: ChatMessageType = {
       id: userMessageId,
-      role: USER_ROLES.USER,
+      role: MESSAGE_ROLES.USER,
       content: userMessageContent,
       timestamp: new Date(),
       attachments:
@@ -358,7 +356,7 @@ export function ChatInterface() {
     const assistantMessageId = uuidv4();
     const initialAssistantMessage: ChatMessageType = {
       id: assistantMessageId,
-      role: ROLE_ASSISTANT,
+      role: MESSAGE_ROLES.ASSISTANT,
       content: "",
       timestamp: new Date(),
       isComplete: false,
@@ -506,7 +504,7 @@ export function ChatInterface() {
           .map((msg) => ({
             role: msg.role,
             content:
-              msg.role === ROLE_ASSISTANT
+              msg.role === MESSAGE_ROLES.ASSISTANT
                 ? msg.finalAnswer?.trim() || msg.content || ""
                 : msg.content || "",
           })),
@@ -590,7 +588,7 @@ export function ChatInterface() {
                   newMessages[currentConversationId]?.[
                     newMessages[currentConversationId].length - 1
                   ];
-                if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+                if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
                   lastMsg.error = t("chatInterface.requestTimeoutRetry");
                   lastMsg.isComplete = true;
                   lastMsg.thinking = undefined;
@@ -682,7 +680,7 @@ export function ChatInterface() {
             newMessages[currentConversationId]?.[
               newMessages[currentConversationId].length - 1
             ];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
             lastMsg.content = t("chatInterface.conversationStopped");
             lastMsg.isComplete = true;
             lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -699,7 +697,7 @@ export function ChatInterface() {
             newMessages[currentConversationId]?.[
               newMessages[currentConversationId].length - 1
             ];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
             lastMsg.content = errorMessage;
             lastMsg.isComplete = true;
             lastMsg.error = errorMessage;
@@ -877,7 +875,7 @@ export function ChatInterface() {
 
             // Optimized processing logic: process messages by role one by one, maintain original order
             dialogMessages.forEach((dialog_msg, index) => {
-              if (dialog_msg.role === USER_ROLES.USER) {
+              if (dialog_msg.role === MESSAGE_ROLES.USER) {
                 const formattedUserMsg: ChatMessageType =
                   extractUserMsgFromResponse(
                     dialog_msg,
@@ -885,7 +883,7 @@ export function ChatInterface() {
                     conversationData.create_time
                   );
                 formattedMessages.push(formattedUserMsg);
-              } else if (dialog_msg.role === ROLE_ASSISTANT) {
+              } else if (dialog_msg.role === MESSAGE_ROLES.ASSISTANT) {
                 const formattedAssistantMsg: ChatMessageType =
                   extractAssistantMsgFromResponse(
                     dialog_msg,
@@ -1004,7 +1002,7 @@ export function ChatInterface() {
 
           // Optimized processing logic: process messages by role one by one, maintain original order
           dialogMessages.forEach((dialog_msg, index) => {
-            if (dialog_msg.role === USER_ROLES.USER) {
+            if (dialog_msg.role === MESSAGE_ROLES.USER) {
               const formattedUserMsg: ChatMessageType =
                 extractUserMsgFromResponse(
                   dialog_msg,
@@ -1012,7 +1010,7 @@ export function ChatInterface() {
                   conversationData.create_time
                 );
               formattedMessages.push(formattedUserMsg);
-            } else if (dialog_msg.role === ROLE_ASSISTANT) {
+            } else if (dialog_msg.role === MESSAGE_ROLES.ASSISTANT) {
               const formattedAssistantMsg: ChatMessageType =
                 extractAssistantMsgFromResponse(
                   dialog_msg,
@@ -1196,7 +1194,7 @@ export function ChatInterface() {
       const lastMsg =
         newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
 
-      if (lastMsg && lastMsg.role === ROLE_ASSISTANT && lastMsg.images) {
+      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT && lastMsg.images) {
         // Filter out failed images
         lastMsg.images = lastMsg.images.filter((url) => url !== imageUrl);
       }
@@ -1249,7 +1247,7 @@ export function ChatInterface() {
         const newMessages = { ...prev };
         const lastMsg =
           newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
-        if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
         }
@@ -1280,7 +1278,7 @@ export function ChatInterface() {
         const newMessages = { ...prev };
         const lastMsg =
           newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
-        if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
           lastMsg.error = t(

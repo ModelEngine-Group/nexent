@@ -15,7 +15,7 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Users, Plus, Edit, Trash2 } from "lucide-react";
+import { Users, Plus, Edit, Trash2, Building2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
@@ -29,6 +29,8 @@ import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import { USER_ROLES } from "@/const/modelConfig";
 
 // Removed mockTenants - now using real data from API
 
@@ -211,10 +213,11 @@ function TenantList({
 export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { user, isSpeedMode } = useAuth();
+  const { isSpeedMode } = useDeployment();
+  const { user } = useAuth()
 
   // Check if user is super admin (speed mode or admin role)
-  const isSuperAdmin = isSpeedMode || user?.role === "admin";
+  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   // Get real tenant data from API
   const {
@@ -249,7 +252,7 @@ export default function UserManageComp() {
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
-                <Users className="h-6 w-6 text-white" />
+                <Building2 className="h-6 w-6 text-white" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">

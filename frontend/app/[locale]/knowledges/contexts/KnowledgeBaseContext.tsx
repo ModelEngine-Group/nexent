@@ -166,11 +166,22 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       if (!state.currentEmbeddingModel) {
         return false;
       }
-      // DataMate knowledge bases are always selectable (even if model doesn't match)
+
+      // Check if knowledge base has content (documents or chunks)
+      const hasContent =
+        (kb.documentCount || 0) > 0 || (kb.chunkCount || 0) > 0;
+
+      // Empty knowledge bases cannot be selected
+      if (!hasContent) {
+        return false;
+      }
+
+      // DataMate knowledge bases are selectable if they have content (even if model doesn't match)
       if (kb.source === "datamate") {
         return true;
       }
-      // Only selectable when knowledge base model exactly matches current model
+
+      // For local knowledge bases, only selectable when model exactly matches current model
       return (
         kb.embeddingModel === "unknown" ||
         kb.embeddingModel === state.currentEmbeddingModel
@@ -433,8 +444,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   const refreshKnowledgeBaseData = useCallback(
     async (forceRefresh = false) => {
       try {
-        // Get latest knowledge base data directly from server, but don't reload user selections and skip DataMate sync
-        await fetchKnowledgeBases(false, false, false);
+        // Get latest knowledge base data directly from server, but don't reload user selections, include DataMate sync to prevent DataMate KBs from disappearing
+        await fetchKnowledgeBases(false, false, true);
 
         // If there is an active knowledge base, also refresh its document information
         if (state.activeKnowledgeBase) {

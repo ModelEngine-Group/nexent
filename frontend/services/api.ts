@@ -169,6 +169,7 @@ export const API_ENDPOINTS = {
   mcp: {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
+    update: `${API_BASE_URL}/mcp/update`,
     delete: `${API_BASE_URL}/mcp`,
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,

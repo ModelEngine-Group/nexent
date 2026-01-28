@@ -481,6 +481,15 @@ class UpdateKnowledgeListRequest(BaseModel):
         None, description="List of knowledge base index names from datamate source")
 
 
+class MCPUpdateRequest(BaseModel):
+    """Request model for updating an existing MCP server"""
+    current_service_name: str = Field(...,
+                                      description="Current MCP service name")
+    current_mcp_url: str = Field(..., description="Current MCP server URL")
+    new_service_name: str = Field(..., description="New MCP service name")
+    new_mcp_url: str = Field(..., description="New MCP server URL")
+
+
 # Tenant Management Data Models
 # ---------------------------------------------------------------------------
 class TenantCreateRequest(BaseModel):
