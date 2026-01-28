@@ -7,6 +7,7 @@ import KnowledgeBaseList from "../../../../knowledges/components/knowledge/Knowl
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { ToolParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
+import { ConfigStore } from "@/lib/config";
 
 export interface KnowledgeBaseToolConfigProps {
   currentParams: ToolParam[];
@@ -49,8 +50,29 @@ export default function KnowledgeBaseToolConfig({
     typeof window !== "undefined" ? knowledgeBaseService.getCachedIdNameMapSync() : null
   );
   // Prevent immediate re-opening of modal when Select regains focus after confirm
-  const [suppressOpen, setSuppressOpen] = useState(false);
+  // Use useRef for synchronous state checking to avoid race conditions
+  const suppressOpenRef = useRef(false);
   const suppressTimerRef = useRef<number | null>(null);
+
+  // Memoize current embedding model to prevent unnecessary re-renders
+  const currentEmbeddingModel = useMemo(() => {
+    return ConfigStore.getInstance().getModelConfig().embedding?.modelName || null;
+  }, []);
+
+  // Helper function to check if a knowledge base is selectable
+  const isKbSelectable = (kb: KnowledgeBase): boolean => {
+    const docCount = typeof kb.documentCount === "number" ? kb.documentCount : 0;
+    const chunkCount = typeof kb.chunkCount === "number" ? kb.chunkCount : 0;
+    const hasContent = (docCount + chunkCount) > 0;
+
+    // Check model compatibility - only for local knowledge bases (nexent source)
+    const isModelCompatible =
+      kb.source !== "nexent" || // Non-local knowledge bases (e.g., DataMate) don't need model check
+      kb.embeddingModel === "unknown" ||
+      kb.embeddingModel === currentEmbeddingModel;
+
+    return hasContent && isModelCompatible;
+  };
 
   const buildKbOptions = (kbs: any[]) => {
     // For the preview/select we only need the KB name (no description).
@@ -62,7 +84,26 @@ export default function KnowledgeBaseToolConfig({
   };
 
   const openKbModal = async () => {
-    if (suppressOpen) return;
+    // Capture suppress state at the start of the function to prevent race conditions
+    // This snapshot will be used later to verify we should still open the modal
+    const suppressSnapshot = suppressOpenRef.current;
+
+    // If suppress was active at the start of this call, clear it and return
+    if (suppressSnapshot) {
+      suppressOpenRef.current = false;
+      if (suppressTimerRef.current) {
+        window.clearTimeout(suppressTimerRef.current);
+        suppressTimerRef.current = null;
+      }
+      return;
+    }
+
+    // Clear any pending suppress timer since we're intentionally opening the modal
+    if (suppressTimerRef.current) {
+      window.clearTimeout(suppressTimerRef.current);
+      suppressTimerRef.current = null;
+    }
+
     // If parent provided KB list, use it; otherwise fetch
     setKbLoading(true);
     try {
@@ -119,6 +160,13 @@ export default function KnowledgeBaseToolConfig({
       const idx = currentParams.findIndex((p) => p.name === "index_names");
       const currentVal = idx !== -1 ? currentParams[idx].value : undefined;
       setKbModalSelected(Array.isArray(currentVal) ? currentVal : []);
+
+      // Double-check suppress snapshot before showing modal to prevent race conditions
+      // If suppress was set during the async operation, don't open the modal
+      if (suppressSnapshot) {
+        setKbLoading(false);
+        return;
+      }
       setKbModalVisible(true);
     } catch (e) {
       message.error(t("toolConfig.message.kbRefreshFailed", "Failed to refresh KB list"));
@@ -404,12 +452,12 @@ export default function KnowledgeBaseToolConfig({
         onCancel={() => {
           setKbModalVisible(false);
           // suppress immediate reopen caused by focus/click after cancel
-          setSuppressOpen(true);
+          suppressOpenRef.current = true;
           if (suppressTimerRef.current) {
             window.clearTimeout(suppressTimerRef.current);
           }
           suppressTimerRef.current = window.setTimeout(() => {
-            setSuppressOpen(false);
+            suppressOpenRef.current = false;
             suppressTimerRef.current = null;
           }, 300);
           if (document.activeElement instanceof HTMLElement) {
@@ -417,7 +465,7 @@ export default function KnowledgeBaseToolConfig({
           }
         }}
         cancelText={t("common.button.cancel")}
-          okText={t("common.button.save")}
+          okText={t("common.confirm")}
           onOk={() => {
             let idx2 = currentParams.findIndex((p) => p.name === "index_names");
             const newParams = [...currentParams];
@@ -441,19 +489,18 @@ export default function KnowledgeBaseToolConfig({
             }
             // Close modal and briefly suppress open to avoid immediate re-open via focus/click
             setKbModalVisible(false);
-            setSuppressOpen(true);
+            suppressOpenRef.current = true;
             if (suppressTimerRef.current) {
               window.clearTimeout(suppressTimerRef.current);
             }
             suppressTimerRef.current = window.setTimeout(() => {
-              setSuppressOpen(false);
+              suppressOpenRef.current = false;
               suppressTimerRef.current = null;
             }, 300);
             // Blur active element to reduce chance of immediate focus triggering open
             if (document.activeElement instanceof HTMLElement) {
               document.activeElement.blur();
             }
-            message.success(t("toolConfig.message.kbSelectSaved", "KB selection saved"));
           }}
           width={800}
         >
@@ -466,7 +513,7 @@ export default function KnowledgeBaseToolConfig({
               knowledgeBases={kbRawList as KnowledgeBase[]}
               selectedIds={kbModalSelected}
               activeKnowledgeBase={null}
-              currentEmbeddingModel={null}
+              currentEmbeddingModel={currentEmbeddingModel}
               isLoading={kbLoading}
               syncLoading={false}
               onSelect={(id: string) => {
@@ -478,11 +525,7 @@ export default function KnowledgeBaseToolConfig({
               }}
               onClick={() => {}}
               showDataMateConfig={false}
-              isSelectable={(kb: KnowledgeBase) => {
-                const docCount = typeof kb.documentCount === "number" ? kb.documentCount : 0;
-                const chunkCount = typeof kb.chunkCount === "number" ? kb.chunkCount : 0;
-                return (docCount + chunkCount) > 0;
-              }}
+              isSelectable={isKbSelectable}
               getModelDisplayName={(m: string) => m}
               containerHeight="50vh"
             />
