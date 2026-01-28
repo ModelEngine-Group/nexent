@@ -101,5 +101,6 @@ export interface MarketAgentListParams {
   category?: string;
   tag?: string;
   search?: string;
+  lang?: string;
 }
 

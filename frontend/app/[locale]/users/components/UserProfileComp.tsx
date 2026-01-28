@@ -86,13 +86,13 @@ export default function UserProfileComp() {
   };
 
   // Open edit modal
-  const openEditModal = () => {
-    editForm.setFieldsValue({
-      email: user?.email || "",
-      displayName: user?.email?.split("@")[0] || "",
-    });
-    setIsEditModalOpen(true);
-  };
+  // const openEditModal = () => {
+  //   editForm.setFieldsValue({
+  //     email: user?.email || "",
+  //     displayName: user?.email?.split("@")[0] || "",
+  //   });
+  //   setIsEditModalOpen(true);
+  // };
 
   return (
     <Flex vertical className="h-full w-full">
@@ -143,7 +143,7 @@ export default function UserProfileComp() {
                   type="text"
                   size="small"
                   icon={<Edit className="h-4 w-4" />}
-                  onClick={openEditModal}
+                  disabled
                 >
                   {t("common.edit") || "Edit"}
                 </Button>
@@ -186,9 +186,8 @@ export default function UserProfileComp() {
               </div>
 
               <div className="divide-y divide-gray-50 dark:divide-gray-700/50">
-                <button
-                  onClick={openEditModal}
-                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-left"
+                <div
+                  className="w-full px-6 py-3 flex items-center justify-between opacity-50 cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -204,11 +203,10 @@ export default function UserProfileComp() {
                     </div>
                   </div>
                   <ChevronRight className="h-4 w-4 text-gray-400" />
-                </button>
+                </div>
 
-                <button
-                  onClick={() => setIsPasswordModalOpen(true)}
-                  className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-left"
+                <div
+                  className="w-full px-6 py-3 flex items-center justify-between opacity-50 cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
@@ -224,7 +222,7 @@ export default function UserProfileComp() {
                     </div>
                   </div>
                   <ChevronRight className="h-4 w-4 text-gray-400" />
-                </button>
+                </div>
 
                 <button
                   onClick={() => setIsDeleteModalOpen(true)}

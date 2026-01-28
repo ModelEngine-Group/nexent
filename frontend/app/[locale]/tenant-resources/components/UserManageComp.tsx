@@ -29,6 +29,7 @@ import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
+import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { USER_ROLES } from "@/const/modelConfig";
 
@@ -324,6 +325,12 @@ export default function UserManageComp() {
                             t("tenantResources.tabs.knowledge") || "Knowledge Base",
                           children: <KnowledgeList tenantId={tenantId} />,
                         },
+                        {
+                          key: "mcp",
+                          label:
+                            t("tenantResources.tabs.mcp") || "MCP",
+                          children: <McpList tenantId={tenantId} />,
+                        },
                       ]}
                     />
                   ) : (
@@ -375,15 +382,21 @@ export default function UserManageComp() {
                       label: t("tenantResources.tabs.models") || "Models",
                       children: <ModelList tenantId={tenantId} />,
                     },
-                    {
-                      key: "knowledge",
-                      label:
-                        t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                      children: <KnowledgeList tenantId={tenantId} />,
-                    },
-                  ]}
-                />
-              ) : (
+                        {
+                          key: "knowledge",
+                          label:
+                            t("tenantResources.tabs.knowledge") || "Knowledge Base",
+                          children: <KnowledgeList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "mcp",
+                          label:
+                            t("tenantResources.tabs.mcp") || "MCP",
+                          children: <McpList tenantId={tenantId} />,
+                        },
+                      ]}
+                    />
+                  ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
                     <Users className="h-8 w-8 text-gray-400" />

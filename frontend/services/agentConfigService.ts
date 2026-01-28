@@ -119,6 +119,7 @@ export const fetchAgentList = async () => {
       author: agent.author,
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
+      is_new: agent.is_new || false,
     }));
 
     return {
@@ -489,6 +490,39 @@ export const importAgent = async (
 };
 
 /**
+ * Clear NEW mark for an agent
+ */
+export const clearAgentNewMark = async (agentId: string | number) => {
+  try {
+    const url = typeof API_ENDPOINTS.agent.clearNew === 'function'
+      ? API_ENDPOINTS.agent.clearNew(agentId)
+      : `${API_ENDPOINTS.agent.clearNew}/${agentId}`;
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data: data,
+      message: "Agent NEW mark cleared successfully",
+    };
+  } catch (error) {
+    log.error("Failed to clear agent NEW mark:", error);
+    return {
+      success: false,
+      data: null,
+      message: "Failed to clear agent NEW mark",
+    };
+  }
+};
+
+/**
  * check agent name/display_name duplication
  * @param payload name/displayName to check
  */
@@ -663,6 +697,7 @@ export const fetchAllAgents = async () => {
       description: agent.description,
       author: agent.author,
       is_available: agent.is_available,
+      is_new: agent.is_new || false,
     }));
 
     return {

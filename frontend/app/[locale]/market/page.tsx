@@ -133,6 +133,7 @@ export default function MarketContent() {
       const params: MarketAgentListParams = {
         page: currentPage,
         page_size: pageSize,
+        lang: isZh ? "zh" : "en",
       };
 
       if (currentCategory !== "all") {

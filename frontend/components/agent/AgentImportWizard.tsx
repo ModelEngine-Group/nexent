@@ -865,6 +865,7 @@ export default function AgentImportWizard({
       // Import using agentConfigService directly
       const result = await importAgent(importData, { forceImport: false });
       if (result.success) {
+        // Agents are automatically marked as NEW in the database during creation/import
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         onImportComplete?.();
         handleCancel(); // Close wizard after success

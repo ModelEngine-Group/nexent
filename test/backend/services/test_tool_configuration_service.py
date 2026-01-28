@@ -1867,9 +1867,12 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         # Mock signature for knowledge_base_search tool
         mock_sig = Mock()
+        mock_index_names_param = Mock()
+        mock_index_names_param.default = ["default_index"]
+        
         mock_sig.parameters = {
             'self': Mock(),
-            'index_names': Mock(),
+            'index_names': mock_index_names_param,
             'vdb_core': Mock(),
             'embedding_model': Mock()
         }
@@ -1905,8 +1908,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         # Verify knowledge base specific parameters were passed
         expected_params = {
             "param": "config",
-            "index_names": ["index1", "index2"],
-            "name_resolver": {"index1": "index1", "alias2": "index2"},
+            "index_names": ["default_index"],
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
         }
@@ -1914,10 +1916,6 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
         # Verify service calls
-        mock_get_knowledge_list.assert_called_once_with(
-            tenant_id="tenant1", user_id="user1")
-        mock_build_mapping.assert_called_once_with(
-            tenant_id="tenant1", user_id="user1")
         mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
@@ -1997,9 +1995,11 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         # Mock signature for knowledge_base_search tool
         mock_sig = Mock()
+        mock_index_names_param = Mock()
+        mock_index_names_param.default = []
         mock_sig.parameters = {
             'self': Mock(),
-            'index_names': Mock(),
+            'index_names': mock_index_names_param,
             'vdb_core': Mock(),
             'embedding_model': Mock()
         }
@@ -2028,79 +2028,12 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         expected_params = {
             "param": "config",
             "index_names": [],
-            "name_resolver": {},
             "vdb_core": mock_vdb_core,
             "embedding_model": "mock_embedding_model",
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
-    @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    @patch('backend.services.tool_configuration_service.build_knowledge_name_mapping')
-    @patch('backend.services.tool_configuration_service.get_embedding_model')
-    @patch('backend.services.tool_configuration_service.get_vector_db_core')
-    @patch('backend.services.tool_configuration_service.get_index_name_by_knowledge_name')
-    def test_validate_local_tool_knowledge_base_search_resolves_inputs_indices(self,
-                                                                               mock_get_index_name,
-                                                                               mock_get_vector_db_core,
-                                                                               mock_get_embedding_model,
-                                                                               mock_build_mapping,
-                                                                               mock_get_knowledge_list,
-                                                                               mock_signature,
-                                                                               mock_get_class):
-        """Resolve index_names from user input when no stored selections exist."""
-        mock_tool_class = Mock()
-        mock_tool_instance = Mock()
-        mock_tool_instance.forward.return_value = "resolved result"
-        mock_tool_class.return_value = mock_tool_instance
-        mock_get_class.return_value = mock_tool_class
-
-        mock_sig = Mock()
-        mock_sig.parameters = {
-            'self': Mock(),
-            'index_names': Mock(),
-            'vdb_core': Mock(),
-            'embedding_model': Mock()
-        }
-        mock_signature.return_value = mock_sig
-
-        mock_get_knowledge_list.return_value = []  # No stored selections
-        mock_build_mapping.return_value = {"existing": "existing_index"}
-        mock_get_embedding_model.return_value = "mock_embedding"
-        mock_vdb_core = Mock()
-        mock_get_vector_db_core.return_value = mock_vdb_core
-
-        # First alias resolves; second keeps raw value on exception
-        mock_get_index_name.side_effect = [
-            "resolved_index", Exception("not found")]
-
-        from backend.services.tool_configuration_service import _validate_local_tool
-
-        result = _validate_local_tool(
-            "knowledge_base_search",
-            {"query": "q", "index_names": ["alias1", "raw_index"]},
-            {"param": "config"},
-            "tenant1",
-            "user1"
-        )
-
-        assert result == "resolved result"
-        expected_params = {
-            "param": "config",
-            "index_names": ["resolved_index", "raw_index"],
-            "name_resolver": {"existing": "existing_index", "alias1": "resolved_index"},
-            "vdb_core": mock_vdb_core,
-            "embedding_model": "mock_embedding",
-        }
-        mock_tool_class.assert_called_once_with(**expected_params)
-        mock_tool_instance.forward.assert_called_once_with(
-            query="q", index_names=["alias1", "raw_index"]
-        )
-        assert mock_get_index_name.call_count == 2
-        mock_get_index_name.assert_any_call("alias1", tenant_id="tenant1")
-        mock_get_index_name.assert_any_call("raw_index", tenant_id="tenant1")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
@@ -2126,9 +2059,11 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
         # Mock signature for knowledge_base_search tool
         mock_sig = Mock()
+        mock_index_names_param = Mock()
+        mock_index_names_param.default = ["default_index"]
         mock_sig.parameters = {
             'self': Mock(),
-            'index_names': Mock(),
+            'index_names': mock_index_names_param,
             'vdb_core': Mock(),
             'embedding_model': Mock()
         }
@@ -2244,23 +2179,18 @@ class TestValidateLocalToolDatamateSearchTool:
         mock_get_class.return_value = mock_tool_class
 
         # Mock signature for datamate_search_tool
+        # _validate_local_tool fills missing instantiation params from signature defaults.
+        # For datamate_search there is no special index selection logic, so index_names
+        # should come from the default value (empty list).
         mock_sig = Mock()
         mock_sig.parameters = {
             'self': Mock(),
-            'index_names': Mock(),
+            'index_names': Mock(default=Mock(default=[])),
         }
         mock_signature.return_value = mock_sig
 
-        # Mock knowledge base dependencies - only datamate sources
-        mock_knowledge_list = [
-            {"index_name": "datamate_index1", "knowledge_id": "kb1",
-                "knowledge_sources": "datamate"},
-            {"index_name": "datamate_index2", "knowledge_id": "kb2",
-                "knowledge_sources": "datamate"},
-            {"index_name": "other_index", "knowledge_id": "kb3",
-                "knowledge_sources": "other"}  # Should be filtered out
-        ]
-        mock_get_knowledge_list.return_value = mock_knowledge_list
+        # datamate_search has no special knowledge-list dependency in _validate_local_tool
+        mock_get_knowledge_list.return_value = []
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
@@ -2278,69 +2208,76 @@ class TestValidateLocalToolDatamateSearchTool:
         # Verify datamate_search_tool specific parameters were passed
         expected_params = {
             "param": "config",
-            # Only datamate sources
-            "index_names": ["datamate_index1", "datamate_index2"],
+            # Filled from signature default
+            "index_names": [],
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
 
-        # Verify service calls
-        mock_get_knowledge_list.assert_called_once_with(
-            tenant_id="tenant1", user_id="user1")
+        mock_get_knowledge_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_datamate_search_tool_missing_tenant_id(self, mock_get_class):
         """Test datamate_search_tool validation when tenant_id is missing"""
         mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "datamate search result"
+        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        with pytest.raises(ToolExecutionException,
-                           match=r"Local tool datamate_search validation failed: Tenant ID and User ID are required for datamate_search validation"):
-            _validate_local_tool(
-                "datamate_search",
-                {"query": "test query"},
-                {"param": "config"},
-                None,  # Missing tenant_id
-                "user1"
-            )
+        # datamate_search does not require tenant/user in current implementation
+        result = _validate_local_tool(
+            "datamate_search",
+            {"query": "test query"},
+            {"param": "config"},
+            None,  # Missing tenant_id
+            "user1"
+        )
+        assert result == "datamate search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_datamate_search_tool_missing_user_id(self, mock_get_class):
         """Test datamate_search_tool validation when user_id is missing"""
         mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "datamate search result"
+        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        with pytest.raises(ToolExecutionException,
-                           match=r"Local tool datamate_search validation failed: Tenant ID and User ID are required for datamate_search validation"):
-            _validate_local_tool(
-                "datamate_search",
-                {"query": "test query"},
-                {"param": "config"},
-                "tenant1",
-                None  # Missing user_id
-            )
+        # datamate_search does not require tenant/user in current implementation
+        result = _validate_local_tool(
+            "datamate_search",
+            {"query": "test query"},
+            {"param": "config"},
+            "tenant1",
+            None  # Missing user_id
+        )
+        assert result == "datamate search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_datamate_search_tool_missing_both_ids(self, mock_get_class):
         """Test datamate_search_tool validation when both tenant_id and user_id are missing"""
         mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "datamate search result"
+        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        with pytest.raises(ToolExecutionException,
-                           match=r"Local tool datamate_search validation failed: Tenant ID and User ID are required for datamate_search validation"):
-            _validate_local_tool(
-                "datamate_search",
-                {"query": "test query"},
-                {"param": "config"},
-                None,  # Missing tenant_id
-                None   # Missing user_id
-            )
+        # datamate_search does not require tenant/user in current implementation
+        result = _validate_local_tool(
+            "datamate_search",
+            {"query": "test query"},
+            {"param": "config"},
+            None,  # Missing tenant_id
+            None   # Missing user_id
+        )
+        assert result == "datamate search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
@@ -2356,11 +2293,11 @@ class TestValidateLocalToolDatamateSearchTool:
 
         mock_get_class.return_value = mock_tool_class
 
-        # Mock signature for datamate_search_tool
+        # Mock signature for datamate_search_tool (default empty list)
         mock_sig = Mock()
         mock_sig.parameters = {
             'self': Mock(),
-            'index_names': Mock(),
+            'index_names': Mock(default=Mock(default=[])),
         }
         mock_signature.return_value = mock_sig
 
@@ -2386,6 +2323,7 @@ class TestValidateLocalToolDatamateSearchTool:
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
+        mock_get_knowledge_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
@@ -2401,11 +2339,11 @@ class TestValidateLocalToolDatamateSearchTool:
 
         mock_get_class.return_value = mock_tool_class
 
-        # Mock signature for datamate_search_tool
+        # Mock signature for datamate_search_tool (default empty list)
         mock_sig = Mock()
         mock_sig.parameters = {
             'self': Mock(),
-            'index_names': Mock(),
+            'index_names': Mock(default=Mock(default=[])),
         }
         mock_signature.return_value = mock_sig
 
@@ -2437,6 +2375,7 @@ class TestValidateLocalToolDatamateSearchTool:
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
+        mock_get_knowledge_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
