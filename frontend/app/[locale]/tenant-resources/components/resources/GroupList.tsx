@@ -12,7 +12,8 @@ import {
   message,
   Select,
 } from "antd";
-import { EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Edit, Trash2 } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useUserList } from "@/hooks/user/useUserList";
@@ -181,6 +182,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         title: t("common.description"),
         dataIndex: "group_description",
         key: "group_description",
+        render: (description: string) =>
+          description ? description : <span className="text-gray-400">{t("tenantResources.groups.noDescription")}</span>,
       },
       {
         title: t("tenantResources.groups.members"),
@@ -201,15 +204,29 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         title: t("common.actions"),
         key: "actions",
         render: (_, record) => (
-          <div className="space-x-2">
-            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          <div className="flex items-center space-x-2">
+            <Tooltip title={t("tenantResources.groups.editGroup")}>
+              <Button
+                type="text"
+                icon={<Edit className="h-4 w-4" />}
+                onClick={() => openEdit(record)}
+                size="small"
+              />
+            </Tooltip>
             <Popconfirm
               title={t("tenantResources.groups.confirmDelete", {
                 name: record.group_name,
               })}
               onConfirm={() => handleDelete(record.group_id)}
             >
-              <Button size="small" danger icon={<DeleteOutlined />} />
+              <Tooltip title={t("tenantResources.groups.deleteGroup")}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                />
+              </Tooltip>
             </Popconfirm>
           </div>
         ),

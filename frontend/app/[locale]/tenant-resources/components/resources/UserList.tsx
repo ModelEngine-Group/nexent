@@ -11,9 +11,10 @@ import {
   Select,
   Popconfirm,
   message,
-  Divider,
+  Tag,
 } from "antd";
-import { EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Edit, Trash2 } from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
 import { useUserList } from "@/hooks/user/useUserList";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -25,7 +26,6 @@ import {
 } from "@/services/userService";
 import {
   createGroup,
-  addUserToGroup,
   type Group,
   type CreateGroupRequest,
 } from "@/services/groupService";
@@ -136,22 +136,43 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
             DEV: t("user.role.dev"),
             USER: t("user.role.user"),
           };
-          return roleLabels[role] || role;
+          const color =
+            role === "SUPER_ADMIN" ? "magenta" :
+            role === "ADMIN" ? "purple" :
+            role === "DEV" ? "cyan" :
+            role === "USER" ? "blue" : "gray";
+          return <Tag color={color}>
+              {roleLabels[role] || role}
+            </Tag>;
         },
       },
       {
         title: t("common.actions"),
         key: "actions",
         render: (_, record) => (
-          <div className="space-x-2">
-            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          <div className="flex items-center space-x-2">
+            <Tooltip title={t("tenantResources.users.editUser")}>
+              <Button
+                type="text"
+                icon={<Edit className="h-4 w-4" />}
+                onClick={() => openEdit(record)}
+                size="small"
+              />
+            </Tooltip>
             <Popconfirm
               title={t("tenantResources.users.confirmDelete", {
                 name: record.username,
               })}
               onConfirm={() => handleDelete(record.id)}
             >
-              <Button size="small" danger icon={<DeleteOutlined />} />
+              <Tooltip title={t("tenantResources.users.deleteUser")}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                />
+              </Tooltip>
             </Popconfirm>
           </div>
         ),

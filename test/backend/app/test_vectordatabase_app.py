@@ -338,13 +338,14 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
 
 
 @pytest.mark.asyncio
-async def test_get_list_indices_success(vdb_core_mock):
+async def test_get_list_indices_success(vdb_core_mock, auth_data):
     """
     Test listing indices successfully.
     Verifies that the endpoint returns the expected list of indices.
     """
-    # Setup mocks
+    # Setup mocks - get_current_user_id is now required
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
 
         expected_response = {"indices": ["index1", "index2"]}
@@ -352,32 +353,208 @@ async def test_get_list_indices_success(vdb_core_mock):
 
         # Execute request
         response = client.get(
-            "/indices", params={"pattern": "*", "include_stats": False})
+            "/indices", params={"pattern": "*", "include_stats": False}, headers=auth_data["auth_header"])
 
         # Verify
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_list.assert_called_once()
 
+        # Verify that list_indices was called with correct parameters including user_id
+        call_args = mock_list.call_args
+        assert call_args[0][0] == "*"  # pattern
+        assert call_args[0][1] is False  # include_stats
+        assert call_args[0][2] == auth_data["tenant_id"]  # tenant_id
+        assert call_args[0][3] == auth_data["user_id"]  # user_id
+
 
 @pytest.mark.asyncio
-async def test_get_list_indices_error(vdb_core_mock):
+async def test_get_list_indices_error(vdb_core_mock, auth_data):
     """
     Test listing indices with error.
     Verifies that the endpoint returns an appropriate error response when listing fails.
     """
-    # Setup mocks
+    # Setup mocks - get_current_user_id is now required
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
 
         mock_list.side_effect = Exception("Test error")
+
+        # Execute request
+        response = client.get("/indices", headers=auth_data["auth_header"])
+
+        # Verify
+        assert response.status_code == 500
+        assert response.json() == {"detail": "Error get index: Test error"}
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_with_tenant_id_filter(vdb_core_mock, auth_data):
+    """
+    Test listing indices with tenant_id query parameter for filtering.
+    Verifies that the endpoint passes tenant_id to the service for filtering.
+    """
+    # Setup mocks
+    target_tenant_id = "target_tenant_123"
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
+
+        expected_response = {
+            "indices": ["kb1", "kb2"],
+            "count": 2,
+            "indices_info": [
+                {
+                    "name": "kb1",
+                    "display_name": "Knowledge Base 1",
+                    "permission": "EDIT",
+                    "group_ids": [],
+                    "knowledge_sources": "elasticsearch",
+                    "ingroup_permission": "EDIT",
+                    "tenant_id": target_tenant_id,
+                    "stats": {}
+                },
+                {
+                    "name": "kb2",
+                    "display_name": "Knowledge Base 2",
+                    "permission": "READ_ONLY",
+                    "group_ids": [],
+                    "knowledge_sources": "elasticsearch",
+                    "ingroup_permission": "READ_ONLY",
+                    "tenant_id": target_tenant_id,
+                    "stats": {}
+                }
+            ]
+        }
+        mock_list.return_value = expected_response
+
+        # Execute request with tenant_id query parameter
+        response = client.get(
+            "/indices",
+            params={"pattern": "*", "include_stats": True,
+                    "tenant_id": target_tenant_id},
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data == expected_response
+
+        # Verify that list_indices was called with the target tenant_id
+        mock_list.assert_called_once()
+        call_args = mock_list.call_args
+        assert call_args[0][0] == "*"  # pattern
+        assert call_args[0][1] is True  # include_stats
+        # effective_tenant_id from query param
+        assert call_args[0][2] == target_tenant_id
+        assert call_args[0][3] == auth_data["user_id"]  # user_id from auth
+
+        # Verify indices_info contains tenant_id
+        assert len(response_data["indices_info"]) == 2
+        assert response_data["indices_info"][0]["tenant_id"] == target_tenant_id
+        assert response_data["indices_info"][1]["tenant_id"] == target_tenant_id
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_uses_auth_tenant_id_when_no_query_param(vdb_core_mock, auth_data):
+    """
+    Test listing indices uses auth tenant_id when tenant_id query parameter is not provided.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
+
+        expected_response = {"indices": ["index1"], "count": 1}
+        mock_list.return_value = expected_response
+
+        # Execute request without tenant_id query parameter
+        response = client.get(
+            "/indices",
+            params={"pattern": "*"},
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+
+        # Verify that list_indices was called with auth tenant_id
+        call_args = mock_list.call_args
+        # Falls back to auth tenant_id
+        assert call_args[0][2] == auth_data["tenant_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_with_stats_includes_tenant_id(vdb_core_mock, auth_data):
+    """
+    Test that list_indices with stats includes tenant_id in the response.
+    """
+    # Setup mocks
+    target_tenant_id = "stats_tenant_456"
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.list_indices") as mock_list:
+
+        expected_response = {
+            "indices": ["kb1"],
+            "count": 1,
+            "indices_info": [{
+                "name": "kb1",
+                "display_name": "Test KB",
+                "permission": "EDIT",
+                "group_ids": [1, 2],
+                "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT",
+                "tenant_id": target_tenant_id,
+                "stats": {
+                    "base_info": {
+                        "doc_count": 100,
+                        "embedding_model": "test-model",
+                        "store_size": "1GB"
+                    }
+                }
+            }]
+        }
+        mock_list.return_value = expected_response
+
+        # Execute request
+        response = client.get(
+            "/indices",
+            params={"include_stats": True, "tenant_id": target_tenant_id},
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+        response_data = response.json()
+
+        assert "indices_info" in response_data
+        assert len(response_data["indices_info"]) == 1
+        assert response_data["indices_info"][0]["tenant_id"] == target_tenant_id
+        assert response_data["indices_info"][0]["group_ids"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_get_list_indices_auth_exception(vdb_core_mock):
+    """
+    Test listing indices with authentication exception.
+    Verifies that the endpoint returns 500 when auth fails.
+    """
+    # Setup mocks - get_current_user_id raises exception
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id") as mock_get_user:
+
+        mock_get_user.side_effect = Exception("Invalid authorization token")
 
         # Execute request
         response = client.get("/indices")
 
         # Verify
         assert response.status_code == 500
-        assert response.json() == {"detail": "Error get index: Test error"}
+        assert "Error get index" in response.json()["detail"]
+        mock_get_user.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -750,7 +927,8 @@ async def test_get_index_chunks_error(vdb_core_mock):
         response = client.post(f"/indices/{index_name}/chunks")
 
         assert response.status_code == 500
-        assert response.json() == {"detail": "Error getting chunks: Chunk failure"}
+        assert response.json() == {
+            "detail": "Error getting chunks: Chunk failure"}
         mock_get_chunks.assert_called_once_with(
             index_name="resolved_index",
             page=None,
@@ -1038,6 +1216,187 @@ async def test_check_knowledge_base_exist_error(vdb_core_mock, auth_data):
         assert response.status_code == 500
         assert response.json() == {
             "detail": "Error checking existence for knowledge base: Test error"}
+
+
+@pytest.mark.asyncio
+async def test_update_index_success(auth_data):
+    """
+    Test updating a knowledge base successfully.
+    Verifies that the endpoint returns the expected response when update succeeds.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+
+        mock_update.return_value = True
+
+        # Execute request with all update fields
+        payload = {
+            "knowledge_name": "Updated Knowledge Base",
+            "ingroup_permission": "EDIT",
+            "group_ids": [1, 2, 3]
+        }
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json=payload,
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+        assert "updated successfully" in response.json()["message"]
+        mock_update.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            knowledge_name="Updated Knowledge Base",
+            ingroup_permission="EDIT",
+            group_ids=[1, 2, 3],
+            tenant_id=auth_data["tenant_id"],
+            user_id=auth_data["user_id"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_index_partial_update(auth_data):
+    """
+    Test partial update of a knowledge base.
+    Verifies that the endpoint handles partial updates correctly.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+
+        mock_update.return_value = True
+
+        # Execute request with only name update
+        payload = {
+            "knowledge_name": "Only Name Updated"
+        }
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json=payload,
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+        mock_update.assert_called_once_with(
+            index_name=auth_data["index_name"],
+            knowledge_name="Only Name Updated",
+            ingroup_permission=None,
+            group_ids=None,
+            tenant_id=auth_data["tenant_id"],
+            user_id=auth_data["user_id"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_index_value_error(auth_data):
+    """
+    Test updating a knowledge base with invalid permission value.
+    Verifies that the endpoint returns 400 BAD_REQUEST for invalid permission.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+
+        mock_update.side_effect = ValueError(
+            "Invalid ingroup_permission. Must be one of: ['EDIT', 'READ_ONLY', 'PRIVATE']")
+
+        # Execute request with invalid permission
+        payload = {
+            "ingroup_permission": "INVALID_PERMISSION"
+        }
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json=payload,
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 400
+        assert "Invalid ingroup_permission" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_index_not_found(auth_data):
+    """
+    Test updating a non-existent knowledge base.
+    Verifies that the endpoint returns 404 NOT_FOUND when knowledge base doesn't exist.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+
+        mock_update.return_value = False  # Knowledge base not found
+
+        # Execute request
+        payload = {
+            "knowledge_name": "New Name"
+        }
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json=payload,
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 404
+        assert auth_data["index_name"] in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_index_exception(auth_data):
+    """
+    Test updating a knowledge base with general exception.
+    Verifies that the endpoint returns 500 INTERNAL_SERVER_ERROR on error.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.update_knowledge_base") as mock_update:
+
+        mock_update.side_effect = Exception("Database error")
+
+        # Execute request
+        payload = {
+            "knowledge_name": "New Name"
+        }
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json=payload,
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 500
+        assert "Error updating index" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_index_auth_exception(auth_data):
+    """
+    Test updating a knowledge base with authentication exception.
+    Verifies that the endpoint returns 500 INTERNAL_SERVER_ERROR when auth fails.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_current_user_id") as mock_get_user:
+
+        mock_get_user.side_effect = Exception("Invalid authorization token")
+
+        # Execute request
+        payload = {
+            "knowledge_name": "New Name"
+        }
+        response = client.patch(
+            f"/indices/{auth_data['index_name']}",
+            json=payload,
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 500
+        assert "Error updating index" in response.json()["detail"]
+        mock_get_user.assert_called_once()
 
 
 @pytest.mark.asyncio
