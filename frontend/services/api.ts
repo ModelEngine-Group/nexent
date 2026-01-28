@@ -251,6 +251,7 @@ export const API_ENDPOINTS = {
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
+    default: (tenantId: string) => `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
   },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
