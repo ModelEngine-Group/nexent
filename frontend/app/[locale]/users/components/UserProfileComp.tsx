@@ -25,8 +25,9 @@ import {
   AlertTriangle,
   ChevronRight,
 } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
 import { USER_ROLES } from "@/const/modelConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 
 const { Text, Paragraph } = Typography;
 
@@ -43,7 +44,8 @@ const { Text, Paragraph } = Typography;
 export default function UserProfileComp() {
   const { t } = useTranslation("common");
   const { message: antdMessage } = App.useApp();
-  const { user, logout, revoke, isLoading } = useAuth();
+  const { logout, revoke, isLoading } = useAuthenticationContext()
+  const { user } = useAuthorizationContext()
 
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
