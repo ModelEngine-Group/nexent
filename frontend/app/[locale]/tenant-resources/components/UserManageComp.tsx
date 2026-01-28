@@ -231,14 +231,11 @@ export default function UserManageComp() {
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
   // For non-super admins, use their current tenant (from user metadata or default)
-  const [tenantId, setTenantId] = useState<string | null>(
-    isSuperAdmin ? tenants[0]?.tenant_id : "default"
-  );
+  const [tenantId, setTenantId] = useState<string | null>(tenants[0]?.tenant_id || null);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
-  const currentTenantName =
-    currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+  const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
 
   return (
     <div className="w-full h-full">
@@ -267,88 +264,25 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-      {isSuperAdmin ? (
-        // Super admin layout: tenant list + resource tabs
-        <Row className="h-full">
-          <Col className="h-full" style={{ width: 300 }}>
-            <div className="h-full pr-6">
-              <div className="sticky top-6">
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                  <TenantList
-                    selected={tenantId}
-                    onSelect={(id) => setTenantId(id)}
-                    tenants={tenants}
-                    onTenantsChange={setTenantsState}
-                    onTenantsRefetch={refetchTenants}
-                    loading={tenantsLoading}
-                    t={t}
-                  />
-                </div>
-              </div>
-            </div>
-          </Col>
-          <Col className="flex-1 p-6">
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
-              {/* Tenant name header */}
-              <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {currentTenantName}
-                </h2>
-              </div>
-
-              {tenantId ? (
-                <Tabs
-                  defaultActiveKey="users"
-                  items={[
-                    {
-                      key: "users",
-                      label: t("tenantResources.tabs.users") || "Users",
-                      children: <UserList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "groups",
-                      label: t("tenantResources.tabs.groups") || "Groups",
-                      children: <GroupList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "models",
-                      label: t("tenantResources.tabs.models") || "Models",
-                      children: <ModelList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "knowledge",
-                      label:
-                        t("tenantResources.tabs.knowledge") || "Knowledge Base",
-                      children: <KnowledgeList tenantId={tenantId} />,
-                    },
-                    {
-                      key: "invitations",
-                      label: t("tenantResources.invitation.tab") || "Invitations",
-                      children: <InvitationList tenantId={tenantId} />,
-                    },
-                  ]}
+      <Row className="h-full">
+        <Col className="h-full" style={{ width: 300 }}>
+          <div className="h-full pr-6">
+            <div className="sticky top-6">
+              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                <TenantList
+                  selected={tenantId}
+                  onSelect={(id) => setTenantId(id)}
+                  tenants={tenants}
+                  onTenantsChange={setTenantsState}
+                  onTenantsRefetch={refetchTenants}
+                  loading={tenantsLoading}
+                  t={t}
                 />
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-                    <Users className="h-8 w-8 text-gray-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                    {t("tenantResources.selectTenantFirst") ||
-                      "Please select a tenant"}
-                  </h3>
-                  <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                    {t("tenantResources.selectTenantDescription") ||
-                      "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
-                  </p>
-                </div>
-              )}
+              </div>
             </div>
-          </Col>
-        </Row>
-      ) : (
-        // Regular user layout: only resource tabs (no tenant selection)
-        <div className="h-full p-6">
+          </div>
+        </Col>
+        <Col className="flex-1 p-6">
           <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
             {/* Tenant name header */}
             <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
@@ -395,18 +329,18 @@ export default function UserManageComp() {
                   <Users className="h-8 w-8 text-gray-400" />
                 </div>
                 <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                  {t("tenantResources.noTenantAssigned") ||
-                    "No tenant assigned"}
+                  {t("tenantResources.selectTenantFirst") ||
+                    "Please select a tenant"}
                 </h3>
                 <p className="text-gray-500 dark:text-gray-400 max-w-sm">
-                  {t("tenantResources.contactAdmin") ||
-                    "Please contact your administrator to assign a tenant."}
+                  {t("tenantResources.selectTenantDescription") ||
+                    "Choose a tenant from the list to manage its users, groups, models, and knowledge base."}
                 </p>
               </div>
             )}
           </div>
-        </div>
-      )}
+        </Col>
+      </Row>
     </div>
   );
 }

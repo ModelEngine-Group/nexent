@@ -29,7 +29,7 @@ import {
   type CreateInvitationRequest,
   type UpdateInvitationRequest,
 } from "@/services/invitationService";
-import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, AlertCircle, Copy } from "lucide-react";
+import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, Copy, CircleSlash } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import dayjs from "dayjs";
 
@@ -280,8 +280,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
 
           const icon = status === "IN_USE" ? <CheckCircle className="w-3 h-3 mr-1" /> :
                       status === "EXPIRE" ? <Clock className="w-3 h-3 mr-1" /> :
-                      status === "RUN_OUT" ? <XCircle className="w-3 h-3 mr-1" /> :
-                      <AlertCircle className="w-3 h-3 mr-1" />;
+                      status === "RUN_OUT" ? <CircleSlash className="w-3.5 h-3 mr-1" /> :
+                      <XCircle className="w-3 h-3 mr-1" />;
 
           return (
             <Tag
