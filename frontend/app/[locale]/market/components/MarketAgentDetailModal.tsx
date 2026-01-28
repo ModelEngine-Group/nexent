@@ -297,7 +297,7 @@ export default function MarketAgentDetailModal({
                         tool.name && tool.description
                           ? getToolDescription(tool.name, tool.description, t)
                           : tool.description ||
-                            t("market.detail.toolDescription", "No description")
+                        t("market.detail.toolDescription", "No description")
                       )}
                     </div>
                   </div>

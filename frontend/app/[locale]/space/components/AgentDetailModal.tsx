@@ -242,7 +242,7 @@ export default function AgentDetailModal({
                           </span>
                           {param.description && (
                             <div className="text-slate-600 dark:text-slate-300 mt-1">
-                              {param.description}
+                              {t(`tool.param.${tool.name}.${param.name}`, { defaultValue: param.description })}
                             </div>
                           )}
                         </div>

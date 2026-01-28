@@ -356,7 +356,7 @@ export default function ToolConfigModal({
                       name={fieldName}
                       rules={rules}
                       tooltip={{
-                        title: param.description,
+                        title: t(`tool.param.${tool.name}.${param.name}`, { defaultValue: param.description }),
                         placement: "topLeft",
                         styles: { root: { maxWidth: 400 } },
                       }}

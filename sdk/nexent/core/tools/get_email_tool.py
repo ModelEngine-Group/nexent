@@ -20,9 +20,9 @@ class GetEmailTool(Tool):
     )
 
     inputs = {
-        "days": {"type": "integer", "description": "Get emails from the past few days, default is 7 days", "default": 7,
+        "days": {"type": "integer", "description": "Number of days to search for emails, default is 7 days", "default": 7,
                  "nullable": True},
-        "sender": {"type": "string", "description": "Filter by sender (must be an email address, not a name or non-ASCII string)", "nullable": True},
+        "sender": {"type": "string", "description": "Email address to filter by sender", "nullable": True},
         "max_emails": {"type": "integer", "description": "Maximum number of emails to retrieve, default is 10",
                        "default": 10, "nullable": True}}
     output_type = "string"
@@ -33,7 +33,7 @@ class GetEmailTool(Tool):
                  username: str=Field(description="IMAP Server Username"), 
                  password: str=Field(description="IMAP Server Password"), 
                  use_ssl: bool=Field(description="Use SSL", default=True),
-                 timeout: int = Field(description="Timeout", default=30)):
+                 timeout: int = Field(description="Connection timeout in seconds", default=30)):
         super().__init__()
         self.imap_server = imap_server
         self.imap_port = imap_port

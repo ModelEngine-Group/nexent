@@ -32,7 +32,7 @@ class SendEmailTool(Tool):
                  password: str=Field(description="SMTP server password"), 
                  use_ssl: bool=Field(description="Use SSL", default=True),
                  sender_name: Optional[str] = Field(description="Sender name", default=None),
-                 timeout: int = Field(description="Timeout", default=30)):
+                 timeout: int = Field(description="Connection timeout in seconds", default=30)):
         super().__init__()
         self.smtp_server = smtp_server
         self.smtp_port = smtp_port

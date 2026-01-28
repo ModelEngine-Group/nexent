@@ -455,13 +455,13 @@ export default function ToolTestPanel({
                           name={fieldName}
                           rules={rules}
                           tooltip={{
-                            title: description,
+                            title: t(`tool.input.${tool.name}.${paramName}`, { defaultValue: description }),
                             placement: "topLeft",
                             styles: { root: { maxWidth: 400 } },
                           }}
                         >
                           <Input
-                            placeholder={description}
+                            placeholder={t(`tool.input.${tool.name}.${paramName}`, { defaultValue: description })}
                           />
                         </Form.Item>
                       );
