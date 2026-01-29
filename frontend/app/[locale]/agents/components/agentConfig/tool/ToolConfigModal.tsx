@@ -17,9 +17,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
-import KnowledgeBaseList from "../../../../knowledges/components/knowledge/KnowledgeBaseList";
-import { KnowledgeBase } from "@/types/knowledgeBase";
-
 import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import ToolTestPanel from "./ToolTestPanel";
@@ -59,65 +56,16 @@ export default function ToolConfigModal({
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
-  const [kbOptions, setKbOptions] = useState<
-    { label: React.ReactNode; value: string; description?: string }[]
-  >([]);
-  const [kbLoading, setKbLoading] = useState(false);
-  const [kbModalVisible, setKbModalVisible] = useState(false);
-  const [kbModalSelected, setKbModalSelected] = useState<string[]>([]);
-  const [kbRawList, setKbRawList] = useState<any[]>([]);
-  // Preload KB list once when modal opens to avoid repeated fetches/ syncing
-  useEffect(() => {
-    let cancelled = false;
-    const loadKbs = async () => {
-      if (!isOpen) return;
-      const toolName = tool?.name;
-      // Only preload for local indices tool to avoid expensive / duplicative DataMate sync.
-      if (toolName !== "knowledge_base_search") {
-        return;
-      }
-
-      setKbLoading(true);
-      try {
-        const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(
-          true,
-          false,
-          true
-        );
-        if (cancelled) return;
-        setKbRawList(kbs);
-        setKbOptions(
-          kbs.map((kb: any) => ({
-            value: kb.id,
-            label: kb.name,
-            description: kb.description || "",
-          }))
-        );
-      } catch (e) {
-        // Non-fatal: leave child to handle DataMate fetch/errors when modal opens
-      } finally {
-        if (!cancelled) setKbLoading(false);
-      }
-    };
-
-    loadKbs();
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, tool]);
-
-  const buildKbOptions = (kbs: any[]) => {
-    // For preview/select usage we only need the KB name (no description).
-    return kbs.map((kb) => ({
-      value: kb.id,
-      label: kb.name,
-      description: kb.description || "",
-    }));
-  };
 
   // Configurable grouping: control which params appear in each group
   const serverParamNames = ["server_url", "verify_ssl"];
-  const retrievalParamNames = ["top_k", "threshold", "kb_page", "kb_page_size", "search_mode"];
+  const retrievalParamNames = [
+    "top_k",
+    "threshold",
+    "kb_page",
+    "kb_page_size",
+    "search_mode",
+  ];
   // Initialize with provided params
   useEffect(() => {
     // Initialize form values
@@ -137,7 +85,9 @@ export default function ToolConfigModal({
         const appConfig = ConfigStore.getInstance().getAppConfig();
         const tenantDataMateUrl = appConfig?.datamateUrl;
         if (tenantDataMateUrl) {
-          const serverIdx = initialParams.findIndex((p) => p.name === "server_url");
+          const serverIdx = initialParams.findIndex(
+            (p) => p.name === "server_url"
+          );
           if (serverIdx !== -1) {
             const currentVal = initialParams[serverIdx]?.value;
             if (!currentVal) {
@@ -361,7 +311,9 @@ export default function ToolConfigModal({
                 disabled={!tool}
                 className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8 mr-auto"
               >
-                {testPanelVisible ? t("toolConfig.button.closeTest") : t("toolConfig.button.testTool")}
+                {testPanelVisible
+                  ? t("toolConfig.button.closeTest")
+                  : t("toolConfig.button.testTool")}
               </button>
             }
             <div className="flex gap-2">
@@ -398,21 +350,17 @@ export default function ToolConfigModal({
               wrapperCol={{ span: 18 }}
             >
               <div className="pr-2 mt-3">
-                {tool?.name === "datamate_search" || tool?.name === "knowledge_base_search" ? (
-                <KnowledgeBaseToolConfig
-                  currentParams={currentParams}
-                  setCurrentParams={setCurrentParams}
-                  form={form}
-                  serverParamNames={serverParamNames}
-                  retrievalParamNames={retrievalParamNames}
-                  renderParamInput={renderParamInput}
-                  externalKbOptions={kbOptions}
-                  externalKbRawList={kbRawList}
-                  externalKbLoading={kbLoading}
-                  includeDataMateSync={tool?.name === "datamate_search"}
-                  toolName={tool?.name}
-                  toolSource={tool?.source}
-                />
+                {tool?.name === "datamate_search" ||
+                tool?.name === "knowledge_base_search" ? (
+                  <KnowledgeBaseToolConfig
+                    currentParams={currentParams}
+                    setCurrentParams={setCurrentParams}
+                    form={form}
+                    serverParamNames={serverParamNames}
+                    retrievalParamNames={retrievalParamNames}
+                    renderParamInput={renderParamInput}
+                    toolName={tool?.name}
+                  />
                 ) : (
                   currentParams.map((param, index) => {
                     const fieldName = `param_${index}`;
@@ -519,7 +467,6 @@ export default function ToolConfigModal({
           </div>
         </div>
       </Modal>
-
     </>
   );
 }

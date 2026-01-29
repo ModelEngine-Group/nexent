@@ -14,7 +14,6 @@ import {
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
 
-// @ts-ignore
 const fetch: typeof fetchWithAuth = fetchWithAuth;
 
 // Simple in-memory cache and in-flight dedupe for KB info
@@ -84,7 +83,8 @@ class KnowledgeBaseService {
 
         if (!response.ok) {
           throw new Error(
-            data.detail || "Failed to sync DataMate knowledge bases and create records"
+            data.detail ||
+              "Failed to sync DataMate knowledge bases and create records"
           );
         }
 
@@ -117,6 +117,12 @@ class KnowledgeBaseService {
     const now = Date.now();
     if (!forceRefresh && cachedKbInfo && now < kbCacheExpiry) {
       return cachedKbInfo;
+    }
+
+    // Clear DataMate cache when force refresh is requested
+    if (forceRefresh) {
+      datamateCache = null;
+      datamateCacheExpiry = 0;
     }
 
     if (kbInFlightPromise) {
@@ -168,8 +174,7 @@ class KnowledgeBaseService {
                     documentCount: stats.doc_count || 0,
                     chunkCount: stats.chunk_count || 0,
                     createdAt: stats.creation_date || null,
-                    updatedAt:
-                      stats.update_date || stats.creation_date || null,
+                    updatedAt: stats.update_date || stats.creation_date || null,
                     embeddingModel: stats.embedding_model || "unknown",
                     avatar: "",
                     chunkNum: 0,
@@ -208,8 +213,7 @@ class KnowledgeBaseService {
                     documentCount: stats.doc_count || 0,
                     chunkCount: stats.chunk_count || 0,
                     createdAt: stats.creation_date || null,
-                    updatedAt:
-                      stats.update_date || stats.creation_date || null,
+                    updatedAt: stats.update_date || stats.creation_date || null,
                     embeddingModel: stats.embedding_model || "unknown",
                     avatar: "",
                     chunkNum: 0,
@@ -822,7 +826,7 @@ class KnowledgeBaseService {
     }
   }
 
-  // Preview chunks from a knowledge base
+  // Preview chunks from knowledge base
   async previewChunks(
     indexName: string,
     batchSize: number = 1000

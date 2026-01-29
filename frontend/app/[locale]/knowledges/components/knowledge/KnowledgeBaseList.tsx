@@ -45,6 +45,7 @@ const KB_LAYOUT = {
 };
 
 interface KnowledgeBaseListProps {
+  showSelection?: boolean; // New: Control whether to show selection UI
   knowledgeBases: KnowledgeBase[];
   selectedIds: string[];
   activeKnowledgeBase: KnowledgeBase | null;
@@ -72,6 +73,7 @@ interface KnowledgeBaseListProps {
 }
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
+  showSelection = true, // New: Default to true
   knowledgeBases,
   selectedIds,
   activeKnowledgeBase,
@@ -439,51 +441,53 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   }}
                 >
                   <div className="flex items-start">
-                    <div className="flex-shrink-0">
-                      <div
-                        className="px-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (canSelect || isSelected) {
-                            onSelect(kb.id);
-                          }
-                        }}
-                        style={{
-                          minWidth: "40px",
-                          minHeight: "40px",
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <ConfigProvider
-                          theme={{
-                            token: {
-                              // If selected with model mismatch, use light blue, otherwise default blue
-                              colorPrimary: isMismatchedAndSelected
-                                ? "#90caf9"
-                                : "#1677ff",
-                            },
+                    {showSelection && (
+                      <div className="flex-shrink-0">
+                        <div
+                          className="px-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (canSelect || isSelected) {
+                              onSelect(kb.id);
+                            }
+                          }}
+                          style={{
+                            minWidth: "40px",
+                            minHeight: "40px",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "center",
                           }}
                         >
-                          <Checkbox
-                            checked={isSelected}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              onSelect(kb.id);
+                          <ConfigProvider
+                            theme={{
+                              token: {
+                                // If selected with model mismatch, use light blue, otherwise default blue
+                                colorPrimary: isMismatchedAndSelected
+                                  ? "#90caf9"
+                                  : "#1677ff",
+                              },
                             }}
-                            disabled={!canSelect && !isSelected}
-                            style={{
-                              cursor:
-                                canSelect || isSelected
-                                  ? "pointer"
-                                  : "not-allowed",
-                              transform: "scale(1.5)",
-                            }}
-                          />
-                        </ConfigProvider>
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                onSelect(kb.id);
+                              }}
+                              disabled={!canSelect && !isSelected}
+                              style={{
+                                cursor:
+                                  canSelect || isSelected
+                                    ? "pointer"
+                                    : "not-allowed",
+                                transform: "scale(1.5)",
+                              }}
+                            />
+                          </ConfigProvider>
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <p
