@@ -67,7 +67,7 @@ export default function McpConfigModal({
     handleUploadImage,
     handleDeleteContainer,
     handleViewLogs,
-  } = useMcpConfig();
+  } = useMcpConfig({ enabled: visible });
 
   // Local UI state
   const [addingServer, setAddingServer] = useState(false);
@@ -101,13 +101,7 @@ export default function McpConfigModal({
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
 
-  // Load data when modal opens
-  useEffect(() => {
-    if (visible) {
-      loadServerList();
-      loadContainerList();
-    }
-  }, [visible, loadServerList, loadContainerList]);
+  // Data loading is handled by React Query (enabled: visible)
 
   // Handlers
   const onAddServer = async () => {

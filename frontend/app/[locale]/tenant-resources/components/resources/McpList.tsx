@@ -66,7 +66,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     handleUploadImage,
     handleDeleteContainer,
     handleViewLogs,
-  } = useMcpConfig();
+  } = useMcpConfig({ enabled: true });
 
   // Add Modal State
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -102,11 +102,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
 
-  // Initial load
-  useEffect(() => {
-    loadServerList();
-    loadContainerList();
-  }, [tenantId, loadServerList, loadContainerList]);
+  // Data loading is handled by React Query (enabled: true)
 
   // Handlers (Add Server)
   const onAddServer = async () => {
