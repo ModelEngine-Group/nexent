@@ -165,11 +165,6 @@
     "More accurate Q&A experience"
   ],
   "page.loginPrompt.githubSupport": "⭐️ Nexent is still growing, please help me by starring on <1>GitHub</1>, thank you.",
-  "page.loginPrompt.title": "Welcome to Nexent",
-  "page.loginPrompt.register": "Create New Account",
-  "page.loginPrompt.login": "Log in to account",
-  "page.loginPrompt.intro": "Please log in to your account to access this page.",
-  "page.loginPrompt.githubSupport": "Support us on GitHub",
   "page.loginPrompt.noAccount": "Don't have an account yet? Click the \"Register\" button to create your exclusive account~",
   "page.adminPrompt.title": "Oh, you are not an administrator",
   "page.adminPrompt.close": "OK",
@@ -182,9 +177,6 @@
     "Create and publish exclusive smart Agents",
     "Integrate and configure your own tools"
   ],
-  "page.adminPrompt.title": "Access Denied",
-  "page.adminPrompt.intro": "You don't have permission to access this page. Please contact an administrator to request elevated privileges.",
-  "page.adminPrompt.githubSupport": "⭐️ Nexent is still growing, please help me by starring on <1>GitHub</1>, thank you.",
   "page.adminPrompt.becomeAdmin": "💡 Want to become an administrator? Please visit the <1>official contact page</1> to apply for an administrator account.",
 
   "chatStreamMessage.appIconAlt": "App Icon",
