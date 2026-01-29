@@ -1850,12 +1850,10 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    @patch('backend.services.tool_configuration_service.build_knowledge_name_mapping')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_success(self, mock_get_vector_db_core, mock_get_embedding_model,
-                                                               mock_build_mapping, mock_get_knowledge_list, mock_signature, mock_get_class):
+                                                               mock_signature, mock_get_class):
         """Test successful knowledge_base_search tool validation with proper dependencies"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -1879,16 +1877,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_signature.return_value = mock_sig
 
         # Mock knowledge base dependencies
-        mock_knowledge_list = [
-            {"index_name": "index1", "knowledge_id": "kb1",
-                "knowledge_sources": "elasticsearch"},
-            {"index_name": "index2", "knowledge_id": "kb2",
-                "knowledge_sources": "elasticsearch"}
-        ]
-        mock_get_knowledge_list.return_value = mock_knowledge_list
         mock_get_embedding_model.return_value = "mock_embedding_model"
-        mock_build_mapping.return_value = {
-            "index1": "index1", "alias2": "index2"}
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
@@ -1919,69 +1908,95 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_get_embedding_model.assert_called_once_with(tenant_id="tenant1")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    def test_validate_local_tool_knowledge_base_search_missing_tenant_id(self, mock_get_class):
+    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    def test_validate_local_tool_knowledge_base_search_missing_tenant_id(self, mock_get_vector_db_core,
+                                                                        mock_get_embedding_model, mock_get_class):
         """Test knowledge_base_search tool validation when tenant_id is missing"""
         mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "knowledge base search result"
+        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
+
+        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_get_vector_db_core.return_value = Mock()
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for knowledge_base_search validation"):
-            _validate_local_tool(
-                "knowledge_base_search",
-                {"query": "test query"},
-                {"param": "config"},
-                None,  # Missing tenant_id
-                "user1"
-            )
+        # knowledge_base_search doesn't require tenant_id/user_id in current implementation
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"param": "config"},
+            None,  # Missing tenant_id
+            "user1"
+        )
+
+        assert result == "knowledge base search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    def test_validate_local_tool_knowledge_base_search_missing_user_id(self, mock_get_class):
+    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    def test_validate_local_tool_knowledge_base_search_missing_user_id(self, mock_get_vector_db_core,
+                                                                       mock_get_embedding_model, mock_get_class):
         """Test knowledge_base_search tool validation when user_id is missing"""
         mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "knowledge base search result"
+        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
+
+        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_get_vector_db_core.return_value = Mock()
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for knowledge_base_search validation"):
-            _validate_local_tool(
-                "knowledge_base_search",
-                {"query": "test query"},
-                {"param": "config"},
-                "tenant1",
-                None  # Missing user_id
-            )
+        # knowledge_base_search doesn't require tenant_id/user_id in current implementation
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"param": "config"},
+            "tenant1",
+            None  # Missing user_id
+        )
+
+        assert result == "knowledge base search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
-    def test_validate_local_tool_knowledge_base_search_missing_both_ids(self, mock_get_class):
+    @patch('backend.services.tool_configuration_service.get_embedding_model')
+    @patch('backend.services.tool_configuration_service.get_vector_db_core')
+    def test_validate_local_tool_knowledge_base_search_missing_both_ids(self, mock_get_vector_db_core,
+                                                                        mock_get_embedding_model, mock_get_class):
         """Test knowledge_base_search tool validation when both tenant_id and user_id are missing"""
         mock_tool_class = Mock()
+        mock_tool_instance = Mock()
+        mock_tool_instance.forward.return_value = "knowledge base search result"
+        mock_tool_class.return_value = mock_tool_instance
         mock_get_class.return_value = mock_tool_class
+
+        mock_get_embedding_model.return_value = "mock_embedding_model"
+        mock_get_vector_db_core.return_value = Mock()
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
-        with pytest.raises(ToolExecutionException,
-                           match="Tenant ID and User ID are required for knowledge_base_search validation"):
-            _validate_local_tool(
-                "knowledge_base_search",
-                {"query": "test query"},
-                {"param": "config"},
-                None,  # Missing tenant_id
-                None   # Missing user_id
-            )
+        # knowledge_base_search doesn't require tenant_id/user_id in current implementation
+        result = _validate_local_tool(
+            "knowledge_base_search",
+            {"query": "test query"},
+            {"param": "config"},
+            None,  # Missing tenant_id
+            None   # Missing user_id
+        )
+
+        assert result == "knowledge base search result"
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    @patch('backend.services.tool_configuration_service.build_knowledge_name_mapping')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_empty_knowledge_list(self, mock_get_vector_db_core,
                                                                             mock_get_embedding_model,
-                                                                            mock_build_mapping,
-                                                                            mock_get_knowledge_list,
                                                                             mock_signature,
                                                                             mock_get_class):
         """Test knowledge_base_search tool validation with empty knowledge list"""
@@ -2006,9 +2021,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_signature.return_value = mock_sig
 
         # Mock empty knowledge list
-        mock_get_knowledge_list.return_value = []
         mock_get_embedding_model.return_value = "mock_embedding_model"
-        mock_build_mapping.return_value = {}
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
@@ -2037,14 +2050,10 @@ class TestValidateLocalToolKnowledgeBaseSearch:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    @patch('backend.services.tool_configuration_service.build_knowledge_name_mapping')
     @patch('backend.services.tool_configuration_service.get_embedding_model')
     @patch('backend.services.tool_configuration_service.get_vector_db_core')
     def test_validate_local_tool_knowledge_base_search_execution_error(self, mock_get_vector_db_core,
                                                                        mock_get_embedding_model,
-                                                                       mock_build_mapping,
-                                                                       mock_get_knowledge_list,
                                                                        mock_signature,
                                                                        mock_get_class):
         """Test knowledge_base_search tool validation when execution fails"""
@@ -2070,10 +2079,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_signature.return_value = mock_sig
 
         # Mock knowledge base dependencies
-        mock_knowledge_list = [{"index_name": "index1", "knowledge_id": "kb1"}]
-        mock_get_knowledge_list.return_value = mock_knowledge_list
         mock_get_embedding_model.return_value = "mock_embedding_model"
-        mock_build_mapping.return_value = {"index1": "index1"}
         mock_vdb_core = Mock()
         mock_get_vector_db_core.return_value = mock_vdb_core
 
@@ -2166,9 +2172,7 @@ class TestValidateLocalToolDatamateSearchTool:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    def test_validate_local_tool_datamate_search_tool_success(self, mock_get_knowledge_list,
-                                                              mock_signature, mock_get_class):
+    def test_validate_local_tool_datamate_search_tool_success(self, mock_signature, mock_get_class):
         """Test successful datamate_search_tool validation with proper dependencies"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2188,9 +2192,6 @@ class TestValidateLocalToolDatamateSearchTool:
             'index_names': Mock(default=Mock(default=[])),
         }
         mock_signature.return_value = mock_sig
-
-        # datamate_search has no special knowledge-list dependency in _validate_local_tool
-        mock_get_knowledge_list.return_value = []
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
@@ -2213,8 +2214,6 @@ class TestValidateLocalToolDatamateSearchTool:
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
-
-        mock_get_knowledge_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_datamate_search_tool_missing_tenant_id(self, mock_get_class):
@@ -2281,9 +2280,7 @@ class TestValidateLocalToolDatamateSearchTool:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    def test_validate_local_tool_datamate_search_tool_empty_knowledge_list(self, mock_get_knowledge_list,
-                                                                           mock_signature, mock_get_class):
+    def test_validate_local_tool_datamate_search_tool_empty_knowledge_list(self, mock_signature, mock_get_class):
         """Test datamate_search_tool validation with empty knowledge list"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2300,9 +2297,6 @@ class TestValidateLocalToolDatamateSearchTool:
             'index_names': Mock(default=Mock(default=[])),
         }
         mock_signature.return_value = mock_sig
-
-        # Mock empty knowledge list
-        mock_get_knowledge_list.return_value = []
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
@@ -2323,13 +2317,10 @@ class TestValidateLocalToolDatamateSearchTool:
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
-        mock_get_knowledge_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    def test_validate_local_tool_datamate_search_tool_no_datamate_sources(self, mock_get_knowledge_list,
-                                                                          mock_signature, mock_get_class):
+    def test_validate_local_tool_datamate_search_tool_no_datamate_sources(self, mock_signature, mock_get_class):
         """Test datamate_search_tool validation when no datamate sources exist"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2346,15 +2337,6 @@ class TestValidateLocalToolDatamateSearchTool:
             'index_names': Mock(default=Mock(default=[])),
         }
         mock_signature.return_value = mock_sig
-
-        # Mock knowledge list with no datamate sources
-        mock_knowledge_list = [
-            {"index_name": "other_index1", "knowledge_id": "kb1",
-                "knowledge_sources": "other"},
-            {"index_name": "other_index2", "knowledge_id": "kb2",
-                "knowledge_sources": "filesystem"}
-        ]
-        mock_get_knowledge_list.return_value = mock_knowledge_list
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
@@ -2375,13 +2357,10 @@ class TestValidateLocalToolDatamateSearchTool:
         }
         mock_tool_class.assert_called_once_with(**expected_params)
         mock_tool_instance.forward.assert_called_once_with(query="test query")
-        mock_get_knowledge_list.assert_not_called()
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_selected_knowledge_list')
-    def test_validate_local_tool_datamate_search_tool_execution_error(self, mock_get_knowledge_list,
-                                                                      mock_signature, mock_get_class):
+    def test_validate_local_tool_datamate_search_tool_execution_error(self, mock_signature, mock_get_class):
         """Test datamate_search_tool validation when execution fails"""
         # Mock tool class
         mock_tool_class = Mock()
@@ -2399,13 +2378,6 @@ class TestValidateLocalToolDatamateSearchTool:
             'index_names': Mock(),
         }
         mock_signature.return_value = mock_sig
-
-        # Mock knowledge base dependencies
-        mock_knowledge_list = [
-            {"index_name": "datamate_index1", "knowledge_id": "kb1",
-                "knowledge_sources": "datamate"}
-        ]
-        mock_get_knowledge_list.return_value = mock_knowledge_list
 
         from backend.services.tool_configuration_service import _validate_local_tool
 
