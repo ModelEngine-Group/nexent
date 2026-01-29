@@ -40,7 +40,7 @@ class KnowledgeBaseSearchTool(Tool):
         top_k: int = Field(
             description="Maximum number of search results", default=3),
         index_names: List[str] = Field(
-            description="The list of index names to search", default=None),
+            description="The list of index names to search"),
         search_mode: str = Field(
             description="the search mode, optional values: hybrid, accurate, semantic",
             default="hybrid",

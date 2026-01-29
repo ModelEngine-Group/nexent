@@ -23,7 +23,6 @@ from database.tool_db import (
 )
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
-from services.tenant_config_service import get_selected_knowledge_list, build_knowledge_name_mapping
 from database.client import minio_client
 from services.image_service import get_vlm_model
 

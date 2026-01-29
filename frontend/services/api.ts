@@ -42,7 +42,8 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
-    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    clearNew: (agentId: string | number) =>
+      `${API_BASE_URL}/agent/clear_new/${agentId}`,
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -164,8 +165,6 @@ export const API_ENDPOINTS = {
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
   },
   tenantConfig: {
-    loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
-    updateKnowledgeList: `${API_BASE_URL}/tenant_config/update_knowledge_list`,
     deploymentVersion: `${API_BASE_URL}/tenant_config/deployment_version`,
   },
   mcp: {
@@ -255,8 +254,10 @@ export const API_ENDPOINTS = {
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
     create: `${API_BASE_URL}/invitations`,
-    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
-    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    update: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
   },
 };
 
