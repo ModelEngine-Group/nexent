@@ -59,6 +59,7 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
+  group_ids?: number[];
 }
 
 export interface Tool {

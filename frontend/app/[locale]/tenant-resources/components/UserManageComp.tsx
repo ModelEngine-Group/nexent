@@ -29,6 +29,7 @@ import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
+import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { USER_ROLES } from "@/const/modelConfig";
@@ -316,6 +317,11 @@ export default function UserManageComp() {
                     label:
                       t("tenantResources.tabs.knowledge") || "Knowledge Base",
                     children: <KnowledgeList tenantId={tenantId} />,
+                  },
+                  {
+                          key: "agents",
+                          label: t("tenantResources.tabs.agents") || "Agents",
+                          children: <AgentList tenantId={tenantId} />,
                   },
                   {
                     key: "invitations",

@@ -4,7 +4,7 @@ import { App } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { updateAgent, updateToolConfig } from "@/services/agentConfigService";
+import { updateAgentInfo, updateToolConfig } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
 
 /**
@@ -34,31 +34,35 @@ export const useSaveGuard = () => {
         return false;
       }
 
-      const result = await updateAgent(
-        currentAgentId ?? undefined, // undefined = create，number = update
-        currentEditedAgent.name,
-        currentEditedAgent.description,
-        currentEditedAgent.model,
-        currentEditedAgent.max_step,
-        currentEditedAgent.provide_run_summary,
-        true, // enabled
-        currentEditedAgent.business_description,
-        currentEditedAgent.duty_prompt,
-        currentEditedAgent.constraint_prompt,
-        currentEditedAgent.few_shots_prompt,
-        currentEditedAgent.display_name,
-        currentEditedAgent.model_id ?? undefined,
-        currentEditedAgent.business_logic_model_name ?? undefined,
-        currentEditedAgent.business_logic_model_id ?? undefined,
-        (currentEditedAgent.tools || [])
-          .filter((tool: any) => tool && tool.is_available !== false)
-          .map((tool: any) => Number(tool.id))
-          .filter((id: number) => Number.isFinite(id)),
-        (currentEditedAgent.sub_agent_id_list || [])
-          .map((id: any) => Number(id))
-          .filter((id: number) => Number.isFinite(id)),
-        currentEditedAgent.author
-      );
+      const enabledToolIds = (currentEditedAgent.tools || [])
+        .filter((tool: any) => tool && tool.is_available !== false)
+        .map((tool: any) => Number(tool.id))
+        .filter((id: number) => Number.isFinite(id));
+
+      const relatedAgentIds = (currentEditedAgent.sub_agent_id_list || [])
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
+      const result = await updateAgentInfo({
+        agent_id: currentAgentId ?? undefined, // undefined=create, number=update
+        name: currentEditedAgent.name,
+        display_name: currentEditedAgent.display_name,
+        description: currentEditedAgent.description,
+        author: currentEditedAgent.author,
+        model_name: currentEditedAgent.model,
+        model_id: currentEditedAgent.model_id ?? undefined,
+        max_steps: currentEditedAgent.max_step,
+        provide_run_summary: currentEditedAgent.provide_run_summary,
+        enabled: true,
+        business_description: currentEditedAgent.business_description,
+        duty_prompt: currentEditedAgent.duty_prompt,
+        constraint_prompt: currentEditedAgent.constraint_prompt,
+        few_shots_prompt: currentEditedAgent.few_shots_prompt,
+        business_logic_model_name: currentEditedAgent.business_logic_model_name ?? undefined,
+        business_logic_model_id: currentEditedAgent.business_logic_model_id ?? undefined,
+        enabled_tool_ids: enabledToolIds,
+        related_agent_ids: relatedAgentIds,
+      });
 
       if (result.success) {
         useAgentConfigStore.getState().markAsSaved(); // 标记为已保存
