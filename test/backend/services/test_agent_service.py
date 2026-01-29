@@ -1337,6 +1337,38 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     mock_get_model_by_model_id.assert_called_once_with(456)
 
 
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_converts_group_ids_when_present(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_convert_string_to_list,
+    mock_check_availability,
+):
+    """get_agent_info_impl should convert group_ids when present."""
+    mock_search_agent_info.return_value = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+        "group_ids": "1,2",
+        "business_logic_model_id": None,
+    }
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = []
+    mock_convert_string_to_list.return_value = [1, 2]
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert result["group_ids"] == [1, 2]
+    mock_convert_string_to_list.assert_called_once_with("1,2")
+
+
 @patch('backend.services.agent_service.check_agent_availability')
 @patch('backend.services.agent_service.get_model_by_model_id')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
@@ -1745,6 +1777,42 @@ async def test_list_all_agent_info_impl_success():
             call([101, 102]),
             call([101, 102])
         ])
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
+    mock_query_all,
+    mock_check_availability,
+    mock_get_model,
+):
+    """list_all_agent_info_impl should fetch model when model_id not in cache."""
+    mock_query_all.return_value = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "First test agent",
+            "enabled": True,
+            "model_id": 99,
+            "group_ids": "",
+            "create_time": 1,
+        }
+    ]
+
+    # Do not mutate model_cache here so that the "model_id not in model_cache" branch runs.
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = {"model_name": "m", "display_name": "M"}
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant")
+
+    assert len(result) == 1
+    assert result[0]["model_id"] == 99
+    assert result[0]["model_name"] == "m"
+    assert result[0]["model_display_name"] == "M"
+    mock_get_model.assert_called_once_with(99, "test_tenant")
 
 
 async def test_list_all_agent_info_impl_with_unavailable_tools():

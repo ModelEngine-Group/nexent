@@ -291,6 +291,44 @@ def test_update_agent_success(monkeypatch, mock_session):
 
     assert mock_agent.updated_by == "user1"
 
+def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
+    """update_agent should skip None values and convert group_ids list to string."""
+    session, query = mock_session
+    mock_agent = MockAgent()
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_agent
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+
+    # Spy on the imported convert_list_to_string in backend.database.agent_db
+    from backend.database import agent_db as agent_db_module
+    agent_db_module.convert_list_to_string.reset_mock()
+
+    agent_info = MagicMock()
+    agent_info.__dict__ = {
+        # None should be skipped by update_agent (lines 158-159)
+        "name": None,
+        # group_ids should be converted (lines 160-161)
+        "group_ids": [1, 2],
+    }
+
+    update_agent(1, agent_info, "tenant1", "user1")
+
+    # name should remain unchanged because None is skipped
+    assert mock_agent.name == "test_agent"
+    # group_ids should be set as a comma-separated string
+    assert getattr(mock_agent, "group_ids") == "1,2"
+    agent_db_module.convert_list_to_string.assert_called_once_with([1, 2])
+    assert mock_agent.updated_by == "user1"
+
 def test_update_agent_not_found(monkeypatch, mock_session):
     """测试更新不存在的agent"""
     session, query = mock_session
