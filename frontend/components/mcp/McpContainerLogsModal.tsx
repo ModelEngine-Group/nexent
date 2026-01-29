@@ -1,8 +1,5 @@
-import { Modal, Button, Typography } from "antd";
-import { LoaderCircle } from "lucide-react";
+import { Modal, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
-
-const { Text } = Typography;
 
 interface McpContainerLogsModalProps {
   open: boolean;
@@ -29,16 +26,11 @@ export default function McpContainerLogsModal({
       width={800}
       footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
     >
-      {loading ? (
-        <div className="text-center py-10">
-          <LoaderCircle className="animate-spin" size={16} />
-          <Text>{t("mcpConfig.containerLogs.loading")}</Text>
-        </div>
-      ) : (
+      <Spin spinning={loading} tip={t("mcpConfig.containerLogs.loading")}>
         <pre className="bg-gray-100 p-4 rounded max-h-[500px] overflow-auto whitespace-pre-wrap text-xs font-mono">
           {logs || t("mcpConfig.containerLogs.empty")}
         </pre>
-      )}
+      </Spin>
     </Modal>
   );
 }

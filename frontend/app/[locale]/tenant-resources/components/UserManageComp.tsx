@@ -324,14 +324,14 @@ export default function UserManageComp() {
                           children: <AgentList tenantId={tenantId} />,
                   },
                   {
-                    key: "invitations",
-                    label: t("tenantResources.invitation.tab") || "Invitations",
-                    children: <InvitationList tenantId={tenantId} />,
-                  },
-                  {
                     key: "mcp",
                     label: t("tenantResources.tabs.mcp") || "MCP",
                     children: <McpList tenantId={tenantId} />,
+                  },
+                  {
+                    key: "invitations",
+                    label: t("tenantResources.invitation.tab") || "Invitations",
+                    children: <InvitationList tenantId={tenantId} />,
                   },
                 ]}
               />
