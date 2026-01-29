@@ -278,6 +278,7 @@ class AgentInfoRequest(BaseModel):
     business_logic_model_id: Optional[int] = None
     enabled_tool_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
+    group_ids: Optional[List[int]] = None
 
 
 class AgentIDRequest(BaseModel):
@@ -481,6 +482,15 @@ class UpdateKnowledgeListRequest(BaseModel):
         None, description="List of knowledge base index names from datamate source")
 
 
+class MCPUpdateRequest(BaseModel):
+    """Request model for updating an existing MCP server"""
+    current_service_name: str = Field(...,
+                                      description="Current MCP service name")
+    current_mcp_url: str = Field(..., description="Current MCP server URL")
+    new_service_name: str = Field(..., description="New MCP service name")
+    new_mcp_url: str = Field(..., description="New MCP server URL")
+
+
 # Tenant Management Data Models
 # ---------------------------------------------------------------------------
 class TenantCreateRequest(BaseModel):
@@ -608,6 +618,10 @@ class InvitationListRequest(BaseModel):
     page: int = Field(1, ge=1, description="Page number for pagination")
     page_size: int = Field(
         20, ge=1, le=100, description="Number of items per page")
+    sort_by: Optional[str] = Field(
+        None, description="Sort field (create_time, update_time, etc.)")
+    sort_order: Optional[str] = Field(
+        None, description="Sort order (asc, desc)")
 
 
 class InvitationUseResponse(BaseModel):

@@ -92,6 +92,7 @@ with patch('sqlalchemy.create_engine', return_value=mock_engine), \
         _generate_unique_display_name_with_suffix,
         _generate_unique_value_with_suffix,
         _regenerate_agent_value_with_llm,
+        clear_agent_new_mark_impl,
     )
     from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
@@ -980,6 +981,7 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_curre
     request.enabled = True
     request.enabled_tool_ids = None
     request.related_agent_ids = None
+    request.group_ids = None
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
@@ -1333,6 +1335,38 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     }
     assert result == expected_result
     mock_get_model_by_model_id.assert_called_once_with(456)
+
+
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("backend.services.agent_service.search_tools_for_sub_agent")
+@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_converts_group_ids_when_present(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_convert_string_to_list,
+    mock_check_availability,
+):
+    """get_agent_info_impl should convert group_ids when present."""
+    mock_search_agent_info.return_value = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+        "group_ids": "1,2",
+        "business_logic_model_id": None,
+    }
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = []
+    mock_convert_string_to_list.return_value = [1, 2]
+    mock_check_availability.return_value = (True, [])
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert result["group_ids"] == [1, 2]
+    mock_convert_string_to_list.assert_called_once_with("1,2")
 
 
 @patch('backend.services.agent_service.check_agent_availability')
@@ -1743,6 +1777,42 @@ async def test_list_all_agent_info_impl_success():
             call([101, 102]),
             call([101, 102])
         ])
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
+    mock_query_all,
+    mock_check_availability,
+    mock_get_model,
+):
+    """list_all_agent_info_impl should fetch model when model_id not in cache."""
+    mock_query_all.return_value = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "First test agent",
+            "enabled": True,
+            "model_id": 99,
+            "group_ids": "",
+            "create_time": 1,
+        }
+    ]
+
+    # Do not mutate model_cache here so that the "model_id not in model_cache" branch runs.
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = {"model_name": "m", "display_name": "M"}
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant")
+
+    assert len(result) == 1
+    assert result[0]["model_id"] == 99
+    assert result[0]["model_name"] == "m"
+    assert result[0]["model_display_name"] == "M"
+    mock_get_model.assert_called_once_with(99, "test_tenant")
 
 
 async def test_list_all_agent_info_impl_with_unavailable_tools():
@@ -6922,3 +6992,153 @@ async def test_import_agent_by_agent_id_duplicate_display_name_no_model_still_al
     assert result == 456
     mock_create_agent.assert_called_once()
     assert mock_create_agent.call_args[1]["agent_info"]["display_name"] == "duplicate_display"
+
+
+@pytest.mark.asyncio
+async def test_clear_agent_new_mark_impl_success():
+    """
+    Test successful clearing of agent NEW mark through service layer.
+
+    This test verifies that:
+    1. The function correctly calls the database helper
+    2. Returns the correct row count
+    3. Logs the operation with correct parameters
+    """
+    # Setup
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 1
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('backend.services.agent_service.logger') as mock_logger:
+
+        # Execute
+        result = await clear_agent_new_mark_impl(
+            agent_id=123,
+            tenant_id="test_tenant",
+            user_id="test_user"
+        )
+
+        # Assert
+        assert result == 1
+        mock_module.clear_agent_new_mark.assert_called_once_with(123, "test_tenant", "test_user")
+        mock_logger.info.assert_called_once_with(
+            "clear_agent_new_mark_impl called for agent_id=123, tenant_id=test_tenant, user_id=test_user, affected_rows=1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_clear_agent_new_mark_impl_no_rows_affected():
+    """
+    Test clearing agent NEW mark when no rows are affected.
+
+    This test verifies that:
+    1. The function handles zero affected rows correctly
+    2. Still logs the operation appropriately
+    """
+    # Setup
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 0
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('backend.services.agent_service.logger') as mock_logger:
+
+        # Execute
+        result = await clear_agent_new_mark_impl(
+            agent_id=999,
+            tenant_id="test_tenant",
+            user_id="test_user"
+        )
+
+        # Assert
+        assert result == 0
+        mock_module.clear_agent_new_mark.assert_called_once_with(999, "test_tenant", "test_user")
+        mock_logger.info.assert_called_once_with(
+            "clear_agent_new_mark_impl called for agent_id=999, tenant_id=test_tenant, user_id=test_user, affected_rows=0"
+        )
+
+
+@pytest.mark.asyncio
+async def test_clear_agent_new_mark_impl_multiple_rows_affected():
+    """
+    Test clearing agent NEW mark when multiple rows are affected.
+
+    This test verifies that:
+    1. The function handles multiple affected rows correctly
+    2. Logs the correct count
+    """
+    # Setup
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 3
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('backend.services.agent_service.logger') as mock_logger:
+
+        # Execute
+        result = await clear_agent_new_mark_impl(
+            agent_id=456,
+            tenant_id="another_tenant",
+            user_id="another_user"
+        )
+
+        # Assert
+        assert result == 3
+        mock_module.clear_agent_new_mark.assert_called_once_with(456, "another_tenant", "another_user")
+        mock_logger.info.assert_called_once_with(
+            "clear_agent_new_mark_impl called for agent_id=456, tenant_id=another_tenant, user_id=another_user, affected_rows=3"
+        )
+
+
+@pytest.mark.asyncio
+async def test_clear_agent_new_mark_impl_database_error():
+    """
+    Test clear_agent_new_mark_impl when database operation fails.
+
+    This test verifies that:
+    1. The function propagates database errors
+    2. Does not log success when operation fails
+    """
+    # Setup
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.side_effect = Exception("Database connection failed")
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('backend.services.agent_service.logger') as mock_logger:
+
+        # Execute and Assert
+        with pytest.raises(Exception, match="Database connection failed"):
+            await clear_agent_new_mark_impl(
+                agent_id=123,
+                tenant_id="test_tenant",
+                user_id="test_user"
+            )
+
+        mock_module.clear_agent_new_mark.assert_called_once_with(123, "test_tenant", "test_user")
+        mock_logger.info.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clear_agent_new_mark_impl_with_special_characters():
+    """
+    Test clear_agent_new_mark_impl with special characters in parameters.
+
+    This test verifies that:
+    1. The function handles special characters in tenant_id and user_id
+    2. Properly passes through all parameters
+    """
+    # Setup
+    mock_module = MagicMock()
+    mock_module.clear_agent_new_mark.return_value = 1
+    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('backend.services.agent_service.logger') as mock_logger:
+
+        # Execute
+        result = await clear_agent_new_mark_impl(
+            agent_id=789,
+            tenant_id="tenant-with-dashes_and_underscores",
+            user_id="user@domain.com"
+        )
+
+        # Assert
+        assert result == 1
+        mock_module.clear_agent_new_mark.assert_called_once_with(789, "tenant-with-dashes_and_underscores", "user@domain.com")
+        mock_logger.info.assert_called_once_with(
+            "clear_agent_new_mark_impl called for agent_id=789, tenant_id=tenant-with-dashes_and_underscores, user_id=user@domain.com, affected_rows=1"
+        )
+
+# Deprecated tests for mark_agents_as_new_impl have been removed as the API is cleaned up.

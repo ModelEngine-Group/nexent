@@ -34,6 +34,9 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   // Debug drawer state
   const [isDebugDrawerOpen, setIsDebugDrawerOpen] = useState(false);
 
+  // Generation state shared with AgentGenerateDetail
+  const [isGenerating, setIsGenerating] = useState(false);
+
   // Handle business info updates
   const handleUpdateBusinessInfo = (updates: AgentBusinessInfo) => {
     updateBusinessInfo(updates);
@@ -75,6 +78,8 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
                   currentAgentId={currentAgentId}
                   onUpdateProfile={handleUpdateProfile}
                   onUpdateBusinessInfo={handleUpdateBusinessInfo}
+                  isGenerating={isGenerating}
+                  setIsGenerating={setIsGenerating}
                 />
               </Flex>
             </Col>
@@ -93,17 +98,19 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
                   })
                 }
                 size="middle"
+                disabled={isGenerating}
               >
                 {t("systemPrompt.button.debug")}
               </Button>
 
               <Button
-                type="primary"
-                className="responsive-button bg-green-500 hover:bg-green-600 border-green-500 hover:border-green-600"
                 icon={<Save size={16} />}
+                color="green"
+                variant="solid"
                 onClick={saveGuard.save}
                 size="middle"
                 title={t("common.save")}
+                disabled={isGenerating}
               >
                 {t("common.save")}
               </Button>

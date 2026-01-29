@@ -11,13 +11,14 @@ import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
 import { ChatStreamFinalMessage } from "@/app/chat/streaming/chatStreamFinalMessage";
 import { TaskWindow } from "@/app/chat/streaming/taskWindow";
 import { transformMessagesToTaskMessages } from "@/app/chat/streaming/messageTransformer";
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { MESSAGE_ROLES } from "@/const/chatConfig";
 import log from "@/lib/logger";
 
 // Agent debugging component Props interface
 interface AgentDebuggingProps {
   onAskQuestion: (question: string) => void;
   onStop: () => void;
+  onClear: () => void;
   isStreaming: boolean;
   messages: ChatMessageType[];
 }
@@ -33,6 +34,7 @@ interface DebugConfigProps {
 function AgentDebugging({
   onAskQuestion,
   onStop,
+  onClear,
   isStreaming,
   messages,
 }: AgentDebuggingProps) {
@@ -71,14 +73,14 @@ function AgentDebugging({
           {messages.map((message, index) => {
             // Process the task content of the current message
             const currentTaskMessages =
-              message.role === ROLE_ASSISTANT
+              message.role === MESSAGE_ROLES.ASSISTANT
                 ? processMessageSteps(message)
                 : [];
 
             return (
               <div key={message.id || index} className="flex flex-col gap-2">
                 {/* User message */}
-                {message.role === "user" && (
+                {message.role === MESSAGE_ROLES.USER && (
                   <ChatStreamFinalMessage
                     message={message}
                     onSelectMessage={() => {}}
@@ -92,7 +94,7 @@ function AgentDebugging({
                 )}
 
                 {/* Assistant message task window */}
-                {message.role === ROLE_ASSISTANT &&
+                {message.role === MESSAGE_ROLES.ASSISTANT &&
                   currentTaskMessages.length > 0 && (
                     <TaskWindow
                       messages={currentTaskMessages}
@@ -101,7 +103,7 @@ function AgentDebugging({
                   )}
 
                 {/* Assistant message final answer */}
-                {message.role === ROLE_ASSISTANT && (
+                {message.role === MESSAGE_ROLES.ASSISTANT && (
                   <ChatStreamFinalMessage
                     message={message}
                     onSelectMessage={() => {}}
@@ -127,6 +129,15 @@ function AgentDebugging({
           onPressEnter={handleSend}
           disabled={isStreaming}
         />
+        {/* Clear history button */}
+        <button
+          onClick={onClear}
+          disabled={isStreaming}
+          className="min-w-[56px] px-4 py-1.5 rounded-md flex items-center justify-center text-sm bg-gray-200 hover:bg-gray-300 text-gray-800 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ border: "none" }}
+        >
+          {t("agent.debug.clear")}
+        </button>
         {isStreaming ? (
           <button
             onClick={onStop}
@@ -217,13 +228,19 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     setMessages((prev) => {
       const newMessages = [...prev];
       const lastMsg = newMessages[newMessages.length - 1];
-      if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
         lastMsg.isComplete = true;
         lastMsg.thinking = undefined; // Explicitly clear thinking state
         lastMsg.content = t("agent.debug.stopped");
       }
       return newMessages;
     });
+  };
+
+  // Clear local history and reset the step counter
+  const handleClearHistory = async () => {
+    setMessages([]);
+    stepIdCounter.current.current = 0;
   };
 
   // Process test question
@@ -236,7 +253,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     // Add user message
     const userMessage: ChatMessageType = {
       id: Date.now().toString(),
-      role: "user",
+      role: MESSAGE_ROLES.USER,
       content: question,
       timestamp: new Date(),
     };
@@ -244,7 +261,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     // Add assistant message (initial state)
     const assistantMessage: ChatMessageType = {
       id: (Date.now() + 1).toString(),
-      role: ROLE_ASSISTANT,
+      role: MESSAGE_ROLES.ASSISTANT,
       content: "",
       timestamp: new Date(),
       isComplete: false,
@@ -304,7 +321,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         setMessages((prev) => {
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
             lastMsg.content = t("agent.debug.stopped");
             lastMsg.isComplete = true;
             lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -321,7 +338,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         setMessages((prev) => {
           const newMessages = [...prev];
           const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
             lastMsg.content = errorMessage;
             lastMsg.isComplete = true;
             lastMsg.error = errorMessage;
@@ -347,6 +364,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         key={agentId} // Re-render when agentId changes to ensure state resets
         onAskQuestion={handleTestQuestion}
         onStop={handleStop}
+        onClear={handleClearHistory}
         isStreaming={isStreaming}
         messages={messages}
       />

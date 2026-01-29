@@ -57,21 +57,42 @@ prompt_option_value() {
   local key="$1"
   local prompt_msg="$2"
   local default_value="${3:-}"
+  local input_type="${4:-text}"  # Default to text type
   local input=""
 
   while true; do
-    if [ -n "$default_value" ]; then
-      read -rp "${prompt_msg} [${default_value}]: " input
-      input="${input:-$default_value}"
-    else
-      read -rp "${prompt_msg}: " input
-    fi
+    read -rp "${prompt_msg}: " input
 
     input="$(trim_quotes "$input")"
-    if [ -n "$input" ]; then
-      DEPLOY_OPTIONS[$key]="$input"
-      update_option_value "$key" "$input"
-      break
+    
+    # Handle yes/no type inputs
+    if [[ "$input_type" == "boolean" ]]; then
+      # Convert to uppercase for consistency
+      input=$(echo "$input" | tr '[:lower:]' '[:upper:]')
+      
+      # Validate input
+      if [[ "$input" =~ ^[YN]$ ]]; then
+        DEPLOY_OPTIONS[$key]="$input"
+        update_option_value "$key" "$input"
+        break
+      elif [ -z "$input" ] && [ -n "$default_value" ]; then
+        # Use default value if input is empty
+        DEPLOY_OPTIONS[$key]="$default_value"
+        update_option_value "$key" "$default_value"
+        break
+      fi
+    else
+      # Handle other types of inputs
+      if [ -n "$input" ]; then
+        DEPLOY_OPTIONS[$key]="$input"
+        update_option_value "$key" "$input"
+        break
+      elif [ -z "$input" ] && [ -n "$default_value" ]; then
+        # Use default value if input is empty
+        DEPLOY_OPTIONS[$key]="$default_value"
+        update_option_value "$key" "$default_value"
+        break
+      fi
     fi
 
     log "WARN" "⚠️  ${key} cannot be empty, please enter a value."
@@ -213,10 +234,73 @@ update_option_value() {
 }
 
 
+prompt_deploy_options() {
+  # Only prompt for options that already exist in DEPLOY_OPTIONS
+  if [[ -n "${DEPLOY_OPTIONS[VERSION_CHOICE]:-}" ]]; then
+    echo "🚀 Please select deployment version:"
+    echo "   1) ⚡️  Speed version - Lightweight deployment with essential features"
+    echo "   2) 🎯  Full version - Full-featured deployment with all capabilities"
+    prompt_option_value "VERSION_CHOICE" "Enter your choice [1/2] (default: ${DEPLOY_OPTIONS[VERSION_CHOICE]:-1})" "${DEPLOY_OPTIONS[VERSION_CHOICE]:-1}" "text"
+  fi
+  if [[ -n "${DEPLOY_OPTIONS[MODE_CHOICE]:-}" ]]; then
+    echo "🎛️  Please select deployment mode:"
+    echo "   1) 🛠️  Development mode - Expose all service ports for debugging"
+    echo "   2) 🏗️  Infrastructure mode - Only start infrastructure services"
+    echo "   3) 🚀 Production mode - Only expose port 3000 for security"
+    prompt_option_value "MODE_CHOICE" "Enter your choice [1/2/3] (default: ${DEPLOY_OPTIONS[MODE_CHOICE]:-1})" "${DEPLOY_OPTIONS[MODE_CHOICE]:-1}" "text"
+  fi
+  if [[ -n "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-}" ]]; then
+    prompt_option_value "ENABLE_TERMINAL" "Do you want to create Terminal tool container? [Y/N] (default: ${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-N})" "${DEPLOY_OPTIONS[ENABLE_TERMINAL]:-N}" "boolean"
+  fi
+  if [[ -n "${DEPLOY_OPTIONS[IS_MAINLAND]:-}" ]]; then
+    prompt_option_value "IS_MAINLAND" "Is your server network located in mainland China? [Y/N] (default: ${DEPLOY_OPTIONS[IS_MAINLAND]:-N})" "${DEPLOY_OPTIONS[IS_MAINLAND]:-N}" "boolean"
+  fi
+}
+
+# Get friendly description for option keys
+_get_option_description() {
+  local key="$1"
+  case "$key" in
+    "MODE_CHOICE") echo "Deployment Mode" ;;
+    "VERSION_CHOICE") echo "Deployment Version" ;;
+    "IS_MAINLAND") echo "Mainland China Network" ;;
+    "ENABLE_TERMINAL") echo "Terminal Tool Container" ;;
+    "APP_VERSION") echo "Application Version" ;;
+    "ROOT_DIR") echo "Root Directory" ;;
+    *) echo "$key" ;;
+  esac
+}
+
+# Get friendly value for option values
+_get_option_value_description() {
+  local key="$1"
+  local value="$2"
+  
+  case "$key" in
+    "MODE_CHOICE")
+      case "$value" in
+        "1") echo "1 - Development Mode" ;;
+        "2") echo "2 - Infrastructure Mode" ;;
+        "3") echo "3 - Production Mode" ;;
+        *) echo "$value" ;;
+      esac
+      ;;
+    "VERSION_CHOICE")
+      case "$value" in
+        "1") echo "1 - Speed Version" ;;
+        "2") echo "2 - Full Version" ;;
+        *) echo "$value" ;;
+      esac
+      ;;
+    *) echo "$value" ;;
+  esac
+}
+
 main() {
   ensure_docker
   load_options
-
+  
+  # Ensure required options are present
   require_option "APP_VERSION" "APP_VERSION not detected, please enter the current deployed version"
   require_option "ROOT_DIR" "ROOT_DIR not detected, please enter the absolute deployment directory path"
   CURRENT_APP_VERSION="${DEPLOY_OPTIONS[APP_VERSION]:-}"
@@ -235,6 +319,44 @@ main() {
   if [ "$cmp_result" -le 0 ]; then
     log "INFO" "🚫 Target version ($NEW_APP_VERSION) is not higher than current version ($CURRENT_APP_VERSION), upgrade aborted."
     exit 1
+  fi
+
+  # Ask user if they want to inherit previous deployment options
+  if [ -f "$OPTIONS_FILE" ] && [ -s "$OPTIONS_FILE" ]; then
+    # Calculate maximum width of option descriptions for better alignment
+    max_desc_width=0
+    for key in "${!DEPLOY_OPTIONS[@]}"; do
+      desc=$(_get_option_description "$key")
+      desc_length=${#desc}
+      if (( desc_length > max_desc_width )); then
+        max_desc_width=$desc_length
+      fi
+    done
+    
+    # Ensure minimum width for better readability
+    if (( max_desc_width < 20 )); then
+      max_desc_width=20
+    fi
+    
+    # Display current deployment options in a readable format
+    log "INFO" "📋 Current deployment options:"
+    echo ""
+    for key in "${!DEPLOY_OPTIONS[@]}"; do
+      value="${DEPLOY_OPTIONS[$key]}"
+      desc=$(_get_option_description "$key")
+      value_desc=$(_get_option_value_description "$key" "$value")
+      printf "   • %-${max_desc_width}s : %s\n" "$desc" "$value_desc"
+    done
+    echo ""
+    
+    read -rp "🔄 Do you want to inherit previous deployment options? [Y/N] (default: Y): " inherit_choice
+    inherit_choice="${inherit_choice:-Y}"
+    inherit_choice="$(trim_quotes "$inherit_choice")"
+    if [[ "$inherit_choice" =~ ^[Nn]$ ]]; then
+      log "INFO" "📝 Starting configuration..."
+      # Prompt for deployment options with existing values as defaults
+      prompt_deploy_options
+    fi
   fi
 
   build_deploy_args

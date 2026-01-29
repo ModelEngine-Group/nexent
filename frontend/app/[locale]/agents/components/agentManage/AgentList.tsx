@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Col, Flex, Tooltip, Divider, Table, theme, App } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
@@ -12,12 +12,14 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
 import {
   searchAgentInfo,
-  updateAgent,
+  updateAgentInfo,
   deleteAgent,
   exportAgent,
   updateToolConfig,
 } from "@/services/agentConfigService";
+import { clearAgentNewMark } from "@/services/agentConfigService";
 import log from "@/lib/logger";
+import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 interface AgentListProps {
   agentList: Agent[];
@@ -40,6 +42,27 @@ export default function AgentList({
   const confirm = useConfirmModal();
   const queryClient = useQueryClient();
 
+  // Note: rely on agent.is_new from agentList (single source of truth).
+  // Clear NEW mark when agent is selected (sync with selection visual feedback)
+  useEffect(() => {
+    if (currentAgentId) {
+      const agentId = String(currentAgentId);
+      const agent = agentList.find(a => String(a.id) === agentId);
+      if (agent?.is_new) {
+        (async () => {
+          try {
+            const res = await clearAgentAndSync(agentId, queryClient);
+            if (!res?.success) {
+              log.warn("Failed to clear NEW mark for agent:", agentId, res);
+            }
+          } catch (err) {
+            log.error("Error clearing NEW mark:", err);
+          }
+        })();
+      }
+    }
+  }, [currentAgentId, agentList]);
+
   // Call relationship modal state
   const [callRelationshipModalVisible, setCallRelationshipModalVisible] =
     useState(false);
@@ -48,7 +71,7 @@ export default function AgentList({
 
   // Mutations
   const updateAgentMutation = useMutation({
-    mutationFn: (payload: any[]) => updateAgent(...payload),
+    mutationFn: (payload: any) => updateAgentInfo(payload),
   });
 
   const deleteAgentMutation = useMutation({
@@ -130,26 +153,26 @@ export default function AgentList({
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
-      const createResult = await updateAgentMutation.mutateAsync([
-        undefined,
-        copyName,
-        detail.description,
-        detail.model,
-        detail.max_step,
-        detail.provide_run_summary,
-        detail.enabled,
-        detail.business_description,
-        detail.duty_prompt,
-        detail.constraint_prompt,
-        detail.few_shots_prompt,
-        copyDisplayName,
-        detail.model_id ?? undefined,
-        detail.business_logic_model_name ?? undefined,
-        detail.business_logic_model_id ?? undefined,
-        enabledToolIds,
-        subAgentIds,
-        detail.author,
-      ]);
+      const createResult = await updateAgentMutation.mutateAsync({
+        agent_id: undefined, // create
+        name: copyName,
+        display_name: copyDisplayName,
+        description: detail.description,
+        author: detail.author,
+        model_name: detail.model,
+        model_id: detail.model_id ?? undefined,
+        max_steps: detail.max_step,
+        provide_run_summary: detail.provide_run_summary,
+        enabled: detail.enabled,
+        business_description: detail.business_description,
+        duty_prompt: detail.duty_prompt,
+        constraint_prompt: detail.constraint_prompt,
+        few_shots_prompt: detail.few_shots_prompt,
+        business_logic_model_name: detail.business_logic_model_name ?? undefined,
+        business_logic_model_id: detail.business_logic_model_id ?? undefined,
+        enabled_tool_ids: enabledToolIds,
+        related_agent_ids: subAgentIds,
+      });
 
       if (!createResult.success || !createResult.data?.agent_id) {
         message.error(
@@ -279,6 +302,8 @@ export default function AgentList({
               onClick: (e: any) => {
                 e.preventDefault();
                 e.stopPropagation();
+
+                // Call onSelectAgent - NEW mark clearing is handled by useEffect
                 onSelectAgent(agent);
               },
             })}
@@ -292,6 +317,7 @@ export default function AgentList({
                   const isSelected =
                     currentAgentId !== null &&
                     String(currentAgentId) === String(agent.id);
+                  const isNew = agent.is_new || false;
 
                   return (
                     <Flex
@@ -330,6 +356,13 @@ export default function AgentList({
                               })()}
                             >
                               <ExclamationCircleOutlined className="text-amber-500 text-sm flex-shrink-0 cursor-pointer" />
+                            </Tooltip>
+                          )}
+                          {isNew && (
+                            <Tooltip title={t("space.new", "New imported agent")}>
+                              <span className="inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none">
+                                <span className="px-0.5">{t("space.new", "NEW")}</span>
+                              </span>
                             </Tooltip>
                           )}
                           {displayName && (

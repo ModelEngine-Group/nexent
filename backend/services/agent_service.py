@@ -40,7 +40,8 @@ from database.agent_db import (
     search_agent_info_by_agent_id,
     search_blank_sub_agent_by_main_agent_id,
     update_agent,
-    update_related_agents
+    update_related_agents,
+    clear_agent_new_mark
 )
 from database.model_management_db import get_model_by_model_id, get_model_id_by_display_name
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
@@ -739,6 +740,9 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str):
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
+    if agent_info.get("group_ids") is not None:
+        agent_info["group_ids"] = convert_string_to_list(agent_info.get("group_ids"))
+
     # Check agent availability
     is_available, unavailable_reasons = check_agent_availability(
         agent_id=agent_id,
@@ -815,7 +819,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
                 "enabled": request.enabled if request.enabled is not None else True,
-                "group_ids": user_group_ids
+                "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids
             }, tenant_id=tenant_id, user_id=user_id)
             agent_id = created["agent_id"]
         else:
@@ -1114,6 +1118,9 @@ async def import_agent_impl(
             agent_stack.append(need_import_agent_id)
             agent_stack.extend(managed_agents)
 
+    # Return the mapping of original IDs to new IDs
+    return mapping_agent_id
+
 
 async def import_agent_by_agent_id(
     import_agent_info: ExportAndImportAgentInfo,
@@ -1221,6 +1228,22 @@ def load_default_agents_json_file(default_agent_path):
     return all_json_files
 
 
+async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Clear the NEW mark for an agent
+
+    Args:
+        agent_id (int): Agent ID
+        tenant_id (str): Tenant ID
+        user_id (str): User ID (for audit purposes)
+    """
+    rowcount = clear_agent_new_mark(agent_id, tenant_id, user_id)
+    logger.info(f"clear_agent_new_mark_impl called for agent_id={agent_id}, tenant_id={tenant_id}, user_id={user_id}, affected_rows={rowcount}")
+    return rowcount
+
+
+
+
 async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
     """
     list all agent info
@@ -1267,14 +1290,25 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
             agent = entry["raw_agent"]
             unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
 
+            model_id = agent.get("model_id")
+            model_info = None
+            if model_id is not None:
+                if model_id not in model_cache:
+                    model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
+                model_info = model_cache.get(model_id)
+
             simple_agent_list.append({
                 "agent_id": agent["agent_id"],
                 "name": agent["name"] if agent["name"] else agent["display_name"],
                 "display_name": agent["display_name"] if agent["display_name"] else agent["name"],
                 "description": agent["description"],
                 "author": agent.get("author"),
+                "model_id": model_id,
+                "model_name": model_info.get("model_name") if model_info is not None else agent.get("model_name"),
+                "model_display_name": model_info.get("display_name") if model_info is not None else None,
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
+                "is_new": agent.get("is_new", False),
                 "group_ids": convert_string_to_list(agent.get("group_ids"))
             })
 
