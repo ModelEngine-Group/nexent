@@ -46,7 +46,7 @@ export class ConfigService {
       return Promise.resolve(true);
     }
 
-    this._loadInFlight = (async () => {
+    this._loadInFlight = (async (): Promise<boolean> => {
       try {
         const response = await fetch(API_ENDPOINTS.config.load, {
           method: "GET",
@@ -61,26 +61,27 @@ export class ConfigService {
         const result = await response.json();
         const config = result.config;
         if (config) {
-        // Use the conversion function of configStore
-        const frontendConfig = ConfigStore.transformBackend2Frontend(config);
+          // Use the conversion function of configStore
+          const frontendConfig = ConfigStore.transformBackend2Frontend(config);
 
-        // Write to localStorage separately
-        if (frontendConfig.app) {
-          localStorage.setItem("app", JSON.stringify(frontendConfig.app));
-        }
-        if (frontendConfig.models) {
-          localStorage.setItem("model", JSON.stringify(frontendConfig.models));
-        }
+          // Write to localStorage separately
+          if (frontendConfig.app) {
+            localStorage.setItem("app", JSON.stringify(frontendConfig.app));
+          }
+          if (frontendConfig.models) {
+            localStorage.setItem("model", JSON.stringify(frontendConfig.models));
+          }
 
-        // Trigger configuration reload and dispatch event
-        if (typeof window !== "undefined") {
-          const configStore = ConfigStore.getInstance();
-          configStore.reloadFromStorage();
-        }
+          // Trigger configuration reload and dispatch event
+          if (typeof window !== "undefined") {
+            const configStore = ConfigStore.getInstance();
+            configStore.reloadFromStorage();
+          }
 
-        this._lastLoadTs = Date.now();
-        return true;
-      }
+          this._lastLoadTs = Date.now();
+          return true;
+        }
+        return false;
       } catch (error) {
         log.error("Load configuration request exception:", error);
         this._lastLoadTs = Date.now();

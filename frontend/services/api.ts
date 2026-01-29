@@ -166,7 +166,9 @@ export const API_ENDPOINTS = {
   },
   tenantConfig: {
     deploymentVersion: `${API_BASE_URL}/tenant_config/deployment_version`,
-  },
+    loadKnowledgeList: `${API_BASE_URL}/tenant_config/knowledge_list`,
+    updateKnowledgeList: `${API_BASE_URL}/tenant_config/knowledge_list`,
+  } as const,
   mcp: {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
