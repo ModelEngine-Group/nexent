@@ -981,6 +981,7 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_curre
     request.enabled = True
     request.enabled_tool_ids = None
     request.related_agent_ids = None
+    request.group_ids = None
 
     # Execute
     result = await update_agent_info_impl(request, authorization="Bearer token")
