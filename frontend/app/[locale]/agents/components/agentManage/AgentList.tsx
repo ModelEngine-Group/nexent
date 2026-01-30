@@ -42,26 +42,37 @@ export default function AgentList({
   const confirm = useConfirmModal();
   const queryClient = useQueryClient();
 
-  // Note: rely on agent.is_new from agentList (single source of truth).
-  // Clear NEW mark when agent is selected (sync with selection visual feedback)
-  useEffect(() => {
-    if (currentAgentId) {
-      const agentId = String(currentAgentId);
-      const agent = agentList.find(a => String(a.id) === agentId);
-      if (agent?.is_new) {
-        (async () => {
-          try {
-            const res = await clearAgentAndSync(agentId, queryClient);
-            if (!res?.success) {
-              log.warn("Failed to clear NEW mark for agent:", agentId, res);
-            }
-          } catch (err) {
-            log.error("Error clearing NEW mark:", err);
-          }
-        })();
+  // Local selected agent ID for optimistic UI update (immediate visual feedback)
+  const [locallySelectedAgentId, setLocallySelectedAgentId] = useState<string | null>(null);
+
+  // Track cleared NEW marks to avoid redundant API calls and enable optimistic UI update
+  const clearedNewMarkIds = React.useRef<Set<string>>(new Set());
+
+  // Handle agent selection and clear NEW mark if needed
+  const handleAgentSelect = async (agent: Agent) => {
+    // Optimistic update: immediately set selected state for UI
+    setLocallySelectedAgentId(String(agent.id));
+
+    // Optimistic update: immediately mark as cleared for NEW label
+    if (agent.is_new === true) {
+      clearedNewMarkIds.current.add(String(agent.id));
+    }
+
+    // Only clear NEW mark if agent is marked as new and hasn't been cleared yet
+    if (agent.is_new === true && !clearedNewMarkIds.current.has(String(agent.id))) {
+      try {
+        const res = await clearAgentAndSync(String(agent.id), queryClient);
+        if (res?.success) {
+          clearedNewMarkIds.current.add(String(agent.id));
+        } else {
+          log.warn("Failed to clear NEW mark for agent:", agent.id, res);
+        }
+      } catch (err) {
+        log.error("Error clearing NEW mark:", err);
       }
     }
-  }, [currentAgentId, agentList]);
+    onSelectAgent(agent);
+  };
 
   // Call relationship modal state
   const [callRelationshipModalVisible, setCallRelationshipModalVisible] =
@@ -292,8 +303,9 @@ export default function AgentList({
                   ? "opacity-60 cursor-not-allowed"
                   : "hover:bg-gray-50 cursor-pointer"
               } ${
-                currentAgentId !== null &&
-                String(currentAgentId) === String(agent.id)
+                // Use local state for immediate visual feedback
+                locallySelectedAgentId !== null &&
+                String(locallySelectedAgentId) === String(agent.id)
                   ? "bg-blue-50 selected-row pl-3"
                   : ""
               }`;
@@ -302,9 +314,7 @@ export default function AgentList({
               onClick: (e: any) => {
                 e.preventDefault();
                 e.stopPropagation();
-
-                // Call onSelectAgent - NEW mark clearing is handled by useEffect
-                onSelectAgent(agent);
+                handleAgentSelect(agent);
               },
             })}
             columns={[
@@ -314,10 +324,12 @@ export default function AgentList({
                   const isAvailable = agent.is_available !== false;
                   const displayName = agent.display_name || "";
                   const name = agent.name || "";
+                  // Use local state for immediate visual feedback
                   const isSelected =
-                    currentAgentId !== null &&
-                    String(currentAgentId) === String(agent.id);
-                  const isNew = agent.is_new || false;
+                    locallySelectedAgentId !== null &&
+                    String(locallySelectedAgentId) === String(agent.id);
+                  // Optimistic update: use clearedNewMarkIds to hide NEW immediately after click
+                  const isNew = (agent.is_new || false) && !clearedNewMarkIds.current.has(String(agent.id));
 
                   return (
                     <Flex
