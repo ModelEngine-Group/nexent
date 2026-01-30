@@ -327,6 +327,8 @@ export const authService = {
       const userData = {
         user: {
           id: data.data.user.user_id,
+          groupIds: data.data.user.group_ids,
+          tenantId: data.data.user.tenant_id,
           email: data.data.user.user_email,
           role: data.data.user.user_role,
           avatarUrl: data.data.user.avatarUrl,

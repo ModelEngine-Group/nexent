@@ -121,7 +121,7 @@ export function SideNavigation({
   const accessibleMenuItems = useMemo((): RouteConfig[] => {
     if (!accessibleRoutes || accessibleRoutes.length === 0) {
       // If no accessibleRoutes available, show all routes (fallback)
-      return ROUTE_CONFIG;
+      return [];
     }
 
     return ROUTE_CONFIG.filter((route) =>

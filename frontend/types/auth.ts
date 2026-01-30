@@ -73,6 +73,7 @@ export interface SessionResponse {
 // Backend returns user data directly, not nested under "user" property
 export interface AuthInfoResponse {
   user: User & {
+    groupIds: number[];
     permissions: string[];
     accessibleRoutes: string[];
   };

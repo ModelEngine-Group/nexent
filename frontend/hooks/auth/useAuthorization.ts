@@ -20,6 +20,7 @@ export function useAuthorization(): AuthorizationContextType {
   const pathname = usePathname();
 
   const [user, setUser] = useState<User | null>(null);
+  const [groupIds, setGroupIds] = useState<number[]>([]);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [accessibleRoutes, setAccessibleRoutes] = useState<string[]>([]);
   const [lastCheckedPath, setLastCheckedPath] = useState<string | null>(null);
@@ -62,6 +63,7 @@ export function useAuthorization(): AuthorizationContextType {
     if (!currentUserInfo) {
       log.warn("Failed to get user info, clearing authorization state");
       setUser(null);
+      setGroupIds([]);
       setPermissions([]);
       setAccessibleRoutes([]);
       return;
@@ -72,10 +74,11 @@ export function useAuthorization(): AuthorizationContextType {
       const { user } = currentUserInfo;
 
       if (user) {
-        const { permissions, accessibleRoutes, ...userInfo } = user;
+        const { permissions, accessibleRoutes, groupIds, ...userInfo } = user;
         // Only update if we have permissions (full user info)
         if (permissions && accessibleRoutes) {
           setUser(userInfo as User);
+          setGroupIds(groupIds);
           setPermissions(permissions);
           setAccessibleRoutes(accessibleRoutes);
           setIsAuthzReady(true);
