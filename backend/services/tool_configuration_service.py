@@ -95,14 +95,6 @@ def get_local_tools() -> List[ToolInfo]:
                 param_info["default"] = param.default.default
                 param_info["optional"] = True
 
-            # Extract options from json_schema_extra if present (for select-type parameters)
-            json_schema_extra = getattr(
-                param.default, 'json_schema_extra', None)
-            if json_schema_extra and isinstance(json_schema_extra, dict) and 'options' in json_schema_extra:
-                param_info["options"] = json_schema_extra['options']
-                # Set type to select when options are present
-                param_info["type"] = "select"
-
             init_params_list.append(param_info)
 
         # get tool fixed attributes
