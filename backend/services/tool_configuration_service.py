@@ -95,6 +95,14 @@ def get_local_tools() -> List[ToolInfo]:
                 param_info["default"] = param.default.default
                 param_info["optional"] = True
 
+            # Extract options from json_schema_extra if present (for select-type parameters)
+            json_schema_extra = getattr(
+                param.default, 'json_schema_extra', None)
+            if json_schema_extra and isinstance(json_schema_extra, dict) and 'options' in json_schema_extra:
+                param_info["options"] = json_schema_extra['options']
+                # Set type to select when options are present
+                param_info["type"] = "select"
+
             init_params_list.append(param_info)
 
         # get tool fixed attributes
@@ -309,7 +317,8 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
                 tools_info.append(tool_info)
             return tools_info
     except BaseException as e:
-        logger.error(f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
+        logger.error(
+            f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
         # Convert all failures (including SystemExit) to domain error to avoid process exit
         raise MCPConnectionError(
             f"failed to get tool from remote MCP server, detail: {e}")
@@ -371,9 +380,11 @@ def load_last_tool_config_impl(tool_id: int, tenant_id: str, user_id: str):
     """
     Load the last tool configuration for a given tool ID
     """
-    tool_instance = search_last_tool_instance_by_tool_id(tool_id, tenant_id, user_id)
+    tool_instance = search_last_tool_instance_by_tool_id(
+        tool_id, tenant_id, user_id)
     if tool_instance is None:
-        raise ValueError(f"Tool configuration not found for tool ID: {tool_id}")
+        raise ValueError(
+            f"Tool configuration not found for tool ID: {tool_id}")
     return tool_instance.get("params", {})
 
 
@@ -538,10 +549,12 @@ def _validate_local_tool(
 
         if tool_name == "knowledge_base_search":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             knowledge_info_list = get_selected_knowledge_list(
                 tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if knowledge_info.get('knowledge_sources') == 'elasticsearch']
+            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if knowledge_info.get(
+                'knowledge_sources') == 'elasticsearch']
             name_resolver = build_knowledge_name_mapping(
                 tenant_id=tenant_id, user_id=user_id)
 
@@ -574,7 +587,8 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         elif tool_name == "datamate_search":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             knowledge_info_list = get_selected_knowledge_list(
                 tenant_id=tenant_id, user_id=user_id)
             index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if
@@ -587,7 +601,8 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
             params = {
                 **instantiation_params,
@@ -597,7 +612,8 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_text_file":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
             params = {
                 **instantiation_params,
