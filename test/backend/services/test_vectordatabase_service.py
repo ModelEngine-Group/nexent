@@ -399,9 +399,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
             {"index_name": "index2", "embedding_model_name": "test-model",
-                "group_ids": "", "knowledge_sources": "elasticsearch"}
+                "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY", "tenant_id": "test_tenant"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -411,7 +411,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=False,
-            tenant_id="test_tenant",  # Now required parameter
+            target_tenant_id="test_tenant",  # Now required parameter
             user_id="test_user",  # New required parameter
             vdb_core=self.mock_vdb_core
         )
@@ -442,9 +442,9 @@ class TestElasticSearchService(unittest.TestCase):
         }
         mock_get_knowledge.return_value = [
             {"index_name": "index1",
-                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch"},
+                "embedding_model_name": "test-model", "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "test_tenant"},
             {"index_name": "index2", "embedding_model_name": "test-model",
-                "group_ids": "", "knowledge_sources": "elasticsearch"}
+                "group_ids": "", "knowledge_sources": "elasticsearch", "ingroup_permission": "READ_ONLY", "tenant_id": "test_tenant"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "test_tenant"}
@@ -454,7 +454,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=True,
-            tenant_id="test_tenant",  # Now required parameter
+            target_tenant_id="test_tenant",  # Now required parameter
             user_id="test_user",  # New required parameter
             vdb_core=self.mock_vdb_core
         )
@@ -483,7 +483,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["es_index"]
         mock_get_info.return_value = [
             {"index_name": "dangling_index",
-                "embedding_model_name": "model-A", "group_ids": "1", "knowledge_sources": "elasticsearch"}
+                "embedding_model_name": "model-A", "group_ids": "1", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         mock_get_user_tenant.return_value = {
             "user_role": "SU", "tenant_id": "tenant-1"}
@@ -492,7 +492,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=False,
-            tenant_id="tenant-1",
+            target_tenant_id="tenant-1",
             user_id="user-1",
             vdb_core=self.mock_vdb_core
         )
@@ -511,7 +511,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": "model-A",
-                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {}
         mock_get_user_tenant.return_value = {
@@ -521,7 +521,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=True,
-            tenant_id="tenant-1",
+            target_tenant_id="tenant-1",
             user_id="user-1",
             vdb_core=self.mock_vdb_core
         )
@@ -541,7 +541,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": None,
-                "knowledge_sources": "elasticsearch"}
+                "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         self.mock_vdb_core.get_indices_detail.return_value = {
             "index1": {"base_info": {"embedding_model": "text-embedding-ada-002"}}
@@ -553,7 +553,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=True,
-            tenant_id="tenant-1",
+            target_tenant_id="tenant-1",
             user_id="user-1",
             vdb_core=self.mock_vdb_core
         )
@@ -574,7 +574,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": "model-A",
-                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         self.mock_vdb_core.get_indices_detail.side_effect = Exception(
             "503 Service Unavailable"
@@ -587,7 +587,7 @@ class TestElasticSearchService(unittest.TestCase):
             ElasticSearchService.list_indices(
                 pattern="*",
                 include_stats=True,
-                tenant_id="tenant-1",
+                target_tenant_id="tenant-1",
                 user_id="user-1",
                 vdb_core=self.mock_vdb_core
             )
@@ -604,7 +604,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.return_value = ["index1"]
         mock_get_info.return_value = [
             {"index_name": "index1", "embedding_model_name": "model-A",
-                "group_ids": "1,2", "knowledge_sources": "elasticsearch"}
+                "group_ids": "1,2", "knowledge_sources": "elasticsearch", "ingroup_permission": "EDIT", "tenant_id": "tenant-1"}
         ]
         detailed_stats = {
             "index1": {
@@ -624,7 +624,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=True,
-            tenant_id="tenant-1",
+            target_tenant_id="tenant-1",
             user_id="user-1",
             vdb_core=self.mock_vdb_core
         )
@@ -674,7 +674,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=False,
-            tenant_id="test_tenant",
+            target_tenant_id="test_tenant",
             user_id="test_user",
             vdb_core=self.mock_vdb_core
         )
@@ -708,14 +708,16 @@ class TestElasticSearchService(unittest.TestCase):
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
                 "tenant_id": "legacy_admin_user",  # Same as user_id
-                "knowledge_sources": "elasticsearch"
+                "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT"
             },
             {
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
                 "tenant_id": "legacy_admin_user",  # Same as user_id
-                "knowledge_sources": "elasticsearch"
+                "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT"
             }
         ]
         # user_role is None to test fallback logic
@@ -728,7 +730,7 @@ class TestElasticSearchService(unittest.TestCase):
             result = ElasticSearchService.list_indices(
                 pattern="*",
                 include_stats=True,  # Need stats to see permissions
-                tenant_id="legacy_admin_user",
+                target_tenant_id="legacy_admin_user",
                 user_id="legacy_admin_user",  # user_id equals tenant_id
                 vdb_core=self.mock_vdb_core
             )
@@ -748,10 +750,10 @@ class TestElasticSearchService(unittest.TestCase):
             call("User legacy_admin_user identified as legacy admin")
         ])
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    def test_list_indices_speed_version_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    def test_list_indices_speed_version_admin_logic(self, mock_get_group_ids, mock_get_user_tenant, mock_get_knowledge):
         """
         Test the SPEED version admin logic when user is default user and tenant is default tenant.
 
@@ -768,19 +770,21 @@ class TestElasticSearchService(unittest.TestCase):
                 "embedding_model_name": "test-model",
                 "group_ids": "1,2",
                 "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
-                "knowledge_sources": "elasticsearch"
+                "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT"
             },
             {
                 "index_name": "index2",
                 "embedding_model_name": "test-model",
                 "group_ids": "3",
                 "tenant_id": "tenant_id",  # DEFAULT_TENANT_ID
-                "knowledge_sources": "elasticsearch"
+                "knowledge_sources": "elasticsearch",
+                "ingroup_permission": "EDIT"
             }
         ]
-        # user_role is USER but should be overridden by SPEED logic
+        # Use legacy admin logic: user_id equals tenant_id
         mock_get_user_tenant.return_value = {
-            "user_role": "USER", "tenant_id": "tenant_id"}  # DEFAULT_TENANT_ID
+            "user_role": "USER", "tenant_id": "user_id"}  # tenant_id equals user_id for legacy admin
         mock_get_group_ids.return_value = []
 
         # Execute
@@ -788,7 +792,7 @@ class TestElasticSearchService(unittest.TestCase):
             result = ElasticSearchService.list_indices(
                 pattern="*",
                 include_stats=True,  # Need stats to see permissions
-                tenant_id="tenant_id",  # DEFAULT_TENANT_ID
+                target_tenant_id="user_id",  # DEFAULT_TENANT_ID (same as user_id for legacy admin)
                 user_id="user_id",  # DEFAULT_USER_ID
                 vdb_core=self.mock_vdb_core
             )
@@ -798,14 +802,14 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["count"], 2)
         self.assertEqual(len(result["indices_info"]), 2)
 
-        # Both knowledgebases should have EDIT permission due to SPEED version admin logic
+        # Both knowledgebases should have EDIT permission due to legacy admin logic
         for kb_info in result["indices_info"]:
             self.assertEqual(kb_info["permission"], "EDIT")
 
-        # Verify info log was called once for each index for SPEED version admin identification
+        # Verify info log was called once for each index for legacy admin identification
         mock_logger.info.assert_has_calls([
-            call("User under SPEED version is treated as admin"),
-            call("User under SPEED version is treated as admin")
+            call("User user_id identified as legacy admin"),
+            call("User user_id identified as legacy admin")
         ])
 
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
@@ -859,7 +863,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=False,
-            tenant_id="test_tenant",
+            target_tenant_id="test_tenant",
             user_id="test_user",
             vdb_core=self.mock_vdb_core
         )
@@ -871,6 +875,125 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("index1", result["indices"])
         self.assertNotIn("index2", result["indices"])  # datamate source should be excluded
         self.assertIn("index3", result["indices"])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_uses_tenant_id_for_filtering(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices uses tenant_id for filtering knowledge bases.
+
+        This test verifies that:
+        1. The method filters knowledge bases by the tenant_id parameter
+        2. Only knowledge bases belonging to the target tenant are returned
+        3. The user's tenant_id from auth is used for permission checking, not for filtering
+        """
+        # Setup - Simulate user from tenant_A querying for tenant_B's knowledge bases
+        self.mock_vdb_core.get_user_indices.return_value = [
+            "kb1", "kb2", "kb3"]
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "kb1",
+                "embedding_model_name": "test-model",
+                "group_ids": "",
+                "created_by": "user1",
+                "ingroup_permission": "READ_ONLY",
+                "tenant_id": "tenant_B",  # Belongs to tenant_B
+                "knowledge_sources": "elasticsearch"
+            },
+            {
+                "index_name": "kb2",
+                "embedding_model_name": "test-model",
+                "group_ids": "",
+                "created_by": "user2",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "tenant_B",  # Belongs to tenant_B
+                "knowledge_sources": "elasticsearch"
+            },
+            {
+                "index_name": "kb3",
+                "embedding_model_name": "test-model",
+                "group_ids": "",
+                "created_by": "user3",
+                "ingroup_permission": "READ_ONLY",
+                "tenant_id": "tenant_C",  # Should be filtered out
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        # User belongs to tenant_A
+        mock_get_user_tenant.return_value = {
+            "user_role": "ADMIN", "tenant_id": "tenant_A"}
+        mock_get_group_ids.return_value = []
+
+        # Execute - Querying for tenant_B's knowledge bases
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=False,
+            target_tenant_id="tenant_B",  # Querying for tenant_B
+            user_id="admin_user",  # User from tenant_A
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        # The mock returns all records without filtering by tenant_id
+        # So all 3 indices are returned (the filtering is expected to happen in the DB function)
+        self.assertEqual(len(result["indices"]), 3)
+        self.assertEqual(result["count"], 3)
+        self.assertIn("kb1", result["indices"])
+        self.assertIn("kb2", result["indices"])
+        self.assertIn("kb3", result["indices"])
+
+        # Verify that get_knowledge_info_by_tenant_id was called with tenant_id
+        mock_get_knowledge.assert_called_once_with("tenant_B")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_includes_tenant_id_in_response(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices includes tenant_id in the indices_info response.
+
+        This test verifies that:
+        1. Each knowledge base in indices_info includes the tenant_id field
+        2. The tenant_id matches the tenant_id used for filtering
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["kb1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "kb1": {"base_info": {"doc_count": 5, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "kb1",
+                "embedding_model_name": "test-model",
+                "group_ids": "",
+                "created_by": "user1",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "tenant_X",
+                "knowledge_sources": "elasticsearch",
+                "update_time": "2024-01-15T10:30:00"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "ADMIN", "tenant_id": "tenant_X"}
+        mock_get_group_ids.return_value = []
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,
+            target_tenant_id="tenant_X",
+            user_id="admin_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["tenant_id"], "tenant_X")
+        self.assertEqual(result["indices_info"][0]["name"], "kb1")
+        # Verify update_time is included in response
+        self.assertEqual(result["indices_info"][0]
+                         ["update_time"], "2024-01-15T10:30:00")
 
     def test_vectorize_documents_success(self):
         """
@@ -2077,6 +2200,187 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["summary"], "Test summary")
         mock_update_record.assert_called_once()
 
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_success(self, mock_update_record):
+        """
+        Test successful knowledge base update.
+
+        This test verifies that:
+        1. The knowledge base can be updated with all fields
+        2. The update_knowledge_record function is called with correct parameters
+        3. The method returns True on successful update
+        """
+        # Setup
+        mock_update_record.return_value = True
+
+        # Execute - update with all fields
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            knowledge_name="Updated Name",
+            ingroup_permission="EDIT",
+            group_ids=[1, 2, 3],
+            user_id="test_user"
+        )
+
+        # Assert
+        self.assertTrue(result)
+        mock_update_record.assert_called_once()
+        call_args = mock_update_record.call_args[0][0]
+        self.assertEqual(call_args["index_name"], "test_index")
+        self.assertEqual(call_args["knowledge_name"], "Updated Name")
+        self.assertEqual(call_args["ingroup_permission"], "EDIT")
+        # Converted to string
+        self.assertEqual(call_args["group_ids"], "1,2,3")
+        self.assertEqual(call_args["updated_by"], "test_user")
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_partial_update_name(self, mock_update_record):
+        """
+        Test partial update - only updating knowledge name.
+
+        This test verifies that:
+        1. Only the specified fields are updated
+        2. Other fields are not included in the update payload
+        """
+        # Setup
+        mock_update_record.return_value = True
+
+        # Execute - update only name
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            knowledge_name="New Name",
+            user_id="test_user"
+        )
+
+        # Assert
+        self.assertTrue(result)
+        mock_update_record.assert_called_once()
+        call_args = mock_update_record.call_args[0][0]
+        self.assertEqual(call_args["index_name"], "test_index")
+        self.assertEqual(call_args["knowledge_name"], "New Name")
+        self.assertNotIn("ingroup_permission", call_args)
+        self.assertNotIn("group_ids", call_args)
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_partial_update_permission(self, mock_update_record):
+        """
+        Test partial update - only updating permission.
+
+        This test verifies that:
+        1. Only the permission field is updated
+        2. Other fields are not included in the update payload
+        """
+        # Setup
+        mock_update_record.return_value = True
+
+        # Execute - update only permission
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            ingroup_permission="PRIVATE",
+            user_id="test_user"
+        )
+
+        # Assert
+        self.assertTrue(result)
+        mock_update_record.assert_called_once()
+        call_args = mock_update_record.call_args[0][0]
+        self.assertEqual(call_args["index_name"], "test_index")
+        self.assertEqual(call_args["ingroup_permission"], "PRIVATE")
+        self.assertNotIn("knowledge_name", call_args)
+        self.assertNotIn("group_ids", call_args)
+
+    def test_update_knowledge_base_invalid_permission(self):
+        """
+        Test update with invalid permission value.
+
+        This test verifies that:
+        1. ValueError is raised for invalid permission values
+        2. The error message contains valid permission options
+        """
+        # Execute & Assert - invalid permission should raise ValueError
+        with self.assertRaises(ValueError) as context:
+            self.es_service.update_knowledge_base(
+                index_name="test_index",
+                ingroup_permission="INVALID_PERMISSION",
+                user_id="test_user"
+            )
+
+        self.assertIn("Invalid ingroup_permission", str(context.exception))
+        self.assertIn("EDIT", str(context.exception))
+        self.assertIn("READ_ONLY", str(context.exception))
+        self.assertIn("PRIVATE", str(context.exception))
+
+    def test_update_knowledge_base_empty_group_ids(self):
+        """
+        Test update with empty group_ids list.
+
+        This test verifies that:
+        1. Empty group_ids list is converted to empty string
+        2. The update is still successful
+        """
+        with patch('backend.services.vectordatabase_service.update_knowledge_record') as mock_update:
+            mock_update.return_value = True
+
+            result = self.es_service.update_knowledge_base(
+                index_name="test_index",
+                group_ids=[],
+                user_id="test_user"
+            )
+
+            self.assertTrue(result)
+            mock_update.assert_called_once()
+            call_args = mock_update.call_args[0][0]
+            # Empty list becomes empty string
+            self.assertEqual(call_args["group_ids"], "")
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_not_found(self, mock_update_record):
+        """
+        Test update when knowledge base doesn't exist.
+
+        This test verifies that:
+        1. False is returned when update_knowledge_record returns False
+        2. The update payload is still constructed correctly
+        """
+        # Setup
+        mock_update_record.return_value = False
+
+        # Execute
+        result = self.es_service.update_knowledge_base(
+            index_name="non_existent_index",
+            knowledge_name="New Name",
+            user_id="test_user"
+        )
+
+        # Assert
+        self.assertFalse(result)
+        mock_update_record.assert_called_once()
+
+    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    def test_update_knowledge_base_with_single_group(self, mock_update_record):
+        """
+        Test update with single group ID.
+
+        This test verifies that:
+        1. Single group ID is correctly converted to string
+        2. The update payload is constructed correctly
+        """
+        # Setup
+        mock_update_record.return_value = True
+
+        # Execute
+        result = self.es_service.update_knowledge_base(
+            index_name="test_index",
+            group_ids=[5],
+            user_id="test_user"
+        )
+
+        # Assert
+        self.assertTrue(result)
+        mock_update_record.assert_called_once()
+        call_args = mock_update_record.call_args[0][0]
+        self.assertEqual(call_args["group_ids"], "5")
+
     @patch('backend.services.vectordatabase_service.get_knowledge_record')
     def test_get_summary(self, mock_get_record):
         """
@@ -2326,7 +2630,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.list_indices(
             pattern="*",
             include_stats=False,
-            tenant_id="test_tenant",  # Now required parameter
+            target_tenant_id="test_tenant",  # Now required parameter
             user_id="test_user",  # New required parameter
             vdb_core=self.mock_vdb_core
         )

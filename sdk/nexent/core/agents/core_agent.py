@@ -113,6 +113,60 @@ class CoreAgent(CodeAgent):
         self.observer = observer
         self.stop_event = threading.Event()
 
+    def _log_model_call_parameters(self, input_messages: List[ChatMessage], stop_sequences: List[str], additional_args: Dict[str, Any]) -> None:
+        """
+        Log model call parameters with content truncation for readability.
+
+
+        Args:
+            input_messages: List of chat messages being sent to the model
+            stop_sequences: Stop sequences for the model
+            additional_args: Additional arguments passed to the model
+        """
+        try:
+            # Convert messages to serializable format and truncate
+            messages_data = []
+            for msg in input_messages:
+                msg_dict = msg.model_dump() if hasattr(msg, 'model_dump') else (
+                    msg.__dict__ if hasattr(msg, '__dict__') else str(msg)
+                )
+                messages_data.append(msg_dict)
+
+            # Format as JSON with truncation for readability
+            messages_json = json.dumps(messages_data, indent=2, ensure_ascii=False, default=str)
+            truncated_messages = truncate_content(messages_json, max_length=1000)
+
+            # Format stop sequences
+            stop_seq_str = ", ".join(f'"{seq}"' for seq in stop_sequences) if stop_sequences else "None"
+
+            # Format additional args (excluding sensitive data)
+            safe_args = {}
+            for key, value in additional_args.items():
+                if key.lower() in ['api_key', 'token', 'password', 'secret']:
+                    safe_args[key] = "***REDACTED***"
+                else:
+                    safe_args[key] = value
+
+            args_str = json.dumps(safe_args, indent=2, ensure_ascii=False) if safe_args else "None"
+
+            # Create log content
+            log_content = f"""Input Messages ({len(input_messages)} total):
+{truncated_messages}
+
+Stop Sequences: [{stop_seq_str}]
+Additional Args:
+{args_str}"""
+
+            self.logger.log_markdown(
+                content=log_content,
+                title="MODEL INPUT PARAMETERS",
+                level=LogLevel.INFO
+            )
+
+        except Exception as e:
+            # Don't let logging errors break the model call
+            self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.WARNING)
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -129,10 +183,15 @@ class CoreAgent(CodeAgent):
         memory_step.model_input_messages = input_messages
         stop_sequences = ["<END_CODE>", "Observation:", "Calling tools:", "<END_CODE"]
 
+        # Prepare additional arguments
+        additional_args: dict[str, Any] = {}
+        if self._use_structured_outputs_internally:
+            additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
+
+        # Log model call parameters before execution
+        self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+
         try:
-            additional_args: dict[str, Any] = {}
-            if self._use_structured_outputs_internally:
-                additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
             chat_message: ChatMessage = self.model(input_messages,
                                                    stop_sequences=stop_sequences, **additional_args)
             memory_step.model_output_message = chat_message
