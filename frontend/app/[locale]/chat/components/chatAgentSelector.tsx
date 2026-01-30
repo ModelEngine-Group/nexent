@@ -216,7 +216,7 @@ export function ChatAgentSelector({
         }
 
         // Clear NEW mark when agent is selected for chat (only if marked as new)
-        if (agent.is_new) {
+        if (agent.is_new === true) {
           try {
             const res = await clearAgentAndSync(agentId, queryClient);
             if (res?.success) {
