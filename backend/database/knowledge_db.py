@@ -140,8 +140,11 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
 
     Args:
         query: Dictionary containing update data, must include:
-            - knowledge_id: Knowledge base ID
-            - update_data: Dictionary containing fields to update
+            - index_name: Knowledge base index name (used as unique identifier)
+            - knowledge_name: New user-facing knowledge base name (optional)
+            - knowledge_describe: Knowledge base description (optional)
+            - ingroup_permission: Permission level - EDIT, READ_ONLY, or PRIVATE (optional)
+            - group_ids: List of group IDs to assign (optional)
             - user_id: Optional user ID for updated_by field
 
     Returns:
@@ -157,8 +160,25 @@ def update_knowledge_record(query: Dict[str, Any]) -> bool:
             if not record:
                 return False
 
-            record.knowledge_describe = query["knowledge_describe"]
             record.update_time = func.current_timestamp()
+
+            # Update knowledge name
+            if query.get("knowledge_name"):
+                record.knowledge_name = query["knowledge_name"]
+
+            # Update description
+            if query.get("knowledge_describe"):
+                record.knowledge_describe = query["knowledge_describe"]
+
+            # Update permission
+            if query.get("ingroup_permission"):
+                record.ingroup_permission = query["ingroup_permission"]
+
+            # Update group IDs
+            if query.get("group_ids") is not None:
+                record.group_ids = query["group_ids"]
+
+            # Update timestamp and user
             if query.get("user_id"):
                 record.updated_by = query["user_id"]
 

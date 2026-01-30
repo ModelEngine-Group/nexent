@@ -215,21 +215,23 @@ export function ChatAgentSelector({
           return; // Unavailable agents cannot be selected
         }
 
-    // Clear NEW mark when agent is selected for chat
-        try {
-          const res = await clearAgentAndSync(agentId, queryClient);
-          if (res?.success) {
-            // update local agents state to reflect cleared NEW mark immediately
-            setAgents((prev) =>
-              prev.map((a) =>
-                a.agent_id === agentId ? { ...a, is_new: false } : a
-              )
-            );
-          } else {
-            log.warn("Failed to clear NEW mark on select:", res);
+        // Clear NEW mark when agent is selected for chat (only if marked as new)
+        if (agent.is_new === true) {
+          try {
+            const res = await clearAgentAndSync(agentId, queryClient);
+            if (res?.success) {
+              // update local agents state to reflect cleared NEW mark immediately
+              setAgents((prev) =>
+                prev.map((a) =>
+                  a.agent_id === agentId ? { ...a, is_new: false } : a
+                )
+              );
+            } else {
+              log.warn("Failed to clear NEW mark on select:", res);
+            }
+          } catch (e) {
+            log.error("Failed to clear NEW mark on select:", e);
           }
-        } catch (e) {
-          log.error("Failed to clear NEW mark on select:", e);
         }
       }
     }

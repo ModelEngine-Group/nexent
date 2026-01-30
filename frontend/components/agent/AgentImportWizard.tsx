@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
 import { getMcpServerList, addMcpServer, updateToolList } from "@/services/mcpService";
-import { McpServer, AgentRefreshEvent } from "@/types/agentConfig";
+import { McpServer } from "@/types/agentConfig";
 import { ImportAgentData } from "@/hooks/useAgentImport";
 import { importAgent, checkAgentNameConflictBatch, regenerateAgentNameBatch, fetchTools } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
@@ -156,16 +156,9 @@ export default function AgentImportWizard({
   // Helper: Refresh tools and agents after MCP changes
   const refreshToolsAndAgents = async () => {
     try {
-      const updateResult = await updateToolList();
-      if (updateResult.success) {
-        // Notify listeners (AgentSetupOrchestrator, ToolPool, etc.) that tools have been updated
-        window.dispatchEvent(new CustomEvent("toolsUpdated"));
-      }
-
-      // Trigger agent list refresh so availability status reflects new MCP tools
-      window.dispatchEvent(
-        new CustomEvent("refreshAgentList") as AgentRefreshEvent
-      );
+      await updateToolList();
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     } catch (error) {
       // Do not block user flow on refresh errors
       log.error("Failed to refresh tools and agents after MCP install:", error);

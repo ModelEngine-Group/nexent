@@ -86,18 +86,75 @@ async def delete_index(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error deleting index: {str(e)}")
 
 
+@router.patch("/{index_name}")
+async def update_index(
+        index_name: str = Path(..., description="Name of the index to update"),
+        request: Dict[str, Any] = Body(...,
+                                       description="Update payload with knowledge_name, ingroup_permission, group_ids, and/or tenant_id"),
+        authorization: Optional[str] = Header(None)
+):
+    """Update knowledge base information (name, group permission, group assignments)."""
+    try:
+        user_id, auth_tenant_id = get_current_user_id(authorization)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        tenant_id = request.get("tenant_id") or auth_tenant_id
+
+        # Extract update fields
+        knowledge_name = request.get("knowledge_name")
+        ingroup_permission = request.get("ingroup_permission")
+        group_ids = request.get("group_ids")
+
+        # Call service layer to update knowledge base
+        result = ElasticSearchService.update_knowledge_base(
+            index_name=index_name,
+            knowledge_name=knowledge_name,
+            ingroup_permission=ingroup_permission,
+            group_ids=group_ids,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
+        if result:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={
+                    "message": "Knowledge base updated successfully", "status": "success"}
+            )
+        else:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Knowledge base '{index_name}' not found"
+            )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc)
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            f"Error updating index '{index_name}': {str(exc)}", exc_info=True)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error updating index: {str(exc)}")
+
+
 @router.get("")
 def get_list_indices(
         pattern: str = Query("*", description="Pattern to match index names"),
         include_stats: bool = Query(
             False, description="Whether to include index stats"),
+        tenant_id: Optional[str] = Query(
+            None, description="Tenant ID for filtering (uses auth if not provided)"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None),
 ):
     """List all user indices with optional stats"""
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        return ElasticSearchService.list_indices(pattern, include_stats, tenant_id, user_id, vdb_core)
+        user_id, auth_tenant_id = get_current_user_id(authorization)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        return ElasticSearchService.list_indices(pattern, include_stats, effective_tenant_id, user_id, vdb_core)
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")

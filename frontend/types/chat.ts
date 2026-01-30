@@ -59,6 +59,7 @@ export interface Agent {
   display_name: string;
   description: string;
   is_available: boolean;
+  is_new?: boolean;
 }
 
 export interface ChatAgentSelectorProps {

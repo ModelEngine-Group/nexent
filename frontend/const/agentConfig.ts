@@ -91,3 +91,37 @@ export const AGENT_SETUP_LAYOUT_DEFAULT: LayoutConfig = {
   CARD_BODY_PADDING: "12px 20px",
   DRAWER_WIDTH: "40%",
 };
+
+// Tool parameter enum configurations (defined frontend-side for consistent rendering)
+export const TOOL_PARAM_OPTIONS = {
+  // Knowledge base search tool
+  knowledge_base_search: {
+    search_mode: ["hybrid", "accurate", "semantic"],
+  },
+  // Dify search tool
+  dify_search: {
+    search_method: [
+      "keyword_search",
+      "semantic_search",
+      "full_text_search",
+      "hybrid_search",
+    ],
+  },
+  // DataMate search tool
+  datamate_search: {
+    // No enum parameters currently defined
+  },
+} as const;
+
+// Get options for a specific tool and parameter
+export function getToolParamOptions(
+  toolName: string,
+  paramName: string
+): string[] | undefined {
+  const toolOptions =
+    TOOL_PARAM_OPTIONS[toolName as keyof typeof TOOL_PARAM_OPTIONS];
+  if (!toolOptions) return undefined;
+  return toolOptions[paramName as keyof typeof toolOptions] as
+    | string[]
+    | undefined;
+}

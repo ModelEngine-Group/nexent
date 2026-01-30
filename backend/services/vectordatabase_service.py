@@ -36,6 +36,7 @@ from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
 )
+from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
 from services.redis_service import get_redis_service
@@ -395,6 +396,63 @@ class ElasticSearchService:
             raise Exception(f"Error creating knowledge base: {str(e)}")
 
     @staticmethod
+    def update_knowledge_base(
+            index_name: str,
+            knowledge_name: Optional[str] = None,
+            ingroup_permission: Optional[str] = None,
+            group_ids: Optional[List[int]] = None,
+            tenant_id: Optional[str] = None,
+            user_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Update knowledge base information (name, group permission, group assignments).
+
+        Args:
+            index_name: Internal index name of the knowledge base
+            knowledge_name: New display name for the knowledge base (optional)
+            ingroup_permission: Permission level - EDIT, READ_ONLY, or PRIVATE (optional)
+            group_ids: List of group IDs to assign (optional)
+            tenant_id: ID of the tenant (optional, for validation)
+            user_id: ID of the user making the update
+
+        Returns:
+            bool: Whether the update was successful
+
+        Raises:
+            ValueError: If ingroup_permission is invalid
+        """
+        valid_permissions = ["EDIT", "READ_ONLY", "PRIVATE"]
+        if ingroup_permission is not None and ingroup_permission not in valid_permissions:
+            raise ValueError(
+                f"Invalid ingroup_permission. Must be one of: {valid_permissions}"
+            )
+
+        # Build update data for database
+        update_data = {
+            "index_name": index_name,
+            "updated_by": user_id,
+        }
+
+        if knowledge_name is not None:
+            update_data["knowledge_name"] = knowledge_name
+
+        if ingroup_permission is not None:
+            update_data["ingroup_permission"] = ingroup_permission
+
+        if group_ids is not None:
+            # Convert list to string for database storage
+            update_data["group_ids"] = convert_list_to_string(group_ids)
+
+        # Call database update function
+        result = update_knowledge_record(update_data)
+
+        if result:
+            logger.info(
+                f"Knowledge base '{index_name}' updated successfully by user '{user_id}'")
+
+        return result
+
+    @staticmethod
     async def delete_index(
             index_name: str = Path(...,
                                    description="Name of the index to delete"),
@@ -443,15 +501,11 @@ class ElasticSearchService:
 
     @staticmethod
     def list_indices(
-            pattern: str = Query(
-                "*", description="Pattern to match index names"),
-            include_stats: bool = Query(
-                False, description="Whether to include index stats"),
-            tenant_id: str = Body(
-                description="ID of the tenant listing the knowledge base"),
-            user_id: str = Body(
-                description="ID of the user listing the knowledge base"),
-            vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+            pattern: str = "*",
+            include_stats: bool = False,
+            target_tenant_id: str = "",
+            user_id: str = "",
+            vdb_core: VectorDatabaseCore | None = None
     ):
         """
         List all indices that the current user has permissions to access based on role and group permissions.
@@ -470,7 +524,7 @@ class ElasticSearchService:
         Args:
             pattern: Pattern to match index names
             include_stats: Whether to include index stats
-            tenant_id: ID of the tenant listing the knowledge base
+            target_tenant_id: ID of the tenant to list knowledge bases for
             user_id: ID of the user listing the knowledge base
             vdb_core: VectorDatabaseCore instance
 
@@ -491,7 +545,7 @@ class ElasticSearchService:
         es_indices_list = vdb_core.get_user_indices(pattern)
 
         # Get all knowledgebase records from database (for cleanup and permission checking)
-        all_db_records = get_knowledge_info_by_tenant_id(user_tenant_id)
+        all_db_records = get_knowledge_info_by_tenant_id(target_tenant_id)
 
         # Filter visible knowledgebases based on user role and permissions
         visible_knowledgebases = []
@@ -508,10 +562,10 @@ class ElasticSearchService:
             # Check permission based on user role
             permission = None
 
-            # Fallback logic: if user_id equals tenant_id, treat as legacy admin user
+            # Fallback logic: if user_id equals user_tenant_id, treat as legacy admin user
             # even if user_role is None or empty
             effective_user_role = user_role
-            if user_id == tenant_id:
+            if user_id == user_tenant_id:
                 effective_user_role = "ADMIN"
                 logger.info(f"User {user_id} identified as legacy admin")
             elif IS_SPEED_MODE:
@@ -601,6 +655,7 @@ class ElasticSearchService:
                 for record in visible_knowledgebases:
                     index_name = record["index_name"]
                     index_stats = indice_stats.get(index_name, {})
+
                     stats_info.append({
                         # Internal index name (used as ID)
                         "name": index_name,
@@ -608,6 +663,12 @@ class ElasticSearchService:
                         "display_name": record.get("knowledge_name", index_name),
                         "permission": record["permission"],
                         "group_ids": record["group_ids"],
+                        # knowledge source and ingroup permission from DB record
+                        "knowledge_sources": record["knowledge_sources"],
+                        "ingroup_permission": record["ingroup_permission"],
+                        "tenant_id": record.get("tenant_id"),
+                        # Update time for sorting and display
+                        "update_time": record.get("update_time"),
                         "stats": index_stats,
                     })
 
@@ -617,7 +678,7 @@ class ElasticSearchService:
                             index_name,
                             index_stats.get("base_info", {}).get(
                                 "embedding_model", ""),
-                            record.get("tenant_id", tenant_id),
+                            record.get("tenant_id", target_tenant_id),
                             user_id
                         )
 

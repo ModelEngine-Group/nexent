@@ -411,6 +411,99 @@ def test_update_knowledge_record_success(monkeypatch, mock_session):
     session.commit.assert_called_once()
 
 
+def test_update_knowledge_record_updates_all_fields(monkeypatch, mock_session):
+    """Test successful update of all knowledge record fields"""
+    session, query = mock_session
+
+    # Create mock knowledge record
+    mock_record = MockKnowledgeRecord()
+    mock_record.knowledge_name = "Old Name"
+    mock_record.knowledge_describe = "Old description"
+    mock_record.ingroup_permission = "READ_ONLY"
+    mock_record.group_ids = "1,2"
+    mock_record.updated_by = "old_user"
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = mock_record
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    test_query = {
+        "index_name": "test_knowledge",
+        "knowledge_name": "New Name",
+        "knowledge_describe": "Updated description",
+        "ingroup_permission": "EDIT",
+        "group_ids": "3,4,5",
+        "user_id": "test_user"
+    }
+
+    result = update_knowledge_record(test_query)
+
+    assert result is True
+    assert mock_record.knowledge_name == "New Name"
+    assert mock_record.knowledge_describe == "Updated description"
+    assert mock_record.ingroup_permission == "EDIT"
+    assert mock_record.group_ids == "3,4,5"
+    assert mock_record.updated_by == "test_user"
+    session.flush.assert_called_once()
+    session.commit.assert_called_once()
+
+
+def test_update_knowledge_record_partial_update(monkeypatch, mock_session):
+    """Test partial update - only updating name and permission"""
+    session, query = mock_session
+
+    # Create mock knowledge record
+    mock_record = MockKnowledgeRecord()
+    mock_record.knowledge_name = "Old Name"
+    mock_record.knowledge_describe = "Old description"
+    mock_record.ingroup_permission = "READ_ONLY"
+    mock_record.group_ids = "1,2"
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = mock_record
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    test_query = {
+        "index_name": "test_knowledge",
+        "knowledge_name": "New Name",
+        "ingroup_permission": "EDIT",
+    }
+
+    result = update_knowledge_record(test_query)
+
+    assert result is True
+    # Only name and permission should be updated
+    assert mock_record.knowledge_name == "New Name"
+    assert mock_record.ingroup_permission == "EDIT"
+    # Description and group_ids should remain unchanged
+    assert mock_record.knowledge_describe == "Old description"
+    assert mock_record.group_ids == "1,2"
+    session.flush.assert_called_once()
+    session.commit.assert_called_once()
+
+
 def test_update_knowledge_record_not_found(monkeypatch, mock_session):
     """Test updating non-existent knowledge record"""
     session, query = mock_session
@@ -440,6 +533,47 @@ def test_update_knowledge_record_not_found(monkeypatch, mock_session):
     result = update_knowledge_record(test_query)
 
     assert result is False
+
+
+def test_update_knowledge_record_without_knowledge_describe(monkeypatch, mock_session):
+    """Test update knowledge record without knowledge_describe field (field handled separately)"""
+    session, query = mock_session
+
+    # Create mock knowledge record
+    mock_record = MockKnowledgeRecord()
+    mock_record.knowledge_describe = "original description"
+    mock_record.updated_by = "original_user"
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = mock_record
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+
+    def mock_exit(exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            session.rollback()
+        return None
+    mock_ctx.__exit__.side_effect = mock_exit
+    monkeypatch.setattr(
+        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+
+    # Test query without knowledge_describe field
+    test_query = {
+        "index_name": "test_knowledge",
+        "user_id": "test_user"
+    }
+
+    result = update_knowledge_record(test_query)
+
+    assert result is True
+    # knowledge_describe should remain unchanged when not provided
+    assert mock_record.knowledge_describe == "original description"
+    # updated_by should be updated
+    assert mock_record.updated_by == "test_user"
+    session.flush.assert_called_once()
+    session.commit.assert_called_once()
 
 
 def test_update_knowledge_record_exception(monkeypatch, mock_session):
