@@ -17,7 +17,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
-import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
+import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import ToolTestPanel from "./ToolTestPanel";
 import KnowledgeBaseToolConfig from "./KnowledgeBaseToolConfig";
@@ -215,7 +215,28 @@ export default function ToolConfigModal({
   };
 
   const renderParamInput = (param: ToolParam, index: number) => {
+    // Get options from frontend configuration based on tool name and parameter name
+    const options = getToolParamOptions(tool.name, param.name);
+
+    // Determine if this parameter should be rendered as a select dropdown
+    const isSelectType = options && options.length > 0;
+
     const inputComponent = (() => {
+      // Handle select type - when options are defined in frontend config
+      if (isSelectType) {
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            options={options.map((option) => ({
+              value: option,
+              label: option,
+            }))}
+          />
+        );
+      }
+
       switch (param.type) {
         case TOOL_PARAM_TYPES.NUMBER:
           return (

@@ -14,6 +14,15 @@ from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, 
 logger = logging.getLogger("datamate_search_tool")
 
 
+def _normalize_index_names(index_names: Optional[Union[str, List[str]]]) -> List[str]:
+    """Normalize index_names to list; accept single string and keep None as empty list."""
+    if index_names is None:
+        return []
+    if isinstance(index_names, str):
+        return [index_names]
+    return list(index_names)
+
+
 class DataMateSearchTool(Tool):
     """DataMate knowledge base search tool"""
     name = "datamate_search"
@@ -28,18 +37,6 @@ class DataMateSearchTool(Tool):
         "query": {
             "type": "string",
             "description": "The search query to perform.",
-        },
-        "kb_page": {
-            "type": "integer",
-            "description": "Page index when listing knowledge bases from DataMate.",
-            "default": 0,
-            "nullable": True,
-        },
-        "kb_page_size": {
-            "type": "integer",
-            "description": "Page size when listing knowledge bases from DataMate.",
-            "default": 20,
-            "nullable": True,
         },
     }
     output_type = "string"
@@ -61,6 +58,10 @@ class DataMateSearchTool(Tool):
             description="Default maximum number of search results to return", default=3),
         threshold: float = Field(
             description="Default similarity threshold for search results", default=0.2),
+        kb_page: int = Field(
+            description="Page index when listing knowledge bases from DataMate", default=0),
+        kb_page_size: int = Field(
+            description="Page size when listing knowledge bases from DataMate", default=20),
     ):
         """Initialize the DataMateSearchTool.
 
@@ -69,6 +70,10 @@ class DataMateSearchTool(Tool):
             verify_ssl (bool, optional): Whether to verify SSL certificates for HTTPS connections. Defaults to False for HTTPS, True for HTTP.
             index_names (List[str], optional): The list of index names to search. Defaults to None.
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
+            top_k (int, optional): Default maximum number of search results to return. Defaults to 3.
+            threshold (float, optional): Default similarity threshold for search results. Defaults to 0.2.
+            kb_page (int, optional): Page index when listing knowledge bases from DataMate. Defaults to 0.
+            kb_page_size (int, optional): Page size when listing knowledge bases from DataMate. Defaults to 20.
         """
         super().__init__()
 
@@ -100,8 +105,8 @@ class DataMateSearchTool(Tool):
             verify_ssl=self.verify_ssl if self.use_https else True
         )
 
-        self.kb_page = 0
-        self.kb_page_size = 20
+        self.kb_page = kb_page
+        self.kb_page_size = kb_page_size
         self.observer = observer
 
         self.record_ops = 1  # To record serial number
@@ -157,19 +162,12 @@ class DataMateSearchTool(Tool):
     def forward(
         self,
         query: str,
-        kb_page: int = 0,
-        kb_page_size: int = 20,
     ) -> str:
         """Execute DataMate search.
 
         Args:
             query: Search query text.
-            kb_page: Optional override for knowledge base list page index.
-            kb_page_size: Optional override for knowledge base list page size.
         """
-
-        self.kb_page = kb_page
-        self.kb_page_size = kb_page_size
 
         # Send tool run message
         if self.observer:

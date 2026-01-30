@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { Modal, Button, Table, Typography } from "antd";
-import { LoaderCircle, Maximize, Minimize } from "lucide-react";
+import { Modal, Button, Table } from "antd";
+import { Maximize, Minimize } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpTool } from "@/types/agentConfig";
-
-const { Text } = Typography;
 
 interface McpToolListModalProps {
   open: boolean;
@@ -75,22 +73,16 @@ export default function McpToolListModal({
       width={800}
       footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
     >
-      {loading ? (
-        <div className="text-center py-10">
-          <LoaderCircle className="animate-spin inline mr-2" size={16} />
-          <Text>{t("mcpConfig.toolsList.loading")}</Text>
-        </div>
-      ) : (
-        <Table
-          columns={toolColumns}
-          dataSource={tools}
-          rowKey="name"
-          size="small"
-          pagination={false}
-          locale={{ emptyText: t("mcpConfig.toolsList.empty") }}
-          scroll={{ y: 500 }}
-        />
-      )}
+      <Table
+        loading={{ spinning: loading, tip: t("mcpConfig.toolsList.loading") }}
+        columns={toolColumns}
+        dataSource={tools}
+        rowKey="name"
+        size="small"
+        pagination={false}
+        locale={{ emptyText: t("mcpConfig.toolsList.empty") }}
+        scroll={{ y: 500 }}
+      />
     </Modal>
   );
 }

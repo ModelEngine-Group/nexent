@@ -80,7 +80,8 @@ class KnowledgeBaseSearchTool(Tool):
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
-            self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
+            self.observer.add_message("", ProcessType.CARD, json.dumps(
+                card_content, ensure_ascii=False))
 
         # Use the instance index_names and search_mode
         search_index_names = self.index_names
@@ -95,25 +96,31 @@ class KnowledgeBaseSearchTool(Tool):
             return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
         if search_mode == "hybrid":
-            kb_search_data = self.search_hybrid(query=query, index_names=search_index_names)
+            kb_search_data = self.search_hybrid(
+                query=query, index_names=search_index_names)
         elif search_mode == "accurate":
-            kb_search_data = self.search_accurate(query=query, index_names=search_index_names)
+            kb_search_data = self.search_accurate(
+                query=query, index_names=search_index_names)
         elif search_mode == "semantic":
-            kb_search_data = self.search_semantic(query=query, index_names=search_index_names)
+            kb_search_data = self.search_semantic(
+                query=query, index_names=search_index_names)
         else:
-            raise Exception(f"Invalid search mode: {search_mode}, only support: hybrid, accurate, semantic")
+            raise Exception(
+                f"Invalid search mode: {search_mode}, only support: hybrid, accurate, semantic")
 
         kb_search_results = kb_search_data["results"]
 
         if not kb_search_results:
-            raise Exception("No results found! Try a less restrictive/shorter query.")
+            raise Exception(
+                "No results found! Try a less restrictive/shorter query.")
 
         search_results_json = []  # Organize search results into a unified format
         search_results_return = []  # Format for input to the large model
         for index, single_search_result in enumerate(kb_search_results):
             # Temporarily correct the source_type stored in the knowledge base
             source_type = single_search_result.get("source_type", "")
-            source_type = "file" if source_type in ["local", "minio"] else source_type
+            source_type = "file" if source_type in [
+                "local", "minio"] else source_type
             title = single_search_result.get("title")
             if not title:
                 title = single_search_result.get("filename", "")
@@ -138,8 +145,10 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Record the detailed content of this search
         if self.observer:
-            search_results_data = json.dumps(search_results_json, ensure_ascii=False)
-            self.observer.add_message("", ProcessType.SEARCH_CONTENT, search_results_data)
+            search_results_data = json.dumps(
+                search_results_json, ensure_ascii=False)
+            self.observer.add_message(
+                "", ProcessType.SEARCH_CONTENT, search_results_data)
         return json.dumps(search_results_return, ensure_ascii=False)
 
     def search_hybrid(self, query, index_names):
@@ -166,7 +175,8 @@ class KnowledgeBaseSearchTool(Tool):
 
     def search_accurate(self, query, index_names):
         try:
-            results = self.vdb_core.accurate_search(index_names=index_names, query_text=query, top_k=self.top_k)
+            results = self.vdb_core.accurate_search(
+                index_names=index_names, query_text=query, top_k=self.top_k)
 
             # Format results
             formatted_results = []

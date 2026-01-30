@@ -306,7 +306,8 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
                 tools_info.append(tool_info)
             return tools_info
     except BaseException as e:
-        logger.error(f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
+        logger.error(
+            f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
         # Convert all failures (including SystemExit) to domain error to avoid process exit
         raise MCPConnectionError(
             f"failed to get tool from remote MCP server, detail: {e}")
@@ -368,9 +369,11 @@ def load_last_tool_config_impl(tool_id: int, tenant_id: str, user_id: str):
     """
     Load the last tool configuration for a given tool ID
     """
-    tool_instance = search_last_tool_instance_by_tool_id(tool_id, tenant_id, user_id)
+    tool_instance = search_last_tool_instance_by_tool_id(
+        tool_id, tenant_id, user_id)
     if tool_instance is None:
-        raise ValueError(f"Tool configuration not found for tool ID: {tool_id}")
+        raise ValueError(
+            f"Tool configuration not found for tool ID: {tool_id}")
     return tool_instance.get("params", {})
 
 
@@ -544,7 +547,8 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
             params = {
                 **instantiation_params,
@@ -554,7 +558,8 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_text_file":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
             params = {
                 **instantiation_params,

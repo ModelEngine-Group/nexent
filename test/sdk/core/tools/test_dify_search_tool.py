@@ -20,7 +20,7 @@ def mock_observer() -> MessageObserver:
 @pytest.fixture
 def dify_tool(mock_observer: MessageObserver) -> DifySearchTool:
     return DifySearchTool(
-        dify_api_base="https://api.dify.ai/v1",
+        server_url="https://api.dify.ai/v1",
         api_key="test_api_key",
         dataset_ids='["dataset1", "dataset2"]',
         top_k=3,
@@ -62,14 +62,14 @@ def _build_download_url_response(download_url: str = "https://download.example.c
 class TestDifySearchToolInit:
     def test_init_success(self, mock_observer: MessageObserver):
         tool = DifySearchTool(
-            dify_api_base="https://api.dify.ai/v1",
+            server_url="https://api.dify.ai/v1",
             api_key="test_key",
             dataset_ids='["ds1", "ds2"]',
             top_k=5,
             observer=mock_observer,
         )
 
-        assert tool.dify_api_base == "https://api.dify.ai/v1"
+        assert tool.server_url == "https://api.dify.ai/v1"
         assert tool.dataset_ids == ["ds1", "ds2"]
         assert tool.api_key == "test_key"
         assert tool.top_k == 5
@@ -80,45 +80,45 @@ class TestDifySearchToolInit:
 
     def test_init_singledataset_id(self, mock_observer: MessageObserver):
         tool = DifySearchTool(
-            dify_api_base="https://api.dify.ai/v1/",
+            server_url="https://api.dify.ai/v1/",
             api_key="test_key",
             dataset_ids='["single_dataset"]',
             observer=mock_observer,
         )
 
-        assert tool.dify_api_base == "https://api.dify.ai/v1"
+        assert tool.server_url == "https://api.dify.ai/v1"
         assert tool.dataset_ids == ["single_dataset"]
 
     def test_init_json_string_array_dataset_ids(self, mock_observer: MessageObserver):
         tool = DifySearchTool(
-            dify_api_base="https://api.dify.ai/v1/",
+            server_url="https://api.dify.ai/v1/",
             api_key="test_key",
             dataset_ids='["0ab7096c-dfa5-4e0e-9dad-9265781447a3"]',
             observer=mock_observer,
         )
 
-        assert tool.dify_api_base == "https://api.dify.ai/v1"
+        assert tool.server_url == "https://api.dify.ai/v1"
         assert tool.dataset_ids == ["0ab7096c-dfa5-4e0e-9dad-9265781447a3"]
 
     def test_init_json_string_array_multiple_dataset_ids(self, mock_observer: MessageObserver):
         tool = DifySearchTool(
-            dify_api_base="https://api.dify.ai/v1/",
+            server_url="https://api.dify.ai/v1/",
             api_key="test_key",
             dataset_ids='["ds1", "ds2", "ds3"]',
             observer=mock_observer,
         )
 
-        assert tool.dify_api_base == "https://api.dify.ai/v1"
+        assert tool.server_url == "https://api.dify.ai/v1"
         assert tool.dataset_ids == ["ds1", "ds2", "ds3"]
 
-    @pytest.mark.parametrize("dify_api_base,expected_error", [
-        ("", "dify_api_base is required and must be a non-empty string"),
-        (None, "dify_api_base is required and must be a non-empty string"),
+    @pytest.mark.parametrize("server_url,expected_error", [
+        ("", "server_url is required and must be a non-empty string"),
+        (None, "server_url is required and must be a non-empty string"),
     ])
-    def test_init_invalid_api_base(self, dify_api_base, expected_error):
+    def test_init_invalid_server_url(self, server_url, expected_error):
         with pytest.raises(ValueError) as excinfo:
             DifySearchTool(
-                dify_api_base=dify_api_base,
+                server_url=server_url,
                 api_key="test_key",
                 dataset_ids='["ds1"]',
             )
@@ -131,7 +131,7 @@ class TestDifySearchToolInit:
     def test_init_invalid_api_key(self, api_key, expected_error):
         with pytest.raises(ValueError) as excinfo:
             DifySearchTool(
-                dify_api_base="https://api.dify.ai/v1",
+                server_url="https://api.dify.ai/v1",
                 api_key=api_key,
                 dataset_ids='["ds1"]',
             )
@@ -145,7 +145,7 @@ class TestDifySearchToolInit:
     def test_init_invaliddataset_ids(self, dataset_ids, expected_error):
         with pytest.raises(ValueError) as excinfo:
             DifySearchTool(
-                dify_api_base="https://api.dify.ai/v1",
+                server_url="https://api.dify.ai/v1",
                 api_key="test_key",
                 dataset_ids=dataset_ids,
             )
@@ -252,8 +252,8 @@ class TestSearchDifyKnowledgeBase:
         assert result["records"][1]["segment"]["content"] == "test content 2"
 
         # Note: Current implementation has URL construction issue
-        # The URL is constructed as f"{self.dify_api_base}/v1/datasets/{dataset_id}/retrieve"
-        # where dify_api_base is "https://api.dify.ai/v1", so it becomes "https://api.dify.ai/v1/datasets/dataset1/retrieve"
+        # The URL is constructed as f"{self.server_url}/datasets/{dataset_id}/retrieve"
+        # where server_url is "https://api.dify.ai/v1", so it becomes "https://api.dify.ai/v1/datasets/dataset1/retrieve"
         # This is a bug in the implementation that needs to be fixed
         client.post.assert_called_once_with(
             "https://api.dify.ai/v1/datasets/dataset1/retrieve",
@@ -383,7 +383,10 @@ class TestForward:
     def test_forward_success_with_observer_en(self, mocker: MockFixture, dify_tool: DifySearchTool):
         client = self._setup_success_flow(mocker, dify_tool)
 
-        result_json = dify_tool.forward("test query", search_method="keyword_search")
+        # Set search_method as instance attribute
+        dify_tool.search_method = "keyword_search"
+
+        result_json = dify_tool.forward("test query")
         results = json.loads(result_json)
 
         assert len(results) == 2  # 2 datasets * 1 record each
@@ -420,7 +423,7 @@ class TestForward:
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DifySearchTool(
-            dify_api_base="https://api.dify.ai/v1",
+            server_url="https://api.dify.ai/v1",
             api_key="test_api_key",
             dataset_ids='["dataset1"]',
             observer=None,

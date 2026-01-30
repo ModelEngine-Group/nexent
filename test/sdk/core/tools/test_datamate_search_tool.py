@@ -77,9 +77,6 @@ class TestDataMateSearchToolInit:
         assert tool.server_port == 1234
         assert tool.use_https is False
         assert tool.server_base_url == "http://datamate.local:1234"
-        assert tool.kb_page == 0
-        assert tool.kb_page_size == 20
-        assert tool.observer is mock_observer
         # index_names is excluded from the model, so we can't directly test it
         # DataMateCore is mocked, so we verify it was called correctly instead
 
@@ -207,7 +204,10 @@ class TestForward:
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(
-            server_url="http://127.0.0.1:8080", observer=None)
+            server_url="http://127.0.0.1:8080",
+            observer=None,
+            index_names=["kb1"]
+        )
 
         # Mock the hybrid_search method to return search results
         mock_hybrid_search = mocker.patch.object(
@@ -219,7 +219,6 @@ class TestForward:
             tool.datamate_core.client, 'build_file_download_url')
         mock_build_url.return_value = "http://dl/kb1/file-1"
 
-        tool.index_names = ["kb1"]
         result_json = tool.forward("query")
         assert len(json.loads(result_json)) == 1
 
@@ -228,7 +227,9 @@ class TestForward:
         mock_hybrid_search = mocker.patch.object(
             datamate_tool.datamate_core, 'hybrid_search')
 
+        # Set empty index_names to trigger the no knowledge base case
         datamate_tool.index_names = []
+
         result = datamate_tool.forward("query")
         assert result == json.dumps(
             "No knowledge base selected. No relevant information found.", ensure_ascii=False)
@@ -263,6 +264,8 @@ class TestForward:
         """Test forward method using default index_names from constructor."""
         # Set default index_names in the tool
         datamate_tool.index_names = ["default_kb1", "default_kb2"]
+        datamate_tool.top_k = 3
+        datamate_tool.threshold = 0.2
 
         # Mock the hybrid_search method to return results for each knowledge base
         mock_hybrid_search = mocker.patch.object(
@@ -287,18 +290,23 @@ class TestForward:
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["default_kb1"],
-            top_k=2,
-            weight_accurate=0.5
+            top_k=3,
+            weight_accurate=0.2
         )
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["default_kb2"],
-            top_k=2,
-            weight_accurate=0.5
+            top_k=3,
+            weight_accurate=0.2
         )
 
     def test_forward_multiple_knowledge_bases(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
         """Test forward method with multiple knowledge bases."""
+        # Set index_names for this test
+        datamate_tool.index_names = ["kb1", "kb2"]
+        datamate_tool.top_k = 3
+        datamate_tool.threshold = 0.2
+
         # Mock the hybrid_search method to return results from multiple KBs
         mock_hybrid_search = mocker.patch.object(
             datamate_tool.datamate_core, 'hybrid_search')
@@ -314,7 +322,6 @@ class TestForward:
             datamate_tool.datamate_core.client, 'build_file_download_url')
         mock_build_url.side_effect = lambda ds, fid: f"http://dl/{ds}/{fid}"
 
-        datamate_tool.index_names = ["kb1", "kb2"]
         result_json = datamate_tool.forward("query")
         results = json.loads(result_json)
 
@@ -325,18 +332,23 @@ class TestForward:
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["kb1"],
-            top_k=2,
-            weight_accurate=0.5
+            top_k=3,
+            weight_accurate=0.2
         )
         mock_hybrid_search.assert_any_call(
             query_text="query",
             index_names=["kb2"],
-            top_k=2,
-            weight_accurate=0.5
+            top_k=3,
+            weight_accurate=0.2
         )
 
     def test_forward_with_custom_parameters(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
         """Test forward method with custom parameters."""
+        # Set custom parameters for this test
+        datamate_tool.index_names = ["kb1"]
+        datamate_tool.top_k = 5
+        datamate_tool.threshold = 0.8
+
         # Mock the hybrid_search method
         mock_hybrid_search = mocker.patch.object(
             datamate_tool.datamate_core, 'hybrid_search')
@@ -347,19 +359,10 @@ class TestForward:
             datamate_tool.datamate_core.client, 'build_file_download_url')
         mock_build_url.return_value = "http://dl/kb1/file-1"
 
-        datamate_tool.index_names = ["kb1"]
-        datamate_tool.top_k = 5
-        datamate_tool.threshold = 0.8
-        result_json = datamate_tool.forward(
-            query="custom query",
-            kb_page=2,
-            kb_page_size=50
-        )
+        result_json = datamate_tool.forward(query="custom query")
         results = json.loads(result_json)
 
         assert len(results) == 1
-        assert datamate_tool.kb_page == 2
-        assert datamate_tool.kb_page_size == 50
 
         mock_hybrid_search.assert_called_once_with(
             query_text="custom query",
@@ -370,6 +373,9 @@ class TestForward:
 
     def test_forward_metadata_parsing_edge_cases(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
         """Test forward method with various metadata parsing edge cases."""
+        # Set index_names for this test
+        datamate_tool.index_names = ["kb1"]
+
         # Create search results with different metadata formats
         search_results = [
             {
@@ -418,7 +424,6 @@ class TestForward:
             datamate_tool.datamate_core.client, 'build_file_download_url')
         mock_build_url.return_value = "http://dl/kb1/file"
 
-        datamate_tool.index_names = ["kb1"]
         result_json = datamate_tool.forward("query")
         results = json.loads(result_json)
 

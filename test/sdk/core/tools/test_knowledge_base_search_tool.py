@@ -35,10 +35,11 @@ def knowledge_base_search_tool(mock_observer, mock_vdb_core, mock_embedding_mode
     tool = KnowledgeBaseSearchTool(
         top_k=5,
         index_names=["test_index1", "test_index2"],
-        search_mode="hybrid",
         observer=mock_observer,
         embedding_model=mock_embedding_model,
-        vdb_core=mock_vdb_core
+        vdb_core=mock_vdb_core,
+        name_resolver={},
+        search_mode="hybrid"
     )
     return tool
 
@@ -49,10 +50,11 @@ def knowledge_base_search_tool_no_observer(mock_vdb_core, mock_embedding_model):
     tool = KnowledgeBaseSearchTool(
         top_k=3,
         index_names=["test_index"],
-        search_mode="hybrid",
         observer=None,
         embedding_model=mock_embedding_model,
-        vdb_core=mock_vdb_core
+        vdb_core=mock_vdb_core,
+        name_resolver={},
+        search_mode="hybrid"
     )
     return tool
 
@@ -80,6 +82,35 @@ def create_mock_search_result(count=3):
 class TestKnowledgeBaseSearchTool:
     """Test KnowledgeBaseSearchTool functionality"""
     
+    def test_update_name_resolver_supports_empty_mapping(self, knowledge_base_search_tool):
+        """Ensure update_name_resolver replaces mapping and handles falsy input"""
+        knowledge_base_search_tool.update_name_resolver({"kb": "index_kb"})
+        assert knowledge_base_search_tool.name_resolver == {"kb": "index_kb"}
+
+        knowledge_base_search_tool.update_name_resolver(None)
+        assert knowledge_base_search_tool.name_resolver == {}
+
+    def test_resolve_names_without_resolver_logs_warning(self, knowledge_base_search_tool, mocker):
+        """When no resolver is configured, names are returned unchanged and warning is logged"""
+        warning_mock = mocker.patch("sdk.nexent.core.tools.knowledge_base_search_tool.logger.warning")
+
+        names = knowledge_base_search_tool._resolve_names(["kb1", "kb2"])
+
+        assert names == ["kb1", "kb2"]
+        warning_mock.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "incoming,expected",
+        [
+            (None, []),
+            ("single_index", ["single_index"]),
+            (["a", "b"], ["a", "b"]),
+        ],
+    )
+    def test_normalize_index_names_variants(self, knowledge_base_search_tool_no_observer, incoming, expected):
+        """_normalize_index_names should normalize None, string, and list inputs"""
+        assert knowledge_base_search_tool_no_observer._normalize_index_names(incoming) == expected
+
     def test_forward_with_observer_adds_messages(self, knowledge_base_search_tool):
         """forward should send TOOL and CARD messages when observer is present"""
         mock_results = create_mock_search_result(1)
@@ -99,10 +130,11 @@ class TestKnowledgeBaseSearchTool:
         tool = KnowledgeBaseSearchTool(
             top_k=10,
             index_names=["index1", "index2", "index3"],
-            search_mode="hybrid",
             observer=mock_observer,
             embedding_model=mock_embedding_model,
-            vdb_core=mock_vdb_core
+            vdb_core=mock_vdb_core,
+            name_resolver={},
+            search_mode="semantic"
         )
 
         assert tool.top_k == 10
@@ -110,16 +142,18 @@ class TestKnowledgeBaseSearchTool:
         assert tool.observer == mock_observer
         assert tool.embedding_model == mock_embedding_model
         assert tool.vdb_core == mock_vdb_core
+        assert tool.search_mode == "semantic"
 
     def test_init_with_none_index_names(self, mock_vdb_core, mock_embedding_model):
         """Test initialization with None index_names"""
         tool = KnowledgeBaseSearchTool(
             top_k=5,
             index_names=None,
-            search_mode="hybrid",
             observer=None,
             embedding_model=mock_embedding_model,
-            vdb_core=mock_vdb_core
+            vdb_core=mock_vdb_core,
+            name_resolver={},
+            search_mode="hybrid"
         )
 
         assert tool.index_names == []
@@ -202,11 +236,13 @@ class TestKnowledgeBaseSearchTool:
 
     def test_forward_accurate_mode_success(self, knowledge_base_search_tool):
         """Test forward method with accurate search mode"""
+        # Set search_mode to accurate
+        knowledge_base_search_tool.search_mode = "accurate"
+
         # Mock search results
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
 
-        knowledge_base_search_tool.search_mode = "accurate"
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
@@ -217,11 +253,13 @@ class TestKnowledgeBaseSearchTool:
 
     def test_forward_semantic_mode_success(self, knowledge_base_search_tool):
         """Test forward method with semantic search mode"""
+        # Set search_mode to semantic
+        knowledge_base_search_tool.search_mode = "semantic"
+
         # Mock search results
         mock_results = create_mock_search_result(4)
         knowledge_base_search_tool.vdb_core.semantic_search.return_value = mock_results
 
-        knowledge_base_search_tool.search_mode = "semantic"
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
@@ -232,7 +270,9 @@ class TestKnowledgeBaseSearchTool:
 
     def test_forward_invalid_search_mode(self, knowledge_base_search_tool):
         """Test forward method with invalid search mode"""
+        # Set invalid search_mode
         knowledge_base_search_tool.search_mode = "invalid"
+
         with pytest.raises(Exception) as excinfo:
             knowledge_base_search_tool.forward("test query")
 
@@ -261,11 +301,13 @@ class TestKnowledgeBaseSearchTool:
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
         """Test forward method with custom index names"""
+        # Set custom index names
+        knowledge_base_search_tool.index_names = ["custom_index1", "custom_index2"]
+
         # Mock search results
         mock_results = create_mock_search_result(2)
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
-        knowledge_base_search_tool.index_names = ["custom_index1", "custom_index2"]
         result = knowledge_base_search_tool.forward("test query")
 
         # Verify vdb_core was called with custom index names

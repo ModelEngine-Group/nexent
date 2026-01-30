@@ -1,10 +1,10 @@
 import logging
 from typing import List
-
 from sqlalchemy import update
+
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
-from sqlalchemy import update, bindparam
+from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 
@@ -157,6 +157,8 @@ def update_agent(agent_id, agent_info, tenant_id, user_id):
         for key, value in filter_property(agent_info.__dict__, AgentInfo).items():
             if value is None:
                 continue
+            if key == "group_ids":
+                value = convert_list_to_string(value)
             setattr(agent, key, value)
         agent.updated_by = user_id
 
