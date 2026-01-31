@@ -93,7 +93,7 @@ consts_const_mod = types.ModuleType("consts.const")
 consts_const_mod.LOCALHOST_IP = "127.0.0.1"
 consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
-# Fields required by utils.memory_utils and services.vectordatabase_service
+# Fields required by utils.memory_utils and services.knowledge_base.vectordatabase_service
 consts_const_mod.MODEL_CONFIG_MAPPING = {
     "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
 consts_const_mod.ES_HOST = "http://localhost:9200"
@@ -262,8 +262,8 @@ db_tenant_cfg_mod.insert_config = _insert_config
 db_tenant_cfg_mod.update_config_by_tenant_config_id_and_data = _update_config_by_tenant_config_id_and_data
 sys.modules["database.tenant_config_db"] = db_tenant_cfg_mod
 
-# Stub services.vectordatabase_service to avoid heavy imports
-services_vdb_mod = types.ModuleType("services.vectordatabase_service")
+# Stub services.knowledge_base.vectordatabase_service to avoid heavy imports
+services_vdb_mod = types.ModuleType("services.knowledge_base.vectordatabase_service")
 
 
 def _get_vector_db_core():
@@ -271,7 +271,7 @@ def _get_vector_db_core():
 
 
 services_vdb_mod.get_vector_db_core = _get_vector_db_core
-sys.modules["services.vectordatabase_service"] = services_vdb_mod
+sys.modules["services.knowledge_base.vectordatabase_service"] = services_vdb_mod
 
 # Stub nexent.memory.memory_service.clear_model_memories
 nexent_memory_mod = types.ModuleType("nexent.memory.memory_service")

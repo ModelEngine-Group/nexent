@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from nexent.vector_database.base import VectorDatabaseCore
 
 from consts.model import ChangeSummaryRequest
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from services.knowledge_base.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/summary")

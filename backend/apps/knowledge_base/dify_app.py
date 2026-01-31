@@ -24,8 +24,6 @@ logger = logging.getLogger("dify_app")
 async def fetch_dify_datasets_api(
     dify_api_base: str = Query(..., description="Dify API base URL"),
     api_key: str = Query(..., description="Dify API key"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Page size"),
     authorization: Optional[str] = Header(None)
 ):
     """
@@ -34,12 +32,26 @@ async def fetch_dify_datasets_api(
     Returns knowledge bases in a format consistent with DataMate for frontend compatibility.
     """
     try:
+        # Normalize URL by removing trailing slash
+        dify_api_base = dify_api_base.rstrip('/')
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch Dify datasets: {str(e)}"
+        )
+
+    try:
         _, tenant_id = get_current_user_id(authorization)
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch Dify datasets: {str(e)}"
+        )
+
+    try:
         result = fetch_dify_datasets_impl(
             dify_api_base=dify_api_base,
             api_key=api_key,
-            page=page,
-            page_size=page_size
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,

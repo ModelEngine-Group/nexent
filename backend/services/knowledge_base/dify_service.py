@@ -16,10 +16,8 @@ logger = logging.getLogger("dify_service")
 
 
 def fetch_dify_datasets_impl(
-    dify_api_base: str,
-    api_key: str,
-    page: int = 1,
-    page_size: int = 20
+        dify_api_base: str,
+        api_key: str,
 ) -> Dict[str, Any]:
     """
     Fetch datasets (knowledge bases) from Dify API and transform to DataMate-compatible format.
@@ -27,8 +25,6 @@ def fetch_dify_datasets_impl(
     Args:
         dify_api_base: Dify API base URL
         api_key: Dify API key with Bearer token
-        page: Page number for pagination (default: 1)
-        page_size: Number of items per page (default: 20, max: 100)
 
     Returns:
         Dictionary containing knowledge bases in DataMate-compatible format:
@@ -75,12 +71,6 @@ def fetch_dify_datasets_impl(
     if not api_key or not isinstance(api_key, str):
         raise ValueError("api_key is required and must be a non-empty string")
 
-    if page < 1:
-        raise ValueError("page must be >= 1")
-
-    if page_size < 1 or page_size > 100:
-        raise ValueError("page_size must be between 1 and 100")
-
     # Normalize API base URL
     api_base = dify_api_base.rstrip("/")
 
@@ -92,16 +82,11 @@ def fetch_dify_datasets_impl(
         "Content-Type": "application/json"
     }
 
-    params = {
-        "page": page,
-        "limit": page_size
-    }
-
     logger.info(f"Fetching Dify datasets from: {url}")
 
     try:
         with httpx.Client(timeout=30, verify=False) as client:
-            response = client.get(url, headers=headers, params=params)
+            response = client.get(url, headers=headers)
             response.raise_for_status()
 
             result = response.json()
@@ -112,6 +97,7 @@ def fetch_dify_datasets_impl(
             # Transform to DataMate-compatible format
             indices = []
             indices_info = []
+            embedding_available = False  # Default value if no datasets or all skipped
 
             for dataset in datasets_data:
                 dataset_id = dataset.get("id", "")
@@ -120,7 +106,6 @@ def fetch_dify_datasets_impl(
                 created_at = dataset.get("created_at", 0)
                 updated_at = dataset.get("updated_at", 0)
                 embedding_available = dataset.get("embedding_available", False)
-
 
                 if not dataset_id:
                     continue

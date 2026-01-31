@@ -10,7 +10,7 @@ from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfi
 from nexent.memory.memory_service import search_memory_in_levels
 
 from services.file_management_service import get_llm_model
-from services.vectordatabase_service import (
+from services.knowledge_base.vectordatabase_service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model,

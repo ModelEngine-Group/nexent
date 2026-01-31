@@ -26,7 +26,7 @@ from utils.model_name_utils import (
     sort_models_by_id,
 )
 from utils.memory_utils import build_memory_config as build_memory_config_for_tenant
-from services.vectordatabase_service import get_vector_db_core
+from services.knowledge_base.vectordatabase_service import get_vector_db_core
 from nexent.memory.memory_service import clear_model_memories
 
 logger = logging.getLogger("model_management_service")

@@ -133,8 +133,9 @@ class TestDifyApp:
             )
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        assert "Error fetching Dify datasets" in str(
+        assert "Failed to fetch Dify datasets" in str(
             exc_info.value.detail)
+        assert "Invalid token" in str(exc_info.value.detail)
         dify_app_mocks['logger'].error.assert_not_called()
 
     @pytest.mark.asyncio
@@ -183,7 +184,8 @@ class TestDifyApp:
         )
 
         # Mock service exception
-        service_error = Exception("Dify API request failed: Connection timeout")
+        service_error = Exception(
+            "Dify API request failed: Connection timeout")
         dify_app_mocks['fetch_datasets'].side_effect = service_error
 
         # Import and execute
@@ -198,7 +200,7 @@ class TestDifyApp:
             )
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        assert "Error fetching Dify datasets" in str(
+        assert "Failed to fetch Dify datasets" in str(
             exc_info.value.detail)
         assert "Connection timeout" in str(exc_info.value.detail)
         dify_app_mocks['logger'].error.assert_called_once()
