@@ -64,7 +64,7 @@ export default function KnowledgesContent() {
             style={{ width: "100%", height: "100%" }}
           >
             <div className="w-full h-full flex items-center justify-center">
-              <DataConfig isActive={false} />
+              <DataConfig isActive={true} />
             </div>
           </motion.div>
         ) : null}

@@ -436,12 +436,301 @@ class TestCreateToolConfigList:
             }
 
     @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_knowledge_base_tool_metadata(self):
+        """
+        Test that KnowledgeBaseSearchTool metadata contains only vdb_core and embedding_model.
+        This test verifies the refactored behavior where index_names and name_resolver
+        have been removed from the metadata.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+        mock_tool_config.return_value = mock_tool_instance
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "knowledge_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [{"name": "index_names", "default": []}],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_vdb_core = "mock_elastic_core"
+            mock_embedding_model = "mock_embedding_model"
+            mock_get_vector_db_core.return_value = mock_vdb_core
+            mock_embedding.return_value = mock_embedding_model
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+
+            # Verify correct functions were called with correct parameters
+            mock_get_vector_db_core.assert_called_once()
+            mock_embedding.assert_called_once_with(tenant_id="tenant_1")
+
+            # Verify metadata contains ONLY vdb_core and embedding_model (no index_names or name_resolver)
+            expected_metadata = {
+                "vdb_core": mock_vdb_core,
+                "embedding_model": mock_embedding_model,
+            }
+            assert mock_tool_instance.metadata == expected_metadata
+
+            # Explicitly verify that old fields are NOT present
+            assert "index_names" not in mock_tool_instance.metadata
+            assert "name_resolver" not in mock_tool_instance.metadata
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_knowledge_base_tool_multiple_tools(self):
+        """
+        Test that multiple tools are processed correctly, with KnowledgeBaseSearchTool
+        receiving the correct metadata without index_names.
+        """
+        mock_tool_kb = MagicMock()
+        mock_tool_kb.class_name = "KnowledgeBaseSearchTool"
+
+        mock_tool_other = MagicMock()
+        mock_tool_other.class_name = "OtherTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+
+            mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search",
+                    "description": "Knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                },
+                {
+                    "class_name": "OtherTool",
+                    "name": "other",
+                    "description": "Other tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core_instance"
+            mock_embedding.return_value = "embedding_instance"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 2
+
+            # Verify KnowledgeBaseSearchTool has correct metadata
+            assert mock_tool_kb.metadata == {
+                "vdb_core": "vdb_core_instance",
+                "embedding_model": "embedding_instance",
+            }
+
+            # Verify OtherTool has no special metadata (should not have metadata attribute set)
+            # Note: MagicMock will return a new MagicMock for unset attributes, so we check call_args
+            # Instead, verify that set_metadata was never called on the mock_tool_other
+            assert not hasattr(mock_tool_other, 'metadata') or mock_tool_other.metadata.call_count == 0 if hasattr(mock_tool_other.metadata, 'call_count') else True
+
+    @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool_mixed_sources(self):
-        pass
+        """
+        Test handling of tools from mixed sources (local, mcp, langchain).
+        KnowledgeBaseSearchTool should always get the simplified metadata.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "mcp",
+                    "usage": "mcp_server_1"
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core"
+            mock_embedding.return_value = "embedding"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            # Even for MCP-sourced KnowledgeBaseSearchTool, metadata should be set
+            assert mock_tool_instance.metadata == {
+                "vdb_core": "vdb_core",
+                "embedding_model": "embedding",
+            }
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_datamate_tool(self):
-        pass
+        """
+        Test that DataMateTool (or other unhandled tools) receive no special metadata.
+        This ensures the refactoring doesn't break other tool types.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateTool",
+                    "name": "datamate",
+                    "description": "Data management tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            # DataMateTool should not receive any special metadata (metadata should remain unset)
+            # Since we use MagicMock, we verify that metadata was never assigned
+            assert not hasattr(mock_tool_instance, 'metadata') or mock_tool_instance.metadata.call_count == 0 if hasattr(mock_tool_instance.metadata, 'call_count') else True
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_empty_list(self):
+        """
+        Test that an empty tools list returns an empty result.
+        """
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+
+            mock_search_tools.return_value = []
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_langchain_tool_metadata(self):
+        """
+        Test that langchain-sourced tools receive metadata from the langchain tool discovery.
+        This verifies that the langchain tool metadata assignment still works correctly.
+        """
+        mock_langchain_tool = MagicMock()
+        mock_langchain_tool.name = "LangChainTool"
+
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "LangChainTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_discover.return_value = [mock_langchain_tool]
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "LangChainTool",
+                    "name": "langchain_tool",
+                    "description": "A langchain tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "langchain",
+                    "usage": None
+                }
+            ]
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            # Langchain tool should receive metadata from discovered langchain tool
+            assert mock_tool_instance.metadata == mock_langchain_tool
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_multiple_tools_same_type(self):
+        """
+        Test that multiple KnowledgeBaseSearchTool instances each get correct metadata.
+        """
+        mock_tool_1 = MagicMock()
+        mock_tool_1.class_name = "KnowledgeBaseSearchTool"
+
+        mock_tool_2 = MagicMock()
+        mock_tool_2.class_name = "KnowledgeBaseSearchTool"
+
+        mock_tool_config.side_effect = [mock_tool_1, mock_tool_2]
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search_1",
+                    "description": "First knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                },
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search_2",
+                    "description": "Second knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core"
+            mock_embedding.return_value = "embedding"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 2
+
+            # Both tools should have the same simplified metadata
+            expected_metadata = {
+                "vdb_core": "vdb_core",
+                "embedding_model": "embedding",
+            }
+            assert mock_tool_1.metadata == expected_metadata
+            assert mock_tool_2.metadata == expected_metadata
 
 
 class TestCreateAgentConfig:

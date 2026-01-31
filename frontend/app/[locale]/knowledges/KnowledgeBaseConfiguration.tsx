@@ -5,8 +5,11 @@ import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { App, Modal, Row, Col, theme, Button, Input, Form } from "antd";
-import { WarningFilled, InfoCircleFilled } from "@ant-design/icons";
-
+import {
+  ExclamationCircleFilled,
+  WarningFilled,
+  InfoCircleFilled,
+} from "@ant-design/icons";
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
@@ -120,21 +123,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { confirm } = useConfirmModal();
   const { modelConfig } = useConfig();
   const { token } = theme.useToken();
-  const hasUserInteractedRef = useRef(false);
-
-  // Helper function to get authorization headers
-  const getAuthHeaders = () => {
-    const session =
-      typeof window !== "undefined" ? localStorage.getItem("session") : null;
-    const sessionObj = session ? JSON.parse(session) : null;
-    return {
-      "Content-Type": "application/json",
-      "User-Agent": "AgentFrontEnd/1.0",
-      ...(sessionObj?.access_token && {
-        Authorization: `Bearer ${sessionObj.access_token}`,
-      }),
-    };
-  };
 
   // Clear cache when component initializes
   useEffect(() => {
@@ -217,7 +205,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     hasKnowledgeBaseModelMismatch,
     refreshKnowledgeBaseData,
     refreshKnowledgeBaseDataWithDataMate,
-
+    loadUserSelectedKnowledgeBases,
+    saveUserSelectedKnowledgeBases,
     dispatch: kbDispatch,
   } = useKnowledgeBaseContext();
 
@@ -240,7 +229,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
-
+  const [showAutoDeselectModal, setShowAutoDeselectModal] = useState(false);
   const [newlyCreatedKbId, setNewlyCreatedKbId] = useState<string | null>(null); // Track newly created KB waiting for documents
 
   // Search and filter state
@@ -286,17 +275,199 @@ function DataConfig({ isActive }: DataConfigProps) {
     setHasClickedUpload,
   ]);
 
-  // When the active knowledge base changes, fetch its documents
-  useEffect(() => {
-    if (kbState.activeKnowledgeBase) {
-      fetchDocuments(
-        kbState.activeKnowledgeBase.id,
-        false,
-        kbState.activeKnowledgeBase.source
-      );
-      fetchKnowledgeBases(false);
+  // User configuration loading and saving logic based on isActive state
+  const prevIsActiveRef = useRef<boolean | null>(null); // Initialize as null to distinguish first render
+  const hasLoadedRef = useRef(false); // Track whether configuration has been loaded
+  const savedSelectedIdsRef = useRef<string[]>([]); // Save currently selected knowledge base IDs
+  const savedKnowledgeBasesRef = useRef<any[]>([]); // Save current knowledge base list
+  const hasUserInteractedRef = useRef(false); // Track whether user has interacted (prevent saving empty state during initial load)
+  const hasCleanedRef = useRef(false); // Ensure auto-deselect runs only once per entry
+  const shouldPersistSelectionRef = useRef(false); // Flag to persist selection after change
+
+  // Listen for isActive state changes
+  useLayoutEffect(() => {
+    // Clear cache that might affect state
+    localStorage.removeItem("preloaded_kb_data");
+    localStorage.removeItem("kb_cache");
+
+    const prevIsActive = prevIsActiveRef.current;
+
+    // Mark ready to load when entering second page
+    if ((prevIsActive === null || !prevIsActive) && isActive) {
+      hasLoadedRef.current = false; // Reset loading state
+      hasUserInteractedRef.current = false; // Reset interaction state to prevent incorrect saving
+      hasCleanedRef.current = false; // Reset auto-clean flag on entering
     }
-  }, [kbState.activeKnowledgeBase?.id]);
+
+    // Save user configuration when leaving second page
+    if (prevIsActive === true && !isActive) {
+      // Only save after user has interacted to prevent saving empty state during initial load
+      if (hasUserInteractedRef.current) {
+        const saveConfig = async () => {
+          localStorage.removeItem("preloaded_kb_data");
+          localStorage.removeItem("kb_cache");
+
+          try {
+            await saveUserSelectedKnowledgeBases();
+          } catch (error) {
+            log.error("保存用户配置失败:", error);
+          }
+        };
+
+        saveConfig();
+      }
+
+      hasLoadedRef.current = false; // Reset loading state
+    }
+
+    // Update ref
+    prevIsActiveRef.current = isActive;
+  }, [isActive]);
+
+  // Save current state to ref in real-time to ensure access during unmount
+  useEffect(() => {
+    savedSelectedIdsRef.current = kbState.selectedIds;
+    savedKnowledgeBasesRef.current = kbState.knowledgeBases;
+  }, [kbState.selectedIds, kbState.knowledgeBases]);
+
+  // Helper function to get authorization headers
+  const getAuthHeaders = () => {
+    const session =
+      typeof window !== "undefined" ? localStorage.getItem("session") : null;
+    const sessionObj = session ? JSON.parse(session) : null;
+    return {
+      "Content-Type": "application/json",
+      "User-Agent": "AgentFrontEnd/1.0",
+      ...(sessionObj?.access_token && {
+        Authorization: `Bearer ${sessionObj.access_token}`,
+      }),
+    };
+  };
+
+  // Save logic when component unmounts
+  useEffect(() => {
+    return () => {
+      // When component unmounts, if previously active and user has interacted, execute save
+      if (prevIsActiveRef.current === true && hasUserInteractedRef.current) {
+        // Use saved state instead of current potentially cleared state
+        const selectedKnowledgeBases = savedKnowledgeBasesRef.current.filter(
+          (kb) => savedSelectedIdsRef.current.includes(kb.id)
+        );
+
+        // Group knowledge bases by source
+        const knowledgeBySource: { nexent?: string[]; datamate?: string[] } =
+          {};
+        selectedKnowledgeBases.forEach((kb) => {
+          const source = kb.source as keyof typeof knowledgeBySource;
+          if (!knowledgeBySource[source]) {
+            knowledgeBySource[source] = [];
+          }
+          knowledgeBySource[source]!.push(kb.id);
+        });
+
+        try {
+          // Use fetch with keepalive to ensure request can be sent during page unload
+          fetch(API_ENDPOINTS.tenantConfig.updateKnowledgeList, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(knowledgeBySource),
+            keepalive: true,
+          }).catch((error) => {
+            log.error("卸载时保存失败:", error);
+          });
+        } catch (error) {
+          log.error("卸载时保存请求异常:", error);
+        }
+      }
+    };
+  }, []);
+
+  // Separately listen for knowledge base loading state, load user configuration when knowledge base loading is complete and in active state
+  useEffect(() => {
+    // Only execute when second page is active, knowledge base is loaded, and user configuration hasn't been loaded yet
+    if (
+      isActive &&
+      kbState.knowledgeBases.length > 0 &&
+      !kbState.isLoading &&
+      !hasLoadedRef.current
+    ) {
+      const loadConfig = async () => {
+        try {
+          await loadUserSelectedKnowledgeBases();
+          hasLoadedRef.current = true;
+        } catch (error) {
+          log.error("加载用户配置失败:", error);
+        }
+      };
+
+      loadConfig();
+    }
+  }, [isActive, kbState.knowledgeBases.length, kbState.isLoading]);
+
+  // Auto-deselect incompatible knowledge bases once after selections are loaded and page is active
+  useEffect(() => {
+    if (!isActive) return;
+    if (!hasLoadedRef.current) return; // ensure user selections loaded
+    if (kbState.isLoading) return; // avoid running during list loading
+    if (hasCleanedRef.current) return; // run once per entry
+
+    const embeddingName = modelConfig?.embedding?.modelName?.trim() || "";
+    const multiEmbeddingName =
+      modelConfig?.multiEmbedding?.modelName?.trim() || "";
+
+    const allowedModels = new Set<string>();
+    if (embeddingName) allowedModels.add(embeddingName);
+    if (multiEmbeddingName) allowedModels.add(multiEmbeddingName);
+
+    const currentSelected = kbState.selectedIds;
+    if (currentSelected.length === 0) {
+      hasCleanedRef.current = true;
+      return;
+    }
+
+    // If both empty, clear all
+    if (allowedModels.size === 0) {
+      shouldPersistSelectionRef.current = true;
+      kbDispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
+        payload: [],
+      });
+      hasUserInteractedRef.current = true;
+      setShowAutoDeselectModal(true);
+      hasCleanedRef.current = true;
+      return;
+    }
+
+    const filtered = currentSelected.filter((id) => {
+      const kb = kbState.knowledgeBases.find((k) => k.id === id);
+      if (!kb) return false;
+      // DataMate knowledge bases are always allowed (skip model check)
+      if (kb.source === "datamate") return true;
+      return allowedModels.has(kb.embeddingModel);
+    });
+
+    if (filtered.length !== currentSelected.length) {
+      shouldPersistSelectionRef.current = true;
+      kbDispatch({
+        type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
+        payload: filtered,
+      });
+      hasUserInteractedRef.current = true;
+      setShowAutoDeselectModal(true);
+    }
+
+    hasCleanedRef.current = true;
+  }, [
+    isActive,
+    kbState.isLoading,
+    kbState.knowledgeBases,
+    modelConfig?.embedding?.modelName,
+    modelConfig?.multiEmbedding?.modelName,
+    kbDispatch,
+  ]);
 
   // Generate unique knowledge base name
   const generateUniqueKbName = (existingKbs: KnowledgeBase[]): string => {
@@ -324,6 +495,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   ) => {
     // Only reset creation mode when user clicks
     if (fromUserClick) {
+      hasUserInteractedRef.current = true; // Mark user interaction
       setIsCreatingMode(false); // Reset creating mode
       setHasClickedUpload(false); // Reset upload button click state
     }
@@ -477,7 +649,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       // Check if ModelEngine is enabled to determine sync behavior
       if (modelEngineEnabled) {
         // When ModelEngine is enabled, sync both local and DataMate knowledge bases
-        await refreshKnowledgeBaseDataWithDataMate(true);
+        await refreshKnowledgeBaseDataWithDataMate();
       } else {
         // When ModelEngine is disabled, only sync local knowledge bases
         await refreshKnowledgeBaseData(true);
@@ -748,6 +920,46 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
   }, [newlyCreatedKbId, viewingDocuments.length]);
 
+  // Handle knowledge base selection
+  const handleSelectKnowledgeBase = (id: string) => {
+    hasUserInteractedRef.current = true; // Mark user interaction
+    selectKnowledgeBase(id);
+    // Persist selection immediately after reducer updates state
+    shouldPersistSelectionRef.current = true;
+
+    // When selecting knowledge base also get latest data (low priority background operation)
+    setTimeout(async () => {
+      try {
+        // Use lower priority to refresh data as this is not a critical operation
+        await refreshKnowledgeBaseData(true);
+      } catch (error) {
+        log.error("刷新知识库数据失败:", error);
+        // Error doesn't affect user experience
+      }
+    }, 500); // Delay execution, lower priority
+  };
+
+  // Persist user selection changes immediately when flagged
+  useEffect(() => {
+    if (!isActive) return;
+    if (!shouldPersistSelectionRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await saveUserSelectedKnowledgeBases();
+      } catch (error) {
+        log.error("保存用户选择的知识库失败:", error);
+      } finally {
+        if (!cancelled) {
+          shouldPersistSelectionRef.current = false;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kbState.selectedIds, isActive, saveUserSelectedKnowledgeBases]);
+
   // Update active knowledge base ID in polling service when component initializes or active knowledge base changes
   useEffect(() => {
     if (kbState.activeKnowledgeBase) {
@@ -829,14 +1041,13 @@ function DataConfig({ isActive }: DataConfigProps) {
             xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
           >
             <KnowledgeBaseList
-              showSelection={isActive}
               knowledgeBases={kbState.knowledgeBases}
               selectedIds={kbState.selectedIds}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
               currentEmbeddingModel={kbState.currentEmbeddingModel}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
-              onSelect={selectKnowledgeBase}
+              onSelect={handleSelectKnowledgeBase}
               onClick={handleKnowledgeBaseClick}
               onDelete={handleDelete}
               onSync={handleSync}
@@ -852,11 +1063,15 @@ function DataConfig({ isActive }: DataConfigProps) {
               onSearchChange={setSearchQuery}
               sourceFilter={sourceFilter}
               onSourceFilterChange={(values) =>
-                setSourceFilter(Array.isArray(values) ? values : [values])
+                setSourceFilter(
+                  Array.isArray(values) ? values : values ? [values] : []
+                )
               }
               modelFilter={modelFilter}
               onModelFilterChange={(values) =>
-                setModelFilter(Array.isArray(values) ? values : [values])
+                setModelFilter(
+                  Array.isArray(values) ? values : values ? [values] : []
+                )
               }
             />
           </Col>
@@ -944,6 +1159,36 @@ function DataConfig({ isActive }: DataConfigProps) {
           </Col>
         </Row>
       </div>
+
+      <Modal
+        open={showAutoDeselectModal}
+        title={null}
+        onOk={() => setShowAutoDeselectModal(false)}
+        onCancel={() => setShowAutoDeselectModal(false)}
+        okText={t("common.confirm")}
+        cancelButtonProps={{ style: { display: "none" } }}
+        centered
+        okButtonProps={{ type: "primary", danger: true }}
+        getContainer={() => contentRef.current || document.body}
+      >
+        <div className="flex items-start gap-4">
+          <ExclamationCircleFilled
+            style={{
+              color: token.colorWarning,
+              fontSize: "22px",
+              marginTop: "2px",
+            }}
+          />
+          <div className="flex-1">
+            <div className="text-base font-medium mb-3">
+              {t("embedding.knowledgeBaseAutoDeselectModal.title")}
+            </div>
+            <div className="text-sm leading-6">
+              {t("embedding.knowledgeBaseAutoDeselectModal.content")}
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={showDataMateConfigModal}
