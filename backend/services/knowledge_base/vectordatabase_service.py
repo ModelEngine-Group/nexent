@@ -1234,7 +1234,9 @@ class ElasticSearchService:
                         await asyncio.sleep(0.01)
                     yield "data: {\"status\": \"completed\"}\n\n"
                 except Exception as e:
-                    yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
+                    logger.error(
+                        f"Summary streaming failed: {str(e)}", exc_info=True)
+                    yield "data: {\"status\": \"error\", \"message\": \"An internal error occurred while generating the summary.\"}\n\n"
 
             return StreamingResponse(
                 generate_summary(),
