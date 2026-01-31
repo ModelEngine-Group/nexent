@@ -469,7 +469,6 @@ export function ChatStreamMain({
               onImageUpload={onImageUpload}
               selectedAgentId={selectedAgentId}
               onAgentSelect={onAgentSelect}
-              cachedAgents={cachedAgents}
             />
           </motion.div>
         </AnimatePresence>
