@@ -51,7 +51,7 @@ class DataMateSearchTool(Tool):
         verify_ssl: bool = Field(
             description="Whether to verify SSL certificates for HTTPS connections", default=False),
         index_names: List[str] = Field(
-            description="The list of index names to search", default=None),
+            description="The list of index names to search"),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
         top_k: int = Field(

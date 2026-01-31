@@ -372,7 +372,8 @@ export default function ToolConfigModal({
             >
               <div className="pr-2 mt-3">
                 {tool?.name === "datamate_search" ||
-                tool?.name === "knowledge_base_search" ? (
+                tool?.name === "knowledge_base_search" ||
+                tool?.name === "dify_search" ? (
                   <KnowledgeBaseToolConfig
                     currentParams={currentParams}
                     setCurrentParams={setCurrentParams}

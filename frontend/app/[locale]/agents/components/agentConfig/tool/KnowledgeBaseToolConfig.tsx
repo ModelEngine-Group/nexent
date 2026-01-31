@@ -54,9 +54,46 @@ export default function KnowledgeBaseToolConfig({
               kbMap[kbId] = kbName;
             });
           }
+        } else if (toolName === "dify_search") {
+          // For dify_search, we need to get dify_api_base and api_key from current params
+          const difyApiBaseIdx = currentParams.findIndex(
+            (p) => p.name === "dify_api_base"
+          );
+          const apiKeyIdx = currentParams.findIndex((p) => p.name === "api_key");
+
+          const difyApiBase =
+            difyApiBaseIdx !== -1 ? currentParams[difyApiBaseIdx]?.value : null;
+          const apiKey = apiKeyIdx !== -1 ? currentParams[apiKeyIdx]?.value : null;
+
+          if (difyApiBase && apiKey) {
+            try {
+              const difyResult = await knowledgeBaseService.fetchDifyDatasets(
+                difyApiBase,
+                apiKey,
+                1,
+                100
+              );
+              if (difyResult && difyResult.indices_info) {
+                difyResult.indices_info.forEach((indexInfo: any) => {
+                  const kbId = indexInfo.name; // dataset_id
+                  const kbName = indexInfo.display_name || indexInfo.name;
+                  kbMap[kbId] = kbName;
+                });
+              }
+            } catch (e) {
+              // Silently fail, kbMap remains empty
+            }
+          }
         } else {
-          // For other tools, use the standard cached map
-          kbMap = await knowledgeBaseService.ensureIdNameMap();
+          // For other tools (nexent knowledge_base_search), fetch knowledge bases
+          const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(
+            true, // skipHealthCheck
+            false, // includeDataMateSync
+            null // tenantId
+          );
+          kbs.forEach((kb: any) => {
+            kbMap[kb.id] = kb.name;
+          });
         }
 
         if (Object.keys(kbMap).length > 0) {
@@ -80,7 +117,7 @@ export default function KnowledgeBaseToolConfig({
     };
 
     loadKbOptions();
-  }, [toolName]);
+  }, [toolName, currentParams]);
 
   const handleSaveSelection = (selectedIds: string[]) => {
     let idx = currentParams.findIndex((p) => p.name === "index_names");
@@ -117,6 +154,19 @@ export default function KnowledgeBaseToolConfig({
     }
     return names;
   }, [retrievalParamNames, currentParams]);
+
+  // Get dify configuration for dify_search tool
+  const difyApiBase = useMemo(() => {
+    if (toolName !== "dify_search") return undefined;
+    const idx = currentParams.findIndex((p) => p.name === "dify_api_base");
+    return idx !== -1 ? currentParams[idx]?.value : undefined;
+  }, [toolName, currentParams]);
+
+  const difyApiKey = useMemo(() => {
+    if (toolName !== "dify_search") return undefined;
+    const idx = currentParams.findIndex((p) => p.name === "api_key");
+    return idx !== -1 ? currentParams[idx]?.value : undefined;
+  }, [toolName, currentParams]);
 
   return (
     <>
@@ -261,6 +311,8 @@ export default function KnowledgeBaseToolConfig({
           currentParams.find((p) => p.name === "index_names")?.value || []
         }
         toolName={toolName}
+        difyApiBase={difyApiBase}
+        difyApiKey={difyApiKey}
       />
     </>
   );

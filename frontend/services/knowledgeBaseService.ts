@@ -76,6 +76,40 @@ class KnowledgeBaseService {
     }
   }
 
+  // Fetch Dify datasets (knowledge bases) from Dify API
+  async fetchDifyDatasets(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+    pagination: {
+      embedding_available: boolean;
+    };
+  }> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.dify.datasets(difyApiBase, apiKey),
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to fetch Dify datasets");
+      }
+
+      return data;
+    } catch (error) {
+      log.error("Failed to fetch Dify datasets:", error);
+      throw error;
+    }
+  }
+
   // Get knowledge bases with stats from all sources (very slow, don't use it)
   async getKnowledgeBasesInfo(
     skipHealthCheck = false,
@@ -126,9 +160,14 @@ class KnowledgeBaseService {
                     chunkCount: stats.chunk_count || 0,
                     createdAt: stats.creation_date || null,
                     // Use update_time from database for sorting, fallback to ES update_date
-                    updatedAt: indexInfo.update_time || stats.update_date || stats.creation_date || null,
+                    updatedAt:
+                      indexInfo.update_time ||
+                      stats.update_date ||
+                      stats.creation_date ||
+                      null,
                     embeddingModel: stats.embedding_model || "unknown",
-                    knowledge_sources: indexInfo.knowledge_sources || "elasticsearch",
+                    knowledge_sources:
+                      indexInfo.knowledge_sources || "elasticsearch",
                     ingroup_permission: indexInfo.ingroup_permission || "",
                     group_ids: indexInfo.group_ids || [],
                     store_size: stats.store_size || "",
@@ -318,7 +357,7 @@ class KnowledgeBaseService {
         parserId: "",
         permission: "",
         tokenNum: 0,
-        source: params.source || "elasticsearch"
+        source: params.source || "elasticsearch",
       };
     } catch (error) {
       log.error("Failed to create knowledge base:", error);
@@ -954,7 +993,9 @@ class KnowledgeBaseService {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.detail || result.message || "Failed to update knowledge base");
+        throw new Error(
+          result.detail || result.message || "Failed to update knowledge base"
+        );
       }
     } catch (error) {
       log.error("Failed to update knowledge base:", error);

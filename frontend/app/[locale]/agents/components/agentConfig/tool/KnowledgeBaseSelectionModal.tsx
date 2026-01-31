@@ -14,6 +14,8 @@ export interface KnowledgeBaseSelectionModalProps {
   onSave: (selectedIds: string[]) => void;
   initialSelectedIds: string[];
   toolName?: string;
+  difyApiBase?: string;
+  difyApiKey?: string;
 }
 
 export default function KnowledgeBaseSelectionModal({
@@ -22,6 +24,8 @@ export default function KnowledgeBaseSelectionModal({
   onSave,
   initialSelectedIds,
   toolName,
+  difyApiBase,
+  difyApiKey,
 }: KnowledgeBaseSelectionModalProps) {
   const { t } = useTranslation("common");
   const [kbLoading, setKbLoading] = useState<boolean>(false);
@@ -50,20 +54,26 @@ export default function KnowledgeBaseSelectionModal({
   };
 
   useEffect(() => {
+    console.log("[KB Modal] isOpen:", isOpen, "toolName:", toolName);
     if (isOpen) {
+      console.log("[KB Modal] Calling loadKnowledgeBases...");
       loadKnowledgeBases();
       setKbModalSelected(initialSelectedIds);
     }
   }, [isOpen, initialSelectedIds]);
 
   const loadKnowledgeBases = async () => {
+    console.log("[KB Modal] loadKnowledgeBases started, toolName:", toolName);
     setKbLoading(true);
     try {
       let kbs: any[] = [];
+
       if (toolName === "datamate_search") {
+        console.log("[KB Modal] Loading datamate_search...");
         try {
           const syncResult =
             await knowledgeBaseService.syncDataMateAndCreateRecords();
+          console.log("[KB Modal] datamate sync result:", syncResult);
           if (syncResult && syncResult.indices_info) {
             kbs = syncResult.indices_info.map((indexInfo: any) => {
               const stats = indexInfo.stats?.base_info || {};
@@ -85,14 +95,76 @@ export default function KnowledgeBaseSelectionModal({
         } catch (e) {
           kbs = [];
         }
-      } else {
-        const nexentKbs = await knowledgeBaseService.getKnowledgeBasesInfo(
-          true,
-          false,
-          true
+      } else if (toolName === "dify_search") {
+        console.log(
+          "[KB Modal] Loading dify_search, difyApiBase:",
+          difyApiBase,
+          "difyApiKey:",
+          difyApiKey ? "***" : "empty"
         );
-        kbs = nexentKbs.map((kb) => ({ ...kb, source: "nexent" }));
+        // For dify_search, fetch datasets from Dify API using provided credentials
+        if (difyApiBase && difyApiKey) {
+          console.log("[KB Modal] Calling fetchDifyDatasets...");
+          try {
+            const difyResult = await knowledgeBaseService.fetchDifyDatasets(
+              difyApiBase,
+              difyApiKey,
+              1,
+              100 // Fetch up to 100 datasets for the dropdown
+            );
+            console.log("[KB Modal] difyResult:", difyResult);
+            if (difyResult && difyResult.indices_info) {
+              kbs = difyResult.indices_info.map((indexInfo: any) => {
+                const stats = indexInfo.stats?.base_info || {};
+                const kbId = indexInfo.name;
+                const kbName = indexInfo.display_name || indexInfo.name;
+                return {
+                  id: kbId,
+                  name: kbName,
+                  description: "Dify knowledge base",
+                  documentCount: stats.doc_count || 0,
+                  chunkCount: stats.chunk_count || 0,
+                  createdAt: stats.creation_date || null,
+                  updatedAt: stats.update_date || stats.creation_date || null,
+                  embeddingModel: stats.embedding_model || "unknown",
+                  source: "dify",
+                };
+              });
+            }
+          } catch (e) {
+            kbs = [];
+          }
+        } else {
+          kbs = [];
+        }
+      } else {
+        // Default: nexent knowledge bases - 直接调用 API 测试
+        console.log("[KB Modal] 直接调用 /api/indices?include_stats=true");
+        try {
+          const response = await fetch("/api/indices?include_stats=true", {
+            headers: {
+              Authorization: "Bearer " + (localStorage.getItem("token") || ""),
+            },
+          });
+          console.log("[KB Modal] API response status:", response.status);
+          const data = await response.json();
+          console.log("[KB Modal] API response data:", data);
+          kbs = (data.indices_info || []).map((indexInfo: any) => ({
+            id: indexInfo.name,
+            name: indexInfo.display_name || indexInfo.name,
+            description: "Local knowledge base",
+            documentCount: indexInfo.stats?.base_info?.doc_count || 0,
+            chunkCount: indexInfo.stats?.base_info?.chunk_count || 0,
+            embeddingModel:
+              indexInfo.stats?.base_info?.embedding_model || "unknown",
+            source: "nexent",
+          }));
+        } catch (err) {
+          console.error("[KB Modal] API Error:", err);
+          kbs = [];
+        }
       }
+
       setKbRawList(kbs);
     } catch (e) {
       message.error(
