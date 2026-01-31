@@ -48,7 +48,7 @@ export default function AgentList({
     if (currentAgentId) {
       const agentId = String(currentAgentId);
       const agent = agentList.find(a => String(a.id) === agentId);
-      if (agent?.is_new) {
+      if (agent?.is_new === true) {
         (async () => {
           try {
             const res = await clearAgentAndSync(agentId, queryClient);
@@ -302,8 +302,6 @@ export default function AgentList({
               onClick: (e: any) => {
                 e.preventDefault();
                 e.stopPropagation();
-
-                // Call onSelectAgent - NEW mark clearing is handled by useEffect
                 onSelectAgent(agent);
               },
             })}
