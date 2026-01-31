@@ -159,7 +159,7 @@ export default function AgentManageComp() {
     }
 
     // Clear NEW mark when agent is selected for editing (only if marked as new)
-    if (agent.is_new) {
+    if (agent.is_new === true) {
       try {
         const res = await clearAgentAndSync(agent.id, queryClient);
         if (!res?.success) {
