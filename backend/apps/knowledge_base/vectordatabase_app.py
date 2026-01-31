@@ -9,7 +9,7 @@ import re
 
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from nexent.vector_database.base import VectorDatabaseCore
-from services.vectordatabase_service import (
+from services.knowledge_base.vectordatabase_service import (
     ElasticSearchService,
     get_embedding_model,
     get_vector_db_core,
