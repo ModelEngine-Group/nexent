@@ -211,50 +211,6 @@ const isSubAgentIdsDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
     JSON.stringify(normalizeArray(editedAgent.sub_agent_id_list ?? []));
 };
 
-const isDirty = (baselineAgent: EditableAgent | null, editedAgent: EditableAgent): boolean => {
-  if (!baselineAgent) {
-    // Create mode: any non-default value counts as dirty
-    return (
-      editedAgent.name !== "" ||
-      editedAgent.display_name !== "" ||
-      editedAgent.description !== "" ||
-      editedAgent.author !== "" ||
-      editedAgent.model !== "" ||
-      editedAgent.model_id !== 0 ||
-      editedAgent.max_step !== 0 ||
-      editedAgent.provide_run_summary !== false ||
-      editedAgent.tools.length > 0 ||
-      editedAgent.duty_prompt !== "" ||
-      editedAgent.constraint_prompt !== "" ||
-      editedAgent.few_shots_prompt !== "" ||
-      editedAgent.business_description !== "" ||
-      editedAgent.business_logic_model_name !== "" ||
-      editedAgent.business_logic_model_id !== 0 ||
-      normalizeArray(editedAgent.sub_agent_id_list || []).length > 0
-    );
-  }
-
-  return (
-    baselineAgent.name !== editedAgent.name ||
-    baselineAgent.display_name !== editedAgent.display_name ||
-    baselineAgent.description !== editedAgent.description ||
-    baselineAgent.author !== editedAgent.author ||
-    baselineAgent.model !== editedAgent.model ||
-    baselineAgent.model_id !== editedAgent.model_id ||
-    baselineAgent.max_step !== editedAgent.max_step ||
-    baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
-    JSON.stringify(baselineAgent.tools) !== JSON.stringify(editedAgent.tools) ||
-    baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
-    baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
-    baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
-    baselineAgent.business_description !== editedAgent.business_description ||
-    baselineAgent.business_logic_model_name !== editedAgent.business_logic_model_name ||
-    baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
-    JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==
-      JSON.stringify(normalizeArray(editedAgent.sub_agent_id_list ?? []))
-  );
-};
-
 export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => ({
   currentAgentId: null,
   baselineAgent: null,

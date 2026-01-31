@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Col, Flex, Tooltip, Divider, Table, theme, App } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
@@ -17,22 +18,17 @@ import {
   exportAgent,
   updateToolConfig,
 } from "@/services/agentConfigService";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
+import { clearAgentNewMark } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 
 interface AgentListProps {
   agentList: Agent[];
-  currentAgentId: number | null;
-  hasUnsavedChanges: boolean;
-  onSelectAgent: (agent: Agent) => void;
-  onAgentDeleted?: (agentId: number) => void;
 }
 
 export default function AgentList({
   agentList,
-  currentAgentId,
-  hasUnsavedChanges,
-  onSelectAgent,
-  onAgentDeleted,
 }: AgentListProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -46,6 +42,11 @@ export default function AgentList({
   const [selectedAgentForRelationship, setSelectedAgentForRelationship] =
     useState<Agent | null>(null);
 
+  // Get state from store
+  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const setCurrentAgent = useAgentConfigStore((state) => state.setCurrentAgent);
+  const hasUnsavedChanges = useAgentConfigStore((state) => state.hasUnsavedChanges);
+
   // Mutations
   const updateAgentMutation = useMutation({
     mutationFn: (payload: any) => updateAgentInfo(payload),
@@ -54,6 +55,9 @@ export default function AgentList({
   const deleteAgentMutation = useMutation({
     mutationFn: (agentId: number) => deleteAgent(agentId),
   });
+
+    // Unsaved changes guard
+  const checkUnsavedChanges = useSaveGuard();
 
   // Handle view call relationship
   const handleViewCallRelationship = (agent: Agent) => {
@@ -64,6 +68,53 @@ export default function AgentList({
   const handleCloseCallRelationshipModal = () => {
     setCallRelationshipModalVisible(false);
     setSelectedAgentForRelationship(null);
+  };
+
+  // Handle select agent
+  const handleSelectAgent = async (agent: Agent) => {
+    // Clear NEW mark when agent is selected for editing (only if marked as new)
+    if (agent.is_new === true) {
+      try {
+        const res = await clearAgentNewMark(agent.id);
+        if (res?.success) {
+          log.warn("Failed to clear NEW mark on select:", res);
+          queryClient.invalidateQueries({ queryKey: ["agents"] });
+        }
+      } catch (err) {
+        log.error("Failed to clear NEW mark on select:", err);
+      }
+    }
+
+    // If already selected, deselect it
+    if (
+      currentAgentId !== null &&
+      String(currentAgentId) === String(agent.id)
+    ) {
+      const canDeselect = await checkUnsavedChanges.saveWithModal();
+      if (canDeselect) {
+        setCurrentAgent(null);
+      }
+      return;
+    }
+
+    // Check if can switch (has unsaved changes)
+    const canSwitch = await checkUnsavedChanges.saveWithModal();
+    if (!canSwitch) {
+      return;
+    }
+
+    // Load agent detail and set as current
+    try {
+      const result = await searchAgentInfo(Number(agent.id));
+      if (result.success && result.data) {
+        setCurrentAgent(result.data);
+      } else {
+        message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
+      }
+    } catch (error) {
+      log.error("Failed to load agent detail:", error);
+      message.error(t("agentConfig.agents.detailsLoadFailed"));
+    }
   };
 
   // Handle export agent
@@ -221,12 +272,12 @@ export default function AgentList({
           })
         );
 
-        // Notify parent component if this was the current agent
+        // Clear current agent if this was the selected agent
         if (
           currentAgentId !== null &&
           String(currentAgentId) === String(agent.id)
         ) {
-          onAgentDeleted?.(Number(agent.id));
+          setCurrentAgent(null);
         }
 
         // Refresh agent list
@@ -280,7 +331,7 @@ export default function AgentList({
               onClick: (e: any) => {
                 e.preventDefault();
                 e.stopPropagation();
-                onSelectAgent(agent);
+                handleSelectAgent(agent);
               },
             })}
             columns={[
