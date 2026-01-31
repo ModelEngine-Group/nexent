@@ -560,8 +560,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
                             ></div>
 
-                            {/* Model tag - only show when model is not "unknown" */}
-                            {kb.embeddingModel !== "unknown" && (
+                            {/* Model tag - only show when model is not "unknown" and not Dify */}
+                            {kb.embeddingModel !== "unknown" && kb.source !== "dify" && (
                               <span
                                 className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}
                               >
@@ -581,6 +581,18 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               )}
                           </>
                         )}
+
+                        {/* For Dify knowledge bases, always show model tag */}
+                        {kb.source === "dify" &&
+                          kb.embeddingModel !== "unknown" && (
+                            <span
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-green-100 text-green-800 border border-green-200 mr-1`}
+                            >
+                              {t("knowledgeBase.tag.model", {
+                                model: getModelDisplayName(kb.embeddingModel),
+                              })}
+                            </span>
+                          )}
                       </div>
                     </div>
                   </div>

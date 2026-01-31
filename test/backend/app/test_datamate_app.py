@@ -52,7 +52,7 @@ sys.modules['supabase'] = supabase_mock
 # Use additional context manager to ensure MinioClient is properly mocked during import
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.apps.datamate_app import sync_datamate_knowledges, get_datamate_knowledge_base_files_endpoint
+    from backend.apps.knowledge_base.datamate_app import sync_datamate_knowledges, get_datamate_knowledge_base_files_endpoint
 
 
 # Fixtures to replace setUp and tearDown
@@ -60,10 +60,10 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
 def datamate_mocks():
     """Fixture to provide mocked dependencies for datamate app tests."""
     # Create fresh mocks for each test
-    with patch('backend.apps.datamate_app.get_current_user_id') as mock_get_current_user_id, \
-            patch('backend.apps.datamate_app.sync_datamate_knowledge_bases_and_create_records') as mock_sync_datamate, \
-            patch('backend.apps.datamate_app.fetch_datamate_knowledge_base_file_list') as mock_fetch_files, \
-            patch('backend.apps.datamate_app.logger') as mock_logger:
+    with patch('backend.apps.knowledge_base.datamate_app.get_current_user_id') as mock_get_current_user_id, \
+            patch('backend.apps.knowledge_base.datamate_app.sync_datamate_knowledge_bases_and_create_records') as mock_sync_datamate, \
+            patch('backend.apps.knowledge_base.datamate_app.fetch_datamate_knowledge_base_file_list') as mock_fetch_files, \
+            patch('backend.apps.knowledge_base.datamate_app.logger') as mock_logger:
 
         # Set up async mocks for async functions
         mock_sync_datamate.return_value = AsyncMock()

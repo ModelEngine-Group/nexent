@@ -17,7 +17,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
-import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
+import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import ToolTestPanel from "./ToolTestPanel";
 import KnowledgeBaseToolConfig from "./KnowledgeBaseToolConfig";
@@ -58,13 +58,15 @@ export default function ToolConfigModal({
   const [testPanelVisible, setTestPanelVisible] = useState(false);
 
   // Configurable grouping: control which params appear in each group
-  const serverParamNames = ["server_url", "verify_ssl"];
+  // Include api_key for tools that need it (e.g., dify tools)
+  const serverParamNames = ["server_url", "api_key", "verify_ssl"];
   const retrievalParamNames = [
     "top_k",
     "threshold",
     "kb_page",
     "kb_page_size",
     "search_mode",
+    "search_method",
   ];
   // Initialize with provided params
   useEffect(() => {
@@ -74,6 +76,15 @@ export default function ToolConfigModal({
     initialParams.forEach((param, index) => {
       formValues[`param_${index}`] = param.value;
     });
+
+    // Set default value for search_method if not provided
+    const searchMethodIdx = initialParams.findIndex(
+      (p) => p.name === "search_method"
+    );
+    if (searchMethodIdx !== -1 && !formValues[`param_${searchMethodIdx}`]) {
+      formValues[`param_${searchMethodIdx}`] = "semantic_search";
+    }
+
     form.setFieldsValue(formValues);
 
     // On first load of the tool config modal, attempt to load tenant config
@@ -215,28 +226,7 @@ export default function ToolConfigModal({
   };
 
   const renderParamInput = (param: ToolParam, index: number) => {
-    // Get options from frontend configuration based on tool name and parameter name
-    const options = getToolParamOptions(tool.name, param.name);
-
-    // Determine if this parameter should be rendered as a select dropdown
-    const isSelectType = options && options.length > 0;
-
     const inputComponent = (() => {
-      // Handle select type - when options are defined in frontend config
-      if (isSelectType) {
-        return (
-          <Select
-            placeholder={t("toolConfig.input.string.placeholder", {
-              name: param.description,
-            })}
-            options={options.map((option) => ({
-              value: option,
-              label: option,
-            }))}
-          />
-        );
-      }
-
       switch (param.type) {
         case TOOL_PARAM_TYPES.NUMBER:
           return (
@@ -270,6 +260,26 @@ export default function ToolConfigModal({
               />
             );
           }
+
+          // Special-case: render `search_method` as a Select dropdown for Dify tools
+          if (param.name === "search_method") {
+            return (
+              <Select
+                defaultValue="semantic_search"
+                options={[
+                  { label: "keyword_search", value: "keyword_search" },
+                  { label: "semantic_search", value: "semantic_search" },
+                  { label: "full_text_search", value: "full_text_search" },
+                  { label: "hybrid_search", value: "hybrid_search" },
+                ]}
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: param.description,
+                })}
+                allowClear
+              />
+            );
+          }
+
           // Default TextArea for all other text-like types and unknown types
           return (
             <Input.TextArea
@@ -373,14 +383,12 @@ export default function ToolConfigModal({
               <div className="pr-2 mt-3">
                 {tool?.name === "datamate_search" ||
                 tool?.name === "knowledge_base_search" ||
-                tool?.name === "dify_search" ? (
+                tool?.name === "dify_search_tool" ||
+                tool?.name?.startsWith("dify_") ? (
                   <KnowledgeBaseToolConfig
                     currentParams={currentParams}
                     setCurrentParams={setCurrentParams}
                     form={form}
-                    serverParamNames={serverParamNames}
-                    retrievalParamNames={retrievalParamNames}
-                    renderParamInput={renderParamInput}
                     toolName={tool?.name}
                   />
                 ) : (

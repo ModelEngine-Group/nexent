@@ -53,6 +53,19 @@ export const API_ENDPOINTS = {
     validate: `${API_BASE_URL}/tool/validate`,
     loadConfig: (toolId: number) =>
       `${API_BASE_URL}/tool/load_config/${toolId}`,
+    difyDatasets: (
+      difyApiBase: string,
+      apiKey: string,
+      page: number = 1,
+      pageSize: number = 20
+    ) => {
+      const queryParams = new URLSearchParams();
+      queryParams.append("dify_api_base", difyApiBase);
+      queryParams.append("api_key", apiKey);
+      queryParams.append("page", page.toString());
+      queryParams.append("page_size", pageSize.toString());
+      return `${API_BASE_URL}/dify/datasets?${queryParams.toString()}`;
+    },
   },
   prompt: {
     generate: `${API_BASE_URL}/prompt/generate`,

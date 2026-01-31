@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException, Path
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
-from services.datamate_service import (
+from services.knowledge_base.datamate_service import (
     sync_datamate_knowledge_bases_and_create_records,
     fetch_datamate_knowledge_base_file_list
 )

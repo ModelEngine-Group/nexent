@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Spin, Select, Form } from "antd";
+import { Spin, Select, Form, Input, InputNumber, Switch } from "antd";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { ToolParam } from "@/types/agentConfig";
 import KnowledgeBaseSelectionModal from "./KnowledgeBaseSelectionModal";
@@ -11,19 +11,24 @@ export interface KnowledgeBaseToolConfigProps {
   currentParams: ToolParam[];
   setCurrentParams: (p: ToolParam[]) => void;
   form: any;
-  serverParamNames: string[];
-  retrievalParamNames: string[];
-  renderParamInput: (param: ToolParam, index: number) => React.ReactNode;
   toolName?: string;
 }
+
+// Parameter groups for knowledge base tools
+const SERVER_PARAM_NAMES = ["server_url", "api_key", "verify_ssl"];
+const RETRIEVAL_PARAM_NAMES = [
+  "top_k",
+  "threshold",
+  "kb_page",
+  "kb_page_size",
+  "search_mode",
+  "search_method",
+];
 
 export default function KnowledgeBaseToolConfig({
   currentParams,
   setCurrentParams,
   form,
-  serverParamNames,
-  retrievalParamNames,
-  renderParamInput,
   toolName,
 }: KnowledgeBaseToolConfigProps) {
   const { t } = useTranslation("common");
@@ -35,6 +40,92 @@ export default function KnowledgeBaseToolConfig({
   const [nameIdMap, setNameIdMap] = useState<Record<string, string> | null>(
     null
   );
+
+  // Check if current tool is a Dify tool
+  const isDifyTool = toolName?.startsWith("dify_");
+
+  // Get Dify API configuration from current params
+  const getDifyApiBase = () => {
+    const serverUrlParam = currentParams.find((p) => p.name === "server_url");
+    return serverUrlParam?.value || "";
+  };
+
+  const getDifyApiKey = () => {
+    const apiKeyParam = currentParams.find((p) => p.name === "api_key");
+    return apiKeyParam?.value || "";
+  };
+
+  // Render input component based on parameter type
+  const renderParamInput = (param: ToolParam, index: number) => {
+    const inputComponent = (() => {
+      switch (param.type) {
+        case "number":
+          return (
+            <InputNumber
+              placeholder={t("toolConfig.input.string.placeholder", {
+                name: param.description,
+              })}
+            />
+          );
+
+        case "boolean":
+          return <Switch />;
+
+        case "string":
+        case "array":
+        case "object":
+        default:
+          // Special-case: render `search_mode` as a Select dropdown with fixed options
+          if (param.name === "search_mode") {
+            return (
+              <Select
+                options={[
+                  { label: "hybrid", value: "hybrid" },
+                  { label: "accurate", value: "accurate" },
+                  { label: "semantic", value: "semantic" },
+                ]}
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: param.description,
+                })}
+                allowClear
+              />
+            );
+          }
+
+          // Special-case: render `search_method` as a Select dropdown
+          if (param.name === "search_method") {
+            return (
+              <Select
+                defaultValue="semantic_search"
+                options={[
+                  { label: "keyword_search", value: "keyword_search" },
+                  { label: "semantic_search", value: "semantic_search" },
+                  { label: "full_text_search", value: "full_text_search" },
+                  { label: "hybrid_search", value: "hybrid_search" },
+                ]}
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: param.description,
+                })}
+                allowClear
+              />
+            );
+          }
+
+          // Default Input.TextArea for all other types
+          return (
+            <Input.TextArea
+              placeholder={t(`toolConfig.input.${param.type}.placeholder`, {
+                name: param.description,
+              })}
+              autoSize={{ minRows: 1, maxRows: 8 }}
+              style={{ resize: "vertical" }}
+            />
+          );
+      }
+    })();
+
+    return inputComponent;
+  };
 
   useEffect(() => {
     const loadKbOptions = async () => {
@@ -54,46 +145,9 @@ export default function KnowledgeBaseToolConfig({
               kbMap[kbId] = kbName;
             });
           }
-        } else if (toolName === "dify_search") {
-          // For dify_search, we need to get dify_api_base and api_key from current params
-          const difyApiBaseIdx = currentParams.findIndex(
-            (p) => p.name === "dify_api_base"
-          );
-          const apiKeyIdx = currentParams.findIndex((p) => p.name === "api_key");
-
-          const difyApiBase =
-            difyApiBaseIdx !== -1 ? currentParams[difyApiBaseIdx]?.value : null;
-          const apiKey = apiKeyIdx !== -1 ? currentParams[apiKeyIdx]?.value : null;
-
-          if (difyApiBase && apiKey) {
-            try {
-              const difyResult = await knowledgeBaseService.fetchDifyDatasets(
-                difyApiBase,
-                apiKey,
-                1,
-                100
-              );
-              if (difyResult && difyResult.indices_info) {
-                difyResult.indices_info.forEach((indexInfo: any) => {
-                  const kbId = indexInfo.name; // dataset_id
-                  const kbName = indexInfo.display_name || indexInfo.name;
-                  kbMap[kbId] = kbName;
-                });
-              }
-            } catch (e) {
-              // Silently fail, kbMap remains empty
-            }
-          }
         } else {
-          // For other tools (nexent knowledge_base_search), fetch knowledge bases
-          const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(
-            true, // skipHealthCheck
-            false, // includeDataMateSync
-            null // tenantId
-          );
-          kbs.forEach((kb: any) => {
-            kbMap[kb.id] = kb.name;
-          });
+          // For other tools, use the standard cached map
+          kbMap = await knowledgeBaseService.ensureIdNameMap();
         }
 
         if (Object.keys(kbMap).length > 0) {
@@ -117,56 +171,89 @@ export default function KnowledgeBaseToolConfig({
     };
 
     loadKbOptions();
-  }, [toolName, currentParams]);
+  }, [toolName]);
 
   const handleSaveSelection = (selectedIds: string[]) => {
-    let idx = currentParams.findIndex((p) => p.name === "index_names");
+    const paramName = getKbParamName();
+    let idx = currentParams.findIndex((p) => p.name === paramName);
     const newParams = [...currentParams];
-    // Convert display_name back to index_name for saving
-    const actualIds = selectedIds.map((id) => nameIdMap?.[id] || id);
+
+    // For Dify tools, save as JSON string; for others, save as array
+    const valueToSave = isDifyTool
+      ? JSON.stringify(selectedIds)
+      : selectedIds.map((id) => nameIdMap?.[id] || id);
+
     if (idx === -1) {
       const newParam: ToolParam = {
-        name: "index_names",
+        name: paramName,
         type: "array",
         required: false,
-        description: "List of knowledge base ids",
-        value: actualIds,
+        description: isDifyTool
+          ? "List of Dify dataset IDs"
+          : "List of knowledge base IDs",
+        value: valueToSave,
       } as ToolParam;
       newParams.push(newParam);
       idx = newParams.length - 1;
     } else {
-      newParams[idx] = { ...newParams[idx], value: actualIds };
+      newParams[idx] = { ...newParams[idx], value: valueToSave };
     }
     setCurrentParams(newParams);
     const fieldName = `param_${idx}`;
-    form.setFieldsValue({ [fieldName]: actualIds });
+    form.setFieldsValue({ [fieldName]: valueToSave });
     setIsModalOpen(false);
   };
 
   const effectiveRetrievalParamNames = useMemo(() => {
-    const names = Array.isArray(retrievalParamNames)
-      ? [...retrievalParamNames]
-      : [];
+    const names = [...RETRIEVAL_PARAM_NAMES];
     const hasSearchModeInParams =
       currentParams.findIndex((p) => p.name === "search_mode") !== -1;
     if (hasSearchModeInParams && !names.includes("search_mode")) {
       names.push("search_mode");
     }
     return names;
-  }, [retrievalParamNames, currentParams]);
+  }, [currentParams]);
 
-  // Get dify configuration for dify_search tool
-  const difyApiBase = useMemo(() => {
-    if (toolName !== "dify_search") return undefined;
-    const idx = currentParams.findIndex((p) => p.name === "dify_api_base");
-    return idx !== -1 ? currentParams[idx]?.value : undefined;
-  }, [toolName, currentParams]);
+  // Get the knowledge base param name based on tool type
+  const getKbParamName = () => {
+    return isDifyTool ? "dataset_ids" : "index_names";
+  };
 
-  const difyApiKey = useMemo(() => {
-    if (toolName !== "dify_search") return undefined;
-    const idx = currentParams.findIndex((p) => p.name === "api_key");
-    return idx !== -1 ? currentParams[idx]?.value : undefined;
-  }, [toolName, currentParams]);
+  // Get placeholder text based on tool type
+  const getKbPlaceholder = () => {
+    if (isDifyTool) {
+      return t("toolConfig.dify.datasetIdsPlaceholder") || "Select datasets";
+    }
+    return t("toolConfig.placeholder.selectKb") || "Select knowledge bases";
+  };
+
+  // Get selected values from params
+  const getSelectedValues = (): string[] => {
+    const paramName = getKbParamName();
+    const idx = currentParams.findIndex((p) => p.name === paramName);
+    if (idx === -1) return [];
+
+    const value = currentParams[idx].value;
+    if (!value) return [];
+
+    // For Dify, value is JSON string; for Nexent, value is array
+    if (isDifyTool && typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+    return Array.isArray(value) ? value : [];
+  };
+
+  // Filter params for each group
+  const serverParams = currentParams.filter((p) =>
+    SERVER_PARAM_NAMES.includes(p.name)
+  );
+  const retrievalParams = currentParams.filter((p) =>
+    RETRIEVAL_PARAM_NAMES.includes(p.name)
+  );
 
   return (
     <>
@@ -175,29 +262,28 @@ export default function KnowledgeBaseToolConfig({
         <div className="text-sm font-medium mb-2">
           {t("toolConfig.group.serverParameters", "Server Parameters")}
         </div>
-        {serverParamNames.map((name) => {
-          const idx = currentParams.findIndex((p) => p.name === name);
-          if (idx === -1) return null;
-          const fieldName = `param_${idx}`;
+        {serverParams.map((param, idx) => {
+          const paramIndex = currentParams.findIndex((p) => p.name === param.name);
+          const fieldName = `param_${paramIndex}`;
           return (
             <Form.Item
-              key={name}
+              key={param.name}
               label={
                 <span
                   className="inline-block w-full truncate"
-                  title={currentParams[idx].name}
+                  title={param.name}
                 >
-                  {currentParams[idx].name}
+                  {param.name}
                 </span>
               }
               name={fieldName}
               tooltip={{
-                title: currentParams[idx].description,
+                title: param.description,
                 placement: "topLeft",
                 styles: { root: { maxWidth: 400 } },
               }}
             >
-              {renderParamInput(currentParams[idx], idx)}
+              {renderParamInput(param, paramIndex)}
             </Form.Item>
           );
         })}
@@ -208,57 +294,54 @@ export default function KnowledgeBaseToolConfig({
         <div className="text-sm font-medium mb-2">
           {t("toolConfig.group.retrievalParameters", "Retrieval Parameters")}
         </div>
-        {effectiveRetrievalParamNames.map((name) => {
-          const idx = currentParams.findIndex((p) => p.name === name);
-          if (idx === -1) return null;
-          const fieldName = `param_${idx}`;
+        {retrievalParams.map((param) => {
+          const paramIndex = currentParams.findIndex((p) => p.name === param.name);
+          const fieldName = `param_${paramIndex}`;
           return (
             <Form.Item
-              key={name}
+              key={param.name}
               label={
                 <span
                   className="inline-block w-full truncate"
-                  title={currentParams[idx].name}
+                  title={param.name}
                 >
-                  {currentParams[idx].name}
+                  {param.name}
                 </span>
               }
               name={fieldName}
               tooltip={{
-                title: currentParams[idx].description,
+                title: param.description,
                 placement: "topLeft",
                 styles: { root: { maxWidth: 400 } },
               }}
             >
-              {renderParamInput(currentParams[idx], idx)}
+              {renderParamInput(param, paramIndex)}
             </Form.Item>
           );
         })}
       </div>
 
-      {/* Knowledge base selection */}
+      {/* Knowledge base selection - unified for all tool types */}
       <div className="mb-4">
         {(() => {
-          const idx = currentParams.findIndex((p) => p.name === "index_names");
+          const paramName = getKbParamName();
+          const idx = currentParams.findIndex((p) => p.name === paramName);
           const fieldName = idx === -1 ? undefined : `param_${idx}`;
-          const selectedValue =
-            idx === -1 ? [] : currentParams[idx].value || [];
+          const selectedValue = getSelectedValues();
 
           return (
             <div className="flex items-start gap-2">
               <div className="flex-1">
                 <Form.Item
-                  key={"index_names_preview"}
+                  key={`${paramName}_preview`}
                   label={
                     <span
                       className="inline-block w-full truncate"
-                      title={
-                        idx !== -1 ? currentParams[idx].name : "index_names"
-                      }
+                      title={idx !== -1 ? currentParams[idx].name : paramName}
                     >
                       {idx !== -1
                         ? currentParams[idx].name
-                        : t("toolConfig.field.indexNames", "index_names")}
+                        : t(`toolConfig.field.${paramName}`, paramName)}
                     </span>
                   }
                   name={fieldName}
@@ -277,19 +360,12 @@ export default function KnowledgeBaseToolConfig({
                     mode="multiple"
                     allowClear
                     options={kbOptions}
-                    placeholder={
-                      !selectedValue || selectedValue.length === 0
-                        ? t(
-                            "toolConfig.placeholder.selectKb",
-                            "Select knowledge bases"
-                          )
-                        : t("toolConfig.input.array.placeholder", {
-                            name: currentParams[idx]?.description,
-                          })
-                    }
+                    placeholder={getKbPlaceholder()}
                     notFoundContent={kbLoading ? <Spin size="small" /> : null}
                     open={false}
                     onClick={() => setIsModalOpen(true)}
+                    value={selectedValue}
+                    className="w-full"
                   />
                 </Form.Item>
               </div>
@@ -303,16 +379,15 @@ export default function KnowledgeBaseToolConfig({
         })()}
       </div>
 
+      {/* Unified knowledge base selection modal */}
       <KnowledgeBaseSelectionModal
         isOpen={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         onSave={handleSaveSelection}
-        initialSelectedIds={
-          currentParams.find((p) => p.name === "index_names")?.value || []
-        }
+        initialSelectedIds={getSelectedValues()}
         toolName={toolName}
-        difyApiBase={difyApiBase}
-        difyApiKey={difyApiKey}
+        difyApiBase={isDifyTool ? getDifyApiBase() : undefined}
+        difyApiKey={isDifyTool ? getDifyApiKey() : undefined}
       />
     </>
   );

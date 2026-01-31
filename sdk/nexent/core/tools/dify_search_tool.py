@@ -61,27 +61,22 @@ class DifySearchTool(Tool):
 
         # Validate server_url
         if not server_url or not isinstance(server_url, str):
-            raise ValueError(
-                "server_url is required and must be a non-empty string")
+            raise ValueError("server_url is required and must be a non-empty string")
 
         # Validate api_key
         if not api_key or not isinstance(api_key, str):
-            raise ValueError(
-                "api_key is required and must be a non-empty string")
+            raise ValueError("api_key is required and must be a non-empty string")
 
         # Parse and validate dataset_ids from JSON string
         if not dataset_ids or not isinstance(dataset_ids, str):
-            raise ValueError(
-                "dataset_ids is required and must be a non-empty JSON string array")
+            raise ValueError("dataset_ids is required and must be a non-empty JSON string array")
         try:
             parsed_ids = json.loads(dataset_ids)
             if not isinstance(parsed_ids, list) or not parsed_ids:
-                raise ValueError(
-                    "dataset_ids must be a non-empty JSON array of strings")
+                raise ValueError("dataset_ids must be a non-empty JSON array of strings")
             self.dataset_ids = [str(item) for item in parsed_ids]
         except (json.JSONDecodeError, TypeError) as e:
-            raise ValueError(
-                f"dataset_ids must be a valid JSON string array: {str(e)}")
+            raise ValueError(f"dataset_ids must be a valid JSON string array: {str(e)}")
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
@@ -102,8 +97,7 @@ class DifySearchTool(Tool):
             running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
-            self.observer.add_message("", ProcessType.CARD, json.dumps(
-                card_content, ensure_ascii=False))
+            self.observer.add_message("", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False))
 
         # Use instance default top_k and search_method
         search_top_k = self.top_k
@@ -123,8 +117,7 @@ class DifySearchTool(Tool):
             # Store results with their dataset_id for URL generation
             all_search_results = []
             for dataset_id in self.dataset_ids:
-                search_results_data = self._search_dify_knowledge_base(
-                    query, search_top_k, search_method, dataset_id)
+                search_results_data = self._search_dify_knowledge_base(query, search_top_k, search_method, dataset_id)
                 search_results = search_results_data.get("records", [])
                 # Add dataset_id to each result for URL generation
                 for result in search_results:
@@ -132,8 +125,7 @@ class DifySearchTool(Tool):
                 all_search_results.extend(search_results)
 
             if not all_search_results:
-                raise Exception(
-                    "No results found! Try a less restrictive/shorter query.")
+                raise Exception("No results found! Try a less restrictive/shorter query.")
 
             # Collect all document info for batch URL fetching
             document_dataset_pairs = []
@@ -146,8 +138,7 @@ class DifySearchTool(Tool):
                     document_dataset_pairs.append((document_id, dataset_id))
 
             # Batch get download URLs
-            download_url_map = self._batch_get_download_urls(
-                document_dataset_pairs)
+            download_url_map = self._batch_get_download_urls(document_dataset_pairs)
 
             # Process all results
             for index, result in enumerate(all_search_results):
@@ -178,17 +169,14 @@ class DifySearchTool(Tool):
                 )
 
                 search_results_json.append(search_result_message.to_dict())
-                search_results_return.append(
-                    search_result_message.to_model_dict())
+                search_results_return.append(search_result_message.to_model_dict())
 
             self.record_ops += len(search_results_return)
 
             # Record the detailed content of this search
             if self.observer:
-                search_results_data = json.dumps(
-                    search_results_json, ensure_ascii=False)
-                self.observer.add_message(
-                    "", ProcessType.SEARCH_CONTENT, search_results_data)
+                search_results_data = json.dumps(search_results_json, ensure_ascii=False)
+                self.observer.add_message("", ProcessType.SEARCH_CONTENT, search_results_data)
 
             return json.dumps(search_results_return, ensure_ascii=False)
 
@@ -196,6 +184,7 @@ class DifySearchTool(Tool):
             error_msg = f"Error searching Dify knowledge base: {str(e)}"
             logger.error(error_msg)
             raise Exception(error_msg)
+
 
     def _get_document_download_url(self, document_id: str, dataset_id: str = None) -> str:
         """Get download URL for a document from Dify API.
@@ -228,20 +217,16 @@ class DifySearchTool(Tool):
                 return result.get("download_url", "")
 
         except httpx.RequestError as e:
-            logger.warning(
-                f"Failed to get download URL for document {document_id}: {str(e)}")
+            logger.warning(f"Failed to get download URL for document {document_id}: {str(e)}")
             return ""
         except httpx.HTTPStatusError as e:
-            logger.warning(
-                f"HTTP error getting download URL for document {document_id}: {str(e)}")
+            logger.warning(f"HTTP error getting download URL for document {document_id}: {str(e)}")
             return ""
         except json.JSONDecodeError as e:
-            logger.warning(
-                f"Failed to parse download URL response for document {document_id}: {str(e)}")
+            logger.warning(f"Failed to parse download URL response for document {document_id}: {str(e)}")
             return ""
         except KeyError as e:
-            logger.warning(
-                f"Unexpected download URL response format for document {document_id}: missing key {str(e)}")
+            logger.warning(f"Unexpected download URL response format for document {document_id}: missing key {str(e)}")
             return ""
 
     def _batch_get_download_urls(self, document_dataset_pairs: List[Tuple[str, str]]) -> Dict[str, str]:
@@ -257,8 +242,7 @@ class DifySearchTool(Tool):
 
         for document_id, dataset_id in document_dataset_pairs:
             if document_id:  # Only process non-empty document_ids
-                download_url = self._get_document_download_url(
-                    document_id, dataset_id)
+                download_url = self._get_document_download_url(document_id, dataset_id)
                 url_map[document_id] = download_url
             else:
                 url_map[document_id] = ""
@@ -310,8 +294,7 @@ class DifySearchTool(Tool):
 
                 # Validate that required keys are present
                 if "records" not in result:
-                    raise Exception(
-                        "Unexpected Dify API response format: missing 'records' key")
+                    raise Exception("Unexpected Dify API response format: missing 'records' key")
 
                 return result
 
@@ -322,5 +305,4 @@ class DifySearchTool(Tool):
         except json.JSONDecodeError as e:
             raise Exception(f"Failed to parse Dify API response: {str(e)}")
         except KeyError as e:
-            raise Exception(
-                f"Unexpected Dify API response format: missing key {str(e)}")
+            raise Exception(f"Unexpected Dify API response format: missing key {str(e)}")

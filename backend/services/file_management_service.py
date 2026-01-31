@@ -16,7 +16,7 @@ from database.attachment_db import (
     delete_file,
     list_files
 )
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from services.knowledge_base.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 

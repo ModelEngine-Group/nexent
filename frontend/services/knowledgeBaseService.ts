@@ -10,6 +10,8 @@ import {
   Document,
   KnowledgeBase,
   KnowledgeBaseCreateParams,
+  DifyDatasetInfo,
+  DifyDatasetsResponse,
 } from "@/types/knowledgeBase";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -1037,6 +1039,71 @@ class KnowledgeBaseService {
       };
     } catch (error) {
       log.error("Failed to get document error info:", error);
+      throw error;
+    }
+  }
+
+  // Fetch Dify datasets (knowledge bases) from the backend API
+  async fetchDifyDatasets(
+    difyApiBase: string,
+    apiKey: string,
+    page: number = 1,
+    pageSize: number = 20
+  ): Promise<DifyDatasetsResponse> {
+    try {
+      const url = API_ENDPOINTS.tool.difyDatasets(
+        difyApiBase,
+        apiKey,
+        page,
+        pageSize
+      );
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.detail || `HTTP error! status: ${response.status}`
+        );
+      }
+
+      const data: DifyDatasetsResponse = await response.json();
+
+      return {
+        indices: data.indices || [],
+        count: data.count || 0,
+        indices_info: (data.indices_info || []).map((info: DifyDatasetInfo) => ({
+          name: info.name,
+          display_name: info.display_name,
+          stats: info.stats || {
+            base_info: {
+              doc_count: 0,
+              chunk_count: 0,
+              store_size: "",
+              process_source: "Dify",
+              embedding_model: "",
+              embedding_dim: 0,
+              creation_date: 0,
+              update_date: 0,
+            },
+            search_performance: {
+              total_search_count: 0,
+              hit_count: 0,
+            },
+          },
+        })),
+        pagination: data.pagination || {
+          page,
+          page_size: pageSize,
+          total: 0,
+          has_more: false,
+        },
+      };
+    } catch (error) {
+      log.error("Failed to fetch Dify datasets:", error);
       throw error;
     }
   }
