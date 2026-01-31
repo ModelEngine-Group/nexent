@@ -138,8 +138,7 @@ export const API_ENDPOINTS = {
     chunkDetail: (indexName: string, chunkId: string) =>
       `${API_BASE_URL}/indices/${indexName}/chunk/${chunkId}`,
     // Update knowledge base info
-    updateIndex: (indexName: string) =>
-      `${API_BASE_URL}/indices/${indexName}`,
+    updateIndex: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
     searchHybrid: `${API_BASE_URL}/indices/search/hybrid`,
     summary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/auto_summary`,
@@ -168,10 +167,10 @@ export const API_ENDPOINTS = {
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
   },
   tenantConfig: {
+    loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
+    updateKnowledgeList: `${API_BASE_URL}/tenant_config/update_knowledge_list`,
     deploymentVersion: `${API_BASE_URL}/tenant_config/deployment_version`,
-    loadKnowledgeList: `${API_BASE_URL}/tenant_config/knowledge_list`,
-    updateKnowledgeList: `${API_BASE_URL}/tenant_config/knowledge_list`,
-  } as const,
+  },
   mcp: {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
@@ -255,7 +254,8 @@ export const API_ENDPOINTS = {
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
-    default: (tenantId: string) => `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
+    default: (tenantId: string) =>
+      `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
   },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
