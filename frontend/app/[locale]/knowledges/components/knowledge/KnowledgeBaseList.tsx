@@ -45,6 +45,7 @@ const KB_LAYOUT = {
 };
 
 interface KnowledgeBaseListProps {
+  showSelection?: boolean; // New: Control whether to show selection UI
   knowledgeBases: KnowledgeBase[];
   selectedIds: string[];
   activeKnowledgeBase: KnowledgeBase | null;
@@ -53,9 +54,9 @@ interface KnowledgeBaseListProps {
   syncLoading?: boolean;
   onSelect: (id: string) => void;
   onClick: (kb: KnowledgeBase) => void;
-  onDelete: (id: string) => void;
-  onSync: () => void;
-  onCreateNew: () => void;
+  onDelete?: (id: string) => void;
+  onSync?: () => void;
+  onCreateNew?: () => void;
   onDataMateConfig?: () => void;
   showDataMateConfig?: boolean; // Control whether to show DataMate config button
   isSelectable: (kb: KnowledgeBase) => boolean;
@@ -72,6 +73,7 @@ interface KnowledgeBaseListProps {
 }
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
+  showSelection = true, // New: Default to true
   knowledgeBases,
   selectedIds,
   activeKnowledgeBase,
@@ -231,52 +233,56 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             </h3>
           </div>
           <div className="flex items-center" style={{ gap: "6px" }}>
-            <Button
-              style={{
-                padding: "4px 15px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                backgroundColor: "#1677ff",
-                color: "white",
-                border: "none",
-              }}
-              className="hover:!bg-blue-600"
-              type="primary"
-              onClick={onCreateNew}
-              icon={<PlusOutlined />}
-            >
-              {t("knowledgeBase.button.create")}
-            </Button>
-            <Button
-              style={{
-                padding: "4px 15px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                backgroundColor: "#1677ff",
-                color: "white",
-                border: "none",
-              }}
-              className="hover:!bg-blue-600"
-              type="primary"
-              onClick={onSync}
-            >
-              <span
+            {onCreateNew && (
+              <Button
                 style={{
+                  padding: "4px 15px",
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  width: "14px",
-                  height: "14px",
+                  gap: "8px",
+                  backgroundColor: "#1677ff",
+                  color: "white",
+                  border: "none",
                 }}
+                className="hover:!bg-blue-600"
+                type="primary"
+                onClick={onCreateNew}
+                icon={<PlusOutlined />}
               >
-                <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
-              </span>
-              <span>{t("knowledgeBase.button.sync")}</span>
-            </Button>
+                {t("knowledgeBase.button.create")}
+              </Button>
+            )}
+            {onSync && (
+              <Button
+                style={{
+                  padding: "4px 15px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  backgroundColor: "#1677ff",
+                  color: "white",
+                  border: "none",
+                }}
+                className="hover:!bg-blue-600"
+                type="primary"
+                onClick={onSync}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: "14px",
+                    height: "14px",
+                  }}
+                >
+                  <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
+                </span>
+                <span>{t("knowledgeBase.button.sync")}</span>
+              </Button>
+            )}
             {showDataMateConfig && (
               <Button
                 style={{
@@ -435,51 +441,53 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   }}
                 >
                   <div className="flex items-start">
-                    <div className="flex-shrink-0">
-                      <div
-                        className="px-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (canSelect || isSelected) {
-                            onSelect(kb.id);
-                          }
-                        }}
-                        style={{
-                          minWidth: "40px",
-                          minHeight: "40px",
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <ConfigProvider
-                          theme={{
-                            token: {
-                              // If selected with model mismatch, use light blue, otherwise default blue
-                              colorPrimary: isMismatchedAndSelected
-                                ? "#90caf9"
-                                : "#1677ff",
-                            },
+                    {showSelection && (
+                      <div className="flex-shrink-0">
+                        <div
+                          className="px-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (canSelect || isSelected) {
+                              onSelect(kb.id);
+                            }
+                          }}
+                          style={{
+                            minWidth: "40px",
+                            minHeight: "40px",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "center",
                           }}
                         >
-                          <Checkbox
-                            checked={isSelected}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              onSelect(kb.id);
+                          <ConfigProvider
+                            theme={{
+                              token: {
+                                // If selected with model mismatch, use light blue, otherwise default blue
+                                colorPrimary: isMismatchedAndSelected
+                                  ? "#90caf9"
+                                  : "#1677ff",
+                              },
                             }}
-                            disabled={!canSelect && !isSelected}
-                            style={{
-                              cursor:
-                                canSelect || isSelected
-                                  ? "pointer"
-                                  : "not-allowed",
-                              transform: "scale(1.5)",
-                            }}
-                          />
-                        </ConfigProvider>
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                onSelect(kb.id);
+                              }}
+                              disabled={!canSelect && !isSelected}
+                              style={{
+                                cursor:
+                                  canSelect || isSelected
+                                    ? "pointer"
+                                    : "not-allowed",
+                                transform: "scale(1.5)",
+                              }}
+                            />
+                          </ConfigProvider>
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <p
@@ -492,15 +500,17 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         >
                           {kb.name}
                         </p>
-                        <button
-                          className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(kb.id);
-                          }}
-                        >
-                          {t("common.delete")}
-                        </button>
+                        {onDelete && (
+                          <button
+                            className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(kb.id);
+                            }}
+                          >
+                            {t("common.delete")}
+                          </button>
+                        )}
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
@@ -562,7 +572,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             )}
                             {kb.embeddingModel !== "unknown" &&
                               kb.embeddingModel !== currentEmbeddingModel &&
-                              kb.source !== "datamate" && (
+                              kb.source == "nexent" && (
                                 <span
                                   className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}
                                 >

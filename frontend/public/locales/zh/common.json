@@ -392,6 +392,8 @@
   "toolConfig.input.model.placeholder": "请选择模型",
   "toolConfig.input.string.placeholder": "请输入{{name}}",
   "toolConfig.input.array.placeholder": "请输入JSON数组",
+  "toolConfig.placeholder.selectKb": "请选择知识库",
+  "toolConfig.validation.selectKb": "请选择至少一个知识库",
   "toolConfig.input.object.placeholder": "请输入JSON对象",
   "toolConfig.toolTest.toolInfo": "工具信息",
   "toolConfig.toolTest.configParams": "配置参数",

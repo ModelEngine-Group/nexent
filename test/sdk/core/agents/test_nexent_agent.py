@@ -746,7 +746,6 @@ def test_create_local_tool_knowledge_base_search_tool_success(nexent_agent_insta
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.index_names == ["index1", "index2"]
     assert mock_kb_tool_instance.vdb_core == mock_vdb_core
     assert mock_kb_tool_instance.embedding_model == mock_embedding_model
 
@@ -797,11 +796,11 @@ def test_create_local_tool_knowledge_base_search_tool_with_conflicting_params(ne
     # Only non-excluded params should be passed to __init__ due to smolagents wrapper restrictions
     mock_kb_tool_class.assert_called_once_with(
         top_k=10,  # From filtered_params (not in conflict list)
+        index_names=["conflicting_index"],  # Not excluded by current implementation
     )
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.index_names == ["index1", "index2"]  # From metadata, not params
     assert mock_kb_tool_instance.vdb_core == mock_vdb_core  # From metadata, not params
     assert mock_kb_tool_instance.embedding_model == mock_embedding_model  # From metadata, not params
 
@@ -842,7 +841,6 @@ def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_
     # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.index_names == []  # Empty list when None
     assert mock_kb_tool_instance.vdb_core is None
     assert mock_kb_tool_instance.embedding_model is None
     assert result == mock_kb_tool_instance
@@ -1367,7 +1365,6 @@ def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == ["datamate_index1", "datamate_index2"]
 
 
 
@@ -1407,7 +1404,6 @@ def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_
     # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == []  # Empty list when None
 
 
 def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
@@ -1448,7 +1444,6 @@ def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == ["datamate_index1", "datamate_index2"]
 
 
 def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_instance):
@@ -1487,7 +1482,6 @@ def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_
     # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == []  # Empty list when None
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
+import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
 import { Tabs, Collapse } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -50,6 +51,12 @@ export default function ToolManagement({
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [toolParams, setToolParams] = useState<ToolParam[]>([]);
 
+  // Memoized array representation of expandedCategories to keep hook order stable
+  const activeKeyArray = useMemo(
+    () => Array.from(expandedCategories),
+    [expandedCategories]
+  );
+
   // Helper function to merge tool parameters with instance parameters
   const mergeToolParamsWithInstance = async (
     tool: Tool,
@@ -64,7 +71,7 @@ export default function ToolManagement({
 
         if (tooInstance.success && tooInstance.data) {
           // Merge instance params with default params
-          const mergedParams =
+          const mergedParams: ToolParam[] =
             defaultTool.initParams?.map((param: ToolParam) => {
               const instanceValue = tooInstance.data?.params?.[param.name];
               return {
@@ -73,8 +80,33 @@ export default function ToolManagement({
                   instanceValue !== undefined ? instanceValue : param.value,
               };
             }) ||
-            defaultTool.initParams ||
+            defaultTool.initParams?.slice() ||
             [];
+
+          // If instance contains params that are not defined in default initParams,
+          // append them so UI can show saved values like `index_names`.
+          const instanceParams = tooInstance.data?.params || {};
+          Object.keys(instanceParams).forEach((key) => {
+            const exists = mergedParams.some((p) => p.name === key);
+            if (!exists) {
+              const val = instanceParams[key];
+              const inferredType = Array.isArray(val)
+                ? TOOL_PARAM_TYPES.ARRAY
+                : typeof val === "boolean"
+                ? TOOL_PARAM_TYPES.BOOLEAN
+                : typeof val === "number"
+                ? TOOL_PARAM_TYPES.NUMBER
+                : TOOL_PARAM_TYPES.STRING;
+              mergedParams.push({
+                name: key,
+                type: inferredType,
+                required: false,
+                value: val,
+                description: "",
+              } as any);
+            }
+          });
+
           return mergedParams;
         } else {
           return defaultTool.initParams || [];
@@ -217,13 +249,22 @@ export default function ToolManagement({
             <>
               {/* Collapsible categories using Ant Design Collapse */}
               <div className="flex-1 overflow-y-auto p-1">
+                {/* Memoize activeKey array to avoid creating a new array on every render,
+                    which could cause the Collapse to think its controlled prop changed
+                    and trigger onChange repeatedly. */}
                 <Collapse
-                  activeKey={Array.from(expandedCategories)}
+                  activeKey={activeKeyArray}
                   onChange={(keys) => {
-                    const newSet = new Set(
-                      typeof keys === "string" ? [keys] : keys
-                    );
-                    setExpandedCategories(newSet);
+                    const keyArray = typeof keys === "string" ? [keys] : keys || [];
+                    const newSet = new Set(keyArray);
+                    // Only update state if the set content actually changed
+                    const sameSize = newSet.size === expandedCategories.size;
+                    const allSame = sameSize
+                      ? Array.from(newSet).every((k) => expandedCategories.has(k))
+                      : false;
+                    if (!allSame) {
+                      setExpandedCategories(newSet);
+                    }
                   }}
                   ghost
                   size="small"
