@@ -18,7 +18,6 @@ import { useState, useEffect } from "react";
 import { ImportAgentData } from "@/hooks/useAgentImport";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import { clearAgentNewMark } from "@/services/agentConfigService";
-import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 export default function AgentManageComp() {
   const { t } = useTranslation("common");
@@ -146,6 +145,19 @@ export default function AgentManageComp() {
 
   // Handle select agent
   const handleSelectAgent = async (agent: Agent) => {
+    // Clear NEW mark when agent is selected for editing (only if marked as new)
+    if (agent.is_new === true) {
+      try {
+        const res = await clearAgentNewMark(agent.id);
+        if (res?.success) {
+          log.warn("Failed to clear NEW mark on select:", res);
+          queryClient.invalidateQueries({ queryKey: ["agents"] });
+        }
+      } catch (err) {
+        log.error("Failed to clear NEW mark on select:", err);
+      }
+    }
+
     // If already selected, deselect it
     if (
       currentAgentId !== null &&
@@ -157,19 +169,6 @@ export default function AgentManageComp() {
       }
       return;
     }
-
-    // Clear NEW mark when agent is selected for editing (only if marked as new)
-    if (agent.is_new === true) {
-      try {
-        const res = await clearAgentAndSync(agent.id, queryClient);
-        if (!res?.success) {
-          log.warn("Failed to clear NEW mark on select:", res);
-        }
-      } catch (err) {
-        log.error("Failed to clear NEW mark on select:", err);
-      }
-    }
-
     // Set selected agent id to trigger the hook
     setSelectedAgentId(Number(agent.id));
   };

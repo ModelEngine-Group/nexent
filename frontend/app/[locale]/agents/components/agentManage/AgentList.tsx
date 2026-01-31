@@ -17,9 +17,7 @@ import {
   exportAgent,
   updateToolConfig,
 } from "@/services/agentConfigService";
-import { clearAgentNewMark } from "@/services/agentConfigService";
 import log from "@/lib/logger";
-import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 interface AgentListProps {
   agentList: Agent[];
@@ -41,27 +39,6 @@ export default function AgentList({
   const { message } = App.useApp();
   const confirm = useConfirmModal();
   const queryClient = useQueryClient();
-
-  // Note: rely on agent.is_new from agentList (single source of truth).
-  // Clear NEW mark when agent is selected (sync with selection visual feedback)
-  useEffect(() => {
-    if (currentAgentId) {
-      const agentId = String(currentAgentId);
-      const agent = agentList.find(a => String(a.id) === agentId);
-      if (agent?.is_new === true) {
-        (async () => {
-          try {
-            const res = await clearAgentAndSync(agentId, queryClient);
-            if (!res?.success) {
-              log.warn("Failed to clear NEW mark for agent:", agentId, res);
-            }
-          } catch (err) {
-            log.error("Error clearing NEW mark:", err);
-          }
-        })();
-      }
-    }
-  }, [currentAgentId, agentList]);
 
   // Call relationship modal state
   const [callRelationshipModalVisible, setCallRelationshipModalVisible] =
@@ -287,14 +264,15 @@ export default function AgentList({
             pagination={false}
             showHeader={false}
             rowClassName={(agent: any) => {
+              const isSelected =
+                currentAgentId !== null &&
+                String(currentAgentId) === String(agent.id);
               return `py-3 px-4 transition-colors border-gray-200 h-[80px] ${
                 agent.is_available === false
                   ? "opacity-60 cursor-not-allowed"
                   : "hover:bg-gray-50 cursor-pointer"
               } ${
-                currentAgentId !== null &&
-                String(currentAgentId) === String(agent.id)
-                  ? "bg-blue-50 selected-row pl-3"
+                isSelected ? "bg-blue-50 selected-row pl-3"
                   : ""
               }`;
             }}

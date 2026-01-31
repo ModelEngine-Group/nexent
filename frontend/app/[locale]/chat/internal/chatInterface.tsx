@@ -13,7 +13,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { conversationService } from "@/services/conversationService";
 import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
-import { fetchAllAgents } from "@/services/agentConfigService";
 
 import { ChatSidebar } from "../components/chatLeftSidebar";
 import { FilePreview } from "@/types/chat";
@@ -130,19 +129,14 @@ export function ChatInterface() {
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
 
   // Add agent selection state
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
-
-  // Add global cache states to avoid repeated API calls
-  const [cachedAgents, setCachedAgents] = useState<any[]>([]);
-  const [agentsLoaded, setAgentsLoaded] = useState(false);
-  const [deploymentVersionLoaded, setDeploymentVersionLoaded] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");
-    // Set selected agent ID from sessionStorage if it exists and is a valid number
+    // Set selected agent ID from sessionStorage if it exists
     if (agentId) {
-        setSelectedAgentId(Number(agentId));
-        sessionStorage.removeItem("selectedAgentId");
+      setSelectedAgentId(agentId);
+      sessionStorage.removeItem("selectedAgentId");
     }
   },[]);
 
@@ -186,24 +180,6 @@ export function ChatInterface() {
     setSidebarOpen(!sidebarOpen);
   };
 
-  // Load agents only once and cache the result
-  const loadAgentsOnce = async () => {
-    if (agentsLoaded) return; // Already loaded, skip
-
-    try {
-      const result = await fetchAllAgents();
-      if (result.success) {
-        setCachedAgents(result.data);
-        setAgentsLoaded(true);
-        log.log("Agent list loaded and cached successfully");
-      } else {
-        log.error("Failed to load agent list:", result.message);
-      }
-    } catch (error) {
-      log.error("Failed to load agent list:", error);
-    }
-  };
-
   // Handle right panel toggle - keep it simple and clear
   const toggleRightPanel = () => {
     setShowRightPanel(!showRightPanel);
@@ -212,11 +188,6 @@ export function ChatInterface() {
   useEffect(() => {
     if (!conversationManagement.initialized.current) {
       conversationManagement.initialized.current = true;
-
-      // Load agent list only once when component initializes
-      if (!agentsLoaded) {
-        loadAgentsOnce();
-      }
 
       // Get conversation history list, but don't auto-select the latest conversation
       conversationManagement.fetchConversationList()
@@ -540,7 +511,7 @@ export function ChatInterface() {
 
       // Only add agent_id if it's not null
       if (selectedAgentId !== null) {
-        runAgentParams.agent_id = selectedAgentId;
+        runAgentParams.agent_id = Number(selectedAgentId);
       }
 
       const reader = await conversationService.runAgent(
@@ -1482,7 +1453,6 @@ export function ChatInterface() {
                 onAgentSelect={setSelectedAgentId}
                 onCitationHover={clearCompletedIndicator}
                 onScroll={clearCompletedIndicator}
-                cachedAgents={cachedAgents}
               />
             </div>
 
