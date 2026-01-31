@@ -1,8 +1,14 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Checkbox, ConfigProvider } from "antd";
-import { SyncOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Checkbox, ConfigProvider, Input, Select, Space } from "antd";
+import {
+  SyncOutlined,
+  PlusOutlined,
+  SettingOutlined,
+  SearchOutlined,
+  FilterOutlined,
+} from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 
@@ -56,6 +62,13 @@ interface KnowledgeBaseListProps {
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
   onKnowledgeBaseChange?: () => void; // New: callback function when knowledge base switches
+  // Optional controlled search / filter props (if parent wants to control filters)
+  searchQuery?: string;
+  onSearchChange?: (value: string) => void;
+  sourceFilter?: string | string[];
+  onSourceFilterChange?: (values: string[] | string) => void;
+  modelFilter?: string | string[];
+  onModelFilterChange?: (values: string[] | string) => void;
 }
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
@@ -76,8 +89,55 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
+  searchQuery,
+  onSearchChange,
+  sourceFilter,
+  onSourceFilterChange,
+  modelFilter,
+  onModelFilterChange,
 }) => {
   const { t } = useTranslation();
+
+  // Search and filter states
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+
+  // Effective (controlled or uncontrolled) values
+  const effectiveSearchKeyword =
+    typeof searchQuery !== "undefined" ? searchQuery : searchKeyword;
+  const effectiveSelectedSources =
+    typeof sourceFilter !== "undefined"
+      ? Array.isArray(sourceFilter)
+        ? sourceFilter
+        : sourceFilter
+          ? [sourceFilter]
+          : []
+      : selectedSources;
+  const effectiveSelectedModels =
+    typeof modelFilter !== "undefined"
+      ? Array.isArray(modelFilter)
+        ? modelFilter
+        : modelFilter
+          ? [modelFilter]
+          : []
+      : selectedModels;
+
+  // Handlers that respect controlled props
+  const handleSearchChange = (value: string) => {
+    if (onSearchChange) onSearchChange(value);
+    else setSearchKeyword(value);
+  };
+
+  const handleSourcesChange = (values: string[]) => {
+    if (onSourceFilterChange) onSourceFilterChange(values);
+    else setSelectedSources(values);
+  };
+
+  const handleModelsChange = (values: string[]) => {
+    if (onModelFilterChange) onModelFilterChange(values);
+    else setSelectedModels(values);
+  };
 
   // Format date function, only keep date part
   const formatDate = (dateValue: any) => {
@@ -108,6 +168,53 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     const bTime = getTimestamp(b.updatedAt ?? b.createdAt);
     return bTime - aTime;
   });
+
+  // Calculate available filter options
+  const availableSources = useMemo(() => {
+    const sources = new Set(knowledgeBases.map((kb) => kb.source));
+    return Array.from(sources)
+      .filter((source) => source)
+      .sort();
+  }, [knowledgeBases]);
+
+  const availableModels = useMemo(() => {
+    const models = new Set(knowledgeBases.map((kb) => kb.embeddingModel));
+    return Array.from(models)
+      .filter((model) => model && model !== "unknown")
+      .sort();
+  }, [knowledgeBases]);
+
+  // Filter knowledge bases based on search and filters
+  const filteredKnowledgeBases = useMemo(() => {
+    return sortedKnowledgeBases.filter((kb) => {
+      // Keyword search: match name, description, or nickname
+      const keyword = effectiveSearchKeyword || "";
+      const matchesSearch =
+        !keyword ||
+        kb.name.toLowerCase().includes(keyword.toLowerCase()) ||
+        (kb.description &&
+          kb.description.toLowerCase().includes(keyword.toLowerCase())) ||
+        (kb.nickname &&
+          kb.nickname.toLowerCase().includes(keyword.toLowerCase()));
+
+      // Source filter
+      const matchesSource =
+        effectiveSelectedSources.length === 0 ||
+        effectiveSelectedSources.includes(kb.source);
+
+      // Model filter
+      const matchesModel =
+        effectiveSelectedModels.length === 0 ||
+        effectiveSelectedModels.includes(kb.embeddingModel);
+
+      return matchesSearch && matchesSource && matchesModel;
+    });
+  }, [
+    sortedKnowledgeBases,
+    effectiveSearchKeyword,
+    effectiveSelectedSources,
+    effectiveSelectedModels,
+  ]);
 
   return (
     <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col">
@@ -192,6 +299,56 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             )}
           </div>
         </div>
+
+        {/* Search and filter area */}
+        <div className="mt-3 flex items-center gap-3">
+          <Input
+            placeholder={t("knowledgeBase.search.placeholder")}
+            prefix={<SearchOutlined />}
+            value={effectiveSearchKeyword}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            style={{ width: 250 }}
+            allowClear
+          />
+
+          {availableSources.length > 0 && (
+            <Select
+              mode="multiple"
+              placeholder={t("knowledgeBase.filter.source.placeholder")}
+              value={effectiveSelectedSources}
+              onChange={handleSourcesChange}
+              style={{ minWidth: 150 }}
+              allowClear
+              maxTagCount={2}
+            >
+              {availableSources.map((source) => (
+                <Select.Option key={source} value={source}>
+                  {t("knowledgeBase.source." + source, {
+                    defaultValue: source,
+                  })}
+                </Select.Option>
+              ))}
+            </Select>
+          )}
+
+          {availableModels.length > 0 && (
+            <Select
+              mode="multiple"
+              placeholder={t("knowledgeBase.filter.model.placeholder")}
+              value={effectiveSelectedModels}
+              onChange={handleModelsChange}
+              style={{ minWidth: 180 }}
+              allowClear
+              maxTagCount={2}
+            >
+              {availableModels.map((model) => (
+                <Select.Option key={model} value={model}>
+                  {getModelDisplayName(model)}
+                </Select.Option>
+              ))}
+            </Select>
+          )}
+        </div>
       </div>
 
       {/* Fixed selection status area */}
@@ -248,9 +405,9 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
       {/* Scrollable knowledge base list area */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        {sortedKnowledgeBases.length > 0 ? (
+        {filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
-            {sortedKnowledgeBases.map((kb, index) => {
+            {filteredKnowledgeBases.map((kb, index) => {
               const canSelect = isSelectable(kb);
               const isSelected = selectedIds.includes(kb.id);
               const isActive = activeKnowledgeBase?.id === kb.id;
@@ -425,7 +582,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           <div
             className={`${KB_LAYOUT.EMPTY_STATE_PADDING} text-center text-gray-500`}
           >
-            {t("knowledgeBase.list.empty")}
+            {searchKeyword ||
+            selectedSources.length > 0 ||
+            selectedModels.length > 0
+              ? t("knowledgeBase.list.noResults")
+              : t("knowledgeBase.list.empty")}
           </div>
         )}
       </div>

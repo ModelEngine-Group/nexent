@@ -1,8 +1,10 @@
 import logging
 from typing import List
+from sqlalchemy import update
 
 from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 
@@ -68,6 +70,47 @@ def query_sub_agents_id_list(main_agent_id: int, tenant_id: str):
         return [relation.selected_agent_id for relation in relations]
 
 
+def clear_agent_new_mark(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Clear the NEW mark for an agent
+
+    Args:
+        agent_id (int): Agent ID
+        tenant_id (str): Tenant ID
+        user_id (str): User ID (for audit purposes)
+    """
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == 'N'
+            )
+            .values(is_new=False, updated_by=user_id)
+        )
+        # return number of rows affected
+        return result.rowcount
+
+
+def mark_agents_as_new(agent_ids: list[int], tenant_id: str, user_id: str):
+    """
+    Mark a list of agents as new (is_new = True)
+    """
+    if not agent_ids:
+        return
+    with get_db_session() as session:
+        session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id.in_(agent_ids),
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == 'N'
+            )
+            .values(is_new=True, updated_by=user_id)
+        )
+
+
 def create_agent(agent_info, tenant_id: str, user_id: str):
     """
     Create a new agent in the database.
@@ -82,6 +125,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "tenant_id": tenant_id,
         "created_by": user_id,
         "updated_by": user_id,
+        "is_new": True,  # Mark new agents as new
     })
     with get_db_session() as session:
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
@@ -113,6 +157,8 @@ def update_agent(agent_id, agent_info, tenant_id, user_id):
         for key, value in filter_property(agent_info.__dict__, AgentInfo).items():
             if value is None:
                 continue
+            if key == "group_ids":
+                value = convert_list_to_string(value)
             setattr(agent, key, value)
         agent.updated_by = user_id
 

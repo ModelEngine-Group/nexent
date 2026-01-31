@@ -2,20 +2,20 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider, App } from "antd";
-import { UserRound, LogOut, LogIn, Power, UserRoundPlus } from "lucide-react";
+import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
+import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
+import Link from "next/link";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 
 export function AvatarDropdown() {
-  const { user, isLoading, logout, revoke, openLoginModal, openRegisterModal } =
+  const { user, isLoading, logout, openLoginModal, openRegisterModal } =
     useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
-  const { modal } = App.useApp();
   const { confirm } = useConfirmModal();
 
   if (isLoading) {
@@ -106,6 +106,17 @@ export function AvatarDropdown() {
       type: "divider",
     },
     {
+      key: "profile",
+      icon: <UserCircle size={16} />,
+      label: <Link href="/users">{t("sidebar.userManagement")}</Link>,
+      onClick: () => {
+        setDropdownOpen(false);
+      },
+    },
+    {
+      type: "divider",
+    },
+    {
       key: "logout",
       icon: <LogOut size={16} />,
       label: t("auth.logout"),
@@ -117,31 +128,6 @@ export function AvatarDropdown() {
             logout();
           },
         });
-      },
-    },
-    {
-      key: "revoke",
-      icon: <Power size={16} />,
-      label: t("auth.revoke"),
-      // danger: true,
-      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
-      onClick: () => {
-        if (user.role === "admin") {
-          modal.error({
-            title: t("auth.refuseRevoke"),
-            content: t("auth.refuseRevokePrompt"),
-            okText: t("auth.confirm"),
-          });
-        } else {
-          confirm({
-            title: t("auth.confirmRevoke"),
-            content: t("auth.confirmRevokePrompt"),
-            okText: t("auth.confirmRevokeOk"),
-            onOk: () => {
-              revoke();
-            },
-          });
-        }
       },
     },
   ];

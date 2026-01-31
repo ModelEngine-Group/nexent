@@ -90,7 +90,53 @@ class TestInvitationListing:
                 tenant_id="tenant-123",
                 page=1,
                 page_size=20,
-                user_id="user-123"
+                user_id="user-123",
+                sort_by=None,
+                sort_order=None
+            )
+
+    def test_list_invitations_with_sorting(self):
+        """Test successful invitation listing with sorting parameters"""
+        mock_result = [
+            {
+                "invitation_id": 1,
+                "invitation_code": "ABC123",
+                "code_type": "single_use",
+                "tenant_id": "tenant-123",
+                "capacity": 10,
+                "used_count": 2,
+                "update_time": "2024-01-02T10:00:00"
+            }
+        ]
+
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.get_invitations_list') as mock_list_invitations:
+
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_list_invitations.return_value = mock_result
+
+            request_data = {
+                "tenant_id": "tenant-123",
+                "page": 1,
+                "page_size": 20,
+                "sort_by": "update_time",
+                "sort_order": "desc"
+            }
+
+            response = client.post("/invitations/list", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Invitation codes retrieved successfully"
+            assert data["data"] == mock_result
+            mock_get_user.assert_called_once_with("Bearer token")
+            mock_list_invitations.assert_called_once_with(
+                tenant_id="tenant-123",
+                page=1,
+                page_size=20,
+                user_id="user-123",
+                sort_by="update_time",
+                sort_order="desc"
             )
 
     def test_list_invitations_unauthorized(self):

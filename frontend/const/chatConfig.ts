@@ -141,3 +141,9 @@ opinion: {
 export type Opinion = typeof chatConfig.opinion[keyof typeof chatConfig.opinion] | null;
 export type MessageType = typeof chatConfig.messageTypes[keyof typeof chatConfig.messageTypes];
 export type ContentType = typeof chatConfig.contentTypes[keyof typeof chatConfig.contentTypes];
+
+export const MESSAGE_ROLES = {
+  USER: "user" as const,
+  ASSISTANT: "assistant" as const,
+  SYSTEM: "system" as const,
+} as const;

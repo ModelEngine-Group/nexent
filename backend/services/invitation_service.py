@@ -405,9 +405,11 @@ def update_invitation_code_status(invitation_id: int) -> bool:
     usage_count = count_invitation_usage(invitation_id)
     current_status = invitation_info["status"]
 
-    new_status = current_status
+    # Determine new status based on current conditions
+    # Priority: EXPIRE > RUN_OUT > IN_USE
+    new_status = "IN_USE"
 
-    # Check expiry
+    # Check expiry first (highest priority)
     if expiry_date:
         try:
             if isinstance(expiry_date, datetime):
@@ -420,8 +422,8 @@ def update_invitation_code_status(invitation_id: int) -> bool:
         except (ValueError, AttributeError, TypeError):
             logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
 
-    # Check capacity
-    if usage_count >= capacity:
+    # Check capacity if not expired
+    if new_status == "IN_USE" and usage_count >= capacity:
         new_status = "RUN_OUT"
 
     # Update status if changed
@@ -467,7 +469,9 @@ def get_invitations_list(
     tenant_id: Optional[str],
     page: int,
     page_size: int,
-    user_id: str
+    user_id: str,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Get invitations list with pagination and permission checks.
@@ -477,6 +481,8 @@ def get_invitations_list(
         page (int): Page number
         page_size (int): Number of items per page
         user_id (str): Current user ID for permission checks
+        sort_by (Optional[str]): Sort field
+        sort_order (Optional[str]): Sort order ('asc' or 'desc')
 
     Returns:
         Dict[str, Any]: Paginated invitation list result
@@ -509,7 +515,9 @@ def get_invitations_list(
     result = query_invitations_with_pagination(
         tenant_id=tenant_id,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order
     )
 
     logger.info(

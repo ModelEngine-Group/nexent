@@ -1,4 +1,7 @@
 import { chatConfig } from "@/const/chatConfig";
+import { MESSAGE_ROLES } from "@/const/chatConfig";
+
+export type MessageRole = typeof MESSAGE_ROLES[keyof typeof MESSAGE_ROLES];
 
 // Step related types
 export interface StepSection {
@@ -56,6 +59,7 @@ export interface Agent {
   display_name: string;
   description: string;
   is_available: boolean;
+  is_new?: boolean;
 }
 
 export interface ChatAgentSelectorProps {

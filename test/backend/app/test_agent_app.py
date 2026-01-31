@@ -808,3 +808,81 @@ def test_regenerate_agent_name_batch_api_error(mocker, mock_auth_header):
 
     assert resp.status_code == 500
     assert "Agent name batch regenerate error" in resp.json()["detail"]
+
+
+def test_clear_agent_new_mark_api_success(mocker, mock_auth_header):
+    """
+    Test successful clearing of agent NEW mark via API endpoint.
+
+    This test verifies that:
+    1. The API correctly parses authorization header
+    2. Calls get_current_user_info to extract user and tenant info
+    3. Calls clear_agent_new_mark_impl with correct parameters
+    4. Returns success response with affected_rows
+    """
+    # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_clear_agent_new_mark = mocker.patch(
+        "apps.agent_app.clear_agent_new_mark_impl", new_callable=mocker.AsyncMock)
+
+    # Mock the auth utility to return user info
+    mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "extra_info")
+
+    # Mock the service layer to return affected rows
+    mock_clear_agent_new_mark.return_value = 1
+
+    # Test the endpoint
+    response = config_client.put(
+        "/agent/clear_new/123",  # agent_id = 123
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["message"] == "Agent NEW mark cleared successfully"
+    assert response_data["affected_rows"] == 1
+
+    # Verify mocks were called correctly
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"])
+    mock_clear_agent_new_mark.assert_called_once_with(123, "test_tenant_id", "test_user_id")
+
+
+def test_clear_agent_new_mark_api_exception(mocker, mock_auth_header):
+    """
+    Test clear_agent_new_mark_api when service layer throws exception.
+
+    This test verifies that:
+    1. When clear_agent_new_mark_impl raises an exception
+    2. The API catches it and logs the error
+    3. Returns HTTP 500 with appropriate error message
+    """
+    # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_clear_agent_new_mark = mocker.patch(
+        "apps.agent_app.clear_agent_new_mark_impl", new_callable=mocker.AsyncMock)
+    mock_logger = mocker.patch("apps.agent_app.logger")
+
+    # Mock the auth utility to return user info
+    mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "extra_info")
+
+    # Mock the service layer to raise an exception
+    test_exception = Exception("Database connection failed")
+    mock_clear_agent_new_mark.side_effect = test_exception
+
+    # Test the endpoint
+    response = config_client.put(
+        "/agent/clear_new/456",  # agent_id = 456
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to clear agent NEW mark."
+
+    # Verify error was logged
+    mock_logger.error.assert_called_once_with("Failed to clear agent NEW mark: Database connection failed")
+
+    # Verify service was still called with correct parameters
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"])
+    mock_clear_agent_new_mark.assert_called_once_with(456, "test_tenant_id", "test_user_id")

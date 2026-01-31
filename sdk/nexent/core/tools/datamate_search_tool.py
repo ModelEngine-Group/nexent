@@ -38,35 +38,6 @@ class DataMateSearchTool(Tool):
             "type": "string",
             "description": "The search query to perform.",
         },
-        "top_k": {
-            "type": "integer",
-            "description": "Maximum number of search results to return.",
-            "default": 10,
-            "nullable": True,
-        },
-        "threshold": {
-            "type": "number",
-            "description": "Similarity threshold for search results.",
-            "default": 0.2,
-            "nullable": True,
-        },
-        "index_names": {
-            "type": "array",
-            "description": "The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.",
-            "nullable": True,
-        },
-        "kb_page": {
-            "type": "integer",
-            "description": "Page index when listing knowledge bases from DataMate.",
-            "default": 0,
-            "nullable": True,
-        },
-        "kb_page_size": {
-            "type": "integer",
-            "description": "Page size when listing knowledge bases from DataMate.",
-            "default": 20,
-            "nullable": True,
-        },
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -83,6 +54,14 @@ class DataMateSearchTool(Tool):
             description="The list of index names to search", default=None, exclude=True),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
+        top_k: int = Field(
+            description="Default maximum number of search results to return", default=3),
+        threshold: float = Field(
+            description="Default similarity threshold for search results", default=0.2),
+        kb_page: int = Field(
+            description="Page index when listing knowledge bases from DataMate", default=0),
+        kb_page_size: int = Field(
+            description="Page size when listing knowledge bases from DataMate", default=20),
     ):
         """Initialize the DataMateSearchTool.
 
@@ -91,6 +70,10 @@ class DataMateSearchTool(Tool):
             verify_ssl (bool, optional): Whether to verify SSL certificates for HTTPS connections. Defaults to False for HTTPS, True for HTTP.
             index_names (List[str], optional): The list of index names to search. Defaults to None.
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
+            top_k (int, optional): Default maximum number of search results to return. Defaults to 3.
+            threshold (float, optional): Default similarity threshold for search results. Defaults to 0.2.
+            kb_page (int, optional): Page index when listing knowledge bases from DataMate. Defaults to 0.
+            kb_page_size (int, optional): Page size when listing knowledge bases from DataMate. Defaults to 20.
         """
         super().__init__()
 
@@ -106,6 +89,8 @@ class DataMateSearchTool(Tool):
         self.use_https = parsed_url["use_https"]
         self.server_base_url = parsed_url["base_url"]
         self.index_names = [] if index_names is None else index_names
+        self.top_k = top_k
+        self.threshold = threshold
 
         # Determine SSL verification setting
         if verify_ssl is None:
@@ -120,8 +105,8 @@ class DataMateSearchTool(Tool):
             verify_ssl=self.verify_ssl if self.use_https else True
         )
 
-        self.kb_page = 0
-        self.kb_page_size = 20
+        self.kb_page = kb_page
+        self.kb_page_size = kb_page_size
         self.observer = observer
 
         self.record_ops = 1  # To record serial number
@@ -177,25 +162,12 @@ class DataMateSearchTool(Tool):
     def forward(
         self,
         query: str,
-        top_k: int = 3,
-        threshold: float = 0.2,
-        index_names: Union[str, List[str], None] = None,
-        kb_page: int = 0,
-        kb_page_size: int = 20,
     ) -> str:
         """Execute DataMate search.
 
         Args:
             query: Search query text.
-            top_k: Optional override for maximum number of search results.
-            threshold: Optional override for similarity threshold.
-            index_names: The list of knowledge base names to search (supports user-facing knowledge_name or internal index_name). If not provided, will search all available knowledge bases.
-            kb_page: Optional override for knowledge base list page index.
-            kb_page_size: Optional override for knowledge base list page size.
         """
-
-        self.kb_page = kb_page
-        self.kb_page_size = kb_page_size
 
         # Send tool run message
         if self.observer:
@@ -207,15 +179,12 @@ class DataMateSearchTool(Tool):
 
         logger.info(
             f"DataMateSearchTool called with query: '{query}', base_url: '{self.server_base_url}', "
-            f"top_k: {top_k}, threshold: {threshold}, index_names: {index_names}"
+            f"top_k: {self.top_k}, threshold: {self.threshold}, index_names: {self.index_names}"
         )
 
         try:
             # Step 1: Determine knowledge base IDs to search
-            # Use provided index_names if available, otherwise use default
-            knowledge_base_ids = _normalize_index_names(
-                index_names if index_names is not None else self.index_names)
-
+            knowledge_base_ids = self.index_names
             if len(knowledge_base_ids) == 0:
                 return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
 
@@ -225,8 +194,8 @@ class DataMateSearchTool(Tool):
                 kb_search = self.datamate_core.hybrid_search(
                     query_text=query,
                     index_names=[knowledge_base_id],
-                    top_k=top_k,
-                    weight_accurate=threshold,
+                    top_k=self.top_k,
+                    weight_accurate=self.threshold,
                 )
                 if not kb_search:
                     raise Exception(

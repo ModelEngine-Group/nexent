@@ -1,5 +1,6 @@
 import { STATUS_CODES } from "@/const/auth";
 import log from "@/lib/logger";
+import type { MarketAgentListParams } from "@/types/market";
 
 const API_BASE_URL = "/api";
 
@@ -41,6 +42,7 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
+    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -134,6 +136,9 @@ export const API_ENDPOINTS = {
     chunk: (indexName: string) => `${API_BASE_URL}/indices/${indexName}/chunk`,
     chunkDetail: (indexName: string, chunkId: string) =>
       `${API_BASE_URL}/indices/${indexName}/chunk/${chunkId}`,
+    // Update knowledge base info
+    updateIndex: (indexName: string) =>
+      `${API_BASE_URL}/indices/${indexName}`,
     searchHybrid: `${API_BASE_URL}/indices/search/hybrid`,
     summary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/auto_summary`,
@@ -169,6 +174,7 @@ export const API_ENDPOINTS = {
   mcp: {
     tools: `${API_BASE_URL}/mcp/tools`,
     add: `${API_BASE_URL}/mcp/add`,
+    update: `${API_BASE_URL}/mcp/update`,
     delete: `${API_BASE_URL}/mcp`,
     list: `${API_BASE_URL}/mcp/list`,
     healthcheck: `${API_BASE_URL}/mcp/healthcheck`,
@@ -204,13 +210,7 @@ export const API_ENDPOINTS = {
     },
   },
   market: {
-    agents: (params?: {
-      page?: number;
-      page_size?: number;
-      category?: string;
-      tag?: string;
-      search?: string;
-    }) => {
+    agents: (params?: MarketAgentListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.page) queryParams.append("page", params.page.toString());
       if (params?.page_size)
@@ -218,6 +218,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
+      if (params?.lang) queryParams.append("lang", (params as any).lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;
@@ -228,6 +229,38 @@ export const API_ENDPOINTS = {
     tags: `${API_BASE_URL}/market/tags`,
     mcpServers: (agentId: number) =>
       `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
+  },
+  tenant: {
+    list: `${API_BASE_URL}/tenants`,
+    create: `${API_BASE_URL}/tenants`,
+    detail: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+    update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+    delete: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
+  },
+  users: {
+    list: `${API_BASE_URL}/users/list`,
+    detail: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+    update: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+    delete: (userId: string) => `${API_BASE_URL}/users/${userId}`,
+  },
+  groups: {
+    create: `${API_BASE_URL}/groups`,
+    list: `${API_BASE_URL}/groups/list`,
+    detail: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    update: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    delete: (groupId: number) => `${API_BASE_URL}/groups/${groupId}`,
+    // Group members
+    members: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
+    removeMember: (groupId: number, userId: string) =>
+      `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
+    default: (tenantId: string) => `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
+  },
+  invitations: {
+    list: `${API_BASE_URL}/invitations/list`,
+    create: `${API_BASE_URL}/invitations`,
+    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
   },
 };
 

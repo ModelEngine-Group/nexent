@@ -68,28 +68,34 @@ def get_group_info(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[
     return result
 
 
-def get_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+def get_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
+                         sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
-    Get groups for a specific tenant with pagination.
+    Get groups for a specific tenant with pagination and sorting.
 
     Args:
         tenant_id (str): Tenant ID
         page (int): Page number (1-based)
         page_size (int): Number of items per page
+        sort_by (str): Field to sort by
+        sort_order (str): Sort order (asc or desc)
 
     Returns:
         Dict[str, Any]: Dictionary containing groups list and total count
     """
     # Get paginated results and total count
-    result = query_groups_by_tenant(tenant_id, page, page_size)
+    result = query_groups_by_tenant(tenant_id, page, page_size, sort_by, sort_order)
 
-    # Filter to only return required fields for each group
+    # Filter to only return required fields for each group and add user count
     filtered_groups = []
     for group in result["groups"]:
+        group_id = group.get("group_id")
+        user_count = count_group_users(group_id) if group_id else 0
         filtered_groups.append({
             "group_id": group.get("group_id"),
             "group_name": group.get("group_name"),
-            "group_description": group.get("group_description")
+            "group_description": group.get("group_description"),
+            "user_count": user_count
         })
 
     return {
@@ -410,13 +416,13 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
 
 def get_group_users(group_id: int) -> List[Dict[str, Any]]:
     """
-    Get all users in a group.
+    Get all users in a group with their details.
 
     Args:
         group_id (int): Group ID
 
     Returns:
-        List[Dict[str, Any]]: List of group user records
+        List[Dict[str, Any]]: List of group user records with user details
 
     Raises:
         NotFoundException: When group not found
@@ -426,15 +432,21 @@ def get_group_users(group_id: int) -> List[Dict[str, Any]]:
     if not group:
         raise NotFoundException(f"Group {group_id} not found")
 
-    users = query_group_users(group_id)
+    # Get group membership records
+    group_memberships = query_group_users(group_id)
 
     filtered_users = []
-    for user in users:
-        filtered_users.append({
-            "group_user_id": user.get("group_user_id"),
-            "group_id": user.get("group_id"),
-            "user_id": user.get("user_id")
-        })
+    for membership in group_memberships:
+        user_id = membership.get("user_id")
+        if user_id:
+            # Get user details from user_tenant table
+            user_info = get_user_tenant_by_user_id(user_id)
+            if user_info:
+                filtered_users.append({
+                    "id": user_id,  # Keep user_id as string
+                    "username": user_info.get("user_email", ""),
+                    "role": user_info.get("user_role", "")
+                })
 
     return filtered_users
 
@@ -490,3 +502,69 @@ def add_user_to_groups(user_id: str, group_ids: List[int], current_user_id: str)
             })
 
     return results
+
+
+def update_group_members(group_id: int, user_ids: List[str], current_user_id: str) -> Dict[str, Any]:
+    """
+    Update group members by setting the exact list of users that should be in the group.
+
+    Args:
+        group_id (int): Group ID
+        user_ids (List[str]): List of user IDs that should be in the group
+        current_user_id (str): Current user ID performing the action
+
+    Returns:
+        Dict[str, Any]: Update results with added/removed counts
+
+    Raises:
+        NotFoundException: When group not found
+        UnauthorizedError: When user doesn't have permission
+    """
+    # Check current user permission
+    user_info = get_user_tenant_by_user_id(current_user_id)
+    if not user_info:
+        raise UnauthorizedError(f"User {current_user_id} not found")
+
+    # Check if group exists
+    group = query_groups(group_id)
+    if not group:
+        raise NotFoundException(f"Group {group_id} not found")
+
+    # Get current group members
+    current_members = get_group_users(group_id)
+    current_user_ids = {str(member["id"]) for member in current_members}
+
+    # Convert target user_ids to set for comparison
+    target_user_ids = set(user_ids)
+
+    # Find users to add and remove
+    users_to_add = target_user_ids - current_user_ids
+    users_to_remove = current_user_ids - target_user_ids
+
+    added_count = 0
+    removed_count = 0
+
+    # Add new members
+    for user_id in users_to_add:
+        try:
+            add_user_to_single_group(group_id, user_id, current_user_id)
+            added_count += 1
+        except Exception as e:
+            logger.error(f"Failed to add user {user_id} to group {group_id}: {str(e)}")
+
+    # Remove old members
+    for user_id in users_to_remove:
+        try:
+            remove_user_from_single_group(group_id, user_id, current_user_id)
+            removed_count += 1
+        except Exception as e:
+            logger.error(f"Failed to remove user {user_id} from group {group_id}: {str(e)}")
+
+    logger.info(f"Updated group {group_id} members: added {added_count}, removed {removed_count} by user {current_user_id}")
+
+    return {
+        "group_id": group_id,
+        "added_count": added_count,
+        "removed_count": removed_count,
+        "total_members": len(target_user_ids)
+    }

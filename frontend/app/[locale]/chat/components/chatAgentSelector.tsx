@@ -9,6 +9,9 @@ import { fetchAllAgents } from "@/services/agentConfigService";
 import { getUrlParam } from "@/lib/utils";
 import log from "@/lib/logger";
 import { Agent, ChatAgentSelectorProps } from "@/types/chat";
+import { clearAgentNewMark } from "@/services/agentConfigService";
+import { useQueryClient } from "@tanstack/react-query";
+import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 export function ChatAgentSelector({
   selectedAgentId,
@@ -34,6 +37,7 @@ export function ChatAgentSelector({
   const selectedAgent = agents.find(
     (agent) => agent.agent_id === selectedAgentId
   );
+  const queryClient = useQueryClient();
 
   // Detect duplicate agent names and mark later-added agents as disabled
   // For agents with the same name, keep the first one (smallest ID) enabled, disable the rest
@@ -198,7 +202,7 @@ export function ChatAgentSelector({
     }
   };
 
-  const handleAgentSelect = (agentId: number | null) => {
+  const handleAgentSelect = async (agentId: number | null) => {
     // Only effectively available agents can be selected
     if (agentId !== null) {
       const agent = agents.find((a) => a.agent_id === agentId);
@@ -206,9 +210,28 @@ export function ChatAgentSelector({
         const isAvailableTool = agent.is_available !== false;
         const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.agent_id);
         const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
-        
+
         if (!isEffectivelyAvailable) {
           return; // Unavailable agents cannot be selected
+        }
+
+        // Clear NEW mark when agent is selected for chat (only if marked as new)
+        if (agent.is_new === true) {
+          try {
+            const res = await clearAgentAndSync(agentId, queryClient);
+            if (res?.success) {
+              // update local agents state to reflect cleared NEW mark immediately
+              setAgents((prev) =>
+                prev.map((a) =>
+                  a.agent_id === agentId ? { ...a, is_new: false } : a
+                )
+              );
+            } else {
+              log.warn("Failed to clear NEW mark on select:", res);
+            }
+          } catch (e) {
+            log.error("Failed to clear NEW mark on select:", e);
+          }
         }
       }
     }
@@ -417,6 +440,12 @@ export function ChatAgentSelector({
                             }`}
                           >
                             <div className="flex items-center gap-1.5">
+                              {/* NEW badge - placed before display_name */}
+                              {(agent as any).is_new && agent.display_name && (
+                                <span className="inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none mr-0.5">
+                                  <span className="px-0.5">{t("space.new", "NEW")}</span>
+                                </span>
+                              )}
                               {agent.display_name && (
                                 <span className="text-sm leading-none">
                                   {agent.display_name}

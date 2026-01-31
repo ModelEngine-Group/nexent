@@ -19,8 +19,7 @@ import { conversationService } from "@/services/conversationService";
 import { copyToClipboard } from "@/lib/clipboard";
 import log from "@/lib/logger";
 import { AttachmentItem } from "@/types/chat";
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
-
+import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatAttachment } from "../internal/chatAttachment";
 
 interface FinalMessageProps {
@@ -211,7 +210,7 @@ export function ChatStreamFinalMessage({
     <div
       ref={messageRef}
       className={`flex gap-3 mb-4 transition-all duration-500 ${
-        message.role === "user" ? "flex-row-reverse" : ""
+        message.role === MESSAGE_ROLES.USER ? "flex-row-reverse" : ""
       } ${
         !isVisible ? "opacity-0 translate-y-4" : "opacity-100 translate-y-0"
       }`}
@@ -219,11 +218,11 @@ export function ChatStreamFinalMessage({
       {/* Message content part */}
       <div
         className={`${
-          message.role === "user" ? "flex items-end flex-col w-full" : "w-full"
+          message.role === MESSAGE_ROLES.USER ? "flex items-end flex-col w-full" : "w-full"
         }`}
       >
         {/* User message part */}
-        {message.role === "user" && (
+        {message.role === MESSAGE_ROLES.USER && (
           <>
             {/* Attachment part - placed above text */}
             {message.attachments && message.attachments.length > 0 && (
@@ -267,7 +266,7 @@ export function ChatStreamFinalMessage({
         )}
 
         {/* Assistant message part - show final answer or content */}
-        {message.role === ROLE_ASSISTANT &&
+        {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
             <div className="bg-white rounded-lg w-full -mt-2">
               <MarkdownRenderer

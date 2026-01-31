@@ -10,13 +10,14 @@ import {
   Zap,
   Settings,
   BookOpen,
-  Users,
+  User,
   Database,
   ShoppingBag,
   Code,
   Home,
   Puzzle,
   Activity,
+  Building2,
 } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useAuth } from "@/hooks/useAuth";
@@ -45,7 +46,7 @@ export function SideNavigation({
   const [selectedKey, setSelectedKey] = useState("home");
   const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
 
-  // 添加路径到key的映射
+  // Add path to key mapping
   const pathToKeyMap: Record<string, string> = {
     "/": "home",
     "/chat": "chat",
@@ -58,21 +59,20 @@ export function SideNavigation({
     "/monitoring": "monitoring",
     "/models": "models",
     "/memory": "memory",
-    "/users": "users",
   };
 
-  // 添加useEffect来监听pathname变化并更新selectedKey
+  // Add useEffect to listen to pathname changes and update selectedKey
   useEffect(() => {
-    // 从pathname中提取实际路径（去掉locale前缀）
+    // Extract actual path from pathname (remove locale prefix)
     const segments = pathname.split("/").filter(Boolean);
-    // 如果第一个segment是locale（zh或en），则去掉它
+    // If the first segment is locale (zh or en), remove it
     if (segments.length > 0 && (segments[0] === "zh" || segments[0] === "en")) {
       segments.shift();
     }
-    // 重新构建路径
+    // Rebuild path
     const currentPath = "/" + segments.join("/");
 
-    // 查找对应的key，找不到则默认为home
+    // Find corresponding key, default to home if not found
     const matchedKey = pathToKeyMap[currentPath] || "home";
     setSelectedKey(matchedKey);
   }, [pathname]);
@@ -145,7 +145,6 @@ export function SideNavigation({
       false,
       true
     ),
-    createMenuItem("9", "/users", Users, "sidebar.userManagement", false, true),
   ];
 
   return (

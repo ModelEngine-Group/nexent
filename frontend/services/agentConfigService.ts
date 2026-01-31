@@ -117,8 +117,13 @@ export const fetchAgentList = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      model_id: agent.model_id,
+      model_name: agent.model_name,
+      model_display_name: agent.model_display_name,
       is_available: agent.is_available,
       unavailable_reasons: agent.unavailable_reasons || [],
+      group_ids: agent.group_ids || [],
+      is_new: agent.is_new || false,
     }));
 
     return {
@@ -310,50 +315,34 @@ export const loadLastToolConfig = async (toolId: number) => {
  * @param provideRunSummary whether to provide run summary
  * @returns update result
  */
-export const updateAgent = async (
-  agentId?: number,
-  name?: string,
-  description?: string,
-  modelName?: string,
-  maxSteps?: number,
-  provideRunSummary?: boolean,
-  enabled?: boolean,
-  businessDescription?: string,
-  dutyPrompt?: string,
-  constraintPrompt?: string,
-  fewShotsPrompt?: string,
-  displayName?: string,
-  modelId?: number,
-  businessLogicModelName?: string,
-  businessLogicModelId?: number,
-  enabledToolIds?: number[],
-  relatedAgentIds?: number[],
-  author?: string
-) => {
+export interface UpdateAgentInfoPayload {
+  agent_id?: number;
+  name?: string;
+  display_name?: string;
+  description?: string;
+  author?: string;
+  duty_prompt?: string;
+  constraint_prompt?: string;
+  few_shots_prompt?: string;
+  group_ids?: number[];
+  model_name?: string;
+  model_id?: number;
+  max_steps?: number;
+  provide_run_summary?: boolean;
+  enabled?: boolean;
+  business_description?: string;
+  business_logic_model_name?: string;
+  business_logic_model_id?: number;
+  enabled_tool_ids?: number[];
+  related_agent_ids?: number[];
+}
+
+export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
   try {
     const response = await fetch(API_ENDPOINTS.agent.update, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({
-        agent_id: agentId,
-        name: name,
-        description: description,
-        display_name: displayName,
-        model_name: modelName,
-        model_id: modelId,
-        max_steps: maxSteps,
-        provide_run_summary: provideRunSummary,
-        enabled: enabled,
-        business_description: businessDescription,
-        duty_prompt: dutyPrompt,
-        constraint_prompt: constraintPrompt,
-        few_shots_prompt: fewShotsPrompt,
-        business_logic_model_name: businessLogicModelName,
-        business_logic_model_id: businessLogicModelId,
-        enabled_tool_ids: enabledToolIds,
-        related_agent_ids: relatedAgentIds,
-        author: author,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -489,6 +478,39 @@ export const importAgent = async (
 };
 
 /**
+ * Clear NEW mark for an agent
+ */
+export const clearAgentNewMark = async (agentId: string | number) => {
+  try {
+    const url = typeof API_ENDPOINTS.agent.clearNew === 'function'
+      ? API_ENDPOINTS.agent.clearNew(agentId)
+      : `${API_ENDPOINTS.agent.clearNew}/${agentId}`;
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      data: data,
+      message: "Agent NEW mark cleared successfully",
+    };
+  } catch (error) {
+    log.error("Failed to clear agent NEW mark:", error);
+    return {
+      success: false,
+      data: null,
+      message: "Failed to clear agent NEW mark",
+    };
+  }
+};
+
+/**
  * check agent name/display_name duplication
  * @param payload name/displayName to check
  */
@@ -598,6 +620,7 @@ export const searchAgentInfo = async (agentId: number) => {
       is_available: data.is_available,
       unavailable_reasons: data.unavailable_reasons || [],
       sub_agent_id_list: data.sub_agent_id_list || [], // Add sub_agent_id_list
+      group_ids: data.group_ids || [],
       tools: data.tools
         ? data.tools.map((tool: any) => {
             const params =
@@ -663,6 +686,7 @@ export const fetchAllAgents = async () => {
       description: agent.description,
       author: agent.author,
       is_available: agent.is_available,
+      is_new: agent.is_new || false,
     }));
 
     return {

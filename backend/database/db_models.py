@@ -222,6 +222,7 @@ class AgentInfo(TableBase):
     business_logic_model_name = Column(String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
     group_ids = Column(String, doc="Agent group IDs list")
+    is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
 
 
 class ToolInstance(TableBase):
@@ -330,7 +331,8 @@ class UserTenant(TableBase):
                             primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_role = Column(String(30), doc="User role: SU, ADMIN, DEV, USER")
+    user_role = Column(String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
+    user_email = Column(String(255), doc="User email address")
 
 
 class AgentRelation(TableBase):

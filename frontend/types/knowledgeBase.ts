@@ -13,6 +13,11 @@ export interface KnowledgeBase {
   // Last update time of the knowledge base/index (may fall back to createdAt)
   updatedAt?: any;
   embeddingModel: string;
+  knowledge_sources?: string;
+  ingroup_permission?: string;
+  group_ids?: number[];
+  store_size?: string;
+  process_source?: string;
   avatar: string;
   chunkNum: number;
   language: string;
@@ -21,6 +26,7 @@ export interface KnowledgeBase {
   permission: string;
   tokenNum: number;
   source: string;
+  tenant_id?: string;
 }
 
 // Create knowledge base parameter type
@@ -62,7 +68,7 @@ export interface DocumentState {
 }
 
 // Document action type
-export type DocumentAction = 
+export type DocumentAction =
   | { type: typeof DOCUMENT_ACTION_TYPES.FETCH_SUCCESS, payload: { kbId: string, documents: Document[] } }
   | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_DOCUMENT, payload: string }
   | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_DOCUMENTS, payload: string[] }
@@ -111,7 +117,7 @@ export interface UIState {
 }
 
 // UI action type
-export type UIAction = 
+export type UIAction =
   | { type: typeof UI_ACTION_TYPES.SET_DRAGGING, payload: boolean }
   | { type: typeof UI_ACTION_TYPES.TOGGLE_CREATE_MODAL, payload: boolean }
   | { type: typeof UI_ACTION_TYPES.TOGGLE_DOC_MODAL, payload: boolean }

@@ -1,5 +1,4 @@
-import { ROLE_ASSISTANT } from "@/const/agentConfig";
-import { chatConfig } from "@/const/chatConfig";
+import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import { USER_ROLES } from "@/const/modelConfig";
 import { ChatMessageType, TaskMessageType } from "@/types/chat";
 
@@ -42,14 +41,14 @@ export function transformMessagesToTaskMessages(
       currentUserMsgId = message.id;
     }
     // Assistant messages - extract task messages from steps
-    else if (message.role === ROLE_ASSISTANT && message.steps && message.steps.length > 0) {
+    else if (message.role === MESSAGE_ROLES.ASSISTANT && message.steps && message.steps.length > 0) {
       message.steps.forEach((step) => {
         // Process step.contents
         if (step.contents && step.contents.length > 0) {
           step.contents.forEach((content: any) => {
             const taskMsg: TaskMessageType = {
               id: content.id,
-              role: ROLE_ASSISTANT,
+              role: MESSAGE_ROLES.ASSISTANT,
               content: content.content,
               timestamp: new Date(),
               type: content.type,
@@ -91,7 +90,7 @@ export function transformMessagesToTaskMessages(
         if (step.thinking && step.thinking.content) {
           const taskMsg: TaskMessageType = {
             id: `thinking-${step.id}`,
-            role: ROLE_ASSISTANT,
+            role: MESSAGE_ROLES.ASSISTANT,
             content: step.thinking.content,
             timestamp: new Date(),
             type: chatConfig.messageTypes.MODEL_OUTPUT_THINKING,
@@ -110,7 +109,7 @@ export function transformMessagesToTaskMessages(
         if (includeCode && step.code && step.code.content) {
           const taskMsg: TaskMessageType = {
             id: `code-${step.id}`,
-            role: ROLE_ASSISTANT,
+            role: MESSAGE_ROLES.ASSISTANT,
             content: step.code.content,
             timestamp: new Date(),
             type: chatConfig.messageTypes.MODEL_OUTPUT_CODE,
@@ -129,7 +128,7 @@ export function transformMessagesToTaskMessages(
         if (step.output && step.output.content) {
           const taskMsg: TaskMessageType = {
             id: `output-${step.id}`,
-            role: ROLE_ASSISTANT,
+            role: MESSAGE_ROLES.ASSISTANT,
             content: step.output.content,
             timestamp: new Date(),
             type: chatConfig.messageTypes.TOOL,
@@ -151,7 +150,7 @@ export function transformMessagesToTaskMessages(
       message.thinking.forEach((thinking, index) => {
         const taskMsg: TaskMessageType = {
           id: `thinking-${message.id}-${index}`,
-          role: ROLE_ASSISTANT,
+          role: MESSAGE_ROLES.ASSISTANT,
           content: thinking.content,
           timestamp: new Date(),
           type: chatConfig.messageTypes.MODEL_OUTPUT_THINKING,
@@ -170,7 +169,7 @@ export function transformMessagesToTaskMessages(
 
   // Process complete messages and release buffered truncation messages
   messages.forEach((message) => {
-    if (message.role === ROLE_ASSISTANT && message.steps) {
+    if (message.role === MESSAGE_ROLES.ASSISTANT && message.steps) {
       message.steps.forEach((step) => {
         if (step.contents && step.contents.length > 0) {
           step.contents.forEach((content: any) => {

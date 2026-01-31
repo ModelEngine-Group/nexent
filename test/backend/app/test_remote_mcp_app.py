@@ -1318,7 +1318,8 @@ class TestUploadMCPImageValidation:
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         # Service layer raises MCPNameIllegal for name conflict
-        mock_upload_service.side_effect = MCPNameIllegal("MCP service name already exists")
+        mock_upload_service.side_effect = MCPNameIllegal(
+            "MCP service name already exists")
 
         file_content = b"fake tar content"
 
@@ -1364,7 +1365,8 @@ class TestUploadMCPImageValidation:
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         # Service layer raises MCPContainerError for Docker unavailable
-        mock_upload_service.side_effect = MCPContainerError("Docker unavailable")
+        mock_upload_service.side_effect = MCPContainerError(
+            "Docker unavailable")
 
         file_content = b"fake tar content"
 
@@ -1502,7 +1504,8 @@ class TestUploadMCPImageWithServiceLayer:
                 "service_name": "test-service",
                 "env_vars": '{"NODE_ENV": "production"}'
             },
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1541,7 +1544,8 @@ class TestUploadMCPImageWithServiceLayer:
         response = client.post(
             "/mcp/upload-image",
             data={"port": 5020},  # No service_name provided
-            files={"file": ("my-image.tar", file_content, "application/octet-stream")},
+            files={"file": ("my-image.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1567,13 +1571,15 @@ class TestUploadMCPImageWithServiceLayer:
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         # Service layer raises ValueError for invalid file type
-        mock_upload_service.side_effect = ValueError("Only .tar files are allowed")
+        mock_upload_service.side_effect = ValueError(
+            "Only .tar files are allowed")
 
         file_content = b"fake content"
         response = client.post(
             "/mcp/upload-image",
             data={"port": 5020},
-            files={"file": ("test.txt", file_content, "text/plain")},  # Wrong file type
+            # Wrong file type
+            files={"file": ("test.txt", file_content, "text/plain")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1588,13 +1594,15 @@ class TestUploadMCPImageWithServiceLayer:
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         # Service layer raises MCPNameIllegal for name conflict
-        mock_upload_service.side_effect = MCPNameIllegal("MCP service name already exists")
+        mock_upload_service.side_effect = MCPNameIllegal(
+            "MCP service name already exists")
 
         file_content = b"fake tar content"
         response = client.post(
             "/mcp/upload-image",
             data={"port": 5020, "service_name": "existing-service"},
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1615,7 +1623,8 @@ class TestUploadMCPImageWithServiceLayer:
         response = client.post(
             "/mcp/upload-image",
             data={"port": 5020},
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1630,13 +1639,15 @@ class TestUploadMCPImageWithServiceLayer:
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         # Service layer raises MCPContainerError for Docker unavailable
-        mock_upload_service.side_effect = MCPContainerError("Docker unavailable")
+        mock_upload_service.side_effect = MCPContainerError(
+            "Docker unavailable")
 
         file_content = b"fake tar content"
         response = client.post(
             "/mcp/upload-image",
             data={"port": 5020},
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1657,7 +1668,8 @@ class TestUploadMCPImageWithServiceLayer:
         response = client.post(
             "/mcp/upload-image",
             data={"port": 5020},
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -1683,10 +1695,12 @@ class TestUploadMCPImageValidationAdditional:
         response = client.post(
             "/mcp/upload-image",
             data={"port": 0},  # Invalid port
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
-        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY  # FastAPI validation error
+        # FastAPI validation error
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
         data = response.json()
         assert "port" in str(data["detail"]).lower()
 
@@ -1694,10 +1708,12 @@ class TestUploadMCPImageValidationAdditional:
         response = client.post(
             "/mcp/upload-image",
             data={"port": 70000},  # Invalid port
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
-        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY  # FastAPI validation error
+        # FastAPI validation error
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
         data = response.json()
         assert "port" in str(data["detail"]).lower()
 
@@ -1708,7 +1724,8 @@ class TestUploadMCPImageValidationAdditional:
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         # Test with array instead of object - now handled in service layer
-        mock_upload_service.side_effect = ValueError("Invalid environment variables format: Environment variables must be a JSON object")
+        mock_upload_service.side_effect = ValueError(
+            "Invalid environment variables format: Environment variables must be a JSON object")
 
         file_content = b"fake tar content"
         response = client.post(
@@ -1717,13 +1734,221 @@ class TestUploadMCPImageValidationAdditional:
                 "port": 5020,
                 "env_vars": '["VAR1", "VAR2"]'  # Array instead of object
             },
-            files={"file": ("test.tar", file_content, "application/octet-stream")},
+            files={"file": ("test.tar", file_content,
+                            "application/octet-stream")},
             headers={"Authorization": "Bearer test_token"}
         )
         assert response.status_code == HTTPStatus.BAD_REQUEST
         data = response.json()
         assert "Invalid environment variables format" in data["detail"]
         assert "Environment variables must be a JSON object" in data["detail"]
+
+
+class MockMCPUpdateRequest:
+    """Mock MCPUpdateRequest for testing"""
+
+    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url):
+        self.current_service_name = current_service_name
+        self.current_mcp_url = current_mcp_url
+        self.new_service_name = new_service_name
+        self.new_mcp_url = new_mcp_url
+
+
+class TestUpdateRemoteProxy:
+    """Test endpoint for updating remote MCP servers"""
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_success(self, mock_update_server, mock_get_user_id):
+        """Test successful update of remote MCP proxy"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.return_value = None  # No exception means success
+
+        update_data = MockMCPUpdateRequest(
+            current_service_name="old_service",
+            current_mcp_url="http://old.url",
+            new_service_name="new_service",
+            new_mcp_url="http://new.url"
+        )
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "old_service",
+                "current_mcp_url": "http://old.url",
+                "new_service_name": "new_service",
+                "new_mcp_url": "http://new.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert "Successfully updated remote MCP proxy" in data["message"]
+
+        mock_get_user_id.assert_called_once_with("Bearer test_token")
+        # Verify the service was called with correct tenant_id and user_id
+        # The update_data parameter is automatically parsed by FastAPI from the JSON request
+        mock_update_server.assert_called_once()
+        call_kwargs = mock_update_server.call_args[1]
+        assert call_kwargs["tenant_id"] == "tenant456"
+        assert call_kwargs["user_id"] == "user123"
+        # Verify that update_data parameter exists and is not None
+        assert "update_data" in call_kwargs
+        assert call_kwargs["update_data"] is not None
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_name_conflict(self, mock_update_server, mock_get_user_id):
+        """Test update MCP proxy with name conflict"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.side_effect = MCPNameIllegal(
+            "New MCP name already exists")
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "old_service",
+                "current_mcp_url": "http://old.url",
+                "new_service_name": "existing_service",
+                "new_mcp_url": "http://new.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.CONFLICT
+        data = response.json()
+        assert "New MCP name already exists" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_connection_failed(self, mock_update_server, mock_get_user_id):
+        """Test update MCP proxy with connection failure"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.side_effect = MCPConnectionError(
+            "New MCP server connection failed")
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "old_service",
+                "current_mcp_url": "http://old.url",
+                "new_service_name": "new_service",
+                "new_mcp_url": "http://unreachable.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        data = response.json()
+        assert "New MCP server connection failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_current_name_not_exist(self, mock_update_server, mock_get_user_id):
+        """Test update MCP proxy when current name doesn't exist"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.side_effect = MCPNameIllegal(
+            "MCP name does not exist")
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "nonexistent_service",
+                "current_mcp_url": "http://old.url",
+                "new_service_name": "new_service",
+                "new_mcp_url": "http://new.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.CONFLICT
+        data = response.json()
+        assert "MCP name does not exist" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_database_error(self, mock_update_server, mock_get_user_id):
+        """Test update MCP proxy with database error"""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.side_effect = SQLAlchemyError(
+            "Database connection failed")
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "old_service",
+                "current_mcp_url": "http://old.url",
+                "new_service_name": "new_service",
+                "new_mcp_url": "http://new.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to update remote MCP proxy" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_same_name_and_url(self, mock_update_server, mock_get_user_id):
+        """Test update MCP proxy with same name and URL (no-op update)"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.return_value = None
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "same_service",
+                "current_mcp_url": "http://same.url",
+                "new_service_name": "same_service",
+                "new_mcp_url": "http://same.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+
+    def test_update_remote_proxy_invalid_request_data(self):
+        """Test update MCP proxy with invalid request data"""
+        # Missing required fields
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "old_service"
+                # Missing other required fields
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_with_special_characters(self, mock_update_server, mock_get_user_id):
+        """Test update MCP proxy with special characters in names and URLs"""
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_server.return_value = None
+
+        response = client.put(
+            "/mcp/update",
+            json={
+                "current_service_name": "old-service_123",
+                "current_mcp_url": "http://old-server.com:8080/path",
+                "new_service_name": "new-service_456",
+                "new_mcp_url": "http://new-server.com:9090/api"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
 
 
 if __name__ == "__main__":
