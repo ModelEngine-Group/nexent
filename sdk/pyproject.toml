@@ -39,7 +39,7 @@ dependencies = [
     "botocore>=1.37.34",
     "python-multipart>=0.0.20",
     "mcpadapt>=0.1.13",
-    "mcp>=1.19.0,<1.23",
+    "mcp>=1.19.0,<1.27",
     "fastmcp==2.12.0",
     "docker>=7.0.0",
     "tiktoken>=0.5.0",
