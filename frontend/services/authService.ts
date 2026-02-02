@@ -181,8 +181,8 @@ export const authService = {
   signUp: async (
     email: string,
     password: string,
-    isAdmin?: boolean,
-    inviteCode?: string
+    inviteCode?: string,
+    withNewInvitation?: boolean
   ): Promise<SessionResponse> => {
     try {
       const response = await fetch(API_ENDPOINTS.user.signup, {
@@ -193,8 +193,8 @@ export const authService = {
         body: JSON.stringify({
           email,
           password,
-          is_admin: isAdmin || false,
           invite_code: inviteCode || null,
+          with_new_invitation: withNewInvitation || false,
         }),
       });
 

@@ -116,8 +116,8 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     async (
       email: string,
       password: string,
-      isAdmin: boolean = false,
-      inviteCode?: string
+      inviteCode?: string,
+      withNewInvitation?: boolean
     ) => {
       setIsLoading(true);
 
@@ -125,8 +125,8 @@ export function useAuthenticationState(): AuthenticationStateReturn {
         const { data, error } = await authService.signUp(
           email,
           password,
-          isAdmin,
-          inviteCode
+          inviteCode,
+          withNewInvitation
         );
 
         if (error) {

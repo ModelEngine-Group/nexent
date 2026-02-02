@@ -127,8 +127,8 @@ export interface AuthenticationContextType {
   register: (
     email: string,
     password: string,
-    isAdmin?: boolean,
-    inviteCode?: string
+    inviteCode?: string,
+    withNewInvitation?: boolean
   ) => Promise<void>;
   logout: (options?: { silent?: boolean }) => Promise<void>;
   clearLocalSession: () => void;
