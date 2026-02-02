@@ -31,7 +31,7 @@ import {
 } from "@/services/invitationService";
 import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, Copy, CircleSlash } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
-import dayjs from "dayjs";
+import { formatDate } from "@/lib/date";
 
 const { Panel } = Collapse;
 
@@ -94,7 +94,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
       capacity: invitation.capacity,
       invitation_code: invitation.invitation_code,
       group_ids: invitation.group_ids || [],
-      expiry_date: invitation.expiry_date ? dayjs(invitation.expiry_date) : undefined,
+      expiry_date: invitation.expiry_date || undefined,
     });
     setModalVisible(true);
   };
@@ -130,7 +130,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         // Update invitation
         const updateData: UpdateInvitationRequest = {
           capacity: values.capacity,
-          expiry_date: values.expiry_date ? values.expiry_date.format("YYYY-MM-DD") : undefined,
+          expiry_date: values.expiry_date || undefined,
           group_ids: values.group_ids || [],
         };
         await updateInvitation(editingInvitation.invitation_code, updateData);
@@ -143,7 +143,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           invitation_code: values.invitation_code?.toUpperCase(),
           capacity: values.capacity,
           group_ids: values.group_ids || [],
-          expiry_date: values.expiry_date ? values.expiry_date.format("YYYY-MM-DD") : undefined,
+          expiry_date: values.expiry_date || undefined,
         };
         await createInvitation(createData);
         message.success(t("tenantResources.invitation.invitationCreated"));
@@ -239,7 +239,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         key: "expiry_date",
         width: 120,
         render: (date: string) =>
-          date ? dayjs(date).format("YYYY-MM-DD") : <span className="text-gray-400">{t("tenantResources.invitation.noExpiry")}</span>,
+          date ? formatDate(date) : <span className="text-gray-400">{t("tenantResources.invitation.noExpiry")}</span>,
       },
       {
         title: t("tenantResources.invitation.groupNames"),
@@ -466,6 +466,11 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               format="YYYY-MM-DD"
               placeholder={t("tenantResources.invitation.expiryDate")}
               style={{ width: "100%" }}
+              onChange={(date) => {
+                form.setFieldsValue({
+                  expiry_date: date ? (date as { format: (fmt: string) => string }).format("YYYY-MM-DD") : undefined,
+                });
+              }}
             />
           </Form.Item>
         </Form>

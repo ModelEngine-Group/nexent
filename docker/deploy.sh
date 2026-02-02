@@ -604,6 +604,11 @@ prepare_directory_and_data() {
   chmod -R 775 $ROOT_DIR/volumes
   echo "   📁 Directory $ROOT_DIR/volumes has been created and permissions set to 775."
 
+  # Copy sync_user_supabase2pg.py to ROOT_DIR for container access
+  cp -rn scripts $ROOT_DIR
+  chmod 644 "$ROOT_DIR/scripts/sync_user_supabase2pg.py"
+  echo "   📁 update scripts copied to $ROOT_DIR"
+
   # Create nexent user workspace directory
   NEXENT_USER_DIR="$HOME/nexent"
   create_dir_with_permission "$NEXENT_USER_DIR" 775
@@ -916,7 +921,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="$(get_app_version)"
+  APP_VERSION="v1.7.9.2"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
