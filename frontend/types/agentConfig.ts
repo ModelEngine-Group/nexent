@@ -33,6 +33,7 @@ export type AgentProfileInfo = Partial<
     | "duty_prompt"
     | "constraint_prompt"
     | "few_shots_prompt"
+    | "group_ids"
   >
 >;
 
@@ -60,6 +61,11 @@ export interface Agent {
   is_new?: boolean;
   sub_agent_id_list?: number[];
   group_ids?: number[];
+  /**
+   * Per-agent permission returned by /agent/list.
+   * EDIT: editable, READ_ONLY: read-only.
+   */
+  permission?: "EDIT" | "READ_ONLY";
 }
 
 export interface Tool {
@@ -338,6 +344,11 @@ export interface McpServer {
   status: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
+  /**
+   * Per-item permission returned by /mcp/list.
+   * EDIT: editable, READ_ONLY: read-only.
+   */
+  permission?: "EDIT" | "READ_ONLY";
 }
 
 // MCP tool interface definition
@@ -354,6 +365,11 @@ export interface McpContainer {
   status?: string;
   mcp_url?: string;
   host_port?: number;
+  /**
+   * Per-item permission returned by /mcp/containers.
+   * EDIT: editable, READ_ONLY: read-only.
+   */
+  permission?: "EDIT" | "READ_ONLY";
 }
 
 // ========== Prompt Service Interfaces ==========
