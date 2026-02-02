@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, Typography, Space } from "antd";
 import { UserRound, LockKeyhole } from "lucide-react";
@@ -7,7 +8,6 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { useAuthForm } from "@/hooks/useAuthForm";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
 
@@ -32,20 +32,34 @@ export function LoginModal() {
 
   const router = useRouter();
   const pathname = usePathname();
+  const [form] = Form.useForm();
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
 
-  // Form state and validation methods from useAuthForm hook
-  const {
-    form,
-    isLoading,
-    setIsLoading,
-    emailError,
-    passwordError,
-    setEmailError,
-    setPasswordError,
-    handleEmailChange,
-    handlePasswordChange,
-    resetForm,
-  } = useAuthForm();
+  const resetForm = () => {
+    setEmailError("");
+    setPasswordError(false);
+    form.resetFields();
+  };
+
+  const handleEmailChange = () => {
+    if (emailError) {
+      setEmailError("");
+      form.setFields([
+        {
+          name: "email",
+          errors: [],
+        },
+      ]);
+    }
+  };
+
+  const handlePasswordChange = () => {
+    if (passwordError) {
+      setPasswordError(false);
+    }
+  };
 
   // Internationalization hook for multi-language support
   const { t } = useTranslation("common");

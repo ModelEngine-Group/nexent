@@ -26,7 +26,6 @@ import {
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AuthFormValues } from "@/types/auth";
-import { useAuthForm } from "@/hooks/useAuthForm";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
 
@@ -45,19 +44,14 @@ export function RegisterModal() {
 
   const router = useRouter();
   const pathname = usePathname();
-  const {
-    form,
-    isLoading,
-    setIsLoading,
-    emailError,
-    setEmailError,
-    resetForm,
-  } = useAuthForm();
+  const [form] = Form.useForm<AuthFormValues>();
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState<{
     target: "password" | "confirmPassword" | "";
     message: string;
   }>({ target: "", message: "" });
-  const [isAdminMode, setIsAdminMode] = useState(false);
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
@@ -72,6 +66,12 @@ export function RegisterModal() {
 
   const validatePassword = (password: string): boolean => {
     return !!(password && password.length >= 6);
+  };
+
+  const resetForm = () => {
+    setEmailError("");
+    setPasswordError({ target: "", message: "" });
+    form.resetFields();
   };
 
   const handleSubmit = async (values: AuthFormValues) => {
@@ -106,8 +106,8 @@ export function RegisterModal() {
       await register(
         values.email,
         values.password,
-        isAdminMode,
-        values.inviteCode
+        values.inviteCode,
+        true,
       );
 
       // Reset form and clear error states
