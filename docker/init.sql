@@ -847,6 +847,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (32, 'SU', 'RESOURCE', 'TENANT', 'READ'),
 (33, 'SU', 'RESOURCE', 'TENANT', 'UPDATE'),
 (34, 'SU', 'RESOURCE', 'TENANT', 'DELETE'),
+(213, 'SU', 'RESOURCE', 'TENANT.LIST', 'READ'),
 (35, 'SU', 'RESOURCE', 'TENANT.INFO', 'READ'),
 (36, 'SU', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
 (37, 'SU', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
