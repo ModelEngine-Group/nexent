@@ -298,6 +298,16 @@ def _get_tenant_info(tenant_id):
 services_tenant_mod.get_tenant_info = _get_tenant_info
 sys.modules["services.tenant_service"] = services_tenant_mod
 
+# Also stub the backend-level import path
+backend_services_tenant_mod = types.ModuleType("backend.services.tenant_service")
+backend_services_tenant_mod.get_tenant_info = _get_tenant_info
+sys.modules["backend.services.tenant_service"] = backend_services_tenant_mod
+
+# Stub parent 'services' package to prevent attribute access error
+services_pkg = types.ModuleType("services")
+services_pkg.tenant_service = services_tenant_mod
+sys.modules["services"] = services_pkg
+
 
 def import_svc():
     """Import service under MinioClient patch to avoid real initialization."""
@@ -1121,7 +1131,7 @@ async def test_list_models_for_admin_success():
     with mock.patch.object(svc, "get_model_records", return_value=records), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
-            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+            mock.patch.object(svc, "get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
         out = await svc.list_models_for_admin("t1")
         assert out["tenant_id"] == "t1"
         assert out["tenant_name"] == "Test Tenant"
@@ -1146,7 +1156,7 @@ async def test_list_models_for_admin_with_pagination():
     with mock.patch.object(svc, "get_model_records", return_value=records), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
-            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+            mock.patch.object(svc, "get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
         # Page 1, page_size 10
         out = await svc.list_models_for_admin("t1", page=1, page_size=10)
         assert out["page"] == 1
@@ -1182,7 +1192,7 @@ async def test_list_models_for_admin_with_model_type_filter():
     with mock.patch.object(svc, "get_model_records", return_value=records) as mock_get_records, \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
-            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+            mock.patch.object(svc, "get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
         # Filter by llm
         out = await svc.list_models_for_admin("t1", model_type="llm")
         mock_get_records.assert_called_once_with({"model_type": "llm"}, "t1")
@@ -1195,7 +1205,7 @@ async def test_list_models_for_admin_empty_tenant():
     svc = import_svc()
 
     with mock.patch.object(svc, "get_model_records", return_value=[]), \
-            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": ""}):
+            mock.patch.object(svc, "get_tenant_info", return_value={"tenant_name": ""}):
         out = await svc.list_models_for_admin("t1")
         assert out["tenant_id"] == "t1"
         assert out["tenant_name"] == ""
@@ -1232,7 +1242,7 @@ async def test_list_models_for_admin_type_mapping():
     with mock.patch.object(svc, "get_model_records", return_value=records), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
-            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+            mock.patch.object(svc, "get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
         out = await svc.list_models_for_admin("t1")
 
         assert len(out["models"]) == 1
