@@ -202,6 +202,7 @@ export interface AuthenticationUIReturn {
 export interface AuthorizationContextType {
   // Authorization data
   user: User | null;
+  groupIds: number[];
   permissions: string[];
   accessibleRoutes: string[];
 

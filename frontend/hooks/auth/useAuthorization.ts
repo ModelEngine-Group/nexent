@@ -88,7 +88,7 @@ export function useAuthorization(): AuthorizationContextType {
             accessibleRoutes,
           });
 
-          
+
         } else {
           log.warn("Missing permissions or accessibleRoutes in user info", {
             hasPermissions: !!permissions,
@@ -109,16 +109,17 @@ export function useAuthorization(): AuthorizationContextType {
         // Check both status string and isSuccess boolean for compatibility
         if (result.data && (result.status === 'success' || result.isSuccess)) {
           const { user } = result.data;
-          
+
           if (user) {
-            const { permissions, accessibleRoutes, ...userInfo } = user;
-            
+            const { permissions, accessibleRoutes, groupIds, ...userInfo } = user;
+
             if (permissions && accessibleRoutes) {
               setUser(userInfo as User);
+              setGroupIds(groupIds);
               setPermissions(permissions);
               setAccessibleRoutes(accessibleRoutes);
               setIsAuthzReady(true);
-              
+
               authzEventUtils.emitPermissionsReady({
                 ...userInfo,
                 permissions,
@@ -138,6 +139,7 @@ export function useAuthorization(): AuthorizationContextType {
     const handleLogout = () => {
       log.info("User logged out, clearing authorization data...");
       setUser(null);
+      setGroupIds([]);
       setPermissions([]);
       setAccessibleRoutes([]);
       setIsAuthzReady(false);
@@ -147,6 +149,7 @@ export function useAuthorization(): AuthorizationContextType {
     const handleSessionExpired = () => {
       log.info("Session expired, clearing authorization data...");
       setUser(null);
+      setGroupIds([]);
       setPermissions([]);
       setAccessibleRoutes([]);
       setIsAuthzReady(false);
@@ -252,6 +255,7 @@ export function useAuthorization(): AuthorizationContextType {
   return {
     // Authorization data
     user,
+    groupIds,
     permissions,
     accessibleRoutes,
 
