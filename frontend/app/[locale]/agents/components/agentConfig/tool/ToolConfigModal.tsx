@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -11,14 +11,21 @@ import {
   Form,
   message,
   Select,
+  Button,
+  Space,
+  Popover,
 } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { CloseCircleOutlined } from "@ant-design/icons";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
+import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
+import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -30,6 +37,13 @@ export interface ToolConfigModalProps {
   isCreatingMode?: boolean;
   currentAgentId?: number;
 }
+
+// Tool types that require knowledge base selection
+const TOOLS_REQUIRING_KB_SELECTION = [
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+];
 
 export default function ToolConfigModal({
   isOpen,
@@ -50,6 +64,27 @@ export default function ToolConfigModal({
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
+
+  // Knowledge base selector state
+  const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
+  const [currentKbParamIndex, setCurrentKbParamIndex] = useState<number | null>(null);
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+  const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<string[]>([]);
+
+  // Fetch knowledge bases for tool config
+  const { knowledgeBases, isLoading: kbLoading } = useKnowledgeBasesForToolConfig();
+
+  // Check if current tool requires knowledge base selection
+  const toolRequiresKbSelection = useMemo(() => {
+    return TOOLS_REQUIRING_KB_SELECTION.includes(tool?.name);
+  }, [tool?.name]);
+
+  // Get index_names parameter info if exists
+  const indexNamesParam = useMemo(() => {
+    if (!toolRequiresKbSelection) return null;
+    return currentParams.find((param) => param.name === "index_names");
+  }, [currentParams, toolRequiresKbSelection]);
+
   // Initialize with provided params
   useEffect(() => {
     // Initialize form values
@@ -59,7 +94,37 @@ export default function ToolConfigModal({
       formValues[`param_${index}`] = param.value;
     });
     form.setFieldsValue(formValues);
-  }, [initialParams]);
+
+    // Parse initial index_names value for knowledge base selection
+    if (toolRequiresKbSelection) {
+      const indexNamesParam = initialParams.find((p) => p.name === "index_names");
+      if (indexNamesParam?.value) {
+        try {
+          // Try to parse as JSON array
+          const parsed = typeof indexNamesParam.value === "string"
+            ? JSON.parse(indexNamesParam.value)
+            : indexNamesParam.value;
+          if (Array.isArray(parsed)) {
+            setSelectedKbIds(parsed);
+          }
+        } catch {
+          // If not JSON, might be comma-separated string
+          if (typeof indexNamesParam.value === "string") {
+            const ids = indexNamesParam.value.split(",").filter(Boolean);
+            setSelectedKbIds(ids);
+          }
+        }
+      }
+    }
+  }, [initialParams, toolRequiresKbSelection]);
+
+  // Update selected KB display names when IDs change
+  useEffect(() => {
+    const names = knowledgeBases
+      .filter((kb) => selectedKbIds.includes(kb.id))
+      .map((kb) => kb.name);
+    setSelectedKbDisplayNames(names);
+  }, [selectedKbIds, knowledgeBases]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
@@ -154,6 +219,7 @@ export default function ToolConfigModal({
     setTestPanelVisible(false);
     onCancel();
   };
+
   // Handle tool testing - toggle test panel
   const handleTestTool = () => {
     setTestPanelVisible(!testPanelVisible);
@@ -164,12 +230,93 @@ export default function ToolConfigModal({
     setTestPanelVisible(false);
   };
 
+  // Open knowledge base selector
+  const openKbSelector = (paramIndex: number) => {
+    setCurrentKbParamIndex(paramIndex);
+    setKbSelectorVisible(true);
+  };
+
+  // Handle knowledge base selection confirm
+  const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
+    const ids = selectedKnowledgeBases.map((kb) => kb.id);
+    const names = selectedKnowledgeBases.map((kb) => kb.name);
+
+    setSelectedKbIds(ids);
+    setSelectedKbDisplayNames(names);
+
+    // Update form value
+    if (currentKbParamIndex !== null) {
+      const param = currentParams[currentKbParamIndex];
+      if (param) {
+        // Store as JSON array for consistency
+        const formFieldName = `param_${currentKbParamIndex}`;
+        form.setFieldValue(formFieldName, JSON.stringify(ids));
+      }
+    }
+
+    setKbSelectorVisible(false);
+    setCurrentKbParamIndex(null);
+  };
+
+  // Clear knowledge base selection
+  const clearKbSelection = () => {
+    setSelectedKbIds([]);
+    setSelectedKbDisplayNames([]);
+
+    if (currentKbParamIndex !== null) {
+      const param = currentParams[currentKbParamIndex];
+      if (param) {
+        const formFieldName = `param_${currentKbParamIndex}`;
+        form.setFieldValue(formFieldName, []);
+      }
+    }
+  };
+
+  // Get tool type for knowledge base selector
+  const getToolType = (): "knowledge_base_search" | "dify_search" | "datamate_search" => {
+    const name = tool?.name;
+    if (name === "dify_search") return "dify_search";
+    if (name === "datamate_search") return "datamate_search";
+    return "knowledge_base_search";
+  };
+
+  // Render knowledge base selector input (no button, just clickable input)
+  const renderKbSelectorInput = (param: ToolParam, index: number) => {
+    return (
+      <Input
+        readOnly
+        placeholder={t("toolConfig.input.knowledgeBaseSelector.placeholder", {
+          name: param.description || param.name,
+        })}
+        value={selectedKbDisplayNames.join(", ")}
+        onClick={() => openKbSelector(index)}
+        className="cursor-pointer bg-white"
+        suffix={
+          selectedKbIds.length > 0 ? (
+            <Button
+              type="text"
+              size="small"
+              icon={<CloseCircleOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                clearKbSelection();
+              }}
+            />
+          ) : null
+        }
+      />
+    );
+  };
+
   const renderParamInput = (param: ToolParam, index: number) => {
     // Get options from frontend configuration based on tool name and parameter name
     const options = getToolParamOptions(tool.name, param.name);
 
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
+
+    // Check if this is index_names parameter for knowledge base search tools
+    const isKbIndexNames = toolRequiresKbSelection && param.name === "index_names";
 
     const inputComponent = (() => {
       // Handle select type - when options are defined in frontend config
@@ -185,6 +332,11 @@ export default function ToolConfigModal({
             }))}
           />
         );
+      }
+
+      // Handle knowledge base index_names parameter
+      if (isKbIndexNames) {
+        return renderKbSelectorInput(param, index);
       }
 
       switch (param.type) {
@@ -408,6 +560,16 @@ export default function ToolConfigModal({
         </div>
       </Modal>
 
+      {/* Knowledge Base Selector Modal */}
+      <KnowledgeBaseSelectorModal
+        isOpen={kbSelectorVisible}
+        onClose={() => setKbSelectorVisible(false)}
+        onConfirm={handleKbConfirm}
+        selectedIds={selectedKbIds}
+        toolType={getToolType()}
+        knowledgeBases={knowledgeBases}
+        isLoading={kbLoading}
+      />
     </>
   );
 }
