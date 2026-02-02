@@ -81,23 +81,29 @@ class TestGetTenantInfo:
             tenant_id, "DEFAULT_GROUP_ID")
 
     def test_get_tenant_info_name_not_found(self, service_mocks):
-        """Test get_tenant_info when tenant name is not found"""
+        """Test get_tenant_info when tenant name is not found - should auto-create config"""
         # Setup
         tenant_id = "test_tenant_id"
 
-        # Mock config functions to return empty dict for name
+        # Mock config functions
         service_mocks['get_single_config_info'].side_effect = [
-            {},  # TENANT_NAME not found
+            {},                    # TENANT_NAME first check (not found)
+            {},                    # TENANT_NAME check in _ensure_tenant_name_config (double-check)
+            {"config_value": "Unnamed Tenant", "tenant_config_id": 1},  # TENANT_NAME after auto-create
             {"config_value": "group-123"}  # DEFAULT_GROUP_ID
         ]
+        service_mocks['insert_config'].return_value = True
 
         # Execute
         result = get_tenant_info(tenant_id)
 
-        # Assert - should return tenant info with empty name
+        # Assert - should return tenant info with auto-created default name
         assert result["tenant_id"] == tenant_id
-        assert result["tenant_name"] == ""
+        assert result["tenant_name"] == "Unnamed Tenant"
         assert result["default_group_id"] == "group-123"
+
+        # Verify insert_config was called to create the missing config
+        service_mocks['insert_config'].assert_called_once()
 
     def test_get_tenant_info_with_empty_group_id(self, service_mocks):
         """Test get_tenant_info when default group ID is empty"""
@@ -133,20 +139,33 @@ class TestGetTenantInfo:
             get_tenant_info(tenant_id)
 
     def test_get_tenant_info_both_configs_none(self, service_mocks):
-        """Test get_tenant_info when both configs return None"""
+        """Test get_tenant_info when both configs return None - should auto-create name config"""
         # Setup
         tenant_id = "test_tenant_id"
 
-        # Mock config functions to return None
-        service_mocks['get_single_config_info'].side_effect = [None, None]
+        # Mock config functions:
+        # 1st call: TENANT_NAME not found (None)
+        # 2nd call: TENANT_NAME check in _ensure_tenant_name_config (None - double-check)
+        # 3rd call: after insert, re-fetch returns the created config
+        # 4th call: DEFAULT_GROUP_ID returns None
+        service_mocks['get_single_config_info'].side_effect = [
+            None,                    # TENANT_NAME first check (None)
+            None,                    # TENANT_NAME check in _ensure_tenant_name_config
+            {"config_value": "Unnamed Tenant", "tenant_config_id": 1},  # TENANT_NAME after auto-create
+            None                     # DEFAULT_GROUP_ID (None)
+        ]
+        service_mocks['insert_config'].return_value = True
 
         # Execute
         result = get_tenant_info(tenant_id)
 
-        # Assert - should return tenant info with empty name and group_id
+        # Assert - should return tenant info with auto-created default name and empty group_id
         assert result["tenant_id"] == tenant_id
-        assert result["tenant_name"] == ""
+        assert result["tenant_name"] == "Unnamed Tenant"
         assert result["default_group_id"] == ""
+
+        # Verify insert_config was called to create the missing config
+        service_mocks['insert_config'].assert_called_once()
 
 
 class TestGetAllTenants:
@@ -427,18 +446,37 @@ class TestUpdateTenantInfo:
             assert result["tenant_name"] == new_tenant_name
 
     def test_update_tenant_info_tenant_not_found(self, service_mocks):
-        """Test update_tenant_info when tenant doesn't exist"""
+        """Test update_tenant_info when tenant doesn't exist - should auto-create config"""
         # Setup
         tenant_id = "nonexistent_tenant"
         new_tenant_name = "Updated Name"
         user_id = "updater_user"
 
-        # Mock get_single_config_info to return empty dict (not found)
-        service_mocks['get_single_config_info'].return_value = {}
+        # Mock get_single_config_info to return empty dict on first call (TENANT_NAME not found),
+        # then return the newly created config after auto-creation
+        service_mocks['get_single_config_info'].side_effect = [
+            {},  # First check - not found
+            {"config_value": new_tenant_name, "tenant_config_id": 1}  # After auto-create
+        ]
+        service_mocks['insert_config'].return_value = True
 
-        # Execute & Assert
-        with pytest.raises(NotFoundException, match="not found"):
-            update_tenant_info(tenant_id, new_tenant_name, user_id)
+        # Mock get_tenant_info to return updated info
+        with patch('backend.services.tenant_service.get_tenant_info') as mock_get_tenant_info:
+            mock_get_tenant_info.return_value = {
+                "tenant_id": tenant_id,
+                "tenant_name": new_tenant_name,
+                "default_group_id": "group-123"
+            }
+
+            # Execute - should NOT raise NotFoundException, instead auto-create config
+            result = update_tenant_info(tenant_id, new_tenant_name, user_id)
+
+            # Assert - update should succeed by auto-creating the config
+            assert result["tenant_id"] == tenant_id
+            assert result["tenant_name"] == new_tenant_name
+
+            # Verify insert_config was called to create the missing config
+            service_mocks['insert_config'].assert_called_once()
 
     def test_update_tenant_info_empty_name(self, service_mocks):
         """Test update_tenant_info with empty name"""
