@@ -45,7 +45,6 @@ export function RegisterModal() {
   const router = useRouter();
   const pathname = usePathname();
   const [form] = Form.useForm<AuthFormValues>();
-  const [isAdminMode, setIsAdminMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState<{
@@ -112,7 +111,6 @@ export function RegisterModal() {
 
       // Reset form and clear error states
       resetForm();
-      setIsAdminMode(false);
     } catch (error: any) {
       log.error("Registration error details:", error);
 
@@ -256,7 +254,6 @@ export function RegisterModal() {
   const handleLoginClick = () => {
     resetForm();
     setPasswordError({ target: "", message: "" });
-    setIsAdminMode(false);
     closeRegisterModal();
     openLoginModal();
   };
@@ -264,7 +261,6 @@ export function RegisterModal() {
   const handleCancel = () => {
     resetForm();
     setPasswordError({ target: "", message: "" });
-    setIsAdminMode(false);
     closeRegisterModal();
 
     // If user manually cancels registration from a protected page,
@@ -493,12 +489,6 @@ export function RegisterModal() {
           <Form.Item
             name="inviteCode"
             label={t("auth.inviteCodeLabel")}
-            rules={[
-              {
-                required: isAdminMode,
-                message: t("auth.inviteCodeRequired"),
-              },
-            ]}
           >
             <Input
               prefix={<KeyRound className="text-gray-400" size={16} />}
@@ -577,13 +567,7 @@ export function RegisterModal() {
               className="mt-2"
               disabled={authServiceUnavailable}
             >
-              {isLoading
-                ? isAdminMode
-                  ? t("auth.registeringAdmin")
-                  : t("auth.registering")
-                : isAdminMode
-                  ? t("auth.registerAdmin")
-                  : t("auth.register")}
+              {isLoading? t("auth.registering"): t("auth.register")}
             </Button>
           </Form.Item>
 
