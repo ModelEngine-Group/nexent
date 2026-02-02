@@ -633,3 +633,44 @@ class InvitationUseResponse(BaseModel):
     code_type: str = Field(..., description="Code type")
     group_ids: Optional[List[int]] = Field(
         None, description="Associated group IDs")
+
+
+# Admin Model Management Data Models
+# ---------------------------------------------------------------------------
+class AdminModelListRequest(BaseModel):
+    """Request model for admin to list models across tenants"""
+    tenant_ids: List[str] = Field(
+        ..., min_items=1, description="List of tenant IDs to query")
+    model_type: Optional[str] = Field(
+        None, description="Filter by model type (e.g., 'llm', 'embedding')")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(20, ge=1, le=100, description="Items per page")
+
+
+class TenantModelInfo(BaseModel):
+    """Model containing tenant info and their models"""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    tenant_name: str = Field(..., description="Tenant display name")
+    models: List[Dict[str, Any]] = Field(
+        default_factory=list, description="List of models for this tenant")
+
+
+class AdminTenantModelRequest(BaseModel):
+    """Request model for admin to query models for a specific tenant"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to query models for")
+    model_type: Optional[str] = Field(
+        None, description="Filter by model type (e.g., 'llm', 'embedding')")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(20, ge=1, le=100, description="Items per page")
+
+
+class AdminTenantModelResponse(BaseModel):
+    """Response model for admin tenant model query"""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    tenant_name: str = Field(..., description="Tenant display name")
+    models: List[Dict[str, Any]] = Field(
+        default_factory=list, description="List of models for this tenant")
+    total: int = Field(0, description="Total number of models")
+    page: int = Field(1, description="Current page number")
+    page_size: int = Field(20, description="Items per page")
+    total_pages: int = Field(0, description="Total number of pages")

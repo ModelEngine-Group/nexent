@@ -124,6 +124,7 @@ export const API_ENDPOINTS = {
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,
+    adminModelList: `${API_BASE_URL}/model/admin/list`,
   },
   knowledgeBase: {
     // Elasticsearch service

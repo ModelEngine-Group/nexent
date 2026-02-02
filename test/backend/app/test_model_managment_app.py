@@ -616,5 +616,163 @@ async def test_batch_update_models_exception(client, auth_header, user_credentia
     mock_batch_update.assert_called_once_with(user_credentials[0], user_credentials[1], models)
 
 
+# Tests for /model/admin/list endpoint
+@pytest.mark.asyncio
+async def test_get_admin_model_list_success(client, auth_header, user_credentials, mocker):
+    """Test successful admin model list retrieval for a specified tenant."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_models_for_admin(*args, **kwargs):
+        return {
+            "tenant_id": "target_tenant",
+            "tenant_name": "Target Tenant",
+            "models": [
+                {
+                    "model_id": "model1",
+                    "model_name": "huggingface/llama",
+                    "display_name": "LLaMA Model",
+                    "model_type": "llm",
+                    "connect_status": "operational"
+                },
+                {
+                    "model_id": "model2",
+                    "model_name": "openai/clip",
+                    "display_name": "CLIP Model",
+                    "model_type": "embedding",
+                    "connect_status": "not_detected"
+                }
+            ],
+            "total": 2,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 1
+        }
+
+    mock_list = mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "model_type": None,
+        "page": 1,
+        "page_size": 20
+    }
+    response = client.post("/model/admin/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully retrieved model list" in data["message"]
+    assert data["data"]["tenant_id"] == "target_tenant"
+    assert data["data"]["tenant_name"] == "Target Tenant"
+    assert data["data"]["total"] == 2
+    assert data["data"]["page"] == 1
+    assert data["data"]["page_size"] == 20
+    assert data["data"]["total_pages"] == 1
+    assert len(data["data"]["models"]) == 2
+    assert data["data"]["models"][0]["model_name"] == "huggingface/llama"
+    assert data["data"]["models"][1]["model_name"] == "openai/clip"
+    mock_list.assert_called_once_with("target_tenant", None, 1, 20)
+
+
+@pytest.mark.asyncio
+async def test_get_admin_model_list_with_pagination(client, auth_header, user_credentials, mocker):
+    """Test admin model list retrieval with pagination parameters."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_models_for_admin(*args, **kwargs):
+        return {
+            "tenant_id": "target_tenant",
+            "tenant_name": "Target Tenant",
+            "models": [
+                {
+                    "model_id": "model3",
+                    "model_name": "openai/gpt-3",
+                    "display_name": "GPT-3",
+                    "model_type": "llm",
+                    "connect_status": "operational"
+                }
+            ],
+            "total": 25,
+            "page": 2,
+            "page_size": 10,
+            "total_pages": 3
+        }
+
+    mock_list = mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "model_type": "llm",
+        "page": 2,
+        "page_size": 10
+    }
+    response = client.post("/model/admin/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["data"]["page"] == 2
+    assert data["data"]["page_size"] == 10
+    assert data["data"]["total"] == 25
+    assert data["data"]["total_pages"] == 3
+    assert len(data["data"]["models"]) == 1
+    mock_list.assert_called_once_with("target_tenant", "llm", 2, 10)
+
+
+@pytest.mark.asyncio
+async def test_get_admin_model_list_exception(client, auth_header, user_credentials, mocker):
+    """Test admin model list retrieval with exception."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_models_for_admin(*args, **kwargs):
+        raise Exception("Database connection error")
+
+    mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "model_type": None,
+        "page": 1,
+        "page_size": 20
+    }
+    response = client.post("/model/admin/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    data = response.json()
+    assert "Database connection error" in data.get("detail", "")
+
+
+@pytest.mark.asyncio
+async def test_get_admin_model_list_empty(client, auth_header, user_credentials, mocker):
+    """Test admin model list retrieval with empty result."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_models_for_admin(*args, **kwargs):
+        return {
+            "tenant_id": "empty_tenant",
+            "tenant_name": "Empty Tenant",
+            "models": [],
+            "total": 0,
+            "page": 1,
+            "page_size": 20,
+            "total_pages": 0
+        }
+
+    mock_list = mocker.patch('apps.model_managment_app.list_models_for_admin', side_effect=mock_list_models_for_admin)
+
+    request_data = {
+        "tenant_id": "empty_tenant",
+        "model_type": None,
+        "page": 1,
+        "page_size": 20
+    }
+    response = client.post("/model/admin/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully retrieved model list" in data["message"]
+    assert data["data"]["total"] == 0
+    assert len(data["data"]["models"]) == 0
+    mock_list.assert_called_once_with("empty_tenant", None, 1, 20)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

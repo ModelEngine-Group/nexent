@@ -1089,3 +1089,135 @@ async def test_list_llm_models_for_tenant_handles_missing_repo():
         assert len(result) == 2
         assert result[0]["model_name"] == "local-model"  # No repo prefix
         assert result[1]["model_name"] == "another-model"  # No repo prefix
+
+
+# Tests for list_models_for_admin
+async def test_list_models_for_admin_success():
+    """Test list_models_for_tenant returns models for a specified tenant."""
+    svc = import_svc()
+
+    records = [
+        {"model_repo": "huggingface", "model_name": "llama",
+            "connect_status": "operational", "model_type": "llm"},
+        {"model_repo": "openai", "model_name": "clip", "connect_status": None, "model_type": "embedding"},
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
+            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+        out = await svc.list_models_for_admin("t1")
+        assert out["tenant_id"] == "t1"
+        assert out["tenant_name"] == "Test Tenant"
+        assert out["total"] == 2
+        assert out["page"] == 1
+        assert out["page_size"] == 20
+        assert out["total_pages"] == 1
+        assert len(out["models"]) == 2
+        assert out["models"][0]["model_name"] == "huggingface/llama"
+
+
+async def test_list_models_for_admin_with_pagination():
+    """Test list_models_for_tenant handles pagination correctly."""
+    svc = import_svc()
+
+    # Create 25 records to test pagination
+    records = [
+        {"model_repo": "openai", "model_name": f"gpt-{i}", "connect_status": "operational", "model_type": "llm"}
+        for i in range(25)
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
+            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+        # Page 1, page_size 10
+        out = await svc.list_models_for_admin("t1", page=1, page_size=10)
+        assert out["page"] == 1
+        assert out["page_size"] == 10
+        assert out["total"] == 25
+        assert out["total_pages"] == 3
+        assert len(out["models"]) == 10
+        assert out["models"][0]["model_name"] == "openai/gpt-0"
+
+        # Page 2
+        out = await svc.list_models_for_admin("t1", page=2, page_size=10)
+        assert out["page"] == 2
+        assert len(out["models"]) == 10
+        assert out["models"][0]["model_name"] == "openai/gpt-10"
+
+        # Page 3 (last page)
+        out = await svc.list_models_for_admin("t1", page=3, page_size=10)
+        assert out["page"] == 3
+        assert out["total_pages"] == 3
+        assert len(out["models"]) == 5
+        assert out["models"][0]["model_name"] == "openai/gpt-20"
+
+
+async def test_list_models_for_admin_with_model_type_filter():
+    """Test list_models_for_tenant filters by model_type."""
+    svc = import_svc()
+
+    records = [
+        {"model_repo": "openai", "model_name": "gpt-4", "connect_status": "operational", "model_type": "llm"},
+        {"model_repo": "openai", "model_name": "text-embedding", "connect_status": "operational", "model_type": "embedding"},
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records) as mock_get_records, \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
+            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+        # Filter by llm
+        out = await svc.list_models_for_admin("t1", model_type="llm")
+        mock_get_records.assert_called_once_with({"model_type": "llm"}, "t1")
+        assert out["total"] == 2
+        assert out["models"][0]["model_type"] == "llm"
+
+
+async def test_list_models_for_admin_empty_tenant():
+    """Test list_models_for_tenant handles empty tenant gracefully."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_model_records", return_value=[]), \
+            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": ""}):
+        out = await svc.list_models_for_admin("t1")
+        assert out["tenant_id"] == "t1"
+        assert out["tenant_name"] == ""
+        assert out["total"] == 0
+        assert out["total_pages"] == 0
+        assert len(out["models"]) == 0
+
+
+async def test_list_models_for_admin_exception():
+    """Test list_models_for_tenant handles exceptions."""
+    svc = import_svc()
+
+    with mock.patch.object(svc, "get_model_records", side_effect=Exception("db error")):
+        with pytest.raises(Exception) as exc:
+            await svc.list_models_for_admin("t1")
+        assert "Failed to retrieve admin model list" in str(exc.value)
+
+
+async def test_list_models_for_admin_type_mapping():
+    """Test list_models_for_tenant maps model_type from 'chat' to 'llm'."""
+    svc = import_svc()
+
+    records = [
+        {
+            "model_id": "llm1",
+            "model_repo": "openai",
+            "model_name": "gpt-4",
+            "display_name": "GPT-4",
+            "model_type": "chat",  # Should be mapped to "llm"
+            "connect_status": "operational"
+        },
+    ]
+
+    with mock.patch.object(svc, "get_model_records", return_value=records), \
+            mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
+            mock.patch("services.tenant_service.get_tenant_info", return_value={"tenant_name": "Test Tenant"}):
+        out = await svc.list_models_for_admin("t1")
+
+        assert len(out["models"]) == 1
+        assert out["models"][0]["model_type"] == "llm"  # Should be mapped from "chat"
