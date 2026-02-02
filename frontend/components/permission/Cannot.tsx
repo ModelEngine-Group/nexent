@@ -14,7 +14,7 @@ interface CannotProps {
  * 
  * @example
  * ```tsx
- * <Cannot permission="KB:DELETE">
+ * <Cannot permission="kb:delete">
  *   <Button disabled>Delete</Button>
  * </Cannot>
  * ```

@@ -14,11 +14,11 @@ interface CanProps {
  * 
  * @example
  * ```tsx
- * <Can permission="KB:CREATE">
- *   <Button>Create KB</Button>
+ * <Can permission="kb:create">
+ *   <Button>Create k</Button>
  * </Can>
  * 
- * <Can permission={["KB:DELETE", "KB.GROUPS:DELETE"]}>
+ * <Can permission={["kb:delete", "kb.groups:delete"]}>
  *   <DeleteButton />
  * </Can>
  * ```
