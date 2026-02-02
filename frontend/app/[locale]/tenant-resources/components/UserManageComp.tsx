@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Row,
   Col,
@@ -33,6 +33,7 @@ import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
+import { Can } from "@/components/permission/Can";
 
 // Removed mockTenants - now using real data from API
 
@@ -232,8 +233,13 @@ export default function UserManageComp() {
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
-  // For non-super admins, use their current tenant (from user metadata or default)
-  const [tenantId, setTenantId] = useState<string | null>(tenants[0]?.tenant_id || null);
+  // For non-super admins, automatically select their first tenant when data loads
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSuperAdmin && tenants.length > 0 && !tenantId) {
+      setTenantId(tenants[0].tenant_id);
+    }
+  }, [isSuperAdmin, tenants, tenantId]);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
@@ -267,23 +273,25 @@ export default function UserManageComp() {
         </div>
       </div>
       <Row className="h-full">
-        <Col className="h-full" style={{ width: 300 }}>
-          <div className="h-full pr-6">
-            <div className="sticky top-6">
-              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                <TenantList
-                  selected={tenantId}
-                  onSelect={(id) => setTenantId(id)}
-                  tenants={tenants}
-                  onTenantsChange={setTenantsState}
-                  onTenantsRefetch={refetchTenants}
-                  loading={tenantsLoading}
-                  t={t}
-                />
+        <Can permission="tenant.list:read">
+          <Col className="h-full" style={{ width: 300 }}>
+            <div className="h-full pr-6">
+              <div className="sticky top-6">
+                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                  <TenantList
+                    selected={tenantId}
+                    onSelect={(id) => setTenantId(id)}
+                    tenants={tenants}
+                    onTenantsChange={setTenantsState}
+                    onTenantsRefetch={refetchTenants}
+                    loading={tenantsLoading}
+                    t={t}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </Col>
+          </Col>
+        </Can>
         <Col className="flex-1 p-6">
           <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
             {/* Tenant name header */}
