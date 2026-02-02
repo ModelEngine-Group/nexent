@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
@@ -396,6 +396,85 @@ async def list_llm_models_for_tenant(tenant_id: str):
     except Exception as e:
         logging.error(f"Failed to retrieve model list: {str(e)}")
         raise Exception(f"Failed to retrieve model list: {str(e)}")
+
+
+async def list_models_for_admin(
+    tenant_id: str,
+    model_type: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+) -> Dict[str, Any]:
+    """Get models for a specified tenant (admin operation) with pagination.
+
+    Args:
+        tenant_id: Target tenant ID to query models for
+        model_type: Optional model type filter (e.g., 'llm', 'embedding')
+        page: Page number for pagination (1-indexed)
+        page_size: Number of items per page
+
+    Returns:
+        Dict containing tenant_id, tenant_name, paginated models list, and pagination info
+    """
+    try:
+        # Build filters
+        filters = None
+        if model_type:
+            filters = {"model_type": model_type}
+
+        # Get model records for the specified tenant
+        records = get_model_records(filters, tenant_id)
+
+        # Type mapping for backwards compatibility
+        type_map = {
+            "chat": "llm",
+        }
+
+        # Normalize model records
+        normalized_models: List[Dict[str, Any]] = []
+        for record in records:
+            record["model_name"] = add_repo_to_name(
+                model_repo=record["model_repo"],
+                model_name=record["model_name"],
+            )
+            record["connect_status"] = ModelConnectStatusEnum.get_value(
+                record.get("connect_status"))
+
+            # Map model_type if necessary
+            if record.get("model_type") in type_map:
+                record["model_type"] = type_map[record["model_type"]]
+
+            normalized_models.append(record)
+
+        # Calculate pagination
+        total = len(normalized_models)
+        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+        paginated_models = normalized_models[start_index:end_index]
+
+        # Get tenant name
+        from services.tenant_service import get_tenant_info
+        try:
+            tenant_info = get_tenant_info(tenant_id)
+            tenant_name = tenant_info.get("tenant_name", "")
+        except Exception:
+            tenant_name = ""
+
+        result = {
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name,
+            "models": paginated_models,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages
+        }
+
+        logging.debug(f"Successfully retrieved admin model list for tenant: {tenant_id}, page: {page}, page_size: {page_size}")
+        return result
+    except Exception as e:
+        logging.error(f"Failed to retrieve admin model list: {str(e)}")
+        raise Exception(f"Failed to retrieve admin model list: {str(e)}")
 
 
 
