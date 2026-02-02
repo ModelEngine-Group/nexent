@@ -69,19 +69,23 @@ class DifySearchTool(Tool):
             raise ValueError(
                 "api_key is required and must be a non-empty string")
 
-        # Parse and validate dataset_ids from JSON string
-        if not dataset_ids or not isinstance(dataset_ids, str):
+        # Parse and validate dataset_ids from string or list
+        if not dataset_ids:
             raise ValueError(
-                "dataset_ids is required and must be a non-empty JSON string array")
+                "dataset_ids is required and must be a non-empty JSON string array or list")
         try:
-            parsed_ids = json.loads(dataset_ids)
+            # Handle both JSON string array and plain list
+            if isinstance(dataset_ids, str):
+                parsed_ids = json.loads(dataset_ids)
+            else:
+                parsed_ids = dataset_ids
             if not isinstance(parsed_ids, list) or not parsed_ids:
                 raise ValueError(
-                    "dataset_ids must be a non-empty JSON array of strings")
+                    "dataset_ids must be a non-empty array of strings")
             self.dataset_ids = [str(item) for item in parsed_ids]
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(
-                f"dataset_ids must be a valid JSON string array: {str(e)}")
+                f"dataset_ids must be a valid JSON string array or list: {str(e)}")
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key

@@ -12,7 +12,6 @@ import {
 import { useTranslation } from "react-i18next";
 
 import knowledgeBaseService from "@/services/knowledgeBaseService";
-import { userConfigService } from "@/services/userConfigService";
 
 import {
   KnowledgeBase,
@@ -111,8 +110,6 @@ export const KnowledgeBaseContext = createContext<{
   hasKnowledgeBaseModelMismatch: (kb: KnowledgeBase) => boolean;
   refreshKnowledgeBaseData: (forceRefresh?: boolean) => Promise<void>;
   refreshKnowledgeBaseDataWithDataMate: () => Promise<void>;
-  loadUserSelectedKnowledgeBases: () => Promise<void>;
-  saveUserSelectedKnowledgeBases: () => Promise<boolean>;
 }>({
   state: {
     knowledgeBases: [],
@@ -133,8 +130,6 @@ export const KnowledgeBaseContext = createContext<{
   hasKnowledgeBaseModelMismatch: () => false,
   refreshKnowledgeBaseData: async () => {},
   refreshKnowledgeBaseDataWithDataMate: async () => {},
-  loadUserSelectedKnowledgeBases: async () => {},
-  saveUserSelectedKnowledgeBases: async () => false,
 });
 
 // Custom hook for using the context
@@ -205,49 +200,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     [state.currentEmbeddingModel]
   );
 
-  // Load user selected knowledge bases from backend
-  const loadUserSelectedKnowledgeBases = useCallback(async () => {
-    try {
-      const userConfig = await userConfigService.loadKnowledgeList();
-      if (userConfig) {
-        let allSelectedNames: string[] = [];
-
-        // Handle new format (selectedKbNames array)
-        if (
-          userConfig.selectedKbNames &&
-          userConfig.selectedKbNames.length > 0
-        ) {
-          allSelectedNames = userConfig.selectedKbNames;
-        }
-        // Fallback to legacy grouped format for backward compatibility
-        else if (userConfig.nexent || userConfig.datamate) {
-          allSelectedNames = [
-            ...(userConfig.nexent || []),
-            ...(userConfig.datamate || []),
-          ];
-        }
-
-        if (allSelectedNames.length > 0) {
-          // Find matching knowledge base IDs based on index names
-          const selectedIds = state.knowledgeBases
-            .filter((kb) => allSelectedNames.includes(kb.id))
-            .map((kb) => kb.id);
-
-          dispatch({
-            type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
-            payload: selectedIds,
-          });
-        }
-      }
-    } catch (error) {
-      log.error(t("knowledgeBase.error.loadSelected"), error);
-      dispatch({
-        type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
-        payload: t("knowledgeBase.error.loadSelectedRetry"),
-      });
-    }
-  }, [state.knowledgeBases]);
-
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
   const fetchKnowledgeBases = useCallback(
     async (
@@ -276,11 +228,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
           payload: kbs,
         });
-
-        // After loading knowledge bases, automatically load user's selected knowledge bases if requested
-        if (shouldLoadSelected && kbs.length > 0) {
-          await loadUserSelectedKnowledgeBases();
-        }
       } catch (error) {
         log.error(t("knowledgeBase.error.fetchList"), error);
         dispatch({
@@ -291,7 +238,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         dispatch({ type: KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: false });
       }
     },
-    [state.isLoading, t, loadUserSelectedKnowledgeBases]
+    [state.isLoading, t]
   );
 
   // Select knowledge base - memoized with useCallback
@@ -401,44 +348,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     },
     [state.knowledgeBases, state.selectedIds, state.activeKnowledgeBase]
   );
-
-  // Save user selected knowledge bases to backend
-  const saveUserSelectedKnowledgeBases = useCallback(async () => {
-    try {
-      // Get selected knowledge bases grouped by source
-      const selectedKnowledgeBases = state.knowledgeBases.filter((kb) =>
-        state.selectedIds.includes(kb.id)
-      );
-
-      // Group knowledge bases by source
-      const knowledgeBySource: { nexent?: string[]; datamate?: string[] } = {};
-      selectedKnowledgeBases.forEach((kb) => {
-        const source = kb.source as keyof typeof knowledgeBySource;
-        if (!knowledgeBySource[source]) {
-          knowledgeBySource[source] = [];
-        }
-        knowledgeBySource[source]!.push(kb.id);
-      });
-
-      const result =
-        await userConfigService.updateKnowledgeList(knowledgeBySource);
-      if (!result) {
-        dispatch({
-          type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
-          payload: t("knowledgeBase.error.saveSelected"),
-        });
-        return false;
-      }
-      return true;
-    } catch (error) {
-      log.error(t("knowledgeBase.error.saveSelected"), error);
-      dispatch({
-        type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
-        payload: t("knowledgeBase.error.saveSelectedRetry"),
-      });
-      return false;
-    }
-  }, [state.knowledgeBases, state.selectedIds, t]);
 
   // Add a function to refresh the knowledge base data
   const refreshKnowledgeBaseData = useCallback(
@@ -624,8 +533,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       hasKnowledgeBaseModelMismatch,
       refreshKnowledgeBaseData,
       refreshKnowledgeBaseDataWithDataMate,
-      loadUserSelectedKnowledgeBases,
-      saveUserSelectedKnowledgeBases,
     }),
     [
       state,
@@ -637,8 +544,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       isKnowledgeBaseSelectable,
       refreshKnowledgeBaseData,
       refreshKnowledgeBaseDataWithDataMate,
-      loadUserSelectedKnowledgeBases,
-      saveUserSelectedKnowledgeBases,
     ]
   );
 

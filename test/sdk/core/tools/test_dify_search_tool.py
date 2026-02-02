@@ -138,9 +138,9 @@ class TestDifySearchToolInit:
         assert expected_error in str(excinfo.value)
 
     @pytest.mark.parametrize("dataset_ids,expected_error", [
-        ("[]", "dataset_ids must be a non-empty JSON array of strings"),
-        ("", "dataset_ids is required and must be a non-empty JSON string array"),
-        (None, "dataset_ids is required and must be a non-empty JSON string array"),
+        ([], "dataset_ids is required and must be a non-empty JSON string array or list"),
+        ("", "dataset_ids is required and must be a non-empty JSON string array or list"),
+        (None, "dataset_ids is required and must be a non-empty JSON string array or list"),
     ])
     def test_init_invaliddataset_ids(self, dataset_ids, expected_error):
         with pytest.raises(ValueError) as excinfo:
@@ -150,6 +150,97 @@ class TestDifySearchToolInit:
                 dataset_ids=dataset_ids,
             )
         assert expected_error in str(excinfo.value)
+
+    def test_init_dataset_ids_empty_json_array_string(self, mock_observer: MessageObserver):
+        """Test that empty JSON array '[]' raises ValueError."""
+        with pytest.raises(ValueError) as excinfo:
+            DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_key",
+                dataset_ids="[]",
+                observer=mock_observer,
+            )
+        # Empty JSON array passes the first check (not falsy), but fails the list/empty check
+        assert "dataset_ids must be a non-empty array of strings" in str(excinfo.value)
+
+    def test_init_dataset_ids_as_list(self, mock_observer: MessageObserver):
+        """Test dataset_ids can be passed as a Python list instead of JSON string."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids=["ds1", "ds2", "ds3"],
+            observer=mock_observer,
+        )
+
+        assert tool.dataset_ids == ["ds1", "ds2", "ds3"]
+        assert len(tool.dataset_ids) == 3
+
+    def test_init_dataset_ids_as_list_single_item(self, mock_observer: MessageObserver):
+        """Test dataset_ids as a list with single item."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids=["single_dataset"],
+            observer=mock_observer,
+        )
+
+        assert tool.dataset_ids == ["single_dataset"]
+        assert len(tool.dataset_ids) == 1
+
+    def test_init_dataset_ids_as_list_with_numeric_ids(self, mock_observer: MessageObserver):
+        """Test dataset_ids list with numeric IDs are converted to strings."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids=[123, 456, 789],
+            observer=mock_observer,
+        )
+
+        assert tool.dataset_ids == ["123", "456", "789"]
+        assert all(isinstance(id, str) for id in tool.dataset_ids)
+
+    @pytest.mark.parametrize("invalid_json,expected_error_contains", [
+        ("invalid_json", "dataset_ids must be a valid JSON string array or list"),
+        ("{key: value}", "dataset_ids must be a valid JSON string array or list"),
+        ("{'key': 'value'}", "dataset_ids must be a valid JSON string array or list"),
+        ("123", "dataset_ids must be a non-empty array of strings"),
+    ])
+    def test_init_invalid_json_format(self, invalid_json, expected_error_contains, mock_observer: MessageObserver):
+        """Test dataset_ids with invalid JSON format raises appropriate error."""
+        with pytest.raises(ValueError) as excinfo:
+            DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_key",
+                dataset_ids=invalid_json,
+                observer=mock_observer,
+            )
+        assert expected_error_contains in str(excinfo.value)
+
+    def test_init_dataset_ids_with_malformed_json_array(self, mock_observer: MessageObserver):
+        """Test dataset_ids with malformed JSON array."""
+        with pytest.raises(ValueError) as excinfo:
+            DifySearchTool(
+                server_url="https://api.dify.ai/v1",
+                api_key="test_key",
+                dataset_ids='["ds1", "ds2"',  # Missing closing bracket
+                observer=mock_observer,
+            )
+        assert "dataset_ids must be a valid JSON string array or list" in str(excinfo.value)
+
+    def test_init_dataset_ids_json_string_with_non_string_elements(self, mock_observer: MessageObserver):
+        """Test that non-string elements in JSON array are converted to strings."""
+        tool = DifySearchTool(
+            server_url="https://api.dify.ai/v1",
+            api_key="test_key",
+            dataset_ids='["ds1", 123, true, null]',
+            observer=mock_observer,
+        )
+
+        # Elements should be converted to strings using Python's str()
+        # JSON true -> Python True -> str() -> 'True'
+        # JSON null -> Python None -> str() -> 'None'
+        assert tool.dataset_ids == ["ds1", "123", "True", "None"]
+        assert all(isinstance(id, str) for id in tool.dataset_ids)
 
 
 class TestGetDocumentDownloadUrl:

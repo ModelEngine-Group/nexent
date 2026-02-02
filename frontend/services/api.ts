@@ -156,6 +156,9 @@ export const API_ENDPOINTS = {
         pathOrUrl
       )}/error-info`,
   },
+  dify: {
+    datasets: `${API_BASE_URL}/dify/datasets`,
+  },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
     files: (knowledgeBaseId: string) =>
@@ -167,8 +170,6 @@ export const API_ENDPOINTS = {
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
   },
   tenantConfig: {
-    loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
-    updateKnowledgeList: `${API_BASE_URL}/tenant_config/update_knowledge_list`,
     deploymentVersion: `${API_BASE_URL}/tenant_config/deployment_version`,
   },
   mcp: {
