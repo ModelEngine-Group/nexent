@@ -475,18 +475,18 @@ select_deployment_mode() {
   MODE_CHOICE_SAVED="$mode_choice"
 
   case $mode_choice in
-      2)
+      2|"infrastructure")
           export DEPLOYMENT_MODE="infrastructure"
           export COMPOSE_FILE_SUFFIX=".yml"
           echo "✅ Selected infrastructure mode 🏗️"
           ;;
-      3)
+      3|"production")
           export DEPLOYMENT_MODE="production"
           export COMPOSE_FILE_SUFFIX=".prod.yml"
           disable_dashboard
           echo "✅ Selected production mode 🚀"
           ;;
-      *)
+      1|"development"|*)
           export DEPLOYMENT_MODE="development"
           export COMPOSE_FILE_SUFFIX=".yml"
           echo "✅ Selected development mode 🛠️"
@@ -686,11 +686,11 @@ select_deployment_version() {
   version_choice=$(sanitize_input "$version_choice")
   VERSION_CHOICE_SAVED="${version_choice}"
   case $version_choice in
-      2)
+      2|"full")
           export DEPLOYMENT_VERSION="full"
           echo "✅ Selected complete version 🎯"
           ;;
-      *)
+      1|"speed"|*)
           export DEPLOYMENT_VERSION="speed"
           echo "✅ Selected speed version ⚡️"
           ;;
