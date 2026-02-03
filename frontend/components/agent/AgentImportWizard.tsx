@@ -820,8 +820,11 @@ export default function AgentImportWizard({
         ),
         okText: t("market.install.warning.continue", "Continue Anyway"),
         cancelText: t("market.install.warning.goBack", "Go Back to Configure"),
+        cancelButtonProps: {
+          type: "primary",
+        },
         okButtonProps: {
-          className: "bg-blue-600 hover:bg-blue-700 border-blue-600 hover:border-blue-700 text-white",
+          type: "default",
         },
         onOk: async () => {
           await performImport();
