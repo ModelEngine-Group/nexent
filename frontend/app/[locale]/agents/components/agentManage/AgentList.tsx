@@ -107,7 +107,13 @@ export default function AgentList({
     try {
       const result = await searchAgentInfo(Number(agent.id));
       if (result.success && result.data) {
-        setCurrentAgent(result.data);
+        // Get permission from agent list (agentList prop contains permission from /agent/list)
+        const permissionFromList = agent.permission ?? undefined;
+        // Merge permission into agent detail before setting as current
+        setCurrentAgent({
+          ...result.data,
+          permission: permissionFromList,
+        });
       } else {
         message.error(result.message || t("agentConfig.agents.detailsLoadFailed"));
       }
