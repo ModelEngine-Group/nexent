@@ -15,7 +15,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { clearAgentAndSync } from "@/lib/agentNewUtils";
 
 import { Avatar } from "antd";
 import AgentCallRelationshipModal from "@/components/ui/AgentCallRelationshipModal";
@@ -152,9 +151,10 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
     // Mark agent as viewed (clear NEW marker in database)
     if (isNewAgent) {
       try {
-        const result = await clearAgentAndSync(agent.id, queryClient);
+        const result = await clearAgentNewMark(agent.id);
         if (result?.success) {
           setIsNewAgent(false); 
+          queryClient.invalidateQueries({ queryKey: ["agents"] });
         } else {
           log.warn("Failed to clear NEW mark for agent", agent.id, result);
         }
