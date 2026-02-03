@@ -11,13 +11,12 @@ import {
   Form,
   message,
   Select,
-  Button,
-  Space,
-  Popover,
+  Skeleton,
 } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { CloseCircleOutlined } from "@ant-design/icons";
+import { CloseOutlined } from "@ant-design/icons";
+import { ConfigStore } from "@/lib/config";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
@@ -25,7 +24,10 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
-import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
+import {
+  useKnowledgeBasesForToolConfig,
+  useSyncKnowledgeBases,
+} from "@/hooks/useKnowledgeBaseSelector";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -67,25 +69,119 @@ export default function ToolConfigModal({
 
   // Knowledge base selector state
   const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
-  const [currentKbParamIndex, setCurrentKbParamIndex] = useState<number | null>(null);
+  const [currentKbParamIndex, setCurrentKbParamIndex] = useState<number | null>(
+    null
+  );
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
-  const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<string[]>([]);
+  const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
+    string[]
+  >([]);
 
-  // Fetch knowledge bases for tool config
-  const { knowledgeBases, isLoading: kbLoading } = useKnowledgeBasesForToolConfig();
+  // Dify configuration state
+  const [difyConfig, setDifyConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+  });
 
-  // Check if current tool requires knowledge base selection
+  // Check if current tool requires knowledge base selection (must be declared before toolKbType)
   const toolRequiresKbSelection = useMemo(() => {
     return TOOLS_REQUIRING_KB_SELECTION.includes(tool?.name);
   }, [tool?.name]);
 
-  // Get index_names parameter info if exists
-  const indexNamesParam = useMemo(() => {
+  // Get tool type for knowledge base selection
+  const toolKbType = useMemo(():
+    | "knowledge_base_search"
+    | "dify_search"
+    | "datamate_search"
+    | null => {
     if (!toolRequiresKbSelection) return null;
-    return currentParams.find((param) => param.name === "index_names");
-  }, [currentParams, toolRequiresKbSelection]);
+    const name = tool?.name;
+    if (name === "dify_search") return "dify_search";
+    if (name === "datamate_search") return "datamate_search";
+    return "knowledge_base_search";
+  }, [tool?.name, toolRequiresKbSelection]);
 
-  // Initialize with provided params
+  // Get Dify configuration from initial params
+  const difyServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const difyApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  // Initialize Dify config from params
+  useEffect(() => {
+    if (toolKbType === "dify_search") {
+      const serverUrl = difyServerUrlParam?.value || "";
+      const apiKey = difyApiKeyParam?.value || "";
+
+      setDifyConfig({
+        serverUrl,
+        apiKey,
+      });
+    }
+  }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
+
+  // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
+  const {
+    data: knowledgeBases = [],
+    isLoading: kbLoading,
+    refetch: refetchKnowledgeBases,
+  } = useKnowledgeBasesForToolConfig(
+    toolKbType,
+    toolKbType === "dify_search" ? difyConfig : undefined
+  );
+
+  // Sync knowledge bases hook
+  const { syncKnowledgeBases, isSyncing } = useSyncKnowledgeBases();
+
+  // Get current embedding model from config for model matching
+  const currentEmbeddingModel = useMemo(() => {
+    try {
+      const configStore = ConfigStore.getInstance();
+      const modelConfig = configStore.getModelConfig();
+      // Use modelName if available, otherwise try displayName
+      return (
+        modelConfig.embedding?.modelName ||
+        modelConfig.embedding?.displayName ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Check if a knowledge base can be selected
+  const canSelectKnowledgeBase = useCallback(
+    (kb: KnowledgeBase): boolean => {
+      // Empty knowledge bases cannot be selected
+      const isEmpty =
+        (kb.documentCount || 0) === 0 && (kb.chunkCount || 0) === 0;
+      if (isEmpty) {
+        return false;
+      }
+
+      // For nexent source, check model matching
+      if (kb.source === "nexent" && currentEmbeddingModel) {
+        if (
+          kb.embeddingModel &&
+          kb.embeddingModel !== "unknown" &&
+          kb.embeddingModel !== currentEmbeddingModel
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+    [currentEmbeddingModel]
+  );
+
+  // Initialize with provided params and sync display names when knowledgeBases is ready
   useEffect(() => {
     // Initialize form values
     setCurrentParams(initialParams);
@@ -95,36 +191,73 @@ export default function ToolConfigModal({
     });
     form.setFieldsValue(formValues);
 
-    // Parse initial index_names value for knowledge base selection
+    // Parse initial index_names/dataset_ids value for knowledge base selection
     if (toolRequiresKbSelection) {
-      const indexNamesParam = initialParams.find((p) => p.name === "index_names");
-      if (indexNamesParam?.value) {
-        try {
-          // Try to parse as JSON array
-          const parsed = typeof indexNamesParam.value === "string"
-            ? JSON.parse(indexNamesParam.value)
-            : indexNamesParam.value;
-          if (Array.isArray(parsed)) {
-            setSelectedKbIds(parsed);
+      // Support both index_names and dataset_ids
+      const kbParam = initialParams.find(
+        (p) => p.name === "index_names" || p.name === "dataset_ids"
+      );
+      if (kbParam?.value) {
+        let ids: string[] = [];
+        // Value can be an array or a JSON string
+        if (Array.isArray(kbParam.value)) {
+          ids = kbParam.value.map(String);
+        } else if (typeof kbParam.value === "string") {
+          try {
+            const parsed = JSON.parse(kbParam.value);
+            if (Array.isArray(parsed)) {
+              ids = parsed.map(String);
+            }
+          } catch {
+            ids = kbParam.value.split(",").filter(Boolean);
           }
-        } catch {
-          // If not JSON, might be comma-separated string
-          if (typeof indexNamesParam.value === "string") {
-            const ids = indexNamesParam.value.split(",").filter(Boolean);
-            setSelectedKbIds(ids);
+        }
+
+        if (ids.length > 0) {
+          setSelectedKbIds(ids);
+          // If knowledgeBases is already loaded, sync display names immediately
+          if (knowledgeBases.length > 0) {
+            const displayNames = ids.map((id) => {
+              const kb = knowledgeBases.find((k) => k.id === id);
+              return kb?.display_name || kb?.name || id;
+            });
+            setSelectedKbDisplayNames(displayNames);
           }
         }
       }
     }
   }, [initialParams, toolRequiresKbSelection]);
 
-  // Update selected KB display names when IDs change
+  // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
-    const names = knowledgeBases
-      .filter((kb) => selectedKbIds.includes(kb.id))
-      .map((kb) => kb.name);
-    setSelectedKbDisplayNames(names);
-  }, [selectedKbIds, knowledgeBases]);
+    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+      const displayNames = selectedKbIds.map((id) => {
+        const kb = knowledgeBases.find((k) => k.id === id);
+        return kb?.display_name || kb?.name || id;
+      });
+      setSelectedKbDisplayNames(displayNames);
+    }
+  }, [knowledgeBases, selectedKbIds]);
+
+  // Trigger refetch when opening for knowledge base tools (with loading state support)
+  useEffect(() => {
+    if (toolRequiresKbSelection && isOpen) {
+      // For Dify, only refetch if we have valid config
+      if (toolKbType === "dify_search") {
+        if (difyConfig.serverUrl && difyConfig.apiKey) {
+          refetchKnowledgeBases();
+        }
+      } else {
+        refetchKnowledgeBases();
+      }
+    }
+  }, [
+    toolRequiresKbSelection,
+    isOpen,
+    refetchKnowledgeBases,
+    toolKbType,
+    difyConfig,
+  ]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
@@ -143,10 +276,29 @@ export default function ToolConfigModal({
 
   const handleSave = async () => {
     try {
-      await form.validateFields();
-      if (!selectedTool) return;
+      // Force sync form values to currentParams before validation
+      const latestFormValues = form.getFieldsValue();
+      if (latestFormValues) {
+        const newParams = [...currentParams];
+        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
+          const index = parseInt(fieldName.replace("param_", ""));
+          if (!isNaN(index) && newParams[index]) {
+            newParams[index] = { ...newParams[index], value };
+          }
+        });
+        setCurrentParams(newParams);
+      }
 
-      // Convert params to backend format
+      await form.validateFields();
+
+      // Use selectedTool if available, otherwise use tool
+      const toolToSave = selectedTool || tool;
+      if (!toolToSave) {
+        message.error("No tool selected");
+        return;
+      }
+
+      // Convert params to backend format (use the synced params)
       const paramsObj = currentParams.reduce(
         (acc, param) => {
           acc[param.name] = param.value;
@@ -156,7 +308,7 @@ export default function ToolConfigModal({
       );
 
       // Update local state: Add tool to selected tools with updated params
-      const updatedTool = { ...selectedTool, initParams: currentParams };
+      const updatedTool = { ...toolToSave, initParams: currentParams };
       const currentTools = useAgentConfigStore.getState().editedAgent.tools;
 
       // Check if tool already exists, if so replace it, otherwise add it
@@ -174,35 +326,50 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
+      // For editing mode (when currentAgentId exists), always call API
+      // For creating mode (isCreatingMode=true), update local state only
       if (isCreatingMode) {
         // In creating mode, just update local state
         updateTools(newSelectedTools);
         message.success(t("toolConfig.message.saveSuccess"));
         handleClose(); // Close modal
-      } else if (currentAgentId) {
-        try {
-          const isEnabled = true; //  New tool is enabled by default
-          const result = await updateToolConfig(
-            parseInt(selectedTool.id),
-            currentAgentId,
-            paramsObj,
-            isEnabled
-          );
+        return;
+      }
 
-          if (result.success) {
-            // Update local state and invalidate queries
-            updateTools(newSelectedTools);
-            queryClient.invalidateQueries({
-              queryKey: ["toolInfo", parseInt(selectedTool.id), currentAgentId],
-            });
-            message.success(t("toolConfig.message.saveSuccess"));
-            handleClose(); // Close modal
-          } else {
-            message.error(result.message || t("toolConfig.message.saveError"));
-          }
-        } catch (error) {
-          message.error(t("toolConfig.message.saveError"));
+      if (!currentAgentId) {
+        // Should not happen in normal editing mode, but handle gracefully
+        updateTools(newSelectedTools);
+        message.success(t("toolConfig.message.saveSuccess"));
+        handleClose(); // Close modal
+        return;
+      }
+
+      // Edit mode: call API to persist changes
+      try {
+        setIsLoading(true);
+        const isEnabled = true; //  New tool is enabled by default
+        const result = await updateToolConfig(
+          parseInt(toolToSave.id),
+          currentAgentId,
+          paramsObj,
+          isEnabled
+        );
+        setIsLoading(false);
+
+        if (result.success) {
+          // Update local state and invalidate queries
+          updateTools(newSelectedTools);
+          queryClient.invalidateQueries({
+            queryKey: ["toolInfo", parseInt(toolToSave.id), currentAgentId],
+          });
+          message.success(t("toolConfig.message.saveSuccess"));
+          handleClose(); // Close modal
+        } else {
+          message.error(result.message || t("toolConfig.message.saveError"));
         }
+      } catch (error) {
+        setIsLoading(false);
+        message.error(t("toolConfig.message.saveError"));
       }
 
       // Call original onSave if provided
@@ -211,7 +378,7 @@ export default function ToolConfigModal({
       }
     } catch (error) {
       // Form validation failed, error will be shown by antd Form
-      message.error("Form validation failed:");
+      message.error("Form validation failed");
     }
   };
 
@@ -239,18 +406,29 @@ export default function ToolConfigModal({
   // Handle knowledge base selection confirm
   const handleKbConfirm = (selectedKnowledgeBases: KnowledgeBase[]) => {
     const ids = selectedKnowledgeBases.map((kb) => kb.id);
-    const names = selectedKnowledgeBases.map((kb) => kb.name);
+    // Use display_name if available, otherwise fall back to name
+    const displayNames = selectedKnowledgeBases.map(
+      (kb) => kb.display_name || kb.name
+    );
 
     setSelectedKbIds(ids);
-    setSelectedKbDisplayNames(names);
+    setSelectedKbDisplayNames(displayNames);
 
     // Update form value
     if (currentKbParamIndex !== null) {
       const param = currentParams[currentKbParamIndex];
       if (param) {
-        // Store as JSON array for consistency
+        // Store as array
         const formFieldName = `param_${currentKbParamIndex}`;
-        form.setFieldValue(formFieldName, JSON.stringify(ids));
+        form.setFieldValue(formFieldName, ids);
+
+        // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
+        const updatedParams = [...currentParams];
+        updatedParams[currentKbParamIndex] = {
+          ...updatedParams[currentKbParamIndex],
+          value: ids,
+        };
+        setCurrentParams(updatedParams);
       }
     }
 
@@ -258,55 +436,140 @@ export default function ToolConfigModal({
     setCurrentKbParamIndex(null);
   };
 
-  // Clear knowledge base selection
-  const clearKbSelection = () => {
-    setSelectedKbIds([]);
-    setSelectedKbDisplayNames([]);
+  // Remove a single knowledge base from selection
+  const removeKbFromSelection = (indexToRemove: number, paramIndex: number) => {
+    const newIds = selectedKbIds.filter((_, i) => i !== indexToRemove);
+    const newDisplayNames = selectedKbDisplayNames.filter(
+      (_, i) => i !== indexToRemove
+    );
 
-    if (currentKbParamIndex !== null) {
-      const param = currentParams[currentKbParamIndex];
-      if (param) {
-        const formFieldName = `param_${currentKbParamIndex}`;
-        form.setFieldValue(formFieldName, []);
-      }
-    }
+    setSelectedKbIds(newIds);
+    setSelectedKbDisplayNames(newDisplayNames);
+
+    // Update form value
+    const formFieldName = `param_${paramIndex}`;
+    form.setFieldValue(formFieldName, newIds);
+
+    // Also update currentParams directly since Form.Item has no name for index_names/dataset_ids
+    const updatedParams = [...currentParams];
+    updatedParams[paramIndex] = {
+      ...updatedParams[paramIndex],
+      value: newIds,
+    };
+    setCurrentParams(updatedParams);
   };
 
   // Get tool type for knowledge base selector
-  const getToolType = (): "knowledge_base_search" | "dify_search" | "datamate_search" => {
-    const name = tool?.name;
-    if (name === "dify_search") return "dify_search";
-    if (name === "datamate_search") return "datamate_search";
-    return "knowledge_base_search";
+  const getToolType = ():
+    | "knowledge_base_search"
+    | "dify_search"
+    | "datamate_search" => {
+    return toolKbType || "knowledge_base_search";
   };
 
   // Render knowledge base selector input (no button, just clickable input)
-  const renderKbSelectorInput = (param: ToolParam, index: number) => {
-    return (
-      <Input
-        readOnly
-        placeholder={t("toolConfig.input.knowledgeBaseSelector.placeholder", {
-          name: param.description || param.name,
-        })}
-        value={selectedKbDisplayNames.join(", ")}
-        onClick={() => openKbSelector(index)}
-        className="cursor-pointer bg-white"
-        suffix={
-          selectedKbIds.length > 0 ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseCircleOutlined />}
-              onClick={(e) => {
-                e.stopPropagation();
-                clearKbSelection();
-              }}
-            />
-          ) : null
+  const renderKbSelectorInput = useCallback(
+    (param: ToolParam, index: number) => {
+      const fieldName = `param_${index}`;
+      const formValue = form.getFieldValue(fieldName);
+
+      // Get display names based on current form value and knowledgeBases
+      let displayNames: string[] = [];
+      let ids: string[] = [];
+      if (formValue) {
+        // Value can be an array or a JSON string
+        if (Array.isArray(formValue)) {
+          ids = formValue.map((id) => String(id));
+        } else if (typeof formValue === "string") {
+          try {
+            const parsed = JSON.parse(formValue);
+            if (Array.isArray(parsed)) {
+              ids = parsed.map((id) => String(id));
+            }
+          } catch {
+            ids = formValue.split(",").filter(Boolean);
+          }
         }
-      />
-    );
-  };
+
+        // Map IDs to display names
+        if (ids.length > 0 && knowledgeBases.length > 0) {
+          displayNames = ids.map((id) => {
+            const cleanId = id.trim();
+            const kb = knowledgeBases.find((k) => k.id === cleanId);
+            return kb?.display_name || kb?.name || cleanId;
+          });
+        }
+      }
+
+      // Fallback to selectedKbDisplayNames if displayNames is empty
+      if (displayNames.length === 0 && selectedKbDisplayNames.length > 0) {
+        displayNames = selectedKbDisplayNames;
+        ids = selectedKbIds;
+      }
+
+      // Use the actual ids and displayNames for rendering
+      const tagsToRender = ids.length > 0 ? ids : [];
+      const namesToRender = displayNames;
+
+      const placeholder = t(
+        "toolConfig.input.knowledgeBaseSelector.placeholder",
+        {
+          name: param.description || param.name,
+        }
+      );
+
+      return (
+        <div
+          className="cursor-pointer bg-white border border-gray-300 rounded px-3 py-2 hover:border-blue-400 transition-colors"
+          onClick={() => openKbSelector(index)}
+          style={{
+            width: "100%",
+            minHeight: "32px",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "4px",
+          }}
+          title={namesToRender.join(", ")}
+        >
+          {kbLoading && knowledgeBases.length === 0 ? (
+            // Show skeleton loading when fetching knowledge bases
+            <div className="flex items-center gap-2 w-full">
+              <Skeleton.Input active size="small" style={{ width: "60%" }} />
+            </div>
+          ) : namesToRender.length > 0 ? (
+            namesToRender.map((name, i) => (
+              <Tag
+                key={tagsToRender[i]}
+                closeIcon={
+                  <span className="ant-tag-close-icon">
+                    <CloseOutlined style={{ fontSize: "10px" }} />
+                  </span>
+                }
+                onClose={(e) => {
+                  e.stopPropagation();
+                  removeKbFromSelection(i, index);
+                }}
+                style={{
+                  marginRight: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  lineHeight: "20px",
+                  padding: "0 8px",
+                  fontSize: "13px",
+                }}
+              >
+                {name}
+              </Tag>
+            ))
+          ) : (
+            <span className="text-gray-400 text-sm">{placeholder}</span>
+          )}
+        </div>
+      );
+    },
+    [form, knowledgeBases, selectedKbIds, selectedKbDisplayNames, kbLoading, t]
+  );
 
   const renderParamInput = (param: ToolParam, index: number) => {
     // Get options from frontend configuration based on tool name and parameter name
@@ -314,9 +577,6 @@ export default function ToolConfigModal({
 
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
-
-    // Check if this is index_names parameter for knowledge base search tools
-    const isKbIndexNames = toolRequiresKbSelection && param.name === "index_names";
 
     const inputComponent = (() => {
       // Handle select type - when options are defined in frontend config
@@ -332,11 +592,6 @@ export default function ToolConfigModal({
             }))}
           />
         );
-      }
-
-      // Handle knowledge base index_names parameter
-      if (isKbIndexNames) {
-        return renderKbSelectorInput(param, index);
       }
 
       switch (param.type) {
@@ -418,7 +673,9 @@ export default function ToolConfigModal({
                 disabled={!tool}
                 className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8 mr-auto"
               >
-                {testPanelVisible ? t("toolConfig.button.closeTest") : t("toolConfig.button.testTool")}
+                {testPanelVisible
+                  ? t("toolConfig.button.closeTest")
+                  : t("toolConfig.button.testTool")}
               </button>
             }
             <div className="flex gap-2">
@@ -473,7 +730,7 @@ export default function ToolConfigModal({
                   switch (param.type) {
                     case TOOL_PARAM_TYPES.ARRAY:
                       rules.push({
-                        validator: (_: any, value: any) => {
+                        validator: async (_: any, value: any) => {
                           if (!value) return Promise.resolve();
                           try {
                             const parsed =
@@ -485,6 +742,7 @@ export default function ToolConfigModal({
                                 t("toolConfig.validation.array.invalid")
                               );
                             }
+                            return Promise.resolve();
                           } catch {
                             return Promise.reject(
                               t("toolConfig.validation.array.invalid")
@@ -495,7 +753,7 @@ export default function ToolConfigModal({
                       break;
                     case TOOL_PARAM_TYPES.OBJECT:
                       rules.push({
-                        validator: (_: any, value: any) => {
+                        validator: async (_: any, value: any) => {
                           if (!value) return Promise.resolve();
                           try {
                             const parsed =
@@ -524,6 +782,7 @@ export default function ToolConfigModal({
                   return (
                     <Form.Item
                       key={param.name}
+                      required={param.required}
                       label={
                         <span
                           className="inline-block w-full truncate"
@@ -532,7 +791,13 @@ export default function ToolConfigModal({
                           {param.name}
                         </span>
                       }
-                      name={fieldName}
+                      name={
+                        toolRequiresKbSelection &&
+                        (param.name === "index_names" ||
+                          param.name === "dataset_ids")
+                          ? undefined
+                          : fieldName
+                      }
                       rules={rules}
                       tooltip={{
                         title: param.description,
@@ -540,7 +805,12 @@ export default function ToolConfigModal({
                         styles: { root: { maxWidth: 400 } },
                       }}
                     >
-                      {renderParamInput(param, index)}
+                      {/* For KB selector, use custom display (Form.Item doesn't control value) */}
+                      {toolRequiresKbSelection &&
+                      (param.name === "index_names" ||
+                        param.name === "dataset_ids")
+                        ? renderKbSelectorInput(param, index)
+                        : renderParamInput(param, index)}
                     </Form.Item>
                   );
                 })}
@@ -569,6 +839,12 @@ export default function ToolConfigModal({
         toolType={getToolType()}
         knowledgeBases={knowledgeBases}
         isLoading={kbLoading}
+        showCheckbox={true}
+        onSync={(toolType) => syncKnowledgeBases(toolType, difyConfig)}
+        syncLoading={isSyncing === getToolType()}
+        isSelectable={canSelectKnowledgeBase}
+        currentEmbeddingModel={currentEmbeddingModel}
+        difyConfig={toolKbType === "dify_search" ? difyConfig : undefined}
       />
     </>
   );

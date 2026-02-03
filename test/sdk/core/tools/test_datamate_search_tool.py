@@ -204,7 +204,7 @@ class TestForward:
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(
-            server_url="http://127.0.0.1:8080", observer=None)
+            server_url="http://127.0.0.1:8080", observer=None, index_names=["kb1"])
 
         # Mock the hybrid_search method to return search results
         mock_hybrid_search = mocker.patch.object(

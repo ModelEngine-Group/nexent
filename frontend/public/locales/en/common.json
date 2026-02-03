@@ -489,7 +489,7 @@
   "knowledgeBase.source.nexent": "Nexent",
   "knowledgeBase.source.datamate": "DataMate",
   "knowledgeBase.source.dify": "Dify",
-  "knowledgeBase.datamate.editDisabled": "DataMate knowledge bases do not support document editing",
+  "knowledgeBase.datamate.editDisabled": "Nexent is unable to upload files to the DataMate knowledge base. Please go to the DataMate page to perform the operation.",
   "knowledgeBase.filter.allSources": "All Sources",
   "knowledgeBase.filter.allModels": "All Models",
   "knowledgeBase.filter.source": "Source",
