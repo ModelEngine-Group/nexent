@@ -227,8 +227,10 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["remote_mcp_server_name"], "n1")
         self.assertEqual(result[0]["remote_mcp_server"], "u1")
         self.assertTrue(result[0]["status"])
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
         self.assertEqual(result[1]["remote_mcp_server_name"], "n2")
         self.assertFalse(result[1]["status"])
+        self.assertEqual(result[1]["permission"], "READ_ONLY")
 
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     async def test_get_empty(self, mock_get):
@@ -251,6 +253,7 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["remote_mcp_server_name"], "single_server")
         self.assertEqual(result[0]["remote_mcp_server"], "http://single.com")
         self.assertTrue(result[0]["status"])
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
 
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     async def test_get_large_list(self, mock_get):
@@ -282,6 +285,39 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
             result[0]["remote_mcp_server_name"], "test-server_123")
         self.assertEqual(result[0]["remote_mcp_server"],
                          "http://test-server.com:8080")
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_permission_by_creator(self, mock_get, mock_get_user_tenant):
+        """Test permission: creator can edit, others read when not admin"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get.return_value = [
+            {"mcp_name": "n1", "mcp_server": "u1",
+                "status": True, "created_by": "user123"},
+            {"mcp_name": "n2", "mcp_server": "u2",
+                "status": True, "created_by": "other"},
+        ]
+
+        result = await get_remote_mcp_server_list('tid', user_id="user123")
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[1]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_permission_admin_can_edit_all(self, mock_get, mock_get_user_tenant):
+        """Test permission: admin can edit all"""
+        mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+        mock_get.return_value = [
+            {"mcp_name": "n1", "mcp_server": "u1",
+                "status": True, "created_by": "someone"},
+            {"mcp_name": "n2", "mcp_server": "u2",
+                "status": True, "created_by": "other"},
+        ]
+
+        result = await get_remote_mcp_server_list('tid', user_id="user123")
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[1]["permission"], "EDIT")
 
 
 class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):

@@ -286,12 +286,14 @@ class TestGetRemoteProxies:
             {
                 "remote_mcp_server_name": "server1",
                 "remote_mcp_server": "http://server1.com",
-                "status": True
+                "status": True,
+                "permission": "EDIT",
             },
             {
                 "remote_mcp_server_name": "server2",
                 "remote_mcp_server": "http://server2.com",
-                "status": False
+                "status": False,
+                "permission": "READ_ONLY",
             }
         ]
         mock_get_list.return_value = mock_server_list
@@ -306,9 +308,11 @@ class TestGetRemoteProxies:
         assert "remote_mcp_server_list" in data
         assert len(data["remote_mcp_server_list"]) == 2
         assert data["status"] == "success"
+        assert data["remote_mcp_server_list"][0]["permission"] == "EDIT"
+        assert data["remote_mcp_server_list"][1]["permission"] == "READ_ONLY"
 
         mock_get_user_id.assert_called_once_with("Bearer test_token")
-        mock_get_list.assert_called_once_with(tenant_id="tenant456")
+        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123")
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
@@ -423,7 +427,8 @@ class TestIntegration:
         mock_get_list.return_value = [
             {"remote_mcp_server_name": "test_service",
              "remote_mcp_server": "http://test.com",
-             "status": True}
+             "status": True,
+             "permission": "EDIT"}
         ]
         list_response = client.get(
             "/mcp/list",
@@ -432,6 +437,7 @@ class TestIntegration:
         assert list_response.status_code == HTTPStatus.OK
         data = list_response.json()
         assert len(data["remote_mcp_server_list"]) == 1
+        assert data["remote_mcp_server_list"][0]["permission"] == "EDIT"
 
         # 3. Delete server
         mock_delete.return_value = None
@@ -1060,14 +1066,15 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.attach_mcp_container_permissions')
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
-    def test_list_mcp_containers_success(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
+    def test_list_mcp_containers_success(self, mock_get_list, mock_attach_perm, mock_container_manager_class, mock_get_user_id):
         """Test successful listing of MCP containers"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.list_mcp_containers.return_value = [
+        raw_containers = [
             {
                 "container_id": "container-1",
                 "name": "service1-user1234",
@@ -1083,6 +1090,11 @@ class TestListMCPContainers:
                 "host_port": "5021"
             }
         ]
+        mock_container_manager.list_mcp_containers.return_value = raw_containers
+        mock_attach_perm.return_value = [
+            {**raw_containers[0], "permission": "EDIT"},
+            {**raw_containers[1], "permission": "READ_ONLY"},
+        ]
 
         response = client.get(
             "/mcp/containers",
@@ -1093,13 +1105,21 @@ class TestListMCPContainers:
         data = response.json()
         assert data["status"] == "success"
         assert len(data["containers"]) == 2
+        assert data["containers"][0]["permission"] == "EDIT"
+        assert data["containers"][1]["permission"] == "READ_ONLY"
         mock_container_manager.list_mcp_containers.assert_called_once_with(
             tenant_id="tenant456")
+        mock_attach_perm.assert_called_once_with(
+            containers=raw_containers,
+            tenant_id="tenant456",
+            user_id="user123",
+        )
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.attach_mcp_container_permissions', return_value=[])
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
-    def test_list_mcp_containers_empty(self, mock_get_list, mock_container_manager_class, mock_get_user_id):
+    def test_list_mcp_containers_empty(self, mock_get_list, mock_attach_perm, mock_container_manager_class, mock_get_user_id):
         """Test listing containers when none exist"""
         mock_get_user_id.return_value = ("user123", "tenant456")
 
@@ -1116,6 +1136,11 @@ class TestListMCPContainers:
         data = response.json()
         assert data["status"] == "success"
         assert len(data["containers"]) == 0
+        mock_attach_perm.assert_called_once_with(
+            containers=[],
+            tenant_id="tenant456",
+            user_id="user123",
+        )
 
     @patch('apps.remote_mcp_app.get_current_user_id')
     @patch('apps.remote_mcp_app.MCPContainerManager')

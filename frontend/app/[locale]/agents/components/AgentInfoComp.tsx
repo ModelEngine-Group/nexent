@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Row, Col, Flex, Badge, Divider, Button, Drawer, App } from "antd";
+import { Row, Col, Flex, Badge, Divider, Button, Drawer, Tooltip } from "antd";
 import { Bug, Save, Info } from "lucide-react";
 
 import { AGENT_SETUP_LAYOUT_DEFAULT } from "@/const/agentConfig";
@@ -19,14 +19,21 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   const { t } = useTranslation("common");
 
   // Get data from store
-  const { editedAgent, updateBusinessInfo, updateProfileInfo, isCreatingMode } =
-    useAgentConfigStore();
+  const {
+    editedAgent,
+    updateBusinessInfo,
+    updateProfileInfo,
+    isCreatingMode,
+    currentAgentPermission,
+  } = useAgentConfigStore();
 
   // Get state from store
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
-  const editable =
+  const isPanelActive =
     (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
+  const isReadOnly = isPanelActive && !isCreatingMode && currentAgentPermission === "READ_ONLY";
+  const isEditable = isPanelActive && !isReadOnly;
 
   // Save guard hook
   const saveGuard = useSaveGuard();
@@ -73,7 +80,7 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
             <Col xs={24} className="h-full">
               <Flex vertical className="h-full min-h-0 w-full min-w-0">
                 <AgentGenerateDetail
-                  editable={editable}
+                  editable={isEditable}
                   editedAgent={editedAgent}
                   currentAgentId={currentAgentId}
                   onUpdateProfile={handleUpdateProfile}
@@ -103,23 +110,27 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
                 {t("systemPrompt.button.debug")}
               </Button>
 
-              <Button
-                icon={<Save size={16} />}
-                color="green"
-                variant="solid"
-                onClick={saveGuard.save}
-                size="middle"
-                title={t("common.save")}
-                disabled={isGenerating}
-              >
-                {t("common.save")}
-              </Button>
+              <Tooltip title={isReadOnly ? t("agent.noEditPermission") : undefined}>
+                <span>
+                  <Button
+                    icon={<Save size={16} />}
+                    color="green"
+                    variant="solid"
+                    onClick={saveGuard.save}
+                    size="middle"
+                    title={t("common.save")}
+                    disabled={isGenerating || isReadOnly}
+                  >
+                    {t("common.save")}
+                  </Button>
+                </span>
+              </Tooltip>
             </Col>
           </Row>
         </Flex>
       }
 
-      {!editable && (
+      {!isPanelActive && (
         <Flex>
           <div className="absolute inset-0 bg-white bg-opacity-95 flex items-center justify-center z-50 transition-all duration-300 ease-out animate-in fade-in-0">
             <div className="space-y-3 animate-in fade-in-50 duration-400 delay-50 text-center">

@@ -64,6 +64,14 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
+# Roles that can edit all resources within a tenant (permission = EDIT).
+# Keep this centralized to avoid drifting role logic across modules.
+CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
+
+# Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
+PERMISSION_READ = "READ_ONLY"
+PERMISSION_EDIT = "EDIT"
+
 
 # Deployment Version Configuration
 DEPLOYMENT_VERSION = os.getenv("DEPLOYMENT_VERSION", "speed")

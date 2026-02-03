@@ -125,8 +125,14 @@ export default function AgentManageComp() {
       !agentInfoLoading &&
       !agentInfoError
     ) {
+      const permissionFromList =
+        agentList.find((a: Agent) => String(a.id) === String(selectedAgentId))
+          ?.permission ?? null;
       // Handle agent switch with unsaved changes check
-      handleAgentSwitch(agentDetail);
+      handleAgentSwitch({
+        ...agentDetail,
+        permission: permissionFromList,
+      });
       setSelectedAgentId(null);
     } else if (selectedAgentId && agentInfoError && !agentInfoLoading) {
       // Handle error

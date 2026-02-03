@@ -859,21 +859,41 @@ select_terminal_tool() {
     echo ""
 }
 
-create_default_admin_user() {
-  echo "🔧 Creating admin user..."
-  RESPONSE=$(docker exec nexent-config bash -c "curl -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"nexent@example.com\",\"password\":\"nexent@4321\",\"email_confirm\":true,\"data\":{\"role\":\"admin\"}}'" 2>/dev/null)
+generate_random_password() {
+  # Generate a URL/JSON safe random password (alphanumeric only)
+  local pwd=""
+  if command -v openssl >/dev/null 2>&1; then
+    pwd=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
+  else
+    pwd=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+  fi
+  if [ -z "$pwd" ]; then
+    # Fallback (should be extremely rare)
+    pwd=$(date +%s%N | tr -dc '0-9' | head -c 20)
+  fi
+  echo "$pwd"
+}
+
+create_default_super_admin_user() {
+  local email="suadmin@nexent.com"
+  local password
+  password="$(generate_random_password)"
+
+  echo "🔧 Creating super admin user..."
+  RESPONSE=$(docker exec nexent-config bash -c "curl -s -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\",\"email_confirm\":true}'" 2>/dev/null)
 
   if [ -z "$RESPONSE" ]; then
     echo "   ❌ No response received from Supabase."
     return 1
   elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
-    echo "   ✅ Default admin user has been successfully created."
+    echo "   ✅ Default super admin user has been successfully created."
     echo ""
     echo "      Please save the following credentials carefully, which would ONLY be shown once."
-    echo "   📧 Email:    nexent@example.com"
-    echo "   🔏 Password: nexent@4321"
+    echo "   📧 Email:    ${email}"
+    echo "   🔏 Password: ${password}"
   elif echo "$RESPONSE" | grep -q '"error_code":"user_already_exists"' || echo "$RESPONSE" | grep -q '"code":422'; then
-    echo "   🚧 Default admin user already exists. Skipping creation."
+    echo "   🚧 Default super admin user already exists. Skipping creation."
+    echo "   📧 Email:    ${email}"
   else
     echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
     return 1
@@ -981,9 +1001,9 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  # Create default admin user
+  # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 1; }
+    create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
   fi
 
   persist_deploy_options

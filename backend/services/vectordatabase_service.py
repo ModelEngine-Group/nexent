@@ -25,7 +25,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from nexent.vector_database.datamate_core import DataMateCore
 
-from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE
+from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST, LANGUAGE, VectorDatabaseType, IS_SPEED_MODE, PERMISSION_EDIT, PERMISSION_READ
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file
 from database.knowledge_db import (
@@ -574,14 +574,14 @@ class ElasticSearchService:
 
             if effective_user_role in ["SU", "ADMIN", "SPEED"]:
                 # SU, ADMIN and SPEED roles can see all knowledgebases
-                permission = "EDIT"
+                permission = PERMISSION_EDIT
             elif effective_user_role in ["USER", "DEV"]:
                 # USER/DEV need group-based permission checking
                 kb_group_ids_str = record.get("group_ids")
                 kb_group_ids = convert_string_to_list(kb_group_ids_str or "")
                 kb_created_by = record.get("created_by")
                 kb_ingroup_permission = record.get(
-                    "ingroup_permission") or "READ_ONLY"
+                    "ingroup_permission") or PERMISSION_READ
 
                 # Check if user belongs to any of the knowledgebase groups
                 # Compatibility logic for legacy data:
@@ -602,17 +602,17 @@ class ElasticSearchService:
 
                 if has_group_intersection:
                     # Determine permission level
-                    permission = "READ_ONLY"  # Default
+                    permission = PERMISSION_READ  # Default
 
                     # User is creator: creator permission
                     if kb_created_by == user_id:
                         permission = "CREATOR"
                     # Group permission allows editing
-                    elif kb_ingroup_permission == "EDIT":
-                        permission = "EDIT"
+                    elif kb_ingroup_permission == PERMISSION_EDIT:
+                        permission = PERMISSION_EDIT
                     # Group permission is read-only: already set
-                    elif kb_ingroup_permission == "READ_ONLY":
-                        permission = "READ_ONLY"
+                    elif kb_ingroup_permission == PERMISSION_READ:
+                        permission = PERMISSION_READ
                     # Group permission is private: not visible
                     elif kb_ingroup_permission == "PRIVATE":
                         permission = None
