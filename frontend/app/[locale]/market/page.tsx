@@ -539,6 +539,8 @@ export default function MarketContent() {
                     agent_id: installAgent.agent_id,
                     agent_info: installAgent.agent_json.agent_info,
                     mcp_info: installAgent.agent_json.mcp_info,
+                    business_logic_model_id: installAgent.business_logic_model_id,
+                    business_logic_model_name: installAgent.business_logic_model_name,
                   } as ImportAgentData)
                 : null
             }
