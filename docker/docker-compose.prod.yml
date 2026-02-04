@@ -76,6 +76,7 @@ services:
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
       <<: [*minio-vars, *es-vars]
       skip_proxy: "true"
