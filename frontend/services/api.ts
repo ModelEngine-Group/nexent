@@ -44,7 +44,8 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
-    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    clearNew: (agentId: string | number) =>
+      `${API_BASE_URL}/agent/clear_new/${agentId}`,
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -140,8 +141,7 @@ export const API_ENDPOINTS = {
     chunkDetail: (indexName: string, chunkId: string) =>
       `${API_BASE_URL}/indices/${indexName}/chunk/${chunkId}`,
     // Update knowledge base info
-    updateIndex: (indexName: string) =>
-      `${API_BASE_URL}/indices/${indexName}`,
+    updateIndex: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
     searchHybrid: `${API_BASE_URL}/indices/search/hybrid`,
     summary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/auto_summary`,
@@ -257,13 +257,16 @@ export const API_ENDPOINTS = {
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
-    default: (tenantId: string) => `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
+    default: (tenantId: string) =>
+      `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
   },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
     create: `${API_BASE_URL}/invitations`,
-    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
-    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    update: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
   },
 };
 
