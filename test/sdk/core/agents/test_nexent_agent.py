@@ -188,8 +188,13 @@ mock_nexent_core_module = types.ModuleType("nexent.core")
 mock_nexent_core_module.utils = mock_nexent_core_utils_module
 mock_nexent_core_module.models = mock_nexent_core_models_module
 mock_nexent_core_module.MessageObserver = _MockMessageObserver
+
+# Create nexent.utils module placeholder - will be populated inside the with block
+mock_nexent_utils_module = types.ModuleType("nexent.utils")
+
 mock_nexent_module = types.ModuleType("nexent")
 mock_nexent_module.core = mock_nexent_core_module
+mock_nexent_module.utils = mock_nexent_utils_module
 mock_nexent_storage_module = types.ModuleType("nexent.storage")
 mock_nexent_storage_module.MinIOStorageClient = MagicMock()
 mock_nexent_module.storage = mock_nexent_storage_module
@@ -228,6 +233,7 @@ module_mocks = {
     "nexent": mock_nexent_module,
     "nexent.core": mock_nexent_core_module,
     "nexent.core.utils": mock_nexent_core_utils_module,
+    "nexent.utils": mock_nexent_utils_module,
     "nexent.core.utils.observer": mock_nexent_core_utils_observer_module,
     "sdk": mock_sdk_module,
     "sdk.nexent": mock_sdk_nexent_module,
@@ -256,9 +262,21 @@ module_mocks = {
 # Import the classes under test with patched dependencies in place
 # ---------------------------------------------------------------------------
 with patch.dict("sys.modules", module_mocks):
+    # Create mock http_client_manager module for analyze_text_file_tool
+    # This is needed because analyze_text_file_tool.py uses absolute import:
+    # "from nexent.utils.http_client_manager import http_client_manager"
+    mock_http_client_manager_module = MagicMock()
+    mock_http_client_manager_module.http_client_manager = MagicMock()
+
+    # We need to add this to sys.modules before the import happens
+    sys.modules["nexent.utils.http_client_manager"] = mock_http_client_manager_module
+
     from sdk.nexent.core.agents import nexent_agent
     from sdk.nexent.core.agents.nexent_agent import NexentAgent, ActionStep, TaskStep
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory
+
+    # Clean up after import
+    sys.modules.pop("nexent.utils.http_client_manager", None)
 
 
 # ----------------------------------------------------------------------------

@@ -14,7 +14,6 @@ import { Button, Dropdown } from "antd";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { StaticScrollArea } from "@/components/ui/scrollArea";
-import { USER_ROLES } from "@/const/modelConfig";
 import { useTranslation } from "react-i18next";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ConversationListItem, ChatSidebarProps } from "@/types/chat";
@@ -94,13 +93,11 @@ export function ChatSidebar({
   onRename,
   onDelete,
   onSettingsClick,
-  settingsMenuItems,
   onDropdownOpenChange,
   onToggleSidebar,
   expanded,
   userEmail,
-  userAvatarUrl,
-  userRole = USER_ROLES.USER,
+  userAvatarUrl
 }: ChatSidebarProps) {
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();

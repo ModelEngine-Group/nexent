@@ -31,7 +31,7 @@ class TestGetPromptTemplate:
 
         # Verify file was opened with correct path
         call_args = mock_file.call_args[0]
-        assert 'prompts/analyze_image.yaml' in call_args[0].replace('\\', '/')
+        assert 'prompts/analyze_image_zh.yaml' in call_args[0].replace('\\', '/')
         assert call_args[1] == 'r'
         assert mock_file.call_args[1]['encoding'] == 'utf-8'
 
@@ -73,7 +73,7 @@ class TestGetPromptTemplate:
 
         # Verify file path contains Chinese template
         call_args = mock_file.call_args[0]
-        assert 'prompts/analyze_image.yaml' in call_args[0].replace('\\', '/')
+        assert 'prompts/analyze_image_zh.yaml' in call_args[0].replace('\\', '/')
 
         mock_yaml_load.assert_called_once()
         assert result == {"system_prompt": "Test prompt"}

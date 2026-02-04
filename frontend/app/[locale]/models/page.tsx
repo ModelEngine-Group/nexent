@@ -14,36 +14,26 @@ import { ModelConfigSectionRef } from "./components/modelConfig";
  */
 export default function ModelsContent() {
   // Use custom hook for common setup flow logic
-  const { canAccessProtectedData, pageVariants, pageTransition } = useSetupFlow(
-    {
-      requireAdmin: true,
-      nonAdminRedirect: "/setup/knowledges",
-    }
-  );
+  const { pageVariants, pageTransition } = useSetupFlow({});
 
   const modelConfigSectionRef = useRef<ModelConfigSectionRef | null>(null);
 
   return (
-    <>
-      <div className="w-full h-full p-8">
-        <motion.div
-          initial="initial"
-          animate="in"
-          exit="out"
-          variants={pageVariants}
-          transition={pageTransition}
-          style={{ width: "100%", height: "100%" }}
-        >
-          <div className="w-full h-full flex items-center justify-center">
-            {canAccessProtectedData ? (
-              <AppModelConfig
-                forwardedRef={modelConfigSectionRef}
-                canAccessProtectedData={canAccessProtectedData}
-              />
-            ) : null}
-          </div>
-        </motion.div>
-      </div>
-    </>
+    <div className="w-full h-full p-8">
+      <motion.div
+        initial="initial"
+        animate="in"
+        exit="out"
+        variants={pageVariants}
+        transition={pageTransition}
+        style={{ width: "100%", height: "100%" }}
+      >
+        <div className="w-full h-full flex items-center justify-center">
+          <AppModelConfig
+            forwardedRef={modelConfigSectionRef}
+          />
+        </div>
+      </motion.div>
+    </div>
   );
 }

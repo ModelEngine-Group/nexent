@@ -1,27 +1,58 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
-import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle } from "lucide-react";
+import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
+import { App } from "antd";
 
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
+import { USER_ROLES } from "@/const/auth";
+import { useGroupList } from "@/hooks/group/useGroupList";
 
 export function AvatarDropdown() {
-  const { user, isLoading, logout, openLoginModal, openRegisterModal } =
-    useAuth();
+  const { user, groupIds, isAuthzReady } = useAuthorizationContext();
+  const { isLoading, logout, revoke, openLoginModal, openRegisterModal } =
+    useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
+  const { modal } = App.useApp();
   const { confirm } = useConfirmModal();
 
+  // Fetch groups for group name mapping
+  const { data: groupData } = useGroupList(user?.tenantId || null, 1, 100);
+  const groups = groupData?.groups || [];
+
+  // Create group name mapping from group_id to group_name
+  const groupNameMap = useMemo(() => {
+    const map = new Map<number, { name: string; description?: string }>();
+    groups.forEach((group) => {
+      map.set(group.group_id, {
+        name: group.group_name,
+        description: group.group_description,
+      });
+    });
+    return map;
+  }, [groups]);
+
+  // Get user's group info
+  const userGroups = useMemo(() => {
+    if (!groupIds || groupIds.length === 0) return [];
+    return groupIds.map((id) => ({
+      id,
+      ...groupNameMap.get(id) || { name: t("common.unknown"), description: "" },
+    }));
+  }, [groupIds, groupNameMap, t]);
+
+  // Show loading while authentication is in progress
   if (isLoading) {
     return <Spin size="small" />;
   }
-
   if (!user) {
     const items: ItemType[] = [
       {
@@ -89,10 +120,17 @@ export function AvatarDropdown() {
       label: (
         <div className="py-1">
           <div className="font-medium">{user.email}</div>
-          <div className="mt-1">
+          <div className="mt-1 flex flex-wrap gap-1 max-w-[240px]">
             <Tag color={getRoleColor(user.role)}>
-              {t(user.role === "admin" ? "auth.admin" : "auth.user")}
+              {t(`auth.${(user.role).toLowerCase()}`)}
             </Tag>
+            {userGroups.length > 0 ? (
+              userGroups.map((group) => (
+                <Tag key={group.id} color="blue">
+                  {group.name}
+                </Tag>
+              ))
+            ) : null}
           </div>
         </div>
       ),
@@ -130,6 +168,31 @@ export function AvatarDropdown() {
         });
       },
     },
+    {
+      key: "revoke",
+      icon: <Power size={16} />,
+      label: t("auth.revoke"),
+      // danger: true,
+      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
+      onClick: () => {
+        if (user.role === USER_ROLES.ADMIN) {
+          modal.error({
+            title: t("auth.refuseRevoke"),
+            content: t("auth.refuseRevokePrompt"),
+            okText: t("auth.confirm"),
+          });
+        } else {
+          confirm({
+            title: t("auth.confirmRevoke"),
+            content: t("auth.confirmRevokePrompt"),
+            okText: t("auth.confirmRevokeOk"),
+            onOk: () => {
+              revoke();
+            },
+          });
+        }
+      },
+    },
   ];
 
   return (
@@ -145,7 +208,7 @@ export function AvatarDropdown() {
         )}
       >
         <Avatar
-          src={user.avatar_url}
+          src={user.avatarUrl}
           className="cursor-pointer"
           size="default"
           icon={<UserRound size={18} />}

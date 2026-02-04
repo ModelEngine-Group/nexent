@@ -820,6 +820,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (6, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
 (7, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
 (8, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(211, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (9, 'SU', 'RESOURCE', 'AGENT', 'READ'),
 (10, 'SU', 'RESOURCE', 'AGENT', 'DELETE'),
 (11, 'SU', 'RESOURCE', 'KB', 'READ'),
@@ -846,6 +847,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (32, 'SU', 'RESOURCE', 'TENANT', 'READ'),
 (33, 'SU', 'RESOURCE', 'TENANT', 'UPDATE'),
 (34, 'SU', 'RESOURCE', 'TENANT', 'DELETE'),
+(213, 'SU', 'RESOURCE', 'TENANT.LIST', 'READ'),
 (35, 'SU', 'RESOURCE', 'TENANT.INFO', 'READ'),
 (36, 'SU', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
 (37, 'SU', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
@@ -868,6 +870,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (54, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
 (55, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
 (56, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(212, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (57, 'ADMIN', 'RESOURCE', 'AGENT', 'CREATE'),
 (58, 'ADMIN', 'RESOURCE', 'AGENT', 'READ'),
 (59, 'ADMIN', 'RESOURCE', 'AGENT', 'UPDATE'),
@@ -1027,4 +1030,8 @@ ON CONFLICT (role_permission_id) DO NOTHING;
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
 VALUES ('user_id', 'tenant_id', 'SPEED', NULL, 'system', 'system')
+ON CONFLICT (user_id, tenant_id) DO NOTHING;
+
+INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
+VALUES ('suadmin', '', 'SU', NULL, 'system', 'system')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;

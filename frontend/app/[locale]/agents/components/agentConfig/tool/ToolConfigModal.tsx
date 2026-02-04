@@ -611,6 +611,19 @@ export default function ToolConfigModal({
         case TOOL_PARAM_TYPES.ARRAY:
         case TOOL_PARAM_TYPES.OBJECT:
         default:
+          // Check if parameter name contains "password" for secure input
+          const isPasswordType = param.name.toLowerCase().includes("password");
+
+          if (isPasswordType) {
+            return (
+              <Input.Password
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: param.description,
+                })}
+              />
+            );
+          }
+
           // Default TextArea for all text-like types and unknown types
           return (
             <Input.TextArea
