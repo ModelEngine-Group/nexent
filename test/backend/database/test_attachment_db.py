@@ -58,6 +58,7 @@ with patch('backend.database.attachment_db.minio_client', minio_client_mock):
         download_file,
         get_file_url,
         get_file_size_from_minio,
+        file_exists,
         list_files,
         delete_file,
         get_file_stream,
@@ -484,4 +485,49 @@ class TestGetContentType:
         assert get_content_type('test.JPG') == 'image/jpeg'
         assert get_content_type('test.PNG') == 'image/png'
         assert get_content_type('test.PDF') == 'application/pdf'
+
+
+class TestFileExists:
+    """Test cases for file_exists function"""
+
+    def test_file_exists_returns_true_when_file_exists(self):
+        """Test file_exists returns True when file exists in bucket"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.storage_config.default_bucket = 'test-bucket'
+            mock_client.client.stat_object.return_value = MagicMock()
+            
+            result = file_exists('test/file.txt')
+            
+            assert result is True
+            mock_client.client.stat_object.assert_called_once_with('test-bucket', 'test/file.txt')
+
+    def test_file_exists_returns_false_when_file_not_exists(self):
+        """Test file_exists returns False when file does not exist"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.storage_config.default_bucket = 'test-bucket'
+            mock_client.client.stat_object.side_effect = Exception('NoSuchKey')
+            
+            result = file_exists('nonexistent/file.txt')
+            
+            assert result is False
+
+    def test_file_exists_with_custom_bucket(self):
+        """Test file_exists with custom bucket parameter"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.client.stat_object.return_value = MagicMock()
+            
+            result = file_exists('test/file.txt', bucket='custom-bucket')
+            
+            assert result is True
+            mock_client.client.stat_object.assert_called_once_with('custom-bucket', 'test/file.txt')
+
+    def test_file_exists_handles_any_exception(self):
+        """Test file_exists handles any exception and returns False"""
+        with patch('backend.database.attachment_db.minio_client') as mock_client:
+            mock_client.storage_config.default_bucket = 'test-bucket'
+            mock_client.client.stat_object.side_effect = RuntimeError('Connection failed')
+            
+            result = file_exists('test/file.txt')
+            
+            assert result is False
 

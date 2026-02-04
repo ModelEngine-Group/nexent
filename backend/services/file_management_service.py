@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import subprocess
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -17,11 +16,12 @@ from database.attachment_db import (
     get_content_type,
     get_file_stream,
     delete_file,
-    list_files
+    list_files,
+    file_exists
 )
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.file_management_utils import save_upload_file
+from utils.file_management_utils import save_upload_file, convert_office_to_pdf
 
 from nexent import MessageObserver
 from nexent.core.models import OpenAILongContextModel
@@ -216,31 +216,35 @@ async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
     
     # PDF, images, and text files - return directly
     if content_type == 'application/pdf' or content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown']:
-        return await get_file_stream_impl(object_name)
+        file_stream = get_file_stream(object_name)
+        if file_stream is None:
+            raise Exception("File not found or failed to read from storage")
+        return file_stream, content_type
     
     # Office documents - convert to PDF with caching
     elif 'officedocument' in content_type or 'msword' in content_type or 'ms-excel' in content_type or 'ms-powerpoint' in content_type:
         
-        # Generate deterministic PDF path for caching
-        safe_name = object_name.replace('/', '_').replace('\\', '_')
-        name_without_ext = safe_name.rsplit('.', 1)[0] if '.' in safe_name else safe_name
-        pdf_object_name = f"converted/temp_{name_without_ext}.pdf"
+        # Generate deterministic PDF path for caching by preserving original path structure
+        name_without_ext = object_name.rsplit('.', 1)[0] if '.' in object_name else object_name
+        pdf_object_name = f"converted/{name_without_ext}.pdf"
         
-        # Check if converted PDF already exists in MinIO
-        try:
-            pdf_stream, pdf_content_type = await get_file_stream_impl(pdf_object_name)
-            return pdf_stream, pdf_content_type
-        except Exception:
-            pass  # Cache miss, will convert
+        # Check if converted PDF already exists in MinIO (cache hit)
+        if file_exists(pdf_object_name):
+            file_stream = get_file_stream(pdf_object_name)
+            if file_stream is None:
+                raise Exception("Cached PDF not found or failed to read from storage")
+            return file_stream, 'application/pdf'
         
-        # Convert Office to PDF
+        # Cache miss - convert Office to PDF
         temp_dir = None
         try:
             # Create temporary directory for conversion
             temp_dir = tempfile.mkdtemp(prefix='office_convert_')
             
             # Download original file from MinIO
-            original_stream, _ = await get_file_stream_impl(object_name)
+            original_stream = get_file_stream(object_name)
+            if original_stream is None:
+                raise Exception("Original file not found or failed to read from storage")
             original_filename = os.path.basename(object_name)
             input_path = os.path.join(temp_dir, original_filename)
             
@@ -269,66 +273,12 @@ async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
         
-        # Return converted PDF from MinIO (same path as cache hit)
-        return await get_file_stream_impl(pdf_object_name)
+        # Return converted PDF from MinIO
+        file_stream = get_file_stream(pdf_object_name)
+        if file_stream is None:
+            raise Exception("Converted PDF not found or failed to read from storage")
+        return file_stream, 'application/pdf'
     
     # Unsupported file type
     else:
         raise Exception(f"Unsupported file type for preview: {content_type}")
-
-
-async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
-    """
-    Convert Office document to PDF using LibreOffice.
-    
-    Args:
-        input_path: Path to input Office file
-        output_dir: Directory for output PDF file
-        timeout: Conversion timeout in seconds (default: 30s)
-        
-    Returns:
-        str: Path to generated PDF file
-    """
-
-    # Run LibreOffice conversion
-    # --headless: run without GUI
-    # --convert-to pdf: output format
-    # --outdir: output directory
-    cmd = [
-        'libreoffice',
-        '--headless',
-        '--convert-to', 'pdf',
-        '--outdir', output_dir,
-        input_path
-    ]
-    
-    try:
-        # Run conversion with timeout
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown conversion error"
-            logger.error(f"LibreOffice conversion failed: {error_msg}")
-            raise Exception(f"Office to PDF conversion failed: {error_msg}")
-        
-        # Find generated PDF file
-        input_filename = os.path.basename(input_path)
-        pdf_filename = os.path.splitext(input_filename)[0] + '.pdf'
-        pdf_path = os.path.join(output_dir, pdf_filename)
-        
-        if not os.path.exists(pdf_path):
-            raise Exception(f"Converted PDF not found: {pdf_path}")
-        
-        return pdf_path
-        
-    except subprocess.TimeoutExpired:
-        logger.error(f"Office to PDF conversion timeout after {timeout}s: {input_path}")
-        raise Exception(f"Office to PDF conversion timeout (>{timeout}s)")
-    except Exception as e:
-        logger.error(f"Office to PDF conversion error: {str(e)}")
-        raise
