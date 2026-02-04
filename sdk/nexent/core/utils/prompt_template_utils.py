@@ -14,11 +14,11 @@ logger = logging.getLogger("prompt_template_utils")
 # Define template path mapping
 template_paths = {
     'analyze_image': {
-        LANGUAGE["ZH"]: 'core/prompts/analyze_image.yaml',
+        LANGUAGE["ZH"]: 'core/prompts/analyze_image_zh.yaml',
         LANGUAGE["EN"]: 'core/prompts/analyze_image_en.yaml'
     },
     'analyze_file': {
-        LANGUAGE["ZH"]: 'core/prompts/analyze_file.yaml',
+        LANGUAGE["ZH"]: 'core/prompts/analyze_file_zh.yaml',
         LANGUAGE["EN"]: 'core/prompts/analyze_file_en.yaml'
     }
 }
