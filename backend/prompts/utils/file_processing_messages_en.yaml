@@ -1,5 +1,0 @@
-FILE_CONTENT_SUCCESS: "File {filename} content: {content}"
-FILE_CONTENT_ERROR: "File {filename} content: Error processing text file {filename}: {error}"
-FILE_PROCESSING_ERROR: "File processing failed (status code: {status_code}): {error_detail}"
-IMAGE_CONTENT_SUCCESS: "Image file {filename} content: {content}"
-IMAGE_CONTENT_ERROR: "Image file {filename} content: Error processing image file {filename}: {error}"

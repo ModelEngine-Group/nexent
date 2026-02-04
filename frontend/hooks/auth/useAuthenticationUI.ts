@@ -127,7 +127,10 @@ export function useAuthenticationUI({
     if (isAuthChecking) return;
     // Skip if user is authenticated
     if (isAuthenticated) return;
-
+    // Skip if session expired modal is already showing (avoid duplicate modals)
+    if (isSessionExpiredModalOpen) return;
+    if (isLoginModalOpen) return;
+    if (isRegisterModalOpen) return;
     // Skip if already on home page
     if (isLocaleHomePath(pathname)) return;
 
@@ -136,21 +139,8 @@ export function useAuthenticationUI({
     if (effectivePath !== "/") {
       openAuthPromptModal();
     }
-  }, [pathname, isAuthenticated, isSpeedMode, isAuthChecking, openAuthPromptModal]);
+  }, [pathname, isAuthenticated, isSpeedMode, isAuthChecking, isSessionExpiredModalOpen, openAuthPromptModal]);
 
-  // After auth check completes, verify current route access if user is authenticated
-  useEffect(() => {
-    if (isSpeedMode) return;
-    if (isAuthChecking) return;
-    if (!isAuthenticated) return;
-    if (isLocaleHomePath(pathname)) return;
-
-    // If we reach here, user is authenticated but accessing a route
-    // that previously triggered auth prompt - ensure prompt is closed
-    if (isAuthPromptModalOpen) {
-      closeAuthPromptModal();
-    }
-  }, [isAuthChecking, isAuthenticated, pathname, isAuthPromptModalOpen, isSpeedMode, closeAuthPromptModal]);
 
   return {
     // Login/Register Modal
