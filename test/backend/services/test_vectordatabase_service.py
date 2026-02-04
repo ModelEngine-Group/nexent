@@ -736,6 +736,7 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that non-creator user gets READ_ONLY permission when ingroup_permission is READ_ONLY.
@@ -781,6 +782,7 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that non-creator user gets default READ_ONLY permission when ingroup_permission is None or other value.
