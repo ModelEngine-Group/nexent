@@ -1,5 +1,7 @@
 # AGENTS
 
+<!-- Skills section removed -->
+
 <skills_system priority="1">
 
 ## Available Skills
@@ -21,6 +23,12 @@ Usage notes:
 </usage>
 
 <available_skills>
+
+<skill>
+<name>prompts-writing</name>
+<description>Create, refine, and optimize high-quality YAML prompts for AI assistants. Use when working with prompt templates, system prompts, agent prompts, or any prompt engineering tasks. Provides structure guidelines, template patterns, and quality standards for YAML-based prompts.</description>
+<location>project</location>
+</skill>
 
 <skill>
 <name>skill-creator</name>
