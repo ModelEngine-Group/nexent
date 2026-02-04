@@ -36,10 +36,18 @@ export type EditableAgent = Pick<
   | "business_logic_model_name"
   | "business_logic_model_id"
   | "sub_agent_id_list"
+  | "group_ids"
 >;
 
 interface AgentConfigStoreState {
   currentAgentId: number | null;
+  /**
+   * Per-agent permission from /agent/list.
+   * - EDIT: editable
+   * - READ_ONLY: read-only
+   * null: unknown / not selected
+   */
+  currentAgentPermission: "EDIT" | "READ_ONLY" | null;
   baselineAgent: EditableAgent | null;
   editedAgent: EditableAgent;
   hasUnsavedChanges: boolean;
@@ -95,7 +103,7 @@ interface AgentConfigStoreState {
    * Reset all state (optional).
    */
   reset: () => void;
- 
+
   /**
    * Get the current baseline editable agent (null = create or initial state).
    * Use isCreatingMode to distinguish between initial state and create mode.
@@ -120,6 +128,7 @@ const emptyEditableAgent: EditableAgent = {
   business_logic_model_name: "",
   business_logic_model_id: 0,
   sub_agent_id_list: [],
+  group_ids: [],
 };
 
 const toEditable = (agent: Agent | null): EditableAgent =>
@@ -141,6 +150,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_name: agent.business_logic_model_name || "",
         business_logic_model_id: agent.business_logic_model_id || 0,
         sub_agent_id_list: agent.sub_agent_id_list || [],
+        group_ids: agent.group_ids || [],
       }
     : { ...emptyEditableAgent };
 
@@ -149,7 +159,7 @@ const normalizeArray = (arr: number[]) =>
     (a, b) => a - b
   );
 
-// 特定字段的脏检查函数
+// Dirty check helpers for specific field groups
 const isBusinessInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: EditableAgent): boolean => {
   if (!baselineAgent) {
     return (
@@ -178,7 +188,8 @@ const isProfileInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
       editedAgent.provide_run_summary !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
-      editedAgent.few_shots_prompt !== ""
+      editedAgent.few_shots_prompt !== "" ||
+      normalizeArray(editedAgent.group_ids || []).length > 0
     );
   }
   return (
@@ -192,7 +203,9 @@ const isProfileInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
-    baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt
+    baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
+    JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
+      JSON.stringify(normalizeArray(editedAgent.group_ids ?? []))
   );
 };
 
@@ -211,52 +224,9 @@ const isSubAgentIdsDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
     JSON.stringify(normalizeArray(editedAgent.sub_agent_id_list ?? []));
 };
 
-const isDirty = (baselineAgent: EditableAgent | null, editedAgent: EditableAgent): boolean => {
-  if (!baselineAgent) {
-    // Create mode: any non-default value counts as dirty
-    return (
-      editedAgent.name !== "" ||
-      editedAgent.display_name !== "" ||
-      editedAgent.description !== "" ||
-      editedAgent.author !== "" ||
-      editedAgent.model !== "" ||
-      editedAgent.model_id !== 0 ||
-      editedAgent.max_step !== 0 ||
-      editedAgent.provide_run_summary !== false ||
-      editedAgent.tools.length > 0 ||
-      editedAgent.duty_prompt !== "" ||
-      editedAgent.constraint_prompt !== "" ||
-      editedAgent.few_shots_prompt !== "" ||
-      editedAgent.business_description !== "" ||
-      editedAgent.business_logic_model_name !== "" ||
-      editedAgent.business_logic_model_id !== 0 ||
-      normalizeArray(editedAgent.sub_agent_id_list || []).length > 0
-    );
-  }
-
-  return (
-    baselineAgent.name !== editedAgent.name ||
-    baselineAgent.display_name !== editedAgent.display_name ||
-    baselineAgent.description !== editedAgent.description ||
-    baselineAgent.author !== editedAgent.author ||
-    baselineAgent.model !== editedAgent.model ||
-    baselineAgent.model_id !== editedAgent.model_id ||
-    baselineAgent.max_step !== editedAgent.max_step ||
-    baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
-    JSON.stringify(baselineAgent.tools) !== JSON.stringify(editedAgent.tools) ||
-    baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
-    baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
-    baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
-    baselineAgent.business_description !== editedAgent.business_description ||
-    baselineAgent.business_logic_model_name !== editedAgent.business_logic_model_name ||
-    baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
-    JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==
-      JSON.stringify(normalizeArray(editedAgent.sub_agent_id_list ?? []))
-  );
-};
-
 export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => ({
   currentAgentId: null,
+  currentAgentPermission: null,
   baselineAgent: null,
   editedAgent: { ...emptyEditableAgent },
   hasUnsavedChanges: false,
@@ -267,6 +237,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     const editedAgent = baselineAgent ? { ...baselineAgent } : { ...emptyEditableAgent };
     set({
       currentAgentId: agent ? parseInt(agent.id) : null,
+      currentAgentPermission: agent ? ((agent as any).permission ?? null) : null,
       baselineAgent,
       editedAgent,
       hasUnsavedChanges: false,
@@ -277,6 +248,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   enterCreateMode: () => {
     set({
       currentAgentId: null,
+      currentAgentPermission: "EDIT",
       baselineAgent: null,
       editedAgent: { ...emptyEditableAgent },
       hasUnsavedChanges: false,
@@ -287,8 +259,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   updateTools: (tools) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, tools: [...tools] };
-      // 如果已经有未保存的更改，则无需重新计算，直接保持true
-      // 只有当前状态为干净时，才需要检查tools字段是否有更改
+      // If there are already unsaved changes, keep it true and skip recalculation.
+      // Only when state is clean do we need to check whether tools changed.
       const hasUnsavedChanges = state.hasUnsavedChanges
         ? true
         : isToolsDirty(state.baselineAgent, editedAgent);
@@ -303,8 +275,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
     const nextIds = normalizeArray(ids);
     set((state) => {
       const editedAgent = { ...state.editedAgent, sub_agent_id_list: nextIds };
-      // 如果已经有未保存的更改，则无需重新计算，直接保持true
-      // 只有当前状态为干净时，才需要检查sub agent ids字段是否有更改
+      // If there are already unsaved changes, keep it true and skip recalculation.
+      // Only when state is clean do we need to check whether sub-agent IDs changed.
       const hasUnsavedChanges = state.hasUnsavedChanges
         ? true
         : isSubAgentIdsDirty(state.baselineAgent, editedAgent);
@@ -318,8 +290,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   updateBusinessInfo: (payload) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, ...payload };
-      // 如果已经有未保存的更改，则无需重新计算，直接保持true
-      // 只有当前状态为干净时，才需要检查business info字段是否有更改
+      // If there are already unsaved changes, keep it true and skip recalculation.
+      // Only when state is clean do we need to check whether business info changed.
       const hasUnsavedChanges = state.hasUnsavedChanges
         ? true
         : isBusinessInfoDirty(state.baselineAgent, editedAgent);
@@ -333,8 +305,8 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   updateProfileInfo: (payload) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, ...payload };
-      // 如果已经有未保存的更改，则无需重新计算，直接保持true
-      // 只有当前状态为干净时，才需要检查profile info字段是否有更改
+      // If there are already unsaved changes, keep it true and skip recalculation.
+      // Only when state is clean do we need to check whether profile info changed.
       const hasUnsavedChanges = state.hasUnsavedChanges
         ? true
         : isProfileInfoDirty(state.baselineAgent, editedAgent);
@@ -367,13 +339,14 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   reset: () => {
     set({
       currentAgentId: null,
+      currentAgentPermission: null,
       baselineAgent: null,
       editedAgent: { ...emptyEditableAgent },
       hasUnsavedChanges: false,
       isCreatingMode: false,
     });
   },
- 
+
   getCurrentAgent: () => {
     return get().baselineAgent;
   },

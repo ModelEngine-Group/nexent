@@ -2,7 +2,6 @@
 
 import React from "react";
 import { Flex } from "antd";
-import { useSetupFlow } from "@/hooks/useSetupFlow";
 import UserProfileComp from "./components/UserProfileComp";
 
 /**
@@ -14,20 +13,15 @@ import UserProfileComp from "./components/UserProfileComp";
  * - Layout uses Flex for responsive design and proper content flow.
  */
 export default function UsersPage() {
-  const { canAccessProtectedData } = useSetupFlow({
-    requireAdmin: false,
-  });
 
   return (
     <>
-      {canAccessProtectedData ? (
-        <Flex
-          vertical
-          className="h-full w-full overflow-hidden"
-        >
-          <UserProfileComp />
-        </Flex>
-      ) : null}
+      <Flex
+        vertical
+        className="h-full w-full overflow-hidden"
+      >
+        <UserProfileComp />
+      </Flex>
     </>
   );
 }

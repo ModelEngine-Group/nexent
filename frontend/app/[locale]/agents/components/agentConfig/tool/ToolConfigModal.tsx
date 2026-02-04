@@ -2,11 +2,20 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Input, Switch, InputNumber, Tag, Form, message } from "antd";
+import {
+  Modal,
+  Input,
+  Switch,
+  InputNumber,
+  Tag,
+  Form,
+  message,
+  Select,
+} from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 
-import { TOOL_PARAM_TYPES } from "@/const/agentConfig";
+import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
@@ -156,7 +165,28 @@ export default function ToolConfigModal({
   };
 
   const renderParamInput = (param: ToolParam, index: number) => {
+    // Get options from frontend configuration based on tool name and parameter name
+    const options = getToolParamOptions(tool.name, param.name);
+
+    // Determine if this parameter should be rendered as a select dropdown
+    const isSelectType = options && options.length > 0;
+
     const inputComponent = (() => {
+      // Handle select type - when options are defined in frontend config
+      if (isSelectType) {
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            options={options.map((option) => ({
+              value: option,
+              label: option,
+            }))}
+          />
+        );
+      }
+
       switch (param.type) {
         case TOOL_PARAM_TYPES.NUMBER:
           return (
@@ -174,6 +204,19 @@ export default function ToolConfigModal({
         case TOOL_PARAM_TYPES.ARRAY:
         case TOOL_PARAM_TYPES.OBJECT:
         default:
+          // Check if parameter name contains "password" for secure input
+          const isPasswordType = param.name.toLowerCase().includes("password");
+
+          if (isPasswordType) {
+            return (
+              <Input.Password
+                placeholder={t("toolConfig.input.string.placeholder", {
+                  name: param.description,
+                })}
+              />
+            );
+          }
+
           // Default TextArea for all text-like types and unknown types
           return (
             <Input.TextArea
@@ -227,7 +270,7 @@ export default function ToolConfigModal({
         width={600}
         confirmLoading={isLoading}
         className="tool-config-modal-content"
-        wrapProps={{ style: { pointerEvents: "auto" } }} 
+        wrapProps={{ style: { pointerEvents: "auto" } }}
         footer={
           <div className="flex justify-end items-center">
             {

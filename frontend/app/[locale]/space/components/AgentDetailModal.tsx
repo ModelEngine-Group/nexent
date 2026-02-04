@@ -91,17 +91,14 @@ export default function AgentDetailModal({
       children: (
         <div className="space-y-4">
           <Descriptions column={1} bordered labelStyle={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+          <Descriptions.Item label={t("space.detail.businessLogicModel", "Business Logic Model")}>
+              {agentDetails?.business_logic_model_name || "-"}
+            </Descriptions.Item>
             <Descriptions.Item label={t("space.detail.model", "Model Name")}>
               {agentDetails?.model || "-"}
             </Descriptions.Item>
             <Descriptions.Item label={t("space.detail.maxStep", "Max Steps")}>
               {agentDetails?.max_step || 0}
-            </Descriptions.Item>
-            <Descriptions.Item label={t("space.detail.businessLogicModel", "Business Logic Model")}>
-              {agentDetails?.business_logic_model_name || "-"}
-            </Descriptions.Item>
-            <Descriptions.Item label={t("space.detail.businessLogicModelId", "Business Logic Model ID")}>
-              {agentDetails?.business_logic_model_id || "-"}
             </Descriptions.Item>
             <Descriptions.Item label={t("space.detail.provideRunSummary", "Provide Run Summary")}>
               {agentDetails?.provide_run_summary ? (

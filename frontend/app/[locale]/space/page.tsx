@@ -6,8 +6,9 @@ import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { App } from "antd";
 import { Plus, RefreshCw, Upload } from "lucide-react";
-import { USER_ROLES } from "@/const/modelConfig";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { Agent } from "@/types/agentConfig";
@@ -25,12 +26,9 @@ export default function SpacePage() {
 
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { user, isSpeedMode } = useAuth();
-  const { canAccessProtectedData, pageVariants, pageTransition } = useSetupFlow(
-    {
-      requireAdmin: false,
-    }
-  );
+  const { pageVariants, pageTransition } = useSetupFlow({
+    requireAdmin: false,
+  });
   const [isImporting, setIsImporting] = useState(false);
   const { agents, isLoading, invalidate } = useAgentList();
 
@@ -39,8 +37,6 @@ export default function SpacePage() {
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
 
-  // Check if user is admin (or in speed mode where all features are available)
-  const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   const handleCreateAgent = () => {
     router.push("/agents?create=true");
@@ -93,9 +89,6 @@ export default function SpacePage() {
     fileInput.click();
   };
 
-  if (!canAccessProtectedData) {
-    return null;
-  }
 
   return (
     <div className="w-full h-full">
@@ -153,7 +146,6 @@ export default function SpacePage() {
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8"
           >
             {/* Create/Import agent card - only for admin */}
-            {isAdmin && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -191,7 +183,6 @@ export default function SpacePage() {
                   </button>
                 </div>
               </motion.div>
-            )}
 
             {/* Agent cards */}
             {agents.map((agent: Agent, index: number) => (

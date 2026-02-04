@@ -1,4 +1,3 @@
-import asyncio
 import importlib
 import inspect
 import json
@@ -24,8 +23,6 @@ from database.tool_db import (
 )
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
-from services.tenant_config_service import get_selected_knowledge_list, build_knowledge_name_mapping
-from database.knowledge_db import get_index_name_by_knowledge_name
 from database.client import minio_client
 from services.image_service import get_vlm_model
 
@@ -309,7 +306,8 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
                 tools_info.append(tool_info)
             return tools_info
     except BaseException as e:
-        logger.error(f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
+        logger.error(
+            f"failed to get tool from remote MCP server, detail: {e}", exc_info=True)
         # Convert all failures (including SystemExit) to domain error to avoid process exit
         raise MCPConnectionError(
             f"failed to get tool from remote MCP server, detail: {e}")
@@ -371,9 +369,11 @@ def load_last_tool_config_impl(tool_id: int, tenant_id: str, user_id: str):
     """
     Load the last tool configuration for a given tool ID
     """
-    tool_instance = search_last_tool_instance_by_tool_id(tool_id, tenant_id, user_id)
+    tool_instance = search_last_tool_instance_by_tool_id(
+        tool_id, tenant_id, user_id)
     if tool_instance is None:
-        raise ValueError(f"Tool configuration not found for tool ID: {tool_id}")
+        raise ValueError(
+            f"Tool configuration not found for tool ID: {tool_id}")
     return tool_instance.get("params", {})
 
 
@@ -537,57 +537,18 @@ def _validate_local_tool(
                     instantiation_params[param_name] = param.default
 
         if tool_name == "knowledge_base_search":
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if knowledge_info.get('knowledge_sources') == 'elasticsearch']
-            name_resolver = build_knowledge_name_mapping(
-                tenant_id=tenant_id, user_id=user_id)
-
-            # Fallback: if user provided index_names in inputs, try to resolve them even when no selection stored
-            if (not index_names) and inputs and inputs.get("index_names"):
-                raw_names = inputs.get("index_names")
-                if isinstance(raw_names, str):
-                    raw_names = [raw_names]
-                resolved_indices = []
-                for raw in raw_names:
-                    try:
-                        resolved = get_index_name_by_knowledge_name(
-                            raw, tenant_id=tenant_id)
-                        name_resolver[raw] = resolved
-                        resolved_indices.append(resolved)
-                    except Exception:
-                        # If not found as knowledge_name, assume it's already an index_name
-                        resolved_indices.append(raw)
-                index_names = resolved_indices
-
             embedding_model = get_embedding_model(tenant_id=tenant_id)
             vdb_core = get_vector_db_core()
             params = {
                 **instantiation_params,
-                'index_names': index_names,
-                'name_resolver': name_resolver,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
             }
             tool_instance = tool_class(**params)
-        elif tool_name == "datamate_search":
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if
-                           knowledge_info.get('knowledge_sources') == 'datamate']
-
-            params = {
-                **instantiation_params,
-                'index_names': index_names,
-            }
-            tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             image_to_text_model = get_vlm_model(tenant_id=tenant_id)
             params = {
                 **instantiation_params,
@@ -597,7 +558,8 @@ def _validate_local_tool(
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_text_file":
             if not tenant_id or not user_id:
-                raise ToolExecutionException(f"Tenant ID and User ID are required for {tool_name} validation")
+                raise ToolExecutionException(
+                    f"Tenant ID and User ID are required for {tool_name} validation")
             long_text_to_text_model = get_llm_model(tenant_id=tenant_id)
             params = {
                 **instantiation_params,

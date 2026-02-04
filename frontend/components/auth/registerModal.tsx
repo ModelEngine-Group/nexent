@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Modal,
   Form,
@@ -22,9 +23,10 @@ import {
   BookMarked,
 } from "lucide-react";
 
-import { useAuth } from "@/hooks/useAuth";
-import { AuthFormValues } from "@/types/auth"
-import { useAuthForm } from "@/hooks/useAuthForm";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import { AuthFormValues } from "@/types/auth";
+import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
 
 const { Text } = Typography;
@@ -32,24 +34,23 @@ const { Text } = Typography;
 export function RegisterModal() {
   const {
     isRegisterModalOpen,
+    isAuthenticated,
     closeRegisterModal,
     openLoginModal,
     register,
     authServiceUnavailable,
-  } = useAuth();
-  const {
-    form,
-    isLoading,
-    setIsLoading,
-    emailError,
-    setEmailError,
-    resetForm,
-  } = useAuthForm();
+  } = useAuthenticationContext();
+  const { isSpeedMode } = useDeployment();
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const [form] = Form.useForm<AuthFormValues>();
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState<{
     target: "password" | "confirmPassword" | "";
     message: string;
   }>({ target: "", message: "" });
-  const [isAdminMode, setIsAdminMode] = useState(false);
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 
@@ -64,6 +65,12 @@ export function RegisterModal() {
 
   const validatePassword = (password: string): boolean => {
     return !!(password && password.length >= 6);
+  };
+
+  const resetForm = () => {
+    setEmailError("");
+    setPasswordError({ target: "", message: "" });
+    form.resetFields();
   };
 
   const handleSubmit = async (values: AuthFormValues) => {
@@ -98,13 +105,12 @@ export function RegisterModal() {
       await register(
         values.email,
         values.password,
-        isAdminMode,
-        values.inviteCode
+        values.inviteCode,
+        true,
       );
 
       // Reset form and clear error states
       resetForm();
-      setIsAdminMode(false);
     } catch (error: any) {
       log.error("Registration error details:", error);
 
@@ -211,7 +217,10 @@ export function RegisterModal() {
         ]);
       }
       // Registration service error
-      else if (errorType === "REGISTRATION_SERVICE_ERROR" || httpStatusCode === 500) {
+      else if (
+        errorType === "REGISTRATION_SERVICE_ERROR" ||
+        httpStatusCode === 500
+      ) {
         const errorMsg = t("auth.registrationServiceError");
         message.error(errorMsg);
         setEmailError(errorMsg);
@@ -223,7 +232,10 @@ export function RegisterModal() {
         setEmailError(errorMsg);
       }
       // Auth service unavailable
-      else if (httpStatusCode === 503 || errorType === "AUTH_SERVICE_UNAVAILABLE") {
+      else if (
+        httpStatusCode === 503 ||
+        errorType === "AUTH_SERVICE_UNAVAILABLE"
+      ) {
         const errorMsg = t("auth.authServiceUnavailable");
         message.error(errorMsg);
         setEmailError(errorMsg);
@@ -242,7 +254,6 @@ export function RegisterModal() {
   const handleLoginClick = () => {
     resetForm();
     setPasswordError({ target: "", message: "" });
-    setIsAdminMode(false);
     closeRegisterModal();
     openLoginModal();
   };
@@ -250,8 +261,16 @@ export function RegisterModal() {
   const handleCancel = () => {
     resetForm();
     setPasswordError({ target: "", message: "" });
-    setIsAdminMode(false);
     closeRegisterModal();
+
+    // If user manually cancels registration from a protected page,
+    // redirect back to home instead of keeping them on the restricted page
+    if (!isAuthenticated && !isSpeedMode) {
+      const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
+      if (effectivePath !== "/") {
+        router.push("/");
+      }
+    }
   };
 
   // Handle email input change - real-time email format validation
@@ -320,171 +339,165 @@ export function RegisterModal() {
   return (
     <Modal
       title={
-        <div className="text-center text-xl font-bold">
+        <div className="text-center text-xl font-bold mt-3">
           {t("auth.registerTitle")}
         </div>
       }
       open={isRegisterModalOpen}
       onCancel={handleCancel}
       footer={null}
-      width={400}
+      width={420}
       centered
       forceRender
     >
-      <Form
-        id="register-form"
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-        className="mt-6"
-        autoComplete="off"
-      >
-        <Form.Item
-          name="email"
-          label={t("auth.emailLabel")}
-          validateStatus={emailError ? "error" : ""}
-          help={emailError}
-          rules={[
-            { required: true, message: t("auth.emailRequired") },
-            {
-              validator: (_, value) => {
-                if (!value) return Promise.resolve();
-                if (!validateEmail(value)) {
-                  return Promise.reject(
-                    new Error(t("auth.invalidEmailFormat"))
-                  );
-                }
-                return Promise.resolve();
-              },
-            },
-          ]}
+      <div className="relative bg-white p-4 rounded-2xl">
+        <Form
+          id="register-form"
+          form={form}
+          layout="vertical"
+          onFinish={handleSubmit}
+          className="mt-6"
+          autoComplete="off"
         >
-          <Input
-            prefix={<UserRound className="text-gray-400" size={16} />}
-            placeholder="your@email.com"
-            size="large"
-            onChange={handleEmailInputChange}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="password"
-          label={t("auth.passwordLabel")}
-          validateStatus={
-            passwordError.target === "password" &&
-            !form.getFieldError("password").length
-              ? "error"
-              : ""
-          }
-          help={
-            form.getFieldError("password").length
-              ? undefined
-              : passwordError.target === "password"
-              ? passwordError.message
-              : authServiceUnavailable
-              ? t("auth.authServiceUnavailable")
-              : undefined
-          }
-          rules={[
-            { required: true, message: t("auth.passwordRequired") },
-            {
-              validator: (_, value) => {
-                if (!value) return Promise.resolve();
-                if (!validatePassword(value)) {
-                  return Promise.reject(new Error(t("auth.passwordMinLength")));
-                }
-                return Promise.resolve();
-              },
-            },
-          ]}
-          hasFeedback
-        >
-          <Input.Password
-            id="register-password"
-            prefix={<LockKeyhole className="text-gray-400" size={16} />}
-            placeholder={t("auth.passwordRequired")}
-            size="large"
-            onChange={handlePasswordChange}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="confirmPassword"
-          label={t("auth.confirmPasswordLabel")}
-          validateStatus={
-            passwordError.target === "confirmPassword" &&
-            !form.getFieldError("confirmPassword").length
-              ? "error"
-              : ""
-          }
-          help={
-            form.getFieldError("confirmPassword").length
-              ? undefined
-              : passwordError.target === "confirmPassword"
-              ? passwordError.message
-              : authServiceUnavailable
-              ? t("auth.authServiceUnavailable")
-              : undefined
-          }
-          dependencies={["password"]}
-          hasFeedback
-          rules={[
-            { required: true, message: t("auth.confirmPasswordRequired") },
-            ({ getFieldValue }) => ({
-              validator(_, value) {
-                const password = getFieldValue("password");
-                // First check password length using validation function
-                if (password && !validatePassword(password)) {
-                  setPasswordError({
-                    target: "password",
-                    message: t("auth.passwordMinLength"),
-                  });
-                  return Promise.reject(new Error(t("auth.passwordMinLength")));
-                }
-                // Then check password match
-                if (!value || getFieldValue("password") === value) {
-                  setPasswordError({ target: "", message: "" });
+          <Form.Item
+            name="email"
+            label={t("auth.emailLabel")}
+            validateStatus={emailError ? "error" : ""}
+            help={emailError}
+            rules={[
+              { required: true, message: t("auth.emailRequired") },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  if (!validateEmail(value)) {
+                    return Promise.reject(
+                      new Error(t("auth.invalidEmailFormat"))
+                    );
+                  }
                   return Promise.resolve();
-                }
-                setPasswordError({
-                  target: "confirmPassword",
-                  message: t("auth.passwordsDoNotMatch"),
-                });
-                return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
+                },
               },
-            }),
-          ]}
-        >
-          <Input.Password
-            id="register-confirm-password"
-            prefix={<ShieldCheck className="text-gray-400" size={16} />}
-            placeholder={t("auth.confirmPasswordRequired")}
-            size="large"
-            onChange={handleConfirmPasswordChange}
-          />
-        </Form.Item>
-
-        <Divider />
-
-        <Form.Item className="mb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Crown className="text-amber-500" size={18} />
-              <span className="font-medium">{t("auth.adminAccount")}</span>
-            </div>
-            <Switch
-              checked={isAdminMode}
-              onChange={setIsAdminMode}
-              checkedChildren={t("auth.admin")}
-              unCheckedChildren={t("auth.user")}
+            ]}
+          >
+            <Input
+              prefix={<UserRound className="text-gray-400" size={16} />}
+              placeholder="your@email.com"
+              size="large"
+              onChange={handleEmailInputChange}
             />
-          </div>
-          <Text type="secondary" className="text-sm mt-1 block">
-            {t("auth.adminAccountDescription")}
-          </Text>
-        </Form.Item>
+          </Form.Item>
 
-        {isAdminMode && (
+          <Form.Item
+            name="password"
+            label={t("auth.passwordLabel")}
+            validateStatus={
+              passwordError.target === "password" &&
+                !form.getFieldError("password").length
+                ? "error"
+                : ""
+            }
+            help={
+              form.getFieldError("password").length
+                ? undefined
+                : passwordError.target === "password"
+                  ? passwordError.message
+                  : authServiceUnavailable
+                    ? t("auth.authServiceUnavailable")
+                    : undefined
+            }
+            rules={[
+              { required: true, message: t("auth.passwordRequired") },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  if (!validatePassword(value)) {
+                    return Promise.reject(new Error(t("auth.passwordMinLength")));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+            hasFeedback
+          >
+            <Input.Password
+              id="register-password"
+              prefix={<LockKeyhole className="text-gray-400" size={16} />}
+              placeholder={t("auth.passwordRequired")}
+              size="large"
+              onChange={handlePasswordChange}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="confirmPassword"
+            label={t("auth.confirmPasswordLabel")}
+            validateStatus={
+              passwordError.target === "confirmPassword" &&
+                !form.getFieldError("confirmPassword").length
+                ? "error"
+                : ""
+            }
+            help={
+              form.getFieldError("confirmPassword").length
+                ? undefined
+                : passwordError.target === "confirmPassword"
+                  ? passwordError.message
+                  : authServiceUnavailable
+                    ? t("auth.authServiceUnavailable")
+                    : undefined
+            }
+            dependencies={["password"]}
+            hasFeedback
+            rules={[
+              { required: true, message: t("auth.confirmPasswordRequired") },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const password = getFieldValue("password");
+                  // First check password length using validation function
+                  if (password && !validatePassword(password)) {
+                    setPasswordError({
+                      target: "password",
+                      message: t("auth.passwordMinLength"),
+                    });
+                    return Promise.reject(new Error(t("auth.passwordMinLength")));
+                  }
+                  // Then check password match
+                  if (!value || getFieldValue("password") === value) {
+                    setPasswordError({ target: "", message: "" });
+                    return Promise.resolve();
+                  }
+                  setPasswordError({
+                    target: "confirmPassword",
+                    message: t("auth.passwordsDoNotMatch"),
+                  });
+                  return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
+                },
+              }),
+            ]}
+          >
+            <Input.Password
+              id="register-confirm-password"
+              prefix={<ShieldCheck className="text-gray-400" size={16} />}
+              placeholder={t("auth.confirmPasswordRequired")}
+              size="large"
+              onChange={handleConfirmPasswordChange}
+            />
+          </Form.Item>
+
+          <Divider />
+
+          <Form.Item
+            name="inviteCode"
+            label={t("auth.inviteCodeLabel")}
+          >
+            <Input
+              prefix={<KeyRound className="text-gray-400" size={16} />}
+              placeholder={t("auth.inviteCodeRequired")}
+              size="large"
+            />
+          </Form.Item>
+
+
           <>
             <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
               <div className="text-sm text-blue-800 dark:text-blue-200">
@@ -492,7 +505,7 @@ export function RegisterModal() {
                   {t("auth.inviteCodeHint.title")}
                 </div>
                 <div className="space-y-1">
-                  <div>
+                  <div className="flex items-center">
                     ✨ {t("auth.inviteCodeHint.step1")}
                     <a
                       href="https://github.com/ModelEngine-Group/nexent"
@@ -504,7 +517,7 @@ export function RegisterModal() {
                     </a>
                     {t("auth.inviteCodeHint.starAction")}
                   </div>
-                  <div>
+                  <div className="flex items-center">
                     💬 {t("auth.inviteCodeHint.step2")}
                     <a
                       href={t("auth.inviteCodeHint.contributionWallUrl")}
@@ -519,13 +532,13 @@ export function RegisterModal() {
                       href={t("auth.inviteCodeHint.documentationUrl")}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="ml-2 text-blue-600 dark:text-blue-400 hover:underline"
+                      className="ml-2 text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center"
                       title={t("auth.inviteCodeHint.viewDocumentation")}
                     >
                       <BookMarked size={16} />
                     </a>
                   </div>
-                  <div>
+                  <div className="flex items-center">
                     🎁 {t("auth.inviteCodeHint.step3")}
                     <a
                       href="http://nexent.tech/contact"
@@ -540,54 +553,34 @@ export function RegisterModal() {
                 </div>
               </div>
             </div>
-            <Form.Item
-              name="inviteCode"
-              label={t("auth.inviteCodeLabel")}
-              rules={[
-                {
-                  required: isAdminMode,
-                  message: t("auth.inviteCodeRequired"),
-                },
-              ]}
-            >
-              <Input
-                prefix={<KeyRound className="text-gray-400" size={16} />}
-                placeholder={t("auth.inviteCodeRequired")}
-                size="large"
-              />
-            </Form.Item>
+
           </>
-        )}
 
-        <Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={isLoading}
-            block
-            size="large"
-            className="mt-2"
-            disabled={authServiceUnavailable}
-          >
-            {isLoading
-              ? isAdminMode
-                ? t("auth.registeringAdmin")
-                : t("auth.registering")
-              : isAdminMode
-              ? t("auth.registerAdmin")
-              : t("auth.register")}
-          </Button>
-        </Form.Item>
 
-        <div className="text-center">
-          <Space>
-            <Text type="secondary">{t("auth.hasAccount")}</Text>
-            <Button type="link" onClick={handleLoginClick} className="p-0">
-              {t("auth.loginNow")}
+          <Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={isLoading}
+              block
+              size="large"
+              className="mt-2"
+              disabled={authServiceUnavailable}
+            >
+              {isLoading? t("auth.registering"): t("auth.register")}
             </Button>
-          </Space>
-        </div>
-      </Form>
+          </Form.Item>
+
+          <div className="text-center">
+            <Space>
+              <Text type="secondary">{t("auth.hasAccount")}</Text>
+              <Button type="link" onClick={handleLoginClick} className="p-0">
+                {t("auth.loginNow")}
+              </Button>
+            </Space>
+          </div>
+        </Form>
+      </div>
     </Modal>
   );
 }

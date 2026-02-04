@@ -9,6 +9,18 @@ import {
   SearchOutlined,
   FilterOutlined,
 } from "@ant-design/icons";
+import {
+  PencilRuler,
+  Eye,
+  Glasses,
+  Trash2,
+  SquarePen,
+  CircleOff,
+} from "lucide-react";
+import { Tooltip } from "@/components/ui/tooltip";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 
@@ -98,10 +110,80 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 }) => {
   const { t } = useTranslation();
 
+  // Get user info for tenant ID
+  const { user } = useAuthorizationContext();
+  const tenantId = user?.tenantId || null;
+
+  // Fetch groups for group name mapping
+  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const groups = groupData?.groups || [];
+
+  // Create group name mapping from group_id to group_name
+  const groupNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    groups.forEach((group) => {
+      map.set(group.group_id, group.group_name);
+    });
+    return map;
+  }, [groups]);
+
+  // Get group names for knowledge base
+  const getGroupNames = (groupIds?: number[]) => {
+    if (!groupIds || groupIds.length === 0) return [];
+    return groupIds
+      .map((id) => groupNameMap.get(id))
+      .filter((name): name is string => !!name);
+  };
+
+  // Get permission icon based on ingroup_permission type
+  const getPermissionIcon = (permission: string) => {
+    const iconProps = {
+      size: 14,
+      className: "text-gray-500",
+    };
+
+    switch (permission) {
+      case "EDIT":
+        return <PencilRuler {...iconProps} />;
+      case "READ_ONLY":
+        return <Eye {...iconProps} />;
+      case "PRIVATE":
+        return <Glasses {...iconProps} />;
+      default:
+        return <CircleOff {...iconProps} />;
+    }
+  };
+
+  // Get permission tooltip key
+  const getPermissionTooltipKey = (permission: string) => {
+    return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
+  };
+
+  // Check if knowledge base allows edit/delete actions based on permission
+  const canEditOrDelete = (permission: string) => {
+    return permission === "EDIT" || permission === "CREATOR";
+  };
+
   // Search and filter states
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+
+  // Edit modal states
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingKnowledge, setEditingKnowledge] = useState<KnowledgeBase | null>(null);
+
+  // Open edit modal
+  const openEditModal = (kb: KnowledgeBase) => {
+    setEditingKnowledge(kb);
+    setEditModalVisible(true);
+  };
+
+  // Close edit modal
+  const closeEditModal = () => {
+    setEditModalVisible(false);
+    setEditingKnowledge(null);
+  };
 
   // Effective (controlled or uncontrolled) values
   const effectiveSearchKeyword =
@@ -482,25 +564,58 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <p
-                          className="text-base font-medium text-gray-800 truncate"
-                          style={{
-                            maxWidth: KB_LAYOUT.KB_NAME_MAX_WIDTH,
-                            ...KB_LAYOUT.KB_NAME_OVERFLOW,
-                          }}
-                          title={kb.name}
-                        >
-                          {kb.name}
-                        </p>
-                        <button
-                          className="text-red-500 hover:text-red-700 text-xs font-medium ml-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(kb.id);
-                          }}
-                        >
-                          {t("common.delete")}
-                        </button>
+                        <div className="flex items-center flex-1 min-w-0">
+                          <p
+                            className="text-base font-medium text-gray-800 truncate"
+                            style={{
+                              maxWidth: KB_LAYOUT.KB_NAME_MAX_WIDTH,
+                              ...KB_LAYOUT.KB_NAME_OVERFLOW,
+                            }}
+                            title={kb.name}
+                          >
+                            {kb.name}
+                          </p>
+                          {/* Permission icon with tooltip */}
+                          <Tooltip
+                            title={t(getPermissionTooltipKey(kb.ingroup_permission || ""))}
+                            placement="top"
+                          >
+                            <div className="ml-3 flex-shrink-0 cursor-pointer">
+                              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 hover:bg-gray-200 transition-all duration-200 hover:shadow-sm">
+                                {getPermissionIcon(kb.ingroup_permission || "")}
+                              </div>
+                            </div>
+                          </Tooltip>
+                        </div>
+                        {canEditOrDelete(kb.permission) && (
+                          <div className="flex items-center ml-2">
+                            {/* Edit button */}
+                            <Tooltip title={t("common.edit")}>
+                              <Button
+                                type="text"
+                                icon={<SquarePen className="h-4 w-4" />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditModal(kb);
+                                }}
+                                size="small"
+                              />
+                            </Tooltip>
+                            {/* Delete button */}
+                            <Tooltip title={t("common.delete")}>
+                              <Button
+                                type="text"
+                                danger
+                                icon={<Trash2 className="h-4 w-4" />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDelete(kb.id);
+                                }}
+                                size="small"
+                              />
+                            </Tooltip>
+                          </div>
+                        )}
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
@@ -569,6 +684,16 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                   {t("knowledgeBase.tag.modelMismatch")}
                                 </span>
                               )}
+
+                            {/* User group tags - show after model tag */}
+                            {getGroupNames(kb.group_ids).map((groupName, idx) => (
+                              <span
+                                key={idx}
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                              >
+                                {groupName}
+                              </span>
+                            ))}
                           </>
                         )}
                       </div>
@@ -590,6 +715,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           </div>
         )}
       </div>
+
+      {/* Edit Knowledge Base Modal */}
+      <KnowledgeBaseEditModal
+        open={editModalVisible}
+        knowledgeBase={editingKnowledge}
+        tenantId={tenantId}
+        onCancel={closeEditModal}
+        onSuccess={() => {}}
+      />
     </div>
   );
 };

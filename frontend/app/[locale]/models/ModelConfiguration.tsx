@@ -22,14 +22,12 @@ const { Title } = Typography;
 // Add interface definition
 interface AppModelConfigProps {
   skipModelVerification?: boolean;
-  canAccessProtectedData?: boolean;
   // Expose a ref from parent to allow programmatic dropdown change
   forwardedRef?: React.Ref<ModelConfigSectionRef>;
 }
 
 export default function AppModelConfig({
   skipModelVerification = false,
-  canAccessProtectedData = false,
   forwardedRef,
 }: AppModelConfigProps) {
   const { t } = useTranslation();
@@ -133,7 +131,6 @@ export default function AppModelConfig({
                   <ModelConfigSection
                     ref={modelConfigRef as any}
                     skipVerification={skipModelVerification}
-                    canAccessProtectedData={canAccessProtectedData}
                   />
                 </div>
               </div>

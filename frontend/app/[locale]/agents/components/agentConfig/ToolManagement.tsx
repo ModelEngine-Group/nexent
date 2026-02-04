@@ -7,6 +7,7 @@ import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
 import { Tabs, Collapse } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
+import log from "@/lib/logger";
 
 import { Settings } from "lucide-react";
 
@@ -27,7 +28,13 @@ export default function ToolManagement({
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
 
-  const editable = currentAgentId || isCreatingMode;
+  const currentAgentPermission = useAgentConfigStore(
+    (state) => state.currentAgentPermission
+  );
+  const isPanelActive =
+    (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
+  const editable =
+    !!isPanelActive && (isCreatingMode || currentAgentPermission !== "READ_ONLY");
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
@@ -80,7 +87,7 @@ export default function ToolManagement({
           return defaultTool.initParams || [];
         }
       } catch (error) {
-        console.error("Failed to fetch tool instance params:", error);
+        log.error("Failed to fetch tool instance params:", error);
         return defaultTool.initParams || [];
       }
     } else {
@@ -96,6 +103,7 @@ export default function ToolManagement({
   }, [toolGroups, activeTabKey]);
 
   const handleToolSettingsClick = async (tool: Tool) => {
+    if (!editable) return;
     // Get latest tools directly from store to avoid stale closure issues
     const currentTools = useAgentConfigStore.getState().editedAgent.tools;
     const configuredTool = currentTools.find(
@@ -119,6 +127,7 @@ export default function ToolManagement({
   };
 
   const handleToolClick = async (toolId: string) => {
+    if (!editable) return;
     const numericId = parseInt(toolId, 10);
     const tool = availableTools.find((t) => parseInt(t.id) === numericId);
 

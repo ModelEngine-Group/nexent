@@ -2,11 +2,11 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag } from "antd";
+import { Table, Button, Popconfirm, message, Tag, Pagination } from "antd";
 import { Edit, Trash2 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
-import { useModelList } from "@/hooks/model/useModelList";
+import { useAdminTenantModels } from "@/hooks/model/useAdminTenantModels";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
@@ -15,7 +15,23 @@ import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "l
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
-  const { data: models = [], isLoading, refetch } = useModelList();
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Use admin API to get models for the specified tenant
+  const {
+    models = [],
+    total = 0,
+    isLoading,
+    refetch,
+  } = useAdminTenantModels({
+    tenantId: tenantId || "",
+    page,
+    pageSize,
+  });
+
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
@@ -60,6 +76,15 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       } else {
         message.error("Delete failed");
       }
+    }
+  };
+
+  // Handle pagination change
+  const handlePageChange = (newPage: number, newPageSize: number) => {
+    setPage(newPage);
+    if (newPageSize !== pageSize) {
+      setPageSize(newPageSize);
+      setPage(1);
     }
   };
 
@@ -168,8 +193,20 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         dataSource={models}
         loading={isLoading}
         rowKey="id"
-        pagination={{ pageSize: 10 }}
+        pagination={false}
       />
+
+      <div className="flex justify-end mt-4">
+        <Pagination
+          current={page}
+          pageSize={pageSize}
+          total={total}
+          onChange={handlePageChange}
+          showSizeChanger
+          showQuickJumper
+          showTotal={(total) => `Total ${total} items`}
+        />
+      </div>
 
       <ModelAddDialog
         isOpen={addDialogVisible}

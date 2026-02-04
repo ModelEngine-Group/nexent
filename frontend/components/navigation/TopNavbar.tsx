@@ -3,7 +3,6 @@
 import { Button } from "antd";
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useTranslation } from "react-i18next";
-import { useAuth } from "@/hooks/useAuth";
 import { ChevronDown, Globe } from "lucide-react";
 import { Dropdown } from "antd";
 import Link from "next/link";
@@ -11,24 +10,16 @@ import { HEADER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import { languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
 import React from "react";
-import { Flex, Layout } from 'antd';
+import { Flex, Layout } from "antd";
+import { ChatTopNavContent } from "./ChatTopNavContent";
+import { useAuthorizationContext } from "../providers/AuthorizationProvider";
+import { useDeployment } from "../providers/deploymentProvider";
 const { Header } = Layout;
 
-interface TopNavbarProps {
-  /** Additional title text to display after logo (separated by |) */
-  additionalTitle?: React.ReactNode;
-  /** Additional content to insert before default right nav items */
-  additionalRightContent?: React.ReactNode;
-}
-
-/**
- * Top navigation bar component
- * Displays logo, language switcher, and user authentication status
- * Can be customized with additionalTitle and additionalRightContent props
- */
-export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbarProps) {
+export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   const { t } = useTranslation("common");
-  const { user, isLoading: userLoading, isSpeedMode } = useAuth();
+  const { user, isLoading } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment()
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
 
   // Left content - Logo + optional additional title (aligned with sidebar width)
@@ -38,20 +29,16 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
       <Link
         href="/"
         className="cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0 "
-        style={{ width: SIDER_CONFIG.EXPANDED_WIDTH-17 }}
+        style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
       >
         <Flex align="center" gap={8}>
-          <img
-            src="/modelengine-logo2.png"
-            alt="ModelEngine"
-            className="h-7"
-          />
+          <img src="/modelengine-logo2.png" alt="ModelEngine" className="h-7" />
           <span
             className="text-blue-600 dark:text-blue-500 font-bold"
             style={{
-              fontSize: '20px',
-              lineHeight: '24px',
-              height: '22px',
+              fontSize: "20px",
+              lineHeight: "24px",
+              height: "22px",
             }}
           >
             {t("assistant.name")}
@@ -60,11 +47,11 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
       </Link>
 
       {/* Additional title with separator - outside of sidebar width */}
-      {additionalTitle && (
+      {isChatPage && (
         <Flex align="center" gap={12}>
           <div className="h-6 border-l border-slate-300 dark:border-slate-600"></div>
           <div className="text-slate-600 dark:text-slate-400">
-            {additionalTitle}
+            <ChatTopNavContent />
           </div>
         </Flex>
       )}
@@ -74,8 +61,6 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
   // Right content - Additional content + default navigation items
   const rightContent = (
     <Flex align="center" gap={16} className="hidden md:flex">
-      {/* Additional right content (e.g., status badge) */}
-      {additionalRightContent}
 
       {/* GitHub link */}
       <Link
@@ -129,7 +114,7 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
       {/* User status - only shown in full version */}
       {!isSpeedMode && (
         <Flex align="center" gap={8}>
-          {userLoading ? (
+          {isLoading ? (
             <span className="text-xs font-medium text-slate-600">
               {t("common.loading")}...
             </span>
@@ -179,4 +164,3 @@ export function TopNavbar({ additionalTitle, additionalRightContent }: TopNavbar
     </Header>
   );
 }
-

@@ -124,6 +124,7 @@ export const fetchAgentList = async () => {
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
+      permission: agent.permission,
     }));
 
     return {

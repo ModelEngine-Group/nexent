@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
+import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type { MarketAgentListParams } from "@/types/market";
 
@@ -12,6 +13,7 @@ export const API_ENDPOINTS = {
     logout: `${API_BASE_URL}/user/logout`,
     session: `${API_BASE_URL}/user/session`,
     currentUserId: `${API_BASE_URL}/user/current_user_id`,
+    currentUserInfo: `${API_BASE_URL}/user/current_user_info`,
     serviceHealth: `${API_BASE_URL}/user/service_health`,
     revoke: `${API_BASE_URL}/user/revoke`,
   },
@@ -42,7 +44,8 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
-    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    clearNew: (agentId: string | number) =>
+      `${API_BASE_URL}/agent/clear_new/${agentId}`,
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -122,6 +125,7 @@ export const API_ENDPOINTS = {
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,
+    adminModelList: `${API_BASE_URL}/model/admin/list`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -137,8 +141,7 @@ export const API_ENDPOINTS = {
     chunkDetail: (indexName: string, chunkId: string) =>
       `${API_BASE_URL}/indices/${indexName}/chunk/${chunkId}`,
     // Update knowledge base info
-    updateIndex: (indexName: string) =>
-      `${API_BASE_URL}/indices/${indexName}`,
+    updateIndex: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
     searchHybrid: `${API_BASE_URL}/indices/search/hybrid`,
     summary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/auto_summary`,
@@ -254,13 +257,16 @@ export const API_ENDPOINTS = {
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
-    default: (tenantId: string) => `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
+    default: (tenantId: string) =>
+      `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
   },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
     create: `${API_BASE_URL}/invitations`,
-    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
-    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    update: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
   },
 };
 
@@ -360,36 +366,6 @@ export const fetchWithErrorHandling = async (
   }
 };
 
-// Method to handle session expiration
-function handleSessionExpired() {
-  // Prevent duplicate triggers
-  if (window.__isHandlingSessionExpired) {
-    return;
-  }
-
-  // Mark as processing
-  window.__isHandlingSessionExpired = true;
-
-  // Clear locally stored session information
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("session");
-
-    // Use custom events to notify other components in the app (such as SessionExpiredListener)
-    if (window.dispatchEvent) {
-      // Ensure using event name consistent with EVENTS.SESSION_EXPIRED constant
-      window.dispatchEvent(
-        new CustomEvent("session-expired", {
-          detail: { message: "Login expired, please login again" },
-        })
-      );
-    }
-
-    // Reset flag after 300ms to allow future triggers
-    setTimeout(() => {
-      window.__isHandlingSessionExpired = false;
-    }, 300);
-  }
-}
 
 // Add global interface extensions for TypeScript
 declare global {

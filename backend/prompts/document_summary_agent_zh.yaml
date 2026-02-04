@@ -25,5 +25,5 @@ user_prompt: |
   内容片段：
   {{ content }}
   
-  总结（{{ max_words }}字）：
+  总结（不超过{{ max_words }}字）：
 
