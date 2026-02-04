@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { configService } from "@/services/configService";
 import { configStore } from "@/lib/config";
-import { USER_ROLES } from "@/const/modelConfig";
+import { USER_ROLES } from "@/const/auth";
 import log from "@/lib/logger";
 
 import DataConfig from "./KnowledgeBaseConfiguration";

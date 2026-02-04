@@ -74,12 +74,10 @@ def fetch_dify_datasets_impl(
     # Normalize API base URL
     api_base = dify_api_base.rstrip("/")
 
-    # Remove /v1 or /v1/ suffix if present to avoid URL duplication
+    # Remove /v1 suffix if present to avoid URL duplication
     # E.g., "https://api.dify.ai/v1" -> "https://api.dify.ai"
     if api_base.endswith("/v1"):
         api_base = api_base[:-3]
-    elif api_base.endswith("/v1/"):
-        api_base = api_base[:-4]
 
     # Build request URL with pagination
     url = f"{api_base}/v1/datasets"

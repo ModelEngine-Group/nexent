@@ -16,6 +16,7 @@ from services.remote_mcp_service import (
     delete_mcp_by_container_id,
     upload_and_start_mcp_image,
     update_remote_mcp_server_list,
+    attach_mcp_container_permissions,
 )
 from database.remote_mcp_db import check_mcp_name_exists
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
@@ -146,8 +147,11 @@ async def get_remote_proxies(
 ):
     """ Used to get the list of remote MCP servers """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        remote_mcp_server_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
+        user_id, tenant_id = get_current_user_id(authorization)
+        remote_mcp_server_list = await get_remote_mcp_server_list(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"remote_mcp_server_list": remote_mcp_server_list,
@@ -384,6 +388,11 @@ async def list_mcp_containers(
             )
 
         containers = container_manager.list_mcp_containers(tenant_id=tenant_id)
+        containers = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
 
         return JSONResponse(
             status_code=HTTPStatus.OK,

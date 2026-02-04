@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
+import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type { MarketAgentListParams } from "@/types/market";
 
@@ -12,6 +13,7 @@ export const API_ENDPOINTS = {
     logout: `${API_BASE_URL}/user/logout`,
     session: `${API_BASE_URL}/user/session`,
     currentUserId: `${API_BASE_URL}/user/current_user_id`,
+    currentUserInfo: `${API_BASE_URL}/user/current_user_info`,
     serviceHealth: `${API_BASE_URL}/user/service_health`,
     revoke: `${API_BASE_URL}/user/revoke`,
   },
@@ -123,6 +125,7 @@ export const API_ENDPOINTS = {
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,
+    adminModelList: `${API_BASE_URL}/model/admin/list`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -170,6 +173,8 @@ export const API_ENDPOINTS = {
     saveDataMateUrl: `${API_BASE_URL}/config/save_datamate_url`,
   },
   tenantConfig: {
+    loadKnowledgeList: `${API_BASE_URL}/tenant_config/load_knowledge_list`,
+    updateKnowledgeList: `${API_BASE_URL}/tenant_config/update_knowledge_list`,
     deploymentVersion: `${API_BASE_URL}/tenant_config/deployment_version`,
   },
   mcp: {
@@ -364,36 +369,6 @@ export const fetchWithErrorHandling = async (
   }
 };
 
-// Method to handle session expiration
-function handleSessionExpired() {
-  // Prevent duplicate triggers
-  if (window.__isHandlingSessionExpired) {
-    return;
-  }
-
-  // Mark as processing
-  window.__isHandlingSessionExpired = true;
-
-  // Clear locally stored session information
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("session");
-
-    // Use custom events to notify other components in the app (such as SessionExpiredListener)
-    if (window.dispatchEvent) {
-      // Ensure using event name consistent with EVENTS.SESSION_EXPIRED constant
-      window.dispatchEvent(
-        new CustomEvent("session-expired", {
-          detail: { message: "Login expired, please login again" },
-        })
-      );
-    }
-
-    // Reset flag after 300ms to allow future triggers
-    setTimeout(() => {
-      window.__isHandlingSessionExpired = false;
-    }, 300);
-  }
-}
 
 // Add global interface extensions for TypeScript
 declare global {

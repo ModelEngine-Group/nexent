@@ -18,6 +18,8 @@ from consts.model import (
     BatchCreateModelsRequest,
     ModelRequest,
     ProviderModelRequest,
+    AdminTenantModelRequest,
+    AdminTenantModelResponse,
 )
 
 from fastapi import APIRouter, Header, Query, HTTPException
@@ -39,6 +41,7 @@ from services.model_management_service import (
     delete_model_for_tenant,
     list_models_for_tenant,
     list_llm_models_for_tenant,
+    list_models_for_admin,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -281,6 +284,41 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
         })
     except Exception as e:
         logging.error(f"Failed to retrieve LLM list: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=str(e))
+
+
+@router.post("/admin/list", response_model=AdminTenantModelResponse)
+async def get_model_list_for_admin(request: AdminTenantModelRequest, authorization: Optional[str] = Header(None)):
+    """Get model list for a specified tenant (admin only).
+
+    This endpoint allows super admin to query models for any tenant.
+
+    Args:
+        request: Contains target tenant_id, optional model_type filter, and pagination params
+        authorization: Bearer token for authentication
+
+    Returns:
+        JSONResponse: Model list for the specified tenant with pagination info
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to list models for admin, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"page: {request.page}, page_size: {request.page_size}")
+
+        result = await list_models_for_admin(
+            request.tenant_id,
+            request.model_type,
+            request.page,
+            request.page_size
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved model list",
+            "data": jsonable_encoder(result)
+        })
+    except Exception as e:
+        logging.error(f"Failed to list models for admin: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail=str(e))
 

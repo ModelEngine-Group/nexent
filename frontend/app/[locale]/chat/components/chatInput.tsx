@@ -23,7 +23,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
 import log from "@/lib/logger";
 import { chatConfig } from "@/const/chatConfig";
-import { FilePreview, Agent } from "@/types/chat";
+import { FilePreview } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
 
@@ -303,9 +303,8 @@ interface ChatInputProps {
   onImageUpload?: (file: File) => void;
   attachments?: FilePreview[];
   onAttachmentsChange?: (attachments: FilePreview[]) => void;
-  selectedAgentId?: number | null;
-  onAgentSelect?: (agentId: number | null) => void;
-  cachedAgents?: Agent[]; // Optional cached agents to avoid repeated API calls
+  selectedAgentId?: string | null;
+  onAgentSelect?: (agentId: string | null) => void;
 }
 
 export function ChatInput({
@@ -318,7 +317,6 @@ export function ChatInput({
   onStop,
   onKeyDown,
   onRecordingStatusChange,
-  cachedAgents,
   onFileUpload,
   onImageUpload,
   attachments = [],
@@ -1023,7 +1021,6 @@ export function ChatInput({
             onAgentSelect={onAgentSelect || (() => {})}
             disabled={isLoading || isStreaming}
             isInitialMode={isInitialMode}
-            agents={cachedAgents}
           />
         </div>
 

@@ -39,7 +39,8 @@ export const getMcpServerList = async () => {
         return {
           service_name: server.remote_mcp_server_name,
           mcp_url: server.remote_mcp_server,
-          status: server.status || false
+          status: server.status || false,
+          permission: server.permission,
         };
       });
 

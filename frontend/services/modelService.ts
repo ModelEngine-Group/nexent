@@ -466,6 +466,81 @@ export const modelService = {
       return [];
     }
   },
+
+  // Get model list for a specific tenant (admin operation)
+  getAdminTenantModels: async (params: {
+    tenantId: string;
+    modelType?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
+    models: ModelOption[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    tenantName: string;
+  }> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.adminModelList, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          model_type: params.modelType,
+          page: params.page || 1,
+          page_size: params.pageSize || 20,
+        }),
+      });
+      const result = await response.json();
+
+      if (response.status === STATUS_CODES.SUCCESS && result.data) {
+        return {
+          models: result.data.models.map((model: any) => ({
+            id: model.model_id,
+            name: model.model_name,
+            type: model.model_type as ModelType,
+            maxTokens: model.max_tokens || 0,
+            source: model.model_factory as ModelSource,
+            apiKey: model.api_key || "",
+            apiUrl: model.base_url || "",
+            displayName: model.display_name || model.model_name,
+            connect_status: model.connect_status as ModelConnectStatus,
+            expectedChunkSize: model.expected_chunk_size,
+            maximumChunkSize: model.maximum_chunk_size,
+            chunkingBatchSize: model.chunk_batch,
+          })),
+          total: result.data.total || 0,
+          page: result.data.page || 1,
+          pageSize: result.data.page_size || 20,
+          totalPages: result.data.total_pages || 0,
+          tenantName: result.data.tenant_name || "",
+        };
+      }
+
+      return {
+        models: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        totalPages: 0,
+        tenantName: "",
+      };
+    } catch (error) {
+      log.warn("Failed to load admin tenant models:", error);
+      return {
+        models: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        totalPages: 0,
+        tenantName: "",
+      };
+    }
+  },
 };
 
 // -------- Provider detection helpers (for UI rendering) --------

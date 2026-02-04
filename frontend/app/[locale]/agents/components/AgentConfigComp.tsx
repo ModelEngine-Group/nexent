@@ -24,8 +24,6 @@ export default function AgentConfigComp({}: AgentConfigCompProps) {
 
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
 
-  const editable = currentAgentId || isCreatingMode;
-
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
