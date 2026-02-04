@@ -529,8 +529,26 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     # Mock return values
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.return_value = [
-        {"agent_id": 1, "name": "Agent 1", "display_name": "Display Agent 1", "group_ids": []},
-        {"agent_id": 2, "name": "Agent 2", "display_name": "Display Agent 2", "group_ids": [1, 2, 3]}
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent 1",
+            "group_ids": [],
+            "permission": "EDIT",
+            "is_available": True,
+            "unavailable_reasons": []
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Test agent 2",
+            "group_ids": [1, 2, 3],
+            "permission": "READ_ONLY",
+            "is_available": True,
+            "unavailable_reasons": []
+        }
     ]
 
     # Test the endpoint
@@ -542,14 +560,16 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 200
     mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
-    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant")
+    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
     assert len(response.json()) == 2
     assert response.json()[0]["agent_id"] == 1
     assert response.json()[0]["display_name"] == "Display Agent 1"
     assert response.json()[0]["group_ids"] == []
+    assert response.json()[0]["permission"] == "EDIT"
     assert response.json()[1]["name"] == "Agent 2"
     assert response.json()[1]["display_name"] == "Display Agent 2"
     assert response.json()[1]["group_ids"] == [1, 2, 3]
+    assert response.json()[1]["permission"] == "READ_ONLY"
 
 
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
@@ -570,7 +590,7 @@ def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 500
     mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
-    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant")
+    mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
     assert "Agent list error" in response.json()["detail"]
 
 

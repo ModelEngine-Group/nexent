@@ -4,6 +4,7 @@ import tempfile
 
 from fastmcp import Client
 
+from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
 from consts.exceptions import MCPConnectionError, MCPNameIllegal
 from database.remote_mcp_db import (
     create_mcp_record,
@@ -14,6 +15,7 @@ from database.remote_mcp_db import (
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
 )
+from database.user_tenant_db import get_user_tenant_by_user_id
 from services.mcp_container_service import MCPContainerManager
 
 logger = logging.getLogger("remote_mcp_service")
@@ -122,17 +124,81 @@ async def update_remote_mcp_server_list(
     )
 
 
-async def get_remote_mcp_server_list(tenant_id: str):
+async def get_remote_mcp_server_list(tenant_id: str, user_id: str | None = None) -> list[dict]:
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     mcp_records_list = []
+    can_edit_all = False
+    if user_id:
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
 
     for record in mcp_records:
+        created_by = record.get("created_by") or record.get("user_id")
+        if user_id is None:
+            permission = PERMISSION_READ
+        else:
+            permission = PERMISSION_EDIT if can_edit_all or str(
+                created_by) == str(user_id) else PERMISSION_READ
+
         mcp_records_list.append({
             "remote_mcp_server_name": record["mcp_name"],
             "remote_mcp_server": record["mcp_server"],
-            "status": record["status"]
+            "status": record["status"],
+            "permission": permission,
         })
     return mcp_records_list
+
+
+def attach_mcp_container_permissions(
+    *,
+    containers: list[dict],
+    tenant_id: str,
+    user_id: str | None = None,
+) -> list[dict]:
+    """
+    Attach permission (EDIT/READ) to each MCP container entry.
+
+    Rules:
+    - If user's role is in CAN_EDIT_ALL_USER_ROLES => EDIT for all containers
+    - Otherwise => EDIT only if the container is associated with an MCP record created by this user
+    - If association cannot be determined => default to READ
+    """
+    if not containers:
+        return []
+    can_edit_all = False
+    if user_id:
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+
+    created_by_by_container_id: dict[str, str] = {}
+    try:
+        for record in get_mcp_records_by_tenant(tenant_id=tenant_id) or []:
+            cid = record.get("container_id")
+            if not cid:
+                continue
+            created_by_by_container_id[str(cid)] = str(
+                record.get("created_by") or record.get("user_id") or ""
+            )
+    except Exception as e:
+        logger.warning(f"Failed to load MCP records for permission mapping: {e}")
+
+    enriched: list[dict] = []
+    for container in containers:
+        container_id = str(container.get("container_id") or "")
+        created_by = created_by_by_container_id.get(container_id, "")
+
+        if user_id is None:
+            permission = PERMISSION_READ
+        else:
+            permission = PERMISSION_EDIT if can_edit_all or (
+                created_by and str(created_by) == str(user_id)
+            ) else PERMISSION_READ
+
+        enriched.append({**container, "permission": permission})
+
+    return enriched
 
 
 async def check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_id):

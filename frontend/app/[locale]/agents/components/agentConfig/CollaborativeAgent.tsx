@@ -17,6 +17,9 @@ export default function CollaborativeAgent({}: CollaborativeAgentProps) {
 
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
+  const currentAgentPermission = useAgentConfigStore(
+    (state) => state.currentAgentPermission
+  );
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const updateSubAgentIds = useAgentConfigStore(
     (state) => state.updateSubAgentIds
@@ -24,7 +27,10 @@ export default function CollaborativeAgent({}: CollaborativeAgentProps) {
 
   const { availableAgents } = useAgentList();
 
-  const editable = currentAgentId || isCreatingMode;
+  const editable =
+    !!isCreatingMode ||
+    ((currentAgentId != null && currentAgentId != undefined) &&
+      currentAgentPermission !== "READ_ONLY");
 
   // Get related agents - use edited agent state (which includes current agent data when editing)
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list)

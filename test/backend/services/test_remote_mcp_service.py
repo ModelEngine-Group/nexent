@@ -36,6 +36,7 @@ from backend.services.remote_mcp_service import (
     check_mcp_health_and_update_db,
     delete_mcp_by_container_id,
     upload_and_start_mcp_image,
+    attach_mcp_container_permissions,
 )
 # Patch exception classes to ensure tests use correct exceptions
 import backend.services.remote_mcp_service as remote_service
@@ -227,8 +228,10 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["remote_mcp_server_name"], "n1")
         self.assertEqual(result[0]["remote_mcp_server"], "u1")
         self.assertTrue(result[0]["status"])
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
         self.assertEqual(result[1]["remote_mcp_server_name"], "n2")
         self.assertFalse(result[1]["status"])
+        self.assertEqual(result[1]["permission"], "READ_ONLY")
 
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     async def test_get_empty(self, mock_get):
@@ -251,6 +254,7 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["remote_mcp_server_name"], "single_server")
         self.assertEqual(result[0]["remote_mcp_server"], "http://single.com")
         self.assertTrue(result[0]["status"])
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
 
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
     async def test_get_large_list(self, mock_get):
@@ -282,6 +286,39 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
             result[0]["remote_mcp_server_name"], "test-server_123")
         self.assertEqual(result[0]["remote_mcp_server"],
                          "http://test-server.com:8080")
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_permission_by_creator(self, mock_get, mock_get_user_tenant):
+        """Test permission: creator can edit, others read when not admin"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get.return_value = [
+            {"mcp_name": "n1", "mcp_server": "u1",
+                "status": True, "created_by": "user123"},
+            {"mcp_name": "n2", "mcp_server": "u2",
+                "status": True, "created_by": "other"},
+        ]
+
+        result = await get_remote_mcp_server_list('tid', user_id="user123")
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[1]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_permission_admin_can_edit_all(self, mock_get, mock_get_user_tenant):
+        """Test permission: admin can edit all"""
+        mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+        mock_get.return_value = [
+            {"mcp_name": "n1", "mcp_server": "u1",
+                "status": True, "created_by": "someone"},
+            {"mcp_name": "n2", "mcp_server": "u2",
+                "status": True, "created_by": "other"},
+        ]
+
+        result = await get_remote_mcp_server_list('tid', user_id="user123")
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[1]["permission"], "EDIT")
 
 
 class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
@@ -892,6 +929,426 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         # Should raise SQLAlchemyError from database layer
         with self.assertRaises(SQLAlchemyError):
             await update_remote_mcp_server_list(update_data, 'tid', 'uid')
+
+
+class TestAttachMcpContainerPermissions(unittest.TestCase):
+    """Test attach_mcp_container_permissions function"""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_empty_containers(self, mock_get_records):
+        """Test with empty containers list"""
+        result = attach_mcp_container_permissions(
+            containers=[],
+            tenant_id='tid',
+            user_id='uid'
+        )
+        self.assertEqual(result, [])
+        mock_get_records.assert_not_called()
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_no_user_id_all_read(self, mock_get_records):
+        """Test when user_id is None - all containers should have READ_ONLY permission"""
+        mock_get_records.return_value = []
+        containers = [
+            {"container_id": "c1", "name": "container1"},
+            {"container_id": "c2", "name": "container2"}
+        ]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id=None
+        )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+        self.assertEqual(result[1]["permission"], "READ_ONLY")
+        self.assertEqual(result[0]["container_id"], "c1")
+        self.assertEqual(result[1]["container_id"], "c2")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_admin_user_all_edit(self, mock_get_records, mock_get_user_tenant):
+        """Test when user has ADMIN role - all containers should have EDIT permission"""
+        mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+        mock_get_records.return_value = []
+        containers = [
+            {"container_id": "c1", "name": "container1"},
+            {"container_id": "c2", "name": "container2"}
+        ]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='admin_user'
+        )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[1]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_su_user_all_edit(self, mock_get_records, mock_get_user_tenant):
+        """Test when user has SU role - all containers should have EDIT permission"""
+        mock_get_user_tenant.return_value = {"user_role": "SU"}
+        mock_get_records.return_value = []
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='su_user'
+        )
+
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_speed_user_all_edit(self, mock_get_records, mock_get_user_tenant):
+        """Test when user has SPEED role - all containers should have EDIT permission"""
+        mock_get_user_tenant.return_value = {"user_role": "SPEED"}
+        mock_get_records.return_value = []
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='speed_user'
+        )
+
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_regular_user_own_container_edit(self, mock_get_records, mock_get_user_tenant):
+        """Test when regular user owns container - should have EDIT permission"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": "c1", "created_by": "user123"}
+        ]
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_regular_user_other_container_read(self, mock_get_records, mock_get_user_tenant):
+        """Test when regular user doesn't own container - should have READ_ONLY permission"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": "c1", "created_by": "other_user"}
+        ]
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_regular_user_no_record_read(self, mock_get_records, mock_get_user_tenant):
+        """Test when container has no associated MCP record - should have READ_ONLY permission"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = []
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_record_uses_user_id_fallback(self, mock_get_records, mock_get_user_tenant):
+        """Test when record uses user_id instead of created_by"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": "c1", "user_id": "user123"}  # No created_by, uses user_id
+        ]
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_record_no_created_by_no_user_id(self, mock_get_records, mock_get_user_tenant):
+        """Test when record has neither created_by nor user_id"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": "c1"}  # No created_by or user_id
+        ]
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_record_without_container_id_skipped(self, mock_get_records, mock_get_user_tenant):
+        """Test that records without container_id are skipped"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"created_by": "user123"},  # No container_id - should be skipped
+            {"container_id": "c2", "created_by": "user123"}
+        ]
+        containers = [
+            {"container_id": "c1", "name": "container1"},  # No record for c1
+            {"container_id": "c2", "name": "container2"}   # Has record for c2
+        ]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "READ_ONLY")  # c1 has no record
+        self.assertEqual(result[1]["permission"], "EDIT")  # c2 owned by user123
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_get_records_returns_none(self, mock_get_records, mock_get_user_tenant):
+        """Test when get_mcp_records_by_tenant returns None"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = None
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.logger')
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_get_records_exception_handled(self, mock_get_records, mock_get_user_tenant, mock_logger):
+        """Test when get_mcp_records_by_tenant raises exception - should log warning and continue"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.side_effect = Exception("Database error")
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        # Should still return result with READ_ONLY permission
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+        # Should log warning
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        self.assertIn("Failed to load MCP records for permission mapping", warning_msg)
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_user_tenant_record_none(self, mock_get_records, mock_get_user_tenant):
+        """Test when get_user_tenant_by_user_id returns None"""
+        mock_get_user_tenant.return_value = None
+        mock_get_records.return_value = []
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        # Should default to READ_ONLY when no user role
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_user_tenant_record_empty_dict(self, mock_get_records, mock_get_user_tenant):
+        """Test when get_user_tenant_by_user_id returns empty dict"""
+        mock_get_user_tenant.return_value = {}
+        mock_get_records.return_value = []
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_user_role_case_insensitive(self, mock_get_records, mock_get_user_tenant):
+        """Test that user role comparison is case-insensitive (converted to uppercase)"""
+        mock_get_user_tenant.return_value = {"user_role": "admin"}  # lowercase
+        mock_get_records.return_value = []
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='admin_user'
+        )
+
+        # Should still get EDIT permission because "admin" -> "ADMIN" matches CAN_EDIT_ALL_USER_ROLES
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_user_role_none_or_empty(self, mock_get_records, mock_get_user_tenant):
+        """Test when user_role is None or empty string"""
+        mock_get_user_tenant.return_value = {"user_role": None}
+        mock_get_records.return_value = [
+            {"container_id": "c1", "created_by": "user123"}
+        ]
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        # Should check ownership since role is not in CAN_EDIT_ALL_USER_ROLES
+        self.assertEqual(result[0]["permission"], "EDIT")  # Owned by user123
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_container_id_none_converted_to_string(self, mock_get_records, mock_get_user_tenant):
+        """Test when container_id is None - should be converted to string"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = []
+        containers = [{"container_id": None, "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        # Should handle None container_id gracefully
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_mixed_scenario_multiple_containers(self, mock_get_records, mock_get_user_tenant):
+        """Test complex scenario with multiple containers and mixed permissions"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": "c1", "created_by": "user123"},  # Owned by user
+            {"container_id": "c2", "created_by": "other_user"},  # Owned by other
+            {"container_id": "c3", "user_id": "user123"},  # Owned by user (via user_id)
+        ]
+        containers = [
+            {"container_id": "c1", "name": "container1"},
+            {"container_id": "c2", "name": "container2"},
+            {"container_id": "c3", "name": "container3"},
+            {"container_id": "c4", "name": "container4"},  # No record
+        ]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[0]["permission"], "EDIT")  # c1 owned by user123
+        self.assertEqual(result[1]["permission"], "READ_ONLY")  # c2 owned by other
+        self.assertEqual(result[2]["permission"], "EDIT")  # c3 owned by user123
+        self.assertEqual(result[3]["permission"], "READ_ONLY")  # c4 no record
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_container_id_string_matching(self, mock_get_records, mock_get_user_tenant):
+        """Test that container_id string matching works correctly"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": 123, "created_by": "user123"},  # Numeric container_id
+        ]
+        containers = [
+            {"container_id": "123", "name": "container1"},  # String container_id
+        ]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        # Should match because both are converted to strings
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_created_by_string_matching(self, mock_get_records, mock_get_user_tenant):
+        """Test that created_by and user_id string matching works correctly"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = [
+            {"container_id": "c1", "created_by": 123},  # Numeric created_by
+        ]
+        containers = [{"container_id": "c1", "name": "container1"}]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id=123  # Numeric user_id
+        )
+
+        # Should match because both are converted to strings
+        self.assertEqual(result[0]["permission"], "EDIT")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    def test_container_preserves_original_fields(self, mock_get_records, mock_get_user_tenant):
+        """Test that original container fields are preserved in result"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get_records.return_value = []
+        containers = [
+            {
+                "container_id": "c1",
+                "name": "container1",
+                "status": "running",
+                "port": 8080
+            }
+        ]
+
+        result = attach_mcp_container_permissions(
+            containers=containers,
+            tenant_id='tid',
+            user_id='user123'
+        )
+
+        self.assertEqual(result[0]["container_id"], "c1")
+        self.assertEqual(result[0]["name"], "container1")
+        self.assertEqual(result[0]["status"], "running")
+        self.assertEqual(result[0]["port"], 8080)
+        self.assertEqual(result[0]["permission"], "READ_ONLY")
 
 
 if __name__ == '__main__':

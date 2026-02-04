@@ -200,8 +200,8 @@ async def list_all_agent_info_api(authorization: Optional[str] = Header(None), r
     list all agent info
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, request)
-        return await list_all_agent_info_impl(tenant_id=tenant_id)
+        user_id, tenant_id, _ = get_current_user_info(authorization, request)
+        return await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
