@@ -2296,6 +2296,56 @@ async def test_list_all_agent_info_impl_group_query_error_handled(
     assert result[0]["agent_id"] == 1
 
 
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_group_query_error_for_user_role(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that group query errors are handled gracefully for USER/DEV roles - covers lines 1274-1278."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent",
+            "enabled": True,
+            "group_ids": "1,2",
+            "created_by": "user1",
+            "create_time": 1,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    # Use USER role - group query errors should be handled gracefully
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    # Simulate exception when querying group IDs - this should trigger lines 1274-1278
+    mock_query_groups.side_effect = Exception("Database connection error")
+    mock_convert_list.return_value = []
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    # Should not raise exception, but should handle gracefully
+    # When group query fails, user_group_ids is set to empty set, so no agents match
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="user1")
+
+    # Since user_group_ids is empty set (due to exception), no agents should match group filter
+    # So result should be empty
+    assert len(result) == 0
+    # Verify that query_group_ids_by_user was called (to trigger the exception)
+    mock_query_groups.assert_called_once_with("user1")
+
+
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
 @patch('backend.services.agent_service.search_agent_info_by_agent_id')

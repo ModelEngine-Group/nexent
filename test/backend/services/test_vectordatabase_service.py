@@ -691,6 +691,234 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
     @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_permission_edit_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that non-creator user gets EDIT permission when ingroup_permission is EDIT.
+
+        This test verifies that:
+        1. When user is not the creator but has group intersection
+        2. And ingroup_permission is EDIT, user gets EDIT permission
+        3. This covers line 611-612
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other_user",  # User is NOT creator
+                "ingroup_permission": "EDIT",  # EDIT permission
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1]  # User belongs to group 1
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,  # Need stats to see permissions
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that non-creator user gets READ_ONLY permission when ingroup_permission is READ_ONLY.
+
+        This test verifies that:
+        1. When user is not the creator but has group intersection
+        2. And ingroup_permission is READ_ONLY, user gets READ_ONLY permission
+        3. This covers line 614-615
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other_user",  # User is NOT creator
+                "ingroup_permission": "READ_ONLY",  # READ_ONLY permission
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1]  # User belongs to group 1
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,  # Need stats to see permissions
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that non-creator user gets default READ_ONLY permission when ingroup_permission is None or other value.
+
+        This test verifies that:
+        1. When user is not the creator but has group intersection
+        2. And ingroup_permission is None or not EDIT/READ_ONLY/PRIVATE, user gets default READ_ONLY permission
+        3. This covers line 605
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other_user",  # User is NOT creator
+                "ingroup_permission": None,  # None permission (will default to READ_ONLY)
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1]  # User belongs to group 1
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,  # Need stats to see permissions
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        # When ingroup_permission is None, it defaults to READ_ONLY (line 584)
+        # Then line 605 sets permission = PERMISSION_READ (which is "READ_ONLY")
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_kb_group_ids_none(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices handles kb_group_ids_str as None correctly.
+
+        This test verifies that:
+        1. When kb_group_ids_str is None, kb_groups_empty is correctly calculated
+        2. This covers line 591 (None branch)
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": None,  # None value to test line 591
+                "created_by": "other_user",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []  # Empty user groups
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        # When both kb_group_ids and user_group_ids are empty/None, they are considered intersecting
+        # So the knowledge base should be visible
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_kb_group_ids_empty_string(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices handles kb_group_ids_str as empty string correctly.
+
+        This test verifies that:
+        1. When kb_group_ids_str is empty string, kb_groups_empty is correctly calculated
+        2. This covers line 591 (empty string branch)
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "",  # Empty string to test line 591
+                "created_by": "other_user",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []  # Empty user groups
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        # When both kb_group_ids and user_group_ids are empty, they are considered intersecting
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
     def test_list_indices_fallback_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test the fallback admin logic when user_id equals tenant_id.
