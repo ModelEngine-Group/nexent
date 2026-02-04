@@ -269,6 +269,7 @@ def get_content_type(file_path: str) -> str:
                   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
                   '.txt': 'text/plain',
                   '.csv': 'text/csv',
+                  '.md': 'text/markdown',
                   '.html': 'text/html',
                   '.htm': 'text/html',
                   '.json': 'application/json',

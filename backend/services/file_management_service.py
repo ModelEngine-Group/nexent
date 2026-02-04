@@ -1,14 +1,17 @@
 import asyncio
 import logging
 import os
+import subprocess
+import tempfile
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import UploadFile
 
 from consts.const import UPLOAD_FOLDER, MAX_CONCURRENT_UPLOADS, MODEL_CONFIG_MAPPING
 from database.attachment_db import (
+    upload_file,
     upload_fileobj,
     get_file_url,
     get_content_type,
@@ -196,3 +199,136 @@ def get_llm_model(tenant_id: str):
         ssl_verify=main_model_config.get("ssl_verify", True),
     )
     return long_text_to_text_model
+
+
+async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
+    """
+    Preview a file by returning its contents as a stream.
+    
+    Args:
+        object_name: File object name in storage
+        
+    Returns:
+        Tuple[BytesIO, str]: (file_stream, content_type)
+    """
+    # Get MIME type directly
+    content_type = get_content_type(object_name)
+    
+    # PDF, images, and text files - return directly
+    if content_type == 'application/pdf' or content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown']:
+        return await get_file_stream_impl(object_name)
+    
+    # Office documents - convert to PDF with caching
+    elif 'officedocument' in content_type or 'msword' in content_type or 'ms-excel' in content_type or 'ms-powerpoint' in content_type:
+        
+        # Generate deterministic PDF path for caching
+        safe_name = object_name.replace('/', '_').replace('\\', '_')
+        name_without_ext = safe_name.rsplit('.', 1)[0] if '.' in safe_name else safe_name
+        pdf_object_name = f"converted/temp_{name_without_ext}.pdf"
+        
+        # Check if converted PDF already exists in MinIO
+        try:
+            pdf_stream, pdf_content_type = await get_file_stream_impl(pdf_object_name)
+            return pdf_stream, pdf_content_type
+        except Exception:
+            pass  # Cache miss, will convert
+        
+        # Convert Office to PDF
+        temp_dir = None
+        try:
+            # Create temporary directory for conversion
+            temp_dir = tempfile.mkdtemp(prefix='office_convert_')
+            
+            # Download original file from MinIO
+            original_stream, _ = await get_file_stream_impl(object_name)
+            original_filename = os.path.basename(object_name)
+            input_path = os.path.join(temp_dir, original_filename)
+            
+            # Write to temporary file
+            with open(input_path, 'wb') as f:
+                f.write(original_stream.read())
+            
+            # Convert to PDF using LibreOffice
+            pdf_path = await convert_office_to_pdf(input_path, temp_dir, timeout=30)
+            
+            # Upload converted PDF to MinIO
+            result = upload_file(file_path=pdf_path, object_name=pdf_object_name)
+            if not result.get('success'):
+                raise Exception(f"Failed to upload converted PDF: {result.get('error', 'Unknown error')}")
+            
+        except Exception as e:
+            logger.error(f"Office conversion failed: {str(e)}")
+            raise Exception(f"Failed to convert Office document to PDF: {str(e)}")
+        
+        finally:
+            # Clean up temporary directory
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
+        
+        # Return converted PDF from MinIO (same path as cache hit)
+        return await get_file_stream_impl(pdf_object_name)
+    
+    # Unsupported file type
+    else:
+        raise Exception(f"Unsupported file type for preview: {content_type}")
+
+
+async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
+    """
+    Convert Office document to PDF using LibreOffice.
+    
+    Args:
+        input_path: Path to input Office file
+        output_dir: Directory for output PDF file
+        timeout: Conversion timeout in seconds (default: 30s)
+        
+    Returns:
+        str: Path to generated PDF file
+    """
+
+    # Run LibreOffice conversion
+    # --headless: run without GUI
+    # --convert-to pdf: output format
+    # --outdir: output directory
+    cmd = [
+        'libreoffice',
+        '--headless',
+        '--convert-to', 'pdf',
+        '--outdir', output_dir,
+        input_path
+    ]
+    
+    try:
+        # Run conversion with timeout
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Unknown conversion error"
+            logger.error(f"LibreOffice conversion failed: {error_msg}")
+            raise Exception(f"Office to PDF conversion failed: {error_msg}")
+        
+        # Find generated PDF file
+        input_filename = os.path.basename(input_path)
+        pdf_filename = os.path.splitext(input_filename)[0] + '.pdf'
+        pdf_path = os.path.join(output_dir, pdf_filename)
+        
+        if not os.path.exists(pdf_path):
+            raise Exception(f"Converted PDF not found: {pdf_path}")
+        
+        return pdf_path
+        
+    except subprocess.TimeoutExpired:
+        logger.error(f"Office to PDF conversion timeout after {timeout}s: {input_path}")
+        raise Exception(f"Office to PDF conversion timeout (>{timeout}s)")
+    except Exception as e:
+        logger.error(f"Office to PDF conversion error: {str(e)}")
+        raise
