@@ -26,9 +26,10 @@ import {
   clearAgentNewMark,
 } from "@/services/agentConfigService";
 import { generateAvatarFromName } from "@/lib/avatar";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import { USER_ROLES } from "@/const/modelConfig";
+import { USER_ROLES } from "@/const/auth";
 import { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 
@@ -40,7 +41,8 @@ interface AgentCardProps {
 export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { user, isSpeedMode } = useAuth();
+  const { user } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const { confirm } = useConfirmModal();
   const router = useRouter();
 
@@ -51,8 +53,6 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
   const [agentDetails, setAgentDetails] = useState<any>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
-  // Check if user is admin (or in speed mode where all features are available)
-  const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   // Generate avatar URL from agent name
   const avatarUrl = generateAvatarFromName(agent.display_name || agent.name);
@@ -247,8 +247,8 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
 
         {/* Action buttons */}
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-          {/* Edit button - only for admin */}
-          {isAdmin && (
+
+
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -259,10 +259,8 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
             >
               <Edit className="h-4 w-4" />
             </button>
-          )}
 
-          {/* Delete button - only for admin */}
-          {isAdmin && (
+
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -274,7 +272,6 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
             >
               <Trash2 className="h-4 w-4" />
             </button>
-          )}
 
           <button
             onClick={(e) => {

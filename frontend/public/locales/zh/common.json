@@ -152,11 +152,6 @@
   ],
   "page.copyright": "Nexent © {{year}}",
   "page.termsOfUse": "使用条款",
-  "page.loginPrompt.title": "登录账号",
-  "page.loginPrompt.register": "注册",
-  "page.loginPrompt.login": "立即登录",
-  "page.loginPrompt.header": "🚀 准备启航！",
-  "page.loginPrompt.intro": "登录您的账户，开启智能问答之旅~",
   "page.loginPrompt.benefitsTitle": "✨ 登录后您将获得：",
   "page.loginPrompt.benefits": [
     "专属的对话历史记录",
@@ -164,11 +159,13 @@
     "企业知识库完整访问权限",
     "更精准的问答体验"
   ],
-  "page.loginPrompt.githubSupport": "⭐️ Nexent还在成长中，帮帮我到<1>GitHub</1>加星支持我吧，谢谢你。",
+  "page.loginPrompt.title": "欢迎使用 Nexent",
+  "page.loginPrompt.register": "注册账户",
+  "page.loginPrompt.login": "登录账户",
+  "page.loginPrompt.intro": "请登录您的账户以访问此页面。",
+  "page.loginPrompt.githubSupport": "在 GitHub 上支持我们",
   "page.loginPrompt.noAccount": "还没有账号？点击\"注册\"按钮创建您的专属账号~",
-  "page.adminPrompt.title": "啊哦，您不是管理员",
   "page.adminPrompt.close": "好的",
-  "page.adminPrompt.intro": "只有管理员可以调整配置，请先登录为管理员账号~",
   "page.adminPrompt.unlockHeader": "🌟 成为管理员，解锁更多能力！",
   "page.adminPrompt.unlockIntro": "成为管理员后，您可以：",
   "page.adminPrompt.permissionsTitle": "✨ 管理员专属权限：",
@@ -177,6 +174,9 @@
     "制作和发布专属智能体",
     "集成和配置自有工具"
   ],
+  "page.adminPrompt.title": "暂无权限",
+  "page.adminPrompt.intro": "您暂时没有权限访问该页面，请联系管理员为您提升权限。",
+  "page.adminPrompt.githubSupport": "在 GitHub 上支持我们",
   "page.adminPrompt.becomeAdmin": "💡 想成为管理员？请访问<1>官网联系页</1>，申请管理员账号。",
 
   "chatStreamMessage.appIconAlt": "应用图标",

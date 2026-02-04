@@ -164,11 +164,9 @@
     "Full access to enterprise knowledge base",
     "More accurate Q&A experience"
   ],
-  "page.loginPrompt.githubSupport": "⭐️ Nexent is still growing, please help me by starring on <1>GitHub</1>, thank you.",
+  "page.loginPrompt.githubSupport": "Support us on GitHub",
   "page.loginPrompt.noAccount": "Don't have an account yet? Click the \"Register\" button to create your exclusive account~",
-  "page.adminPrompt.title": "Oh, you are not an administrator",
   "page.adminPrompt.close": "OK",
-  "page.adminPrompt.intro": "Only administrators can adjust the configuration, please log in as an administrator first~",
   "page.adminPrompt.unlockHeader": "🌟 Become an administrator and unlock more capabilities!",
   "page.adminPrompt.unlockIntro": "After becoming an administrator, you can:",
   "page.adminPrompt.permissionsTitle": "✨ Administrator exclusive permissions:",

@@ -7,9 +7,11 @@ import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
-import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
+import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { conversationService } from "@/services/conversationService";
 import { storageService, convertImageUrlToApiUrl } from "@/services/storageService";
 import { useConversationManagement } from "@/hooks/chat/useConversationManagement";
@@ -54,7 +56,8 @@ const getI18nKeyByType = (type: string): string => {
 
 export function ChatInterface() {
   const router = useRouter();
-  const { user, isSpeedMode } = useAuth(); // Get user information
+  const { user } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const [input, setInput] = useState("");
   // Replace the original messages state
   const [sessionMessages, setSessionMessages] = useState<{
@@ -336,7 +339,7 @@ export function ChatInterface() {
     const assistantMessageId = uuidv4();
     const initialAssistantMessage: ChatMessageType = {
       id: assistantMessageId,
-      role: MESSAGE_ROLES.ASSISTANT,
+      role: ROLE_ASSISTANT,
       content: "",
       timestamp: new Date(),
       isComplete: false,
@@ -484,7 +487,7 @@ export function ChatInterface() {
           .map((msg) => ({
             role: msg.role,
             content:
-              msg.role === MESSAGE_ROLES.ASSISTANT
+              msg.role === ROLE_ASSISTANT
                 ? msg.finalAnswer?.trim() || msg.content || ""
                 : msg.content || "",
           })),
@@ -568,7 +571,7 @@ export function ChatInterface() {
                   newMessages[currentConversationId]?.[
                     newMessages[currentConversationId].length - 1
                   ];
-                if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+                if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
                   lastMsg.error = t("chatInterface.requestTimeoutRetry");
                   lastMsg.isComplete = true;
                   lastMsg.thinking = undefined;
@@ -660,7 +663,7 @@ export function ChatInterface() {
             newMessages[currentConversationId]?.[
               newMessages[currentConversationId].length - 1
             ];
-          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
             lastMsg.content = t("chatInterface.conversationStopped");
             lastMsg.isComplete = true;
             lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -677,7 +680,7 @@ export function ChatInterface() {
             newMessages[currentConversationId]?.[
               newMessages[currentConversationId].length - 1
             ];
-          if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
             lastMsg.content = errorMessage;
             lastMsg.isComplete = true;
             lastMsg.error = errorMessage;
@@ -990,7 +993,7 @@ export function ChatInterface() {
                   conversationData.create_time
                 );
               formattedMessages.push(formattedUserMsg);
-            } else if (dialog_msg.role === MESSAGE_ROLES.ASSISTANT) {
+            } else if (dialog_msg.role === ROLE_ASSISTANT) {
               const formattedAssistantMsg: ChatMessageType =
                 extractAssistantMsgFromResponse(
                   dialog_msg,
@@ -1174,7 +1177,7 @@ export function ChatInterface() {
       const lastMsg =
         newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
 
-      if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT && lastMsg.images) {
+      if (lastMsg && lastMsg.role === ROLE_ASSISTANT && lastMsg.images) {
         // Filter out failed images
         lastMsg.images = lastMsg.images.filter((url) => url !== imageUrl);
       }
@@ -1227,7 +1230,7 @@ export function ChatInterface() {
         const newMessages = { ...prev };
         const lastMsg =
           newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
-        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+        if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
         }
@@ -1258,7 +1261,7 @@ export function ChatInterface() {
         const newMessages = { ...prev };
         const lastMsg =
           newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
-        if (lastMsg && lastMsg.role === MESSAGE_ROLES.ASSISTANT) {
+        if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
           lastMsg.error = t(
@@ -1356,41 +1359,7 @@ export function ChatInterface() {
     // Both admin and regular users now use dropdown menus
   };
 
-  // Settings menu items based on user role (speed mode is treated as admin)
-  const settingsMenuItems = (isSpeedMode || user?.role === "admin") ? [
-    // Admin has three options
-    {
-      key: "models",
-      label: t("chatLeftSidebar.settingsMenu.modelConfig"),
-      onClick: () => {
-        localStorage.setItem("show_page", "1");
-        router.push("/setup/models");
-      },
-    },
-    {
-      key: "knowledges",
-      label: t("chatLeftSidebar.settingsMenu.knowledgeConfig"),
-      onClick: () => {
-        router.push("/setup/knowledges");
-      },
-    },
-    {
-      key: "agents",
-      label: t("chatLeftSidebar.settingsMenu.agentConfig"),
-      onClick: () => {
-        router.push("/setup/agents");
-      },
-    },
-  ] : [
-    // Regular user only has knowledge base configuration
-    {
-      key: "knowledges",
-      label: t("chatLeftSidebar.settingsMenu.knowledgeConfig"),
-      onClick: () => {
-        router.push("/setup/knowledges");
-      },
-    },
-  ];
+
 
   return (
     <>
@@ -1406,14 +1375,13 @@ export function ChatInterface() {
           onRename={handleConversationRename}
           onDelete={handleConversationDeleteClick}
           onSettingsClick={handleSettingsClick}
-          settingsMenuItems={settingsMenuItems}
           onDropdownOpenChange={(open: boolean, id: string | null) =>
             setOpenDropdownId(open ? id : null)
           }
           onToggleSidebar={toggleSidebar}
           expanded={sidebarOpen}
           userEmail={user?.email}
-          userAvatarUrl={user?.avatar_url}
+          userAvatarUrl={user?.avatarUrl}
           userRole={user?.role}
         />
 
