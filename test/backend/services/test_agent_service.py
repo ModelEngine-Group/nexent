@@ -515,46 +515,35 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_agent')
 @patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_enabled_tool_ids(
     mock_get_current_user_info,
     mock_update_agent,
-    mock_query_all_tools,
-    mock_query_tool_instances_by_id,
+    mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool
 ):
     """
     Test update_agent_info_impl with enabled_tool_ids parameter.
 
     This test verifies that:
-    1. When enabled_tool_ids is provided, tools are updated correctly
-    2. Existing tool params are preserved
-    3. Tools are enabled/disabled based on the provided list
+    1. When enabled_tool_ids is provided, existing tools are disabled if not selected
+    2. Selected tools are enabled (create or update)
+    3. Existing tool params are preserved
     """
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
 
-    # Mock all tools in tenant
-    mock_query_all_tools.return_value = [
-        {"tool_id": 1, "name": "Tool 1"},
-        {"tool_id": 2, "name": "Tool 2"},
-        {"tool_id": 3, "name": "Tool 3"},
-    ]
-
-    # Mock existing tool instance with params
-    mock_query_tool_instances_by_id.side_effect = [
+    # Mock existing tool instances for this agent
+    mock_query_tool_instances_by_agent_id.return_value = [
         {"tool_id": 1, "params": {"key1": "value1"}},  # Existing tool with params
-        None,  # Tool 2 doesn't exist yet
-        None,  # Tool 3 doesn't exist yet
     ]
 
     request = MagicMock()
     request.agent_id = 123
-    request.enabled_tool_ids = [1, 2]  # Enable tools 1 and 2, disable 3
+    request.enabled_tool_ids = [1, 2]  # Enable tools 1 and 2
     request.related_agent_ids = None
 
     # Execute
@@ -564,8 +553,8 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert result["agent_id"] == 123
     mock_update_agent.assert_called_once()
 
-    # Verify tools were updated: tool 1 and 2 enabled, tool 3 disabled
-    assert mock_create_or_update_tool.call_count == 3
+    # Verify tools were updated: tool 1 and 2 enabled
+    assert mock_create_or_update_tool.call_count == 2
 
     # Check tool 1: enabled with existing params
     call_args = mock_create_or_update_tool.call_args_list[0]
@@ -574,18 +563,12 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert tool_info.enabled is True
     assert tool_info.params == {"key1": "value1"}
 
-    # Check tool 2: enabled with empty params
+    # Check tool 2: enabled with empty params (new tool)
     call_args = mock_create_or_update_tool.call_args_list[1]
     tool_info = call_args.kwargs['tool_info']
     assert tool_info.tool_id == 2
     assert tool_info.enabled is True
     assert tool_info.params == {}
-
-    # Check tool 3: disabled
-    call_args = mock_create_or_update_tool.call_args_list[2]
-    tool_info = call_args.kwargs['tool_info']
-    assert tool_info.tool_id == 3
-    assert tool_info.enabled is False
 
 
 @patch('backend.services.agent_service.update_related_agents')
@@ -668,8 +651,7 @@ async def test_update_agent_info_impl_circular_dependency_detection(
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_related_agents')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.update_agent')
@@ -680,8 +662,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_update_agent,
     mock_query_sub_agents_id_list,
     mock_update_related_agents,
-    mock_query_all_tools,
-    mock_query_tool_instances_by_id,
+    mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool
 ):
     """
@@ -693,8 +674,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     """
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
-    mock_query_all_tools.return_value = [{"tool_id": 1}]
-    mock_query_tool_instances_by_id.return_value = None
+    mock_query_tool_instances_by_agent_id.return_value = []  # No existing instances
     mock_query_sub_agents_id_list.return_value = []
 
     request = MagicMock()
@@ -718,16 +698,14 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_agent')
 @patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_tool_update_exception(
     mock_get_current_user_info,
     mock_update_agent,
-    mock_query_all_tools,
-    mock_query_tool_instances_by_id,
+    mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool
 ):
     """
@@ -738,8 +716,7 @@ async def test_update_agent_info_impl_tool_update_exception(
     """
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
-    mock_query_all_tools.return_value = [{"tool_id": 1}]
-    mock_query_tool_instances_by_id.return_value = None
+    mock_query_tool_instances_by_agent_id.return_value = []
     mock_create_or_update_tool.side_effect = Exception("Tool update failed")
 
     request = MagicMock()
