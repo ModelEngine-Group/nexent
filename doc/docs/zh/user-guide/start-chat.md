@@ -79,8 +79,8 @@ Nexent支持语音输入功能，让您可以通过语音与智能体交互。�
    - 或直接将文件拖拽到对话区域
 
 2. **支持的文件格式**
-   - **文档类**：PDF、Word (.docx)、PowerPoint (.pptx)、Excel (.xlsx)
-   - **文本类**：Markdown (.md)、纯文本 (.txt)
+   - **文档类**：PDF、Word (.docx)、PowerPoint (.pptx)、Excel (.xlsx), EPUB (.epub), HTML (.html), XML (.xml)
+   - **文本类**：Markdown (.md)、纯文本 (.txt), JSON (.json), CSV (.csv)
    - **图片类**：JPG、PNG、GIF 等常见图片格式
 
 3. **文件处理流程**
