@@ -359,9 +359,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="flex flex-col">
-      <div className="space-y-6">
-        <div>
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="space-y-6 flex-1 overflow-auto">
+        <div className="min-w-0">
           <Table
             columns={columns}
             dataSource={agents as AgentListRow[]}

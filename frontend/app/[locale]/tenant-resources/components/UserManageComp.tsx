@@ -272,9 +272,9 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-      <Row className="h-full">
+      <Row className="flex-1 min-h-0 h-full" align="stretch">
         <Can permission="tenant.list:read">
-          <Col className="h-full" style={{ width: 300 }}>
+          <Col className="flex flex-col h-full" style={{ width: 300 }}>
             <div className="h-full pr-6">
               <div className="sticky top-6">
                 <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
@@ -292,10 +292,10 @@ export default function UserManageComp() {
             </div>
           </Col>
         </Can>
-        <Col className="flex-1 p-6">
-          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+        <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
             {/* Tenant name header */}
-            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 {currentTenantName}
               </h2>
@@ -304,6 +304,7 @@ export default function UserManageComp() {
             {tenantId ? (
               <Tabs
                 defaultActiveKey="users"
+                className="h-full flex flex-col"
                 items={[
                   {
                     key: "users",

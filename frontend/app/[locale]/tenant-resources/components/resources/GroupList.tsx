@@ -236,8 +236,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate}>
@@ -252,6 +252,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         rowKey={(r) => String(r.group_id)}
         loading={isLoading}
         pagination={{ pageSize: 10 }}
+        scroll={{ x: true }}
+        className="flex-1"
       />
 
       {/* Create/Edit Group Modal */}
