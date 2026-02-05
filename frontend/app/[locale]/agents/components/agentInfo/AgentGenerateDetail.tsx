@@ -239,6 +239,13 @@ export default function AgentGenerateDetail({
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
+    // Sync model to store if not already set (e.g., in create mode with default model)
+    if ((isCreateMode || !editedAgent.model) && defaultLlmModel) {
+      onUpdateProfile({
+        model: defaultLlmModel.displayName || "",
+        model_id: defaultLlmModel.id || 0,
+      });
+    }
     // We intentionally initialize the form only when switching agent (or when default model becomes available),
     // otherwise it can create update loops with Form-controlled fields updating the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
