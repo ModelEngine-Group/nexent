@@ -901,10 +901,6 @@ export default function AgentImportWizard({
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
         agentInfo.model_id = selectedModelId;
         agentInfo.model_name = selectedModelName;
-
-
-        agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
-        agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
       });
     } else {
       // Individual mode: apply models to all agents
@@ -913,12 +909,15 @@ export default function AgentImportWizard({
         if (modelSelection && modelSelection.modelId && modelSelection.modelName) {
           agentInfo.model_id = modelSelection.modelId;
           agentInfo.model_name = modelSelection.modelName;
-
-          agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
-          agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
         }
       });
     }
+
+    // Apply business logic model fields to all agents
+    Object.values(agentJson.agent_info).forEach((agentInfo: any) => {
+      agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
+      agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
+    });
 
     // Update config fields for all agents (main + sub-agents)
     configFields.forEach(field => {
