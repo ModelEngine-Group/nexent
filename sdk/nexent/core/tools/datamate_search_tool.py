@@ -38,7 +38,7 @@ class DataMateSearchTool(Tool):
 
     def __init__(
         self,
-        server_url: str = Field(description="DataMate server url"),
+        server_url: str = Field(description="DataMate server url. (e.g., 'https://192.168.1.100:8080' or 'https://datamate.example.com:8443')"),
         verify_ssl: bool = Field(
             description="Whether to verify SSL certificates for HTTPS connections", default=False),
         index_names: List[str] = Field(

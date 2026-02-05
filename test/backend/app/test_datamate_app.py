@@ -98,8 +98,15 @@ class TestDataMateApp:
         # Mock service response
         datamate_mocks['sync_datamate'].return_value = expected_result
 
-        # Execute - call the endpoint directly
-        result = await sync_datamate_knowledges(authorization=mock_auth_header)
+        # Create request with None datamate_url (default behavior)
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=None)
+
+        # Execute - call the endpoint with request body
+        result = await sync_datamate_knowledges(
+            authorization=mock_auth_header,
+            request=request
+        )
 
         # Assert
         assert result == expected_result
@@ -107,7 +114,8 @@ class TestDataMateApp:
             mock_auth_header)
         datamate_mocks['sync_datamate'].assert_called_once_with(
             tenant_id="test_tenant_id",
-            user_id="test_user_id"
+            user_id="test_user_id",
+            datamate_url=None
         )
 
     @pytest.mark.asyncio
@@ -144,9 +152,16 @@ class TestDataMateApp:
         service_error = RuntimeError("DataMate API unavailable")
         datamate_mocks['sync_datamate'].side_effect = service_error
 
+        # Create request with None datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=None)
+
         # Execute and Assert
         with pytest.raises(HTTPException) as exc_info:
-            await sync_datamate_knowledges(authorization=mock_auth_header)
+            await sync_datamate_knowledges(
+                authorization=mock_auth_header,
+                request=request
+            )
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         assert "Error syncing DataMate knowledge bases and creating records" in str(
@@ -296,8 +311,15 @@ class TestDataMateApp:
         }
         datamate_mocks['sync_datamate'].return_value = expected_result
 
+        # Create request with None datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=None)
+
         # Execute
-        result = await sync_datamate_knowledges(authorization=mock_auth_header)
+        result = await sync_datamate_knowledges(
+            authorization=mock_auth_header,
+            request=request
+        )
 
         # Assert
         assert result == expected_result
@@ -348,9 +370,16 @@ class TestDataMateApp:
         custom_error = UnauthorizedError("Custom auth error")
         datamate_mocks['sync_datamate'].side_effect = custom_error
 
+        # Create request with None datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=None)
+
         # Execute and Assert
         with pytest.raises(HTTPException) as exc_info:
-            await sync_datamate_knowledges(authorization=mock_auth_header)
+            await sync_datamate_knowledges(
+                authorization=mock_auth_header,
+                request=request
+            )
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         assert "Custom auth error" in str(exc_info.value.detail)
@@ -380,3 +409,153 @@ class TestDataMateApp:
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         assert "Rate limit exceeded" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_sync_datamate_knowledges_with_custom_datamate_url(self, datamate_mocks):
+        """Test DataMate knowledge bases sync with custom datamate_url in request body."""
+        # Setup
+        mock_auth_header = "Bearer test-token"
+        custom_datamate_url = "http://custom-datamate.example.com:8080"
+        expected_result = {
+            "indices": ["kb1", "kb2"],
+            "count": 2,
+            "created_records": 5
+        }
+
+        # Mock user and tenant ID
+        datamate_mocks['get_current_user_id'].return_value = (
+            "test_user_id", "test_tenant_id")
+
+        # Mock service response
+        datamate_mocks['sync_datamate'].return_value = expected_result
+
+        # Create request with custom datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=custom_datamate_url)
+
+        # Execute - call the endpoint with request body
+        result = await sync_datamate_knowledges(
+            authorization=mock_auth_header,
+            request=request
+        )
+
+        # Assert
+        assert result == expected_result
+        datamate_mocks['get_current_user_id'].assert_called_once_with(
+            mock_auth_header)
+        datamate_mocks['sync_datamate'].assert_called_once_with(
+            tenant_id="test_tenant_id",
+            user_id="test_user_id",
+            datamate_url=custom_datamate_url
+        )
+
+    @pytest.mark.asyncio
+    async def test_sync_datamate_kcknowledges_with_none_datamate_url(self, datamate_mocks):
+        """Test DataMate knowledge bases sync with explicit None datamate_url."""
+        # Setup
+        mock_auth_header = "Bearer test-token"
+        expected_result = {
+            "indices": [],
+            "count": 0
+        }
+
+        # Mock user and tenant ID
+        datamate_mocks['get_current_user_id'].return_value = (
+            "test_user_id", "test_tenant_id")
+
+        # Mock service response
+        datamate_mocks['sync_datamate'].return_value = expected_result
+
+        # Create request with explicit None datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=None)
+
+        # Execute - call the endpoint with request body containing None
+        result = await sync_datamate_knowledges(
+            authorization=mock_auth_header,
+            request=request
+        )
+
+        # Assert
+        assert result == expected_result
+        datamate_mocks['get_current_user_id'].assert_called_once_with(
+            mock_auth_header)
+        # When datamate_url is None, it should be passed as None to service
+        datamate_mocks['sync_datamate'].assert_called_once_with(
+            tenant_id="test_tenant_id",
+            user_id="test_user_id",
+            datamate_url=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_sync_datamate_knowledges_with_empty_datamate_url(self, datamate_mocks):
+        """Test DataMate knowledge bases sync with empty string datamate_url."""
+        # Setup
+        mock_auth_header = "Bearer test-token"
+        empty_datamate_url = ""
+        expected_result = {
+            "indices": [],
+            "count": 0
+        }
+
+        # Mock user and tenant ID
+        datamate_mocks['get_current_user_id'].return_value = (
+            "test_user_id", "test_tenant_id")
+
+        # Mock service response - empty URL should be treated as no URL
+        datamate_mocks['sync_datamate'].return_value = expected_result
+
+        # Create request with empty string datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=empty_datamate_url)
+
+        # Execute - call the endpoint with request body
+        result = await sync_datamate_knowledges(
+            authorization=mock_auth_header,
+            request=request
+        )
+
+        # Assert
+        assert result == expected_result
+        datamate_mocks['sync_datamate'].assert_called_once_with(
+            tenant_id="test_tenant_id",
+            user_id="test_user_id",
+            datamate_url=empty_datamate_url
+        )
+
+    @pytest.mark.asyncio
+    async def test_sync_datamate_kcknowledges_with_https_datamate_url(self, datamate_mocks):
+        """Test DataMate knowledge bases sync with HTTPS datamate_url."""
+        # Setup
+        mock_auth_header = "Bearer test-token"
+        https_datamate_url = "https://secure-datamate.example.com"
+        expected_result = {
+            "indices": ["kb1"],
+            "count": 1,
+            "created_records": 1
+        }
+
+        # Mock user and tenant ID
+        datamate_mocks['get_current_user_id'].return_value = (
+            "test_user_id", "test_tenant_id")
+
+        # Mock service response
+        datamate_mocks['sync_datamate'].return_value = expected_result
+
+        # Create request with HTTPS datamate_url
+        from backend.apps.datamate_app import SyncDatamateRequest
+        request = SyncDatamateRequest(datamate_url=https_datamate_url)
+
+        # Execute - call the endpoint with request body
+        result = await sync_datamate_knowledges(
+            authorization=mock_auth_header,
+            request=request
+        )
+
+        # Assert
+        assert result == expected_result
+        datamate_mocks['sync_datamate'].assert_called_once_with(
+            tenant_id="test_tenant_id",
+            user_id="test_user_id",
+            datamate_url=https_datamate_url
+        )

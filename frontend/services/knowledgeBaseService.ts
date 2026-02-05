@@ -130,18 +130,23 @@ class KnowledgeBaseService {
   }
 
   // Sync DataMate knowledge bases and create local records
-  async syncDataMateAndCreateRecords(): Promise<{
+  async syncDataMateAndCreateRecords(datamateUrl?: string): Promise<{
     indices: string[];
     count: number;
     indices_info: any[];
     created_records: any[];
   }> {
     try {
+      const body = datamateUrl
+        ? JSON.stringify({ datamate_url: datamateUrl })
+        : undefined;
+
       const response = await fetch(
         API_ENDPOINTS.datamate.syncDatamateKnowledges,
         {
           method: "POST",
           headers: getAuthHeaders(),
+          ...(body && { body }),
         }
       );
 

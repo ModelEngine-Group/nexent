@@ -3,6 +3,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Path
 from fastapi.responses import JSONResponse
+from fastapi import Body
+from pydantic import BaseModel
 from http import HTTPStatus
 
 from services.datamate_service import (
@@ -10,14 +12,21 @@ from services.datamate_service import (
     fetch_datamate_knowledge_base_file_list
 )
 from utils.auth_utils import get_current_user_id
+from consts.exceptions import DataMateConnectionError
 
 router = APIRouter(prefix="/datamate")
 logger = logging.getLogger("datamate_app")
 
 
+class SyncDatamateRequest(BaseModel):
+    """Request body for syncing DataMate knowledge bases."""
+    datamate_url: Optional[str] = None
+
+
 @router.post("/sync_datamate_knowledges")
 async def sync_datamate_knowledges(
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    request: SyncDatamateRequest = Body(None)
 ):
     """Sync DataMate knowledge bases and create knowledge records in local database."""
     try:
@@ -25,8 +34,12 @@ async def sync_datamate_knowledges(
 
         return await sync_datamate_knowledge_bases_and_create_records(
             tenant_id=tenant_id,
-            user_id=user_id
+            user_id=user_id,
+            datamate_url=request.datamate_url if request else None
         )
+    except DataMateConnectionError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error syncing DataMate knowledge bases and creating records: {str(e)}")

@@ -396,6 +396,7 @@
   "toolConfig.input.array.placeholder": "请输入JSON数组",
   "toolConfig.placeholder.selectKb": "请选择知识库",
   "toolConfig.validation.selectKb": "请选择至少一个知识库",
+  "toolConfig.validation.required": "此字段为必填项",
   "toolConfig.input.object.placeholder": "请输入JSON对象",
   "toolConfig.toolTest.toolInfo": "工具信息",
   "toolConfig.toolTest.configParams": "配置参数",

@@ -329,7 +329,7 @@ async def test_sync_datamate_knowledge_bases_success(monkeypatch, mock_datamate_
     knowledge_db_mock.upsert_knowledge_record.reset_mock()
     knowledge_db_mock.delete_knowledge_record.reset_mock()
 
-    # Mock the _get_datamate_core function
+    # Mock the _get_datamate_core function - now accepts two parameters
     fake_core = MagicMock()
 
     # Mock core methods
@@ -343,7 +343,8 @@ async def test_sync_datamate_knowledge_bases_success(monkeypatch, mock_datamate_
     )
 
     monkeypatch.setattr(
-        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+        "backend.services.datamate_service._get_datamate_core",
+        lambda tenant_id, datamate_url=None: fake_core)
 
     # Mock database functions that are imported directly
     monkeypatch.setattr(
@@ -383,12 +384,13 @@ async def test_sync_datamate_knowledge_bases_no_indices(monkeypatch, mock_datama
     knowledge_db_mock.upsert_knowledge_record.reset_mock()
     knowledge_db_mock.delete_knowledge_record.reset_mock()
 
-    # Mock the _get_datamate_core function
+    # Mock the _get_datamate_core function - now accepts two parameters
     fake_core = MagicMock()
     fake_core.get_user_indices.return_value = []  # No indices
 
     monkeypatch.setattr(
-        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+        "backend.services.datamate_service._get_datamate_core",
+        lambda tenant_id, datamate_url=None: fake_core)
 
     result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
 
@@ -409,7 +411,7 @@ async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch, mock_da
     knowledge_db_mock.upsert_knowledge_record.reset_mock()
     knowledge_db_mock.delete_knowledge_record.reset_mock()
 
-    # Mock the _get_datamate_core function
+    # Mock the _get_datamate_core function - now accepts two parameters
     fake_core = MagicMock()
 
     # Mock core methods - only kb1 exists in API now
@@ -420,7 +422,8 @@ async def test_sync_datamate_knowledge_bases_with_deletions(monkeypatch, mock_da
     )
 
     monkeypatch.setattr(
-        "backend.services.datamate_service._get_datamate_core", lambda tenant_id: fake_core)
+        "backend.services.datamate_service._get_datamate_core",
+        lambda tenant_id, datamate_url=None: fake_core)
 
     # Mock database functions that are imported directly - kb1 and kb2 exist in DB, but kb2 was deleted from API
     mock_get_knowledge_info = MagicMock(return_value=[
@@ -477,25 +480,18 @@ async def test_sync_datamate_knowledge_bases_datamate_url_not_configured(monkeyp
         "backend.services.datamate_service.logger", mock_logger
     )
 
-    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+    # Import the exception class
+    from consts.exceptions import DataMateConnectionError
+
+    # Expect DataMateConnectionError when DataMate URL is not configured
+    with pytest.raises(DataMateConnectionError) as excinfo:
+        await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    assert "Unable to connect to DataMate" in str(excinfo.value)
 
     # Verify the warning was logged
     mock_logger.warning.assert_called_once_with(
         "DataMate URL not configured for tenant tenant1, skipping sync"
-    )
-
-    # Verify the correct default response is returned
-    expected_result = {
-        "indices": [],
-        "count": 0,
-        "indices_info": [],
-        "created_records": []
-    }
-    assert result == expected_result
-
-    # Verify tenant_config_manager.get_app_config was called correctly
-    mock_config_manager.get_app_config.assert_called_once_with(
-        "DATAMATE_URL", tenant_id="tenant1"
     )
 
 
@@ -520,25 +516,18 @@ async def test_sync_datamate_knowledge_bases_datamate_url_empty_string(monkeypat
         "backend.services.datamate_service.logger", mock_logger
     )
 
-    result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+    # Import the exception class
+    from consts.exceptions import DataMateConnectionError
+
+    # Expect DataMateConnectionError when DataMate URL is empty string
+    with pytest.raises(DataMateConnectionError) as excinfo:
+        await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")
+
+    assert "Unable to connect to DataMate" in str(excinfo.value)
 
     # Verify the warning was logged
     mock_logger.warning.assert_called_once_with(
         "DataMate URL not configured for tenant tenant1, skipping sync"
-    )
-
-    # Verify the correct default response is returned
-    expected_result = {
-        "indices": [],
-        "count": 0,
-        "indices_info": [],
-        "created_records": []
-    }
-    assert result == expected_result
-
-    # Verify tenant_config_manager.get_app_config was called correctly
-    mock_config_manager.get_app_config.assert_called_once_with(
-        "DATAMATE_URL", tenant_id="tenant1"
     )
 
 
@@ -556,3 +545,301 @@ async def test_sync_datamate_knowledge_bases_error_handling(monkeypatch):
     # Should return empty result on error
     assert result["indices"] == []
     assert result["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_with_custom_datamate_url(monkeypatch, mock_datamate_sync_setup):
+    """Test sync_datamate_knowledge_bases_and_create_records with custom datamate_url from request."""
+    # Reset mock state from previous tests
+    knowledge_db_mock.get_knowledge_info_by_tenant_and_source.reset_mock()
+    knowledge_db_mock.upsert_knowledge_record.reset_mock()
+    knowledge_db_mock.delete_knowledge_record.reset_mock()
+
+    # Custom datamate URL provided in request - should be used directly
+    custom_datamate_url = "http://custom-datamate.example.com:8080"
+
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+
+    # Mock core methods
+    fake_core.get_user_indices.return_value = ["kb1"]
+    fake_core.get_indices_detail.return_value = (
+        {"kb1": {"base_info": {"embedding_model": "embedding1"}}},
+        ["Custom Knowledge Base"]
+    )
+
+    # Track the URL passed to _get_datamate_core
+    core_calls = []
+
+    def create_core_with_custom_url(tenant_id, datamate_url=None):
+        core_calls.append({"tenant_id": tenant_id, "datamate_url": datamate_url})
+        return fake_core
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core",
+        create_core_with_custom_url
+    )
+
+    # Mock database functions that are imported directly
+    monkeypatch.setattr(
+        "backend.services.datamate_service.get_knowledge_info_by_tenant_and_source",
+        MagicMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "backend.services.datamate_service.delete_knowledge_record",
+        MagicMock(return_value=True)
+    )
+
+    # Mock _create_datamate_knowledge_records
+    async def mock_create_records(*args, **kwargs):
+        return [{"id": "record1"}]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._create_datamate_knowledge_records",
+        mock_create_records
+    )
+
+    # Call with custom datamate_url - should use this URL directly
+    result = await sync_datamate_knowledge_bases_and_create_records(
+        "tenant1", "user1", datamate_url=custom_datamate_url
+    )
+
+    assert result["indices"] == ["Custom Knowledge Base"]
+    assert result["count"] == 1
+    assert "indices_info" in result
+    assert len(result["indices_info"]) == 1
+
+    # Verify _get_datamate_core was called with the custom URL
+    assert len(core_calls) == 1
+    assert core_calls[0]["datamate_url"] == custom_datamate_url
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_with_none_datamate_url(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records with None datamate_url falls back to tenant config."""
+    # Mock MODEL_ENGINE_ENABLED to be true
+    monkeypatch.setattr(
+        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "true"
+    )
+
+    # Mock tenant_config_manager to return a configured URL
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = "http://tenant-configured.example.com"
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager
+    )
+
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+    fake_core.get_user_indices.return_value = ["kb1"]
+    fake_core.get_indices_detail.return_value = (
+        {"kb1": {"base_info": {"embedding_model": "embedding1"}}},
+        ["Config Based Knowledge Base"]
+    )
+
+    # Track calls to _get_datamate_core
+    core_calls = []
+
+    def create_core_tracking_call(tenant_id, datamate_url=None):
+        core_calls.append({"tenant_id": tenant_id, "datamate_url": datamate_url})
+        return fake_core
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core",
+        create_core_tracking_call
+    )
+
+    # Mock database functions
+    monkeypatch.setattr(
+        "backend.services.datamate_service.get_knowledge_info_by_tenant_and_source",
+        MagicMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "backend.services.datamate_service.delete_knowledge_record",
+        MagicMock(return_value=True)
+    )
+
+    # Mock _create_datamate_knowledge_records
+    async def mock_create_records(*args, **kwargs):
+        return [{"id": "record1"}]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._create_datamate_knowledge_records",
+        mock_create_records
+    )
+
+    # Call with None datamate_url - should fall back to tenant config
+    result = await sync_datamate_knowledge_bases_and_create_records(
+        "tenant1", "user1", datamate_url=None
+    )
+
+    assert result["indices"] == ["Config Based Knowledge Base"]
+    assert result["count"] == 1
+
+    # Verify _get_datamate_core was called with the URL from tenant config (not None)
+    assert len(core_calls) == 1
+    assert core_calls[0]["datamate_url"] == "http://tenant-configured.example.com"
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_with_empty_datamate_url(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records with empty string datamate_url falls back to tenant config."""
+    # Mock MODEL_ENGINE_ENABLED to be true
+    monkeypatch.setattr(
+        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "true"
+    )
+
+    # Mock tenant_config_manager to return a configured URL
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = "http://fallback-url.example.com"
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager", mock_config_manager
+    )
+
+    # Mock the _get_datamate_core function
+    fake_core = MagicMock()
+    fake_core.get_user_indices.return_value = ["kb1"]
+    fake_core.get_indices_detail.return_value = (
+        {"kb1": {"base_info": {"embedding_model": "embedding1"}}},
+        ["Fallback Knowledge Base"]
+    )
+
+    # Track calls to _get_datamate_core
+    core_calls = []
+
+    def create_core_tracking_call(tenant_id, datamate_url=None):
+        core_calls.append({"tenant_id": tenant_id, "datamate_url": datamate_url})
+        return fake_core
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core",
+        create_core_tracking_call
+    )
+
+    # Mock database functions
+    monkeypatch.setattr(
+        "backend.services.datamate_service.get_knowledge_info_by_tenant_and_source",
+        MagicMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "backend.services.datamate_service.delete_knowledge_record",
+        MagicMock(return_value=True)
+    )
+
+    # Mock _create_datamate_knowledge_records
+    async def mock_create_records(*args, **kwargs):
+        return [{"id": "record1"}]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._create_datamate_knowledge_records",
+        mock_create_records
+    )
+
+    # Call with empty string datamate_url - empty string is falsy, should fall back to tenant config
+    result = await sync_datamate_knowledge_bases_and_create_records(
+        "tenant1", "user1", datamate_url=""
+    )
+
+    assert result["indices"] == ["Fallback Knowledge Base"]
+    assert result["count"] == 1
+
+    # Verify _get_datamate_core was called with the URL from tenant config (not empty string)
+    assert len(core_calls) == 1
+    assert core_calls[0]["datamate_url"] == "http://fallback-url.example.com"
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_with_https_datamate_url(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records with HTTPS datamate_url."""
+    # Mock MODEL_ENGINE_ENABLED to be true
+    monkeypatch.setattr(
+        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "true"
+    )
+
+    # Custom HTTPS URL - SSL should be disabled for DataMateCore
+    https_datamate_url = "https://secure-datamate.example.com"
+
+    # Mock the _get_datamate_core function - track if SSL verification is disabled
+    fake_core = MagicMock()
+    fake_core.get_user_indices.return_value = ["kb1"]
+    fake_core.get_indices_detail.return_value = (
+        {"kb1": {"base_info": {"embedding_model": "embedding1"}}},
+        ["HTTPS Knowledge Base"]
+    )
+
+    # Track calls to _get_datamate_core
+    core_calls = []
+
+    def create_core_tracking_call(tenant_id, datamate_url=None):
+        core_calls.append({"tenant_id": tenant_id, "datamate_url": datamate_url})
+        return fake_core
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._get_datamate_core",
+        create_core_tracking_call
+    )
+
+    # Mock database functions
+    monkeypatch.setattr(
+        "backend.services.datamate_service.get_knowledge_info_by_tenant_and_source",
+        MagicMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "backend.services.datamate_service.delete_knowledge_record",
+        MagicMock(return_value=True)
+    )
+
+    # Mock _create_datamate_knowledge_records
+    async def mock_create_records(*args, **kwargs):
+        return [{"id": "record1"}]
+
+    monkeypatch.setattr(
+        "backend.services.datamate_service._create_datamate_knowledge_records",
+        mock_create_records
+    )
+
+    # Call with HTTPS datamate_url
+    result = await sync_datamate_knowledge_bases_and_create_records(
+        "tenant1", "user1", datamate_url=https_datamate_url
+    )
+
+    assert result["indices"] == ["HTTPS Knowledge Base"]
+    assert result["count"] == 1
+    # Verify _get_datamate_core was called with the HTTPS URL
+    assert len(core_calls) == 1
+    assert core_calls[0]["datamate_url"] == https_datamate_url
+
+
+@pytest.mark.asyncio
+async def test_sync_datamate_knowledge_bases_model_engine_disabled(monkeypatch):
+    """Test sync_datamate_knowledge_bases_and_create_records when MODEL_ENGINE_ENABLED is false."""
+    # Mock MODEL_ENGINE_ENABLED to be false
+    monkeypatch.setattr(
+        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "false"
+    )
+
+    # Mock logger to capture info message
+    mock_logger = MagicMock()
+    monkeypatch.setattr(
+        "backend.services.datamate_service.logger", mock_logger
+    )
+
+    # Call the function - should return early without syncing
+    result = await sync_datamate_knowledge_bases_and_create_records(
+        "tenant1", "user1", datamate_url="http://custom.example.com"
+    )
+
+    # Verify the early return result
+    expected_result = {
+        "indices": [],
+        "count": 0,
+        "indices_info": [],
+        "created_records": []
+    }
+    assert result == expected_result
+
+    # Verify logger was called with the skip message
+    mock_logger.info.assert_called_once()
+    call_args = mock_logger.info.call_args[0][0]
+    assert "ModelEngine is disabled" in call_args
+    assert "skipping DataMate sync" in call_args

@@ -102,3 +102,8 @@ class ToolExecutionException(Exception):
 class MCPContainerError(Exception):
     """Raised when MCP container operation fails."""
     pass
+
+
+class DataMateConnectionError(Exception):
+    """Raised when DataMate connection fails or URL is not configured."""
+    pass
