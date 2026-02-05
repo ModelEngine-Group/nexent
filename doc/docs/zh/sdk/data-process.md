@@ -93,11 +93,14 @@ def file_process(self,
 - `.docx` - Word 2007及更高版本
 - `.doc` - Word 97-2003版本
 - `.html`, `.htm` - HTML文档
+- `.xml` - XML数据文件
 - `.md` - Markdown文件
 - `.rtf` - 富文本格式
 - `.odt` - OpenDocument文本
 - `.pptx` - PowerPoint 2007及更高版本
 - `.ppt` - PowerPoint 97-2003版本
+- `.json` - JSON数据文件
+- `.csv` - 逗号分隔值文件
 
 ## 💡 使用示例
 

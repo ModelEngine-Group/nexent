@@ -26,12 +26,14 @@ Create and manage knowledge bases, upload documents, and generate summaries. Kno
 ### Supported File Formats
 
 Nexent supports multiple file formats, including:
-- **Text:** .txt, .md
+- **Text:** .txt, .md, .csv, .json
 - **PDF:** .pdf
 - **Word:** .docx
 - **PowerPoint:** .pptx
+- **EPUB** .epub
 - **Excel:** .xlsx
 - **Data files:** .csv
+- **Web content**: .html, .xml
 
 ## 📊 Knowledge Base Summary
 

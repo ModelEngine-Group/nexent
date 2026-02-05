@@ -17,7 +17,7 @@ class DataProcessCore:
 
     Supported file types:
     - Excel files: .xlsx, .xls
-    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt
+    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt, .epub, .xml, .csv, .json
 
     Supported input methods:
     - In-memory byte data
@@ -147,6 +147,10 @@ class DataProcessCore:
                 ".odt",
                 ".pptx",
                 ".ppt",
+                ".epub",
+                ".json",
+                ".xml",
+                ".csv",
             ]
 
         return {"excel": list(self.EXCEL_EXTENSIONS), "generic": generic_formats}

@@ -556,3 +556,120 @@ class TestUnstructuredProcessor:
 
         assert len(result) >= 1
         assert result[0]["filename"] is None
+
+    def test_get_supported_formats_includes_new_types(self, processor):
+        """Ensure that the new format has been added to the supported list."""
+        formats = processor.get_supported_formats()
+        assert ".json" in formats
+        assert ".epub" in formats
+        assert ".csv" in formats
+        assert ".xml" in formats
+        # HTML already supported
+        assert ".html" in formats
+
+    @pytest.mark.parametrize("filename", ["test.json", "test.epub", "test.csv", "test.xml", "test.html"])
+    def test_validate_file_format_new_types(self, processor, filename):
+        """Verify that the newly added file type can pass format verification."""
+        assert processor.validate_file_format(filename) is True
+
+    def test_process_json_file_special_handling(self, processor, mocker):
+        """Test JSON files follow the dedicated _partition_json path"""
+        json_data = b'{"name": "Alice", "age": 30}'
+
+        # Patch at the actual source modules
+        mock_json_chunk_cls = mocker.patch(
+            "sdk.nexent.data_process.json_chunk_processor.JSONChunkProcessor"
+        )
+        mock_comp_elem_cls = mocker.patch(
+            "unstructured.documents.elements.CompositeElement"
+        )
+
+        # Configure mocks
+        mock_json_chunk_cls.return_value.split.return_value = [
+            '{"name": "Alice"}', '{"age": 30}']
+
+        def make_element(text):
+            m = mocker.Mock(spec=["text"])
+            m.text = text
+            return m
+
+        mock_comp_elem_cls.side_effect = make_element
+
+        # Call the method
+        result = processor._process_file(json_data, "basic", "data.json")
+
+        # Assertions
+        assert len(result) == 2
+        assert result[0]["content"] == '{"name": "Alice"}'
+        assert result[1]["content"] == '{"age": 30}'
+        assert "language" not in result[0]
+
+    def test_process_epub_csv_xml_html_uses_partition(self, processor, mocker: MockFixture):
+        """Test EPUB/CSV/XML/HTML using unstructured.partition processing"""
+        test_cases = [
+            (b"EPUB content", "book.epub"),
+            (b"name,age\nAlice,30", "data.csv"),
+            (b"<root><item>value</item></root>", "data.xml"),
+            (b"<html><body>Test</body></html>", "page.html"),
+        ]
+
+        for file_data, filename in test_cases:
+            # Mock partition returns an element containing text
+            mock_element = Mock()
+            mock_element.text = "Mocked content from " + filename
+            mock_element.metadata.to_dict.return_value = {}
+
+            mock_partition = setup_partition_mock(
+                mocker, return_value=[mock_element])
+
+            result = processor._process_file(file_data, "basic", filename)
+
+            # Verify that the partition function is called
+            mock_partition.assert_called_once()
+            call_kwargs = mock_partition.call_args[1]
+            assert isinstance(call_kwargs["file"], io.BytesIO)
+            assert call_kwargs["chunking_strategy"] == "basic"
+
+            # Validation result structure
+            assert len(result) == 1
+            assert result[0]["content"] == "Mocked content from " + filename
+            assert result[0]["filename"] == filename
+
+    def test_process_json_with_custom_max_characters(self, processor, mocker):
+        json_data = b'{"long_field": "' + b"x" * 2000 + b'"}'
+
+        # Patch both classes
+        mock_comp_elem_cls = mocker.patch(
+            "unstructured.documents.elements.CompositeElement"
+        )
+        mock_json_chunk_cls = mocker.patch(
+            "sdk.nexent.data_process.json_chunk_processor.JSONChunkProcessor"
+        )
+
+        # Configure the split return value of JSONChunkProcessor
+        mock_json_chunk_instance = mock_json_chunk_cls.return_value
+        mock_json_chunk_instance.split.return_value = [
+            '{"long_field": "' + 'x' * 300 + '"}',
+            '"' + 'x' * 1700 + '"}'
+        ]  # The simulation is split into two parts (to comply with max_characters=500)
+
+        def make_element(text):
+            m = mocker.Mock(spec=["text"])
+            m.text = text
+            return m
+
+        mock_comp_elem_cls.side_effect = make_element
+
+        result = processor.process_file(
+            json_data,
+            chunking_strategy="basic",
+            filename="large.json",
+            max_characters=500
+        )
+
+        assert len(result) == 2  # or > 0
+        assert "language" not in result[0]
+
+    def test_process_unsupported_format_rejected(self, processor):
+        """Ensure that unsupported formats (such as .exe) are still rejected"""
+        assert processor.validate_file_format("malware.exe") is False

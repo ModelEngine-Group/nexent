@@ -79,8 +79,8 @@ You can upload files during a chat so the agent can reason over their content:
    - Or drag files directly into the chat area
 
 2. **Supported File Formats**
-   - **Documents:** PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx)
-   - **Text:** Markdown (.md), Plain text (.txt)
+   - **Documents:** PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx), EPUB (.epub), HTML (.html), XML (.xml)
+   - **Text & Data:** Markdown (.md), Plain text (.txt), JSON (.json), CSV (.csv)
    - **Images:** JPG, PNG, GIF, and other common formats
 
 3. **File Processing Flow**

@@ -26,12 +26,14 @@
 
 Nexent支持多种文件格式，包括：
 
-- **文本**: .txt, .md文件
+- **文本**: .txt, .md, .json文件
 - **PDF**: .pdf文件
 - **Word**: .docx文件
 - **PowerPoint**: .pptx文件
+- **EPUB** .epub文件
 - **Excel**: .xlsx文件
 - **数据文件**: .csv文件
+- **Web content**: .html, .xml文件
 
 ## 📊 知识库总结
 
