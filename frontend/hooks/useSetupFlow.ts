@@ -1,5 +1,8 @@
 import {useRouter} from "next/navigation";
 import {useTranslation} from "react-i18next";
+import {USER_ROLES} from "@/const/auth";
+import {useAuthorization} from "@/hooks/auth/useAuthorization";
+import {useDeployment} from "@/components/providers/deploymentProvider";
 
 interface UseSetupFlowOptions {
   /** Whether admin role is required to access this page */
@@ -9,6 +12,11 @@ interface UseSetupFlowOptions {
 }
 
 interface UseSetupFlowReturn {
+  // User and authorization
+  user: ReturnType<typeof useAuthorization>["user"];
+  isSpeedMode: boolean;
+  canAccessProtectedData: boolean;
+
   // Animation config
   pageVariants: {
     initial: { opacity: number; x: number };
@@ -45,6 +53,13 @@ export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowRet
   const router = useRouter();
   const {t} = useTranslation();
 
+  // Get user and deployment info for authorization checks
+  const auth = useAuthorization();
+  const { isSpeedMode } = useDeployment();
+
+  // Determine if user can access protected data (speed mode or admin)
+  const canAccessProtectedData = isSpeedMode || auth.user?.role === USER_ROLES.ADMIN;
+
   // Animation variants for smooth page transitions
   const pageVariants = {
     initial: {
@@ -68,6 +83,11 @@ export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowRet
   };
 
   return {
+    // User and authorization
+    user: auth.user,
+    isSpeedMode,
+    canAccessProtectedData,
+
     // Animation
     pageVariants,
     pageTransition,

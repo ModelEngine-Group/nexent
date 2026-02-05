@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Checkbox, ConfigProvider, Input, Select, Space } from "antd";
+import { Button, Input, Select } from "antd";
 import {
   SyncOutlined,
   PlusOutlined,
@@ -23,54 +23,20 @@ import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-
-// Knowledge base layout constants configuration
-const KB_LAYOUT = {
-  // Knowledge base row height configuration
-  ROW_PADDING: "py-4", // Row vertical padding
-  HEADER_PADDING: "p-3", // List header padding
-  BUTTON_PADDING: "p-2", // Create button area padding
-  TAG_SPACING: "gap-0.5", // Spacing between tags
-  TAG_MARGIN: "mt-2.5", // Tag container top margin
-  // Tag related configuration
-  TAG_PADDING: "px-1.5 py-0.5", // Tag padding
-  TAG_TEXT: "text-xs font-medium", // Tag text style
-  TAG_ROUNDED: "rounded-md", // Tag rounded corners
-  // Line break related configuration
-  TAG_BREAK_HEIGHT: "h-0.5", // Line break interval height
-  SECOND_ROW_TAG_MARGIN: "mt-0.5", // Second row tag top margin
-  // Other layout configuration
-  TITLE_MARGIN: "ml-2", // Title left margin
-  EMPTY_STATE_PADDING: "py-4", // Empty state padding
-  // Title related configuration
-  TITLE_TEXT: "text-xl font-bold", // Title text style
-  KB_NAME_TEXT: "text-lg font-medium", // Knowledge base name text style
-  // Knowledge base name configuration
-  KB_NAME_MAX_WIDTH: "220px", // Knowledge base name max width
-  KB_NAME_OVERFLOW: {
-    // Knowledge base name overflow style
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    display: "block",
-  },
-};
+import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
-  selectedIds: string[];
   activeKnowledgeBase: KnowledgeBase | null;
   currentEmbeddingModel: string | null;
   isLoading?: boolean;
   syncLoading?: boolean;
-  onSelect: (id: string) => void;
   onClick: (kb: KnowledgeBase) => void;
   onDelete: (id: string) => void;
   onSync: () => void;
   onCreateNew: () => void;
   onDataMateConfig?: () => void;
   showDataMateConfig?: boolean; // Control whether to show DataMate config button
-  isSelectable: (kb: KnowledgeBase) => boolean;
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
   onKnowledgeBaseChange?: () => void; // New: callback function when knowledge base switches
@@ -85,19 +51,16 @@ interface KnowledgeBaseListProps {
 
 const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
-  selectedIds,
   activeKnowledgeBase,
   currentEmbeddingModel,
   isLoading = false,
   syncLoading = false,
-  onSelect,
   onClick,
   onDelete,
   onSync,
   onCreateNew,
   onDataMateConfig,
   showDataMateConfig = false,
-  isSelectable,
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
@@ -433,67 +396,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         </div>
       </div>
 
-      {/* Fixed selection status area */}
-      <div className="border-b border-gray-200 shrink-0 relative z-10 shadow-md">
-        <div className="px-5 py-2 bg-blue-50">
-          <div className="flex items-center">
-            <span className="font-medium text-blue-700">
-              {t("knowledgeBase.selected.prefix")}{" "}
-            </span>
-            <span className="mx-1 text-blue-600 font-bold text-lg">
-              {selectedIds.length}
-            </span>
-            <span className="font-medium text-blue-700">
-              {t("knowledgeBase.selected.suffix")}
-            </span>
-          </div>
-
-          {selectedIds.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
-              {selectedIds.map((id) => {
-                const kb = knowledgeBases.find((kb) => kb.id === id);
-                return kb ? (
-                  <span
-                    key={id}
-                    className="inline-flex items-center justify-center bg-blue-100 text-blue-800 rounded text-sm font-medium group"
-                    style={{ maxWidth: "fit-content", padding: "2px 6px" }}
-                  >
-                    <span
-                      className="truncate"
-                      style={{
-                        maxWidth: "150px",
-                        ...KB_LAYOUT.KB_NAME_OVERFLOW,
-                      }}
-                      title={kb.name}
-                    >
-                      {kb.name}
-                    </span>
-                    <button
-                      className="ml-1.5 text-blue-600 hover:text-blue-800 flex-shrink-0 text-sm leading-none"
-                      onClick={() => onSelect(id)}
-                      aria-label={t("knowledgeBase.button.removeKb", {
-                        name: kb.name,
-                      })}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ) : null;
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Scrollable knowledge base list area */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         {filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
             {filteredKnowledgeBases.map((kb, index) => {
-              const canSelect = isSelectable(kb);
-              const isSelected = selectedIds.includes(kb.id);
               const isActive = activeKnowledgeBase?.id === kb.id;
-              const isMismatchedAndSelected = isSelected && !canSelect;
 
               return (
                 <div
@@ -517,51 +424,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   }}
                 >
                   <div className="flex items-start">
-                    <div className="flex-shrink-0">
-                      <div
-                        className="px-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (canSelect || isSelected) {
-                            onSelect(kb.id);
-                          }
-                        }}
-                        style={{
-                          minWidth: "40px",
-                          minHeight: "40px",
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <ConfigProvider
-                          theme={{
-                            token: {
-                              // If selected with model mismatch, use light blue, otherwise default blue
-                              colorPrimary: isMismatchedAndSelected
-                                ? "#90caf9"
-                                : "#1677ff",
-                            },
-                          }}
-                        >
-                          <Checkbox
-                            checked={isSelected}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              onSelect(kb.id);
-                            }}
-                            disabled={!canSelect && !isSelected}
-                            style={{
-                              cursor:
-                                canSelect || isSelected
-                                  ? "pointer"
-                                  : "not-allowed",
-                              transform: "scale(1.5)",
-                            }}
-                          />
-                        </ConfigProvider>
-                      </div>
-                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center flex-1 min-w-0">
@@ -622,7 +484,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                       >
                         {/* Document count tag */}
                         <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                         >
                           {t("knowledgeBase.tag.documents", {
                             count: kb.documentCount || 0,
@@ -631,7 +493,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
                         {/* Chunk count tag */}
                         <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                         >
                           {t("knowledgeBase.tag.chunks", {
                             count: kb.chunkCount || 0,
@@ -640,7 +502,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
                         {/* Always show source tag regardless of document/chunk count */}
                         <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                         >
                           {t("knowledgeBase.tag.source", {
                             source: kb.source,
@@ -653,7 +515,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           <>
                             {/* Creation date tag - only show date */}
                             <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} bg-gray-200 text-gray-800 border border-gray-200 mr-1`}
+                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                             >
                               {t("knowledgeBase.tag.createdAt", {
                                 date: formatDate(kb.createdAt),
@@ -668,7 +530,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             {/* Model tag - only show when model is not "unknown" */}
                             {kb.embeddingModel !== "unknown" && (
                               <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-green-100 text-green-800 border border-green-200 mr-1`}
+                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model} mr-1`}
                               >
                                 {t("knowledgeBase.tag.model", {
                                   model: getModelDisplayName(kb.embeddingModel),
@@ -679,7 +541,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               kb.embeddingModel !== currentEmbeddingModel &&
                               kb.source !== "datamate" && (
                                 <span
-                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-yellow-100 text-yellow-800 border border-yellow-200 mr-1`}
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.warning} mr-1`}
                                 >
                                   {t("knowledgeBase.tag.modelMismatch")}
                                 </span>

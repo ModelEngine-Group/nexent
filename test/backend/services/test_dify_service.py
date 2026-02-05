@@ -499,3 +499,188 @@ class TestFetchDifyDatasetsImpl:
 
         # Verify Client was instantiated with timeout=30, verify=False
         mock_client_class.assert_called_once_with(timeout=30, verify=False)
+
+    def test_fetch_dify_datasets_impl_url_normalization_v1_suffix(self):
+        """Test that /v1 suffix is removed from API base URL to avoid duplication.
+
+        E.g., "https://api.dify.ai/v1" -> "https://api.dify.ai"
+        """
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            fetch_dify_datasets_impl(
+                dify_api_base="https://api.dify.ai/v1",
+                api_key="test-api-key"
+            )
+
+        # Verify URL is normalized (/v1 suffix removed)
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        assert called_url == "https://api.dify.ai/v1/datasets"
+        assert "/v1/v1/" not in called_url
+
+    def test_fetch_dify_datasets_impl_url_normalization_v1_with_trailing_slash(self):
+        """Test that /v1/ suffix is removed from API base URL to avoid duplication.
+
+        E.g., "https://api.dify.ai/v1/" -> "https://api.dify.ai"
+        """
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            fetch_dify_datasets_impl(
+                dify_api_base="https://api.dify.ai/v1/",
+                api_key="test-api-key"
+            )
+
+        # Verify URL is normalized (/v1/ suffix removed)
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        assert called_url == "https://api.dify.ai/v1/datasets"
+        assert "/v1/v1/" not in called_url
+
+    def test_fetch_dify_datasets_impl_url_normalization_v1_and_trailing_slash_combined(self):
+        """Test URL normalization when API base has /v1 and trailing slash.
+
+        E.g., "https://api.dify.ai/v1/" -> "https://api.dify.ai"
+        Then /v1/datasets is appended.
+        """
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            # This tests the combined effect: rstrip("/") + endswith("/v1") check
+            fetch_dify_datasets_impl(
+                dify_api_base="https://api.dify.ai/v1/",
+                api_key="test-api-key"
+            )
+
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        # Should result in clean URL without double slashes or /v1 duplication
+        assert called_url == "https://api.dify.ai/v1/datasets"
+        assert not called_url.endswith("//")
+        assert not called_url.endswith("/v1/v1/")
+
+    def test_fetch_dify_datasets_impl_url_normalization_no_v1_suffix(self):
+        """Test that URLs without /v1 suffix are not modified.
+
+        E.g., "https://api.dify.ai" stays as "https://api.dify.ai"
+        """
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            fetch_dify_datasets_impl(
+                dify_api_base="https://api.dify.ai",
+                api_key="test-api-key"
+            )
+
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        assert called_url == "https://api.dify.ai/v1/datasets"
+
+    def test_fetch_dify_datasets_impl_url_v1_suffix_in_custom_path(self):
+        """Test that /v1 suffix is stripped even when in custom path.
+
+        The code removes /v1 suffix regardless of URL structure.
+        E.g., "https://api.dify.ai/custom/v1" -> "https://api.dify.ai/custom"
+        Then /v1/datasets is appended: "https://api.dify.ai/custom/v1/datasets"
+        """
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            # The /v1 at the end of base URL gets stripped
+            fetch_dify_datasets_impl(
+                dify_api_base="https://api.dify.ai/custom/v1",
+                api_key="test-api-key"
+            )
+
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        # /v1 is stripped, then /v1/datasets is appended
+        assert called_url == "https://api.dify.ai/custom/v1/datasets"
+        # Verify no duplication
+        assert "/v1/v1" not in called_url
+
+    def test_fetch_dify_datasets_impl_url_v1_suffix_with_port(self):
+        """Test /v1 suffix removal with port number in URL.
+
+        E.g., "https://api.dify.ai:8080/v1" -> "https://api.dify.ai:8080"
+        """
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            fetch_dify_datasets_impl(
+                dify_api_base="https://api.dify.ai:8080/v1",
+                api_key="test-api-key"
+            )
+
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        assert called_url == "https://api.dify.ai:8080/v1/datasets"
+        assert "/v1/v1" not in called_url
+
+    @pytest.mark.parametrize("api_base_url", [
+        "https://api.dify.ai/v1",
+        "https://api.dify.ai/v1/",
+        "http://localhost:3000/v1",
+        "http://localhost:3000/v1/",
+        "https://dify.example.com/v1",
+        "https://dify.example.com/v1/",
+    ])
+    def test_fetch_dify_datasets_impl_url_v1_suffix_parametrized(self, api_base_url):
+        """Parametrized test for various /v1 suffix formats."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            fetch_dify_datasets_impl(
+                dify_api_base=api_base_url,
+                api_key="test-api-key"
+            )
+
+        mock_client.get.assert_called_once()
+        called_url = mock_client.get.call_args[0][0]
+        # Verify no URL duplication (/v1 should not appear twice)
+        assert "/v1/v1" not in called_url, f"URL duplication detected: {called_url}"
+        # Verify URL ends with /v1/datasets
+        assert called_url.endswith("/v1/datasets")

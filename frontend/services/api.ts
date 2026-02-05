@@ -159,6 +159,9 @@ export const API_ENDPOINTS = {
         pathOrUrl
       )}/error-info`,
   },
+  dify: {
+    datasets: `${API_BASE_URL}/dify/datasets`,
+  },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
     files: (knowledgeBaseId: string) =>

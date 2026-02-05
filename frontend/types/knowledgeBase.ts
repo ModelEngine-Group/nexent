@@ -1,11 +1,17 @@
 // Knowledge base related type definitions
 
-import { DOCUMENT_ACTION_TYPES, KNOWLEDGE_BASE_ACTION_TYPES, UI_ACTION_TYPES, NOTIFICATION_TYPES } from "@/const/knowledgeBase";
+import {
+  DOCUMENT_ACTION_TYPES,
+  KNOWLEDGE_BASE_ACTION_TYPES,
+  UI_ACTION_TYPES,
+  NOTIFICATION_TYPES,
+} from "@/const/knowledgeBase";
 
 // Knowledge base basic type
 export interface KnowledgeBase {
   id: string;
   name: string;
+  display_name?: string; // User-friendly display name, falls back to name if not available
   description: string | null;
   chunkCount: number;
   documentCount: number;
@@ -69,17 +75,32 @@ export interface DocumentState {
 
 // Document action type
 export type DocumentAction =
-  | { type: typeof DOCUMENT_ACTION_TYPES.FETCH_SUCCESS, payload: { kbId: string, documents: Document[] } }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_DOCUMENT, payload: string }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_DOCUMENTS, payload: string[] }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_ALL, payload: { kbId: string, selected: boolean } }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES, payload: File[] }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: boolean }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SET_LOADING_DOCUMENTS, payload: boolean }
-  | { type: typeof DOCUMENT_ACTION_TYPES.DELETE_DOCUMENT, payload: { kbId: string, docId: string } }
-  | { type: typeof DOCUMENT_ACTION_TYPES.SET_LOADING_KB_ID, payload: { kbId: string, isLoading: boolean } }
-  | { type: typeof DOCUMENT_ACTION_TYPES.CLEAR_DOCUMENTS, payload?: undefined }
-  | { type: typeof DOCUMENT_ACTION_TYPES.ERROR, payload: string };
+  | {
+      type: typeof DOCUMENT_ACTION_TYPES.FETCH_SUCCESS;
+      payload: { kbId: string; documents: Document[] };
+    }
+  | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_DOCUMENT; payload: string }
+  | { type: typeof DOCUMENT_ACTION_TYPES.SELECT_DOCUMENTS; payload: string[] }
+  | {
+      type: typeof DOCUMENT_ACTION_TYPES.SELECT_ALL;
+      payload: { kbId: string; selected: boolean };
+    }
+  | { type: typeof DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES; payload: File[] }
+  | { type: typeof DOCUMENT_ACTION_TYPES.SET_UPLOADING; payload: boolean }
+  | {
+      type: typeof DOCUMENT_ACTION_TYPES.SET_LOADING_DOCUMENTS;
+      payload: boolean;
+    }
+  | {
+      type: typeof DOCUMENT_ACTION_TYPES.DELETE_DOCUMENT;
+      payload: { kbId: string; docId: string };
+    }
+  | {
+      type: typeof DOCUMENT_ACTION_TYPES.SET_LOADING_KB_ID;
+      payload: { kbId: string; isLoading: boolean };
+    }
+  | { type: typeof DOCUMENT_ACTION_TYPES.CLEAR_DOCUMENTS; payload?: undefined }
+  | { type: typeof DOCUMENT_ACTION_TYPES.ERROR; payload: string };
 
 // Knowledge base state interface
 export interface KnowledgeBaseState {
@@ -94,15 +115,36 @@ export interface KnowledgeBaseState {
 
 // Knowledge base action type
 export type KnowledgeBaseAction =
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS, payload: KnowledgeBase[] }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE, payload: string[] }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_ACTIVE, payload: KnowledgeBase | null }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL, payload: string | null }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.DELETE_KNOWLEDGE_BASE, payload: string }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ADD_KNOWLEDGE_BASE, payload: KnowledgeBase }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.LOADING, payload: boolean }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING, payload: boolean }
-  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ERROR, payload: string };
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS;
+      payload: KnowledgeBase[];
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE;
+      payload: string[];
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_ACTIVE;
+      payload: KnowledgeBase | null;
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL;
+      payload: string | null;
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.DELETE_KNOWLEDGE_BASE;
+      payload: string;
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ADD_KNOWLEDGE_BASE;
+      payload: KnowledgeBase;
+    }
+  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.LOADING; payload: boolean }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING;
+      payload: boolean;
+    }
+  | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ERROR; payload: string };
 
 // UI state interface
 export interface UIState {
@@ -112,35 +154,33 @@ export interface UIState {
   notifications: {
     id: string;
     message: string;
-    type: typeof NOTIFICATION_TYPES.SUCCESS | typeof NOTIFICATION_TYPES.ERROR | typeof NOTIFICATION_TYPES.INFO | typeof NOTIFICATION_TYPES.WARNING;
+    type:
+      | typeof NOTIFICATION_TYPES.SUCCESS
+      | typeof NOTIFICATION_TYPES.ERROR
+      | typeof NOTIFICATION_TYPES.INFO
+      | typeof NOTIFICATION_TYPES.WARNING;
   }[];
 }
 
 // UI action type
 export type UIAction =
-  | { type: typeof UI_ACTION_TYPES.SET_DRAGGING, payload: boolean }
-  | { type: typeof UI_ACTION_TYPES.TOGGLE_CREATE_MODAL, payload: boolean }
-  | { type: typeof UI_ACTION_TYPES.TOGGLE_DOC_MODAL, payload: boolean }
-  | { type: typeof UI_ACTION_TYPES.ADD_NOTIFICATION, payload: { message: string; type: typeof NOTIFICATION_TYPES.SUCCESS | typeof NOTIFICATION_TYPES.ERROR | typeof NOTIFICATION_TYPES.INFO | typeof NOTIFICATION_TYPES.WARNING } }
-  | { type: typeof UI_ACTION_TYPES.REMOVE_NOTIFICATION, payload: string };
+  | { type: typeof UI_ACTION_TYPES.SET_DRAGGING; payload: boolean }
+  | { type: typeof UI_ACTION_TYPES.TOGGLE_CREATE_MODAL; payload: boolean }
+  | { type: typeof UI_ACTION_TYPES.TOGGLE_DOC_MODAL; payload: boolean }
+  | {
+      type: typeof UI_ACTION_TYPES.ADD_NOTIFICATION;
+      payload: {
+        message: string;
+        type:
+          | typeof NOTIFICATION_TYPES.SUCCESS
+          | typeof NOTIFICATION_TYPES.ERROR
+          | typeof NOTIFICATION_TYPES.INFO
+          | typeof NOTIFICATION_TYPES.WARNING;
+      };
+    }
+  | { type: typeof UI_ACTION_TYPES.REMOVE_NOTIFICATION; payload: string };
 
 // Abortable error type for upload operations
 export interface AbortableError extends Error {
   name: string;
-}
-
-// User selected knowledge base configuration type
-export interface UserKnowledgeConfig {
-  selectedKbNames?: string[];
-  selectedKbModels?: string[];
-  selectedKbSources?: string[];
-  // Legacy support for grouped format
-  nexent?: string[];
-  datamate?: string[];
-}
-
-// Update knowledge list request type
-export interface UpdateKnowledgeListRequest {
-  nexent?: string[];
-  datamate?: string[];
 }

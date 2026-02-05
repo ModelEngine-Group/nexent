@@ -41,6 +41,94 @@ class KnowledgeBaseService {
     }
   }
 
+  // Sync Dify knowledge bases
+  async syncDifyKnowledgeBases(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+  }> {
+    try {
+      // Call backend proxy endpoint to avoid CORS issues
+      const url = new URL(API_ENDPOINTS.dify.datasets, window.location.origin);
+      url.searchParams.set("dify_api_base", difyApiBase);
+      url.searchParams.set("api_key", apiKey);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to fetch Dify datasets");
+      }
+
+      const result = await response.json();
+      return {
+        indices: result.indices || [],
+        count: result.count || 0,
+        indices_info: result.indices_info || [],
+      };
+    } catch (error) {
+      log.error("Failed to sync Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
+  // Get Dify knowledge bases as KnowledgeBase array
+  async getDifyKnowledgeBases(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<KnowledgeBase[]> {
+    try {
+      const syncResult = await this.syncDifyKnowledgeBases(difyApiBase, apiKey);
+
+      if (!syncResult.indices_info || syncResult.indices_info.length === 0) {
+        return [];
+      }
+
+      // Transform to KnowledgeBase format
+      const difyKnowledgeBases: KnowledgeBase[] = syncResult.indices_info.map(
+        (indexInfo: any) => {
+          const stats = indexInfo.stats?.base_info || {};
+          return {
+            id: indexInfo.name,
+            name: indexInfo.display_name || indexInfo.name,
+            display_name: indexInfo.display_name || indexInfo.name,
+            description: "Dify knowledge base",
+            documentCount: stats.doc_count || 0,
+            chunkCount: stats.chunk_count || 0,
+            createdAt: stats.creation_date || null,
+            updatedAt: stats.update_date || stats.creation_date || null,
+            embeddingModel: stats.embedding_model || "unknown",
+            knowledge_sources: "dify",
+            ingroup_permission: "",
+            group_ids: [],
+            store_size: stats.store_size || "",
+            process_source: stats.process_source || "Dify",
+            avatar: "",
+            chunkNum: 0,
+            language: "",
+            nickname: "",
+            parserId: "",
+            permission: "",
+            tokenNum: 0,
+            source: "dify",
+            tenant_id: "",
+          };
+        }
+      );
+
+      return difyKnowledgeBases;
+    } catch (error) {
+      log.error("Failed to get Dify knowledge bases:", error);
+      throw error;
+    }
+  }
+
   // Sync DataMate knowledge bases and create local records
   async syncDataMateAndCreateRecords(): Promise<{
     indices: string[];
@@ -72,6 +160,78 @@ class KnowledgeBaseService {
         "Failed to sync DataMate knowledge bases and create records:",
         error
       );
+      throw error;
+    }
+  }
+
+  // Sync Dify knowledge bases
+  async syncDifyDatasets(
+    difyApiBase: string,
+    apiKey: string
+  ): Promise<{
+    indices: string[];
+    count: number;
+    indices_info: any[];
+  }> {
+    try {
+      // Normalize URL by removing trailing slash
+      const normalizedApiBase = difyApiBase.replace(/\/+$/, "");
+      const url = `${normalizedApiBase}/v1/datasets`;
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Dify API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const datasetsData = result.data || [];
+
+      // Transform to internal format
+      const indices: string[] = [];
+      const indices_info: any[] = [];
+
+      for (const dataset of datasetsData) {
+        const datasetId = dataset.id;
+        if (!datasetId) continue;
+
+        indices.push(datasetId);
+
+        indices_info.push({
+          name: datasetId,
+          display_name: dataset.name,
+          stats: {
+            base_info: {
+              doc_count: dataset.document_count || 0,
+              chunk_count: 0,
+              store_size: "",
+              process_source: "Dify",
+              embedding_model: dataset.embedding_model || "",
+              embedding_dim: 0,
+              creation_date: (dataset.created_at || 0) * 1000,
+              update_date: (dataset.updated_at || 0) * 1000,
+            },
+            search_performance: {
+              total_search_count: 0,
+              hit_count: 0,
+            },
+          },
+        });
+      }
+
+      return {
+        indices,
+        count: indices.length,
+        indices_info,
+      };
+    } catch (error) {
+      log.error("Failed to sync Dify datasets:", error);
       throw error;
     }
   }
@@ -121,14 +281,20 @@ class KnowledgeBaseService {
                   return {
                     id: kbId,
                     name: kbName,
+                    display_name: indexInfo.display_name || indexInfo.name,
                     description: "Elasticsearch index",
                     documentCount: stats.doc_count || 0,
                     chunkCount: stats.chunk_count || 0,
                     createdAt: stats.creation_date || null,
                     // Use update_time from database for sorting, fallback to ES update_date
-                    updatedAt: indexInfo.update_time || stats.update_date || stats.creation_date || null,
+                    updatedAt:
+                      indexInfo.update_time ||
+                      stats.update_date ||
+                      stats.creation_date ||
+                      null,
                     embeddingModel: stats.embedding_model || "unknown",
-                    knowledge_sources: indexInfo.knowledge_sources || "elasticsearch",
+                    knowledge_sources:
+                      indexInfo.knowledge_sources || "elasticsearch",
                     ingroup_permission: indexInfo.ingroup_permission || "",
                     group_ids: indexInfo.group_ids || [],
                     store_size: stats.store_size || "",
@@ -168,6 +334,7 @@ class KnowledgeBaseService {
                 return {
                   id: kbId,
                   name: kbName,
+                  display_name: indexInfo.display_name || indexInfo.name,
                   description: "DataMate knowledge base",
                   documentCount: stats.doc_count || 0,
                   chunkCount: stats.chunk_count || 0,
@@ -318,7 +485,7 @@ class KnowledgeBaseService {
         parserId: "",
         permission: "",
         tokenNum: 0,
-        source: params.source || "elasticsearch"
+        source: params.source || "elasticsearch",
       };
     } catch (error) {
       log.error("Failed to create knowledge base:", error);
@@ -954,7 +1121,9 @@ class KnowledgeBaseService {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.detail || result.message || "Failed to update knowledge base");
+        throw new Error(
+          result.detail || result.message || "Failed to update knowledge base"
+        );
       }
     } catch (error) {
       log.error("Failed to update knowledge base:", error);
