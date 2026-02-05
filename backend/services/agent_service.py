@@ -53,6 +53,7 @@ from database.tool_db import (
     query_all_enabled_tool_instances,
     query_all_tools,
     query_tool_instances_by_id,
+    query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
 from database.group_db import query_group_ids_by_user
@@ -835,23 +836,40 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     try:
         if request.enabled_tool_ids is not None and agent_id is not None:
             enabled_set = set(request.enabled_tool_ids)
-            # Get all tools for current tenant
-            all_tools = query_all_tools(tenant_id=tenant_id)
-            for tool in all_tools:
-                tool_id = tool.get("tool_id")
-                if tool_id is None:
-                    continue
+            # Query existing tool instances for this agent
+            existing_instances = query_tool_instances_by_agent_id(
+                agent_id, tenant_id)
+
+            # Handle unselected tool（already exist instance）→ enabled=False
+            for instance in existing_instances:
+                inst_tool_id = instance.get("tool_id")
+                if inst_tool_id is not None and inst_tool_id not in enabled_set:
+                    create_or_update_tool_by_tool_info(
+                        tool_info=ToolInstanceInfoRequest(
+                            tool_id=inst_tool_id,
+                            agent_id=agent_id,
+                            params=instance.get("params", {}),
+                            enabled=False
+                        ),
+                        tenant_id=tenant_id,
+                        user_id=user_id
+                    )
+
+            # Handle selected tool → enabled=True（create or update）
+            for tool_id in enabled_set:
                 # Keep existing params if any
-                existing_instance = query_tool_instances_by_id(
-                    agent_id, tool_id, tenant_id)
-                params = (existing_instance or {}).get(
-                    "params", {}) if existing_instance else {}
+                existing_instance = next(
+                    (inst for inst in existing_instances
+                     if inst.get("tool_id") == tool_id),
+                    None
+                )
+                params = (existing_instance or {}).get("params", {})
                 create_or_update_tool_by_tool_info(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,
                         agent_id=agent_id,
                         params=params,
-                        enabled=(tool_id in enabled_set)
+                        enabled=True,
                     ),
                     tenant_id=tenant_id,
                     user_id=user_id
