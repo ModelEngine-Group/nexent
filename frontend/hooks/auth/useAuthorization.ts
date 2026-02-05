@@ -10,6 +10,7 @@ import { authEvents, authzEvents, authzEventUtils } from "@/lib/authEvents";
 import { AUTH_EVENTS, AUTHZ_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 
 /**
  * Custom hook for authorization management
@@ -18,6 +19,8 @@ import log from "@/lib/logger";
 export function useAuthorization(): AuthorizationContextType {
   const router = useRouter();
   const pathname = usePathname();
+
+  const { isSpeedMode } = useDeployment();
 
   const [user, setUser] = useState<User | null>(null);
   const [groupIds, setGroupIds] = useState<number[]>([]);
@@ -101,6 +104,7 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Listen for authentication events
   useEffect(() => {
+    if (isSpeedMode) return;
     // Handle login success - set user info immediately, then fetch full permissions
     const handleLoginSuccess = () => {
       refetch().then((result) => {
@@ -176,26 +180,35 @@ export function useAuthorization(): AuthorizationContextType {
   // Initialize authorization data on mount if user is already authenticated
   useEffect(() => {
     const initializeAuthz = () => {
-      const session = getSessionFromStorage();
-      if (session?.access_token) {
+      // In speed mode, always fetch authorization info
+      // In full mode, only fetch if session exists
+      if (!isSpeedMode) {
+        const session = getSessionFromStorage();
+        if (!session?.access_token) {
+          return;
+        }
         const now = Date.now();
         const expiresAt = session.expires_at * 1000;
 
-        if (expiresAt > now) {
-          log.info(
-            "Valid session found on initialization, fetching authorization info..."
-          );
-          refetch().catch((error) => {
-            log.error("Initial refetch error:", error);
-          });
+        if (expiresAt <= now) {
+          return;
         }
       }
+
+      log.info(
+        isSpeedMode
+          ? "Speed mode: fetching authorization info..."
+          : "Valid session found on initialization, fetching authorization info..."
+      );
+      refetch().catch((error) => {
+        log.error("Initial refetch error:", error);
+      });
     };
 
     // Small delay to ensure authentication state is initialized
     const timeoutId = setTimeout(initializeAuthz, 100);
     return () => clearTimeout(timeoutId);
-  }, [refetch]);
+  }, [isSpeedMode, refetch]);
 
   // Authz prompt modal control functions (defined before useLayoutEffect)
   const openAuthzPromptModal = useCallback(() => setIsAuthzPromptModalOpen(true), []);
