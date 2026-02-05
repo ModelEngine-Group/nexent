@@ -127,15 +127,6 @@ def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[st
     # Generate a random UUID for tenant_id
     tenant_id = str(uuid.uuid4())
 
-    # Check if tenant already exists (extremely unlikely with UUID, but good practice)
-    try:
-        existing_tenant = get_tenant_info(tenant_id)
-        if existing_tenant:
-            raise ValidationError(f"Tenant {tenant_id} already exists")
-    except NotFoundException:
-        # Tenant doesn't exist, which is what we want
-        pass
-
     # Validate tenant name
     if not tenant_name or not tenant_name.strip():
         raise ValidationError("Tenant name cannot be empty")
