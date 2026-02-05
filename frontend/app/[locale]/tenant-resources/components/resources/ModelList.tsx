@@ -178,8 +178,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate}>
@@ -194,9 +194,11 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         loading={isLoading}
         rowKey="id"
         pagination={false}
+        scroll={{ x: true }}
+        className="flex-1"
       />
 
-      <div className="flex justify-end mt-4">
+      <div className="flex justify-end mt-4 flex-shrink-0">
         <Pagination
           current={page}
           pageSize={pageSize}

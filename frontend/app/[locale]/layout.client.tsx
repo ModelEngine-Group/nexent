@@ -91,6 +91,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   };
 
   const contentStyle: React.CSSProperties = {
+    height: "100%",
     overflowY: "auto",
     overflowX: "hidden",
     position: "relative",

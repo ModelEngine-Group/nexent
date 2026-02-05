@@ -237,7 +237,7 @@ export default function KnowledgeList({
   ];
 
   return (
-    <>
+    <div className="h-full flex flex-col overflow-hidden">
       <Table
         columns={columns}
         dataSource={knowledgeBases}
@@ -245,6 +245,7 @@ export default function KnowledgeList({
         rowKey="id"
         pagination={{ pageSize: 10 }}
         scroll={{ x: 1400 }}
+        className="flex-1"
       />
 
       {/* Edit Knowledge Base Modal */}
@@ -276,6 +277,6 @@ export default function KnowledgeList({
           <div className="text-gray-400 italic">{t("tenantResources.knowledgeBase.noSummary")}</div>
         )}
       </Modal>
-    </>
+    </div>
   );
 }
