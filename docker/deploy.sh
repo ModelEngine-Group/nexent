@@ -941,7 +941,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="v1.7.9.2"
+  APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
