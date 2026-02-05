@@ -8,6 +8,7 @@ import { configService } from "@/services/configService";
 import { configStore } from "@/lib/config";
 import { USER_ROLES } from "@/const/auth";
 import log from "@/lib/logger";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
 
@@ -36,6 +37,15 @@ export default function KnowledgesContent() {
       })
     );
 
+    // Load knowledge base list from API
+    const loadKnowledgeBaseList = async () => {
+      try {
+        await knowledgeBaseService.getKnowledgeBases(true);
+      } catch (error) {
+        log.error("Failed to load knowledge base list:", error);
+      }
+    };
+
     // Load config for normal user
     const loadConfigForNormalUser = async () => {
       if (!isSpeedMode && user && user.role !== USER_ROLES.ADMIN) {
@@ -48,8 +58,9 @@ export default function KnowledgesContent() {
       }
     };
 
+    loadKnowledgeBaseList();
     loadConfigForNormalUser();
-  }, []);
+  }, [isSpeedMode, user]);
 
   return (
     <>
