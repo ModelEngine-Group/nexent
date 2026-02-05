@@ -29,10 +29,14 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const [authServiceUnavailable, setAuthServiceUnavailable] =
     useState<boolean>(false);
 
-  
+  if (isSpeedMode) {
+    log.info("Speed mode: valid session found, emitting login success event");
+    authEventUtils.emitLoginSuccess();
+  }
 
   // Initialize authentication state based on session
   useEffect(() => {
+    if (isSpeedMode) return;
     // Check session validity directly
     if (checkSessionValid()) {
       // Session is valid, restore it to state
@@ -47,7 +51,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
       setIsAuthenticated(false);
     }
     setIsAuthChecking(false);
-  }, []);
+  }, [isSpeedMode]);
 
 
   const clearLocalSession = useCallback(() => {
