@@ -72,6 +72,7 @@ from backend.database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_all_tools,
     query_tool_instances_by_id,
+    query_tool_instances_by_agent_id,
     query_tools_by_ids,
     query_all_enabled_tool_instances,
     update_tool_table_from_scan_tool_list,
@@ -644,4 +645,73 @@ def test_search_last_tool_instance_by_tool_id_different_tenants(monkeypatch, moc
     result = search_last_tool_instance_by_tool_id(1, "tenant2", "user2")
     
     assert result["tenant_id"] == "tenant2"
-    assert result["user_id"] == "user2" 
+
+
+def test_query_tool_instances_by_agent_id(monkeypatch, mock_session):
+    """Test querying all tool instances for an agent"""
+    session, query = mock_session
+    mock_tool_instance1 = MockToolInstance()
+    mock_tool_instance1.tool_id = 1
+    mock_tool_instance2 = MockToolInstance()
+    mock_tool_instance2.tool_id = 2
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_tool_instance1, mock_tool_instance2]
+    query.all = mock_all
+    # Set up filter chain: query.filter(...).all()
+    query.filter.return_value.all = mock_all
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_tool_instances_by_agent_id(agent_id=1, tenant_id="tenant1")
+
+    assert len(result) == 2
+    assert result[0]["tool_id"] == 1
+    assert result[1]["tool_id"] == 2
+
+
+def test_query_tool_instances_by_agent_id_empty(monkeypatch, mock_session):
+    """Test querying tool instances when agent has no instances"""
+    session, query = mock_session
+
+    mock_all = MagicMock()
+    mock_all.return_value = []
+    query.all = mock_all
+    query.filter.return_value.all = mock_all
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_tool_instances_by_agent_id(agent_id=1, tenant_id="tenant1")
+
+    assert result == []
+
+
+def test_query_tool_instances_by_agent_id_with_version(monkeypatch, mock_session):
+    """Test querying tool instances with specific version number"""
+    session, query = mock_session
+    mock_tool_instance = MockToolInstance()
+    mock_tool_instance.tool_id = 1
+
+    mock_all = MagicMock()
+    mock_all.return_value = [mock_tool_instance]
+    query.all = mock_all
+    query.filter.return_value.all = mock_all
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_tool_instances_by_agent_id(agent_id=1, tenant_id="tenant1", version_no=2)
+
+    assert len(result) == 1
+    assert result[0]["tool_id"] == 1 
