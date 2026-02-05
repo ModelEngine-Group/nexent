@@ -28,7 +28,8 @@ from backend.services.tenant_service import (
     create_tenant,
     update_tenant_info,
     delete_tenant,
-    _create_default_group_for_tenant
+    _create_default_group_for_tenant,
+    check_tenant_name_exists
 )
 
 
@@ -264,8 +265,8 @@ class TestCreateTenant:
         user_id = "creator_user"
         group_id = 123
 
-        # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()), \
+        # Mock check_tenant_name_exists to return False (name not taken)
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
              patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=group_id):
 
             # Configure insert_config to succeed
@@ -282,14 +283,14 @@ class TestCreateTenant:
             # Verify config insertions were called (3 configs: ID, name, group)
             assert service_mocks['insert_config'].call_count == 3
 
-    def test_create_tenant_already_exists(self, service_mocks):
-        """Test creating tenant that already exists"""
+    def test_create_tenant_name_already_exists(self, service_mocks):
+        """Test creating tenant with a name that already exists"""
         # Setup
         tenant_name = "Existing Tenant"
         user_id = "creator_user"
 
-        # Mock get_tenant_info to return existing tenant (UUID collision)
-        with patch('backend.services.tenant_service.get_tenant_info', return_value={"tenant_id": "some-uuid"}) as mock_get_tenant_info:
+        # Mock check_tenant_name_exists to return True (name already taken)
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=True):
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="already exists"):
@@ -301,8 +302,8 @@ class TestCreateTenant:
         tenant_name = ""
         user_id = "creator_user"
 
-        # Mock get_tenant_info to raise NotFoundException (tenant doesn't exist)
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()) as mock_get_tenant_info:
+        # Mock check_tenant_name_exists (won't be called due to empty name validation)
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
@@ -315,7 +316,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()), \
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
              patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=123):
 
             service_mocks['insert_config'].return_value = False
@@ -330,8 +331,8 @@ class TestCreateTenant:
         tenant_name = "   \t\n   "  # Only whitespace
         user_id = "creator_user"
 
-        # Mock get_tenant_info to raise NotFoundException (tenant doesn't exist)
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()) as mock_get_tenant_info:
+        # Mock check_tenant_name_exists (won't be called due to whitespace validation)
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
@@ -344,7 +345,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()), \
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
                 patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=123):
 
             # Configure insert_config to fail on first call (tenant ID config)
@@ -361,7 +362,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()), \
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
                 patch('backend.services.tenant_service._create_default_group_for_tenant', return_value=123):
 
             # Configure insert_config to succeed for first two, fail for third (group config)
@@ -378,7 +379,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()), \
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
                 patch('backend.services.tenant_service._create_default_group_for_tenant', side_effect=ValidationError("Group creation failed")):
 
             # Execute & Assert
@@ -392,7 +393,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock dependencies
-        with patch('backend.services.tenant_service.get_tenant_info', side_effect=NotFoundException()), \
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
                 patch('backend.services.tenant_service._create_default_group_for_tenant', side_effect=Exception("Unexpected error")):
 
             # Execute & Assert
@@ -400,17 +401,11 @@ class TestCreateTenant:
                 create_tenant(tenant_name, user_id)
 
     def test_create_tenant_uuid_collision(self, service_mocks):
-        """Test create_tenant when UUID collision occurs"""
-        # Setup
-        tenant_name = "New Tenant"
-        user_id = "creator_user"
-
-        # Mock get_tenant_info to return existing tenant (UUID collision)
-        with patch('backend.services.tenant_service.get_tenant_info', return_value={"tenant_id": "existing-uuid"}) as mock_get_tenant_info:
-
-            # Execute & Assert
-            with pytest.raises(ValidationError, match="already exists"):
-                create_tenant(tenant_name, user_id)
+        """Test create_tenant when UUID collision occurs (unlikely but possible)"""
+        # Note: This test is now obsolete since we removed UUID collision check.
+        # UUIDs are random and collision probability is astronomically low.
+        # Keeping for reference - this scenario should never happen in practice.
+        pass
 
 
 class TestUpdateTenantInfo:
@@ -530,6 +525,21 @@ class TestUpdateTenantInfo:
         with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
             update_tenant_info(tenant_id, new_tenant_name, user_id)
 
+    def test_update_tenant_info_name_already_exists(self, service_mocks):
+        """Test update_tenant_info raises error when name already exists on another tenant"""
+        # Setup
+        tenant_id = "test_tenant"
+        new_tenant_name = "Duplicate Name"
+        user_id = "updater_user"
+
+        # Mock check_tenant_name_exists to return True (name already taken by another tenant)
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=True) as mock_check:
+            # Execute & Assert
+            with pytest.raises(ValidationError, match="already exists"):
+                update_tenant_info(tenant_id, new_tenant_name, user_id)
+
+            # Verify check_tenant_name_exists was called with the right parameters
+            mock_check.assert_called_once_with(new_tenant_name.strip(), exclude_tenant_id=tenant_id)
 
 
 class TestDeleteTenant:
@@ -615,3 +625,130 @@ class TestCreateDefaultGroupForTenant:
             # Execute & Assert
             with pytest.raises(ValidationError, match="Failed to create default group: Invalid group data"):
                 _create_default_group_for_tenant(tenant_id, user_id)
+
+
+class TestCheckTenantNameExists:
+    """Test cases for check_tenant_name_exists function"""
+
+    def test_check_tenant_name_exists_returns_false_when_no_match(self):
+        """Test check_tenant_name_exists returns False when no tenant has the name"""
+        # Setup
+        tenant_name = "Unique Tenant Name"
+        tenant_ids = ["tenant1", "tenant2", "tenant3"]
+
+        # Mock with fresh mocks to avoid fixture conflicts
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
+            # Each tenant has a different name
+            mock_get_config.side_effect = [
+                {"config_value": "Tenant 1"},  # tenant1
+                {"config_value": "Tenant 2"},  # tenant2
+                {"config_value": "Tenant 3"}   # tenant3
+            ]
+
+            # Execute
+            result = check_tenant_name_exists(tenant_name)
+
+            # Assert
+            assert result is False
+
+    def test_check_tenant_name_exists_returns_true_when_match_found(self):
+        """Test check_tenant_name_exists returns True when a tenant has the name"""
+        # Setup
+        tenant_name = "Existing Tenant"
+        tenant_ids = ["tenant1", "tenant2", "tenant3"]
+
+        # Mock with fresh mocks
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
+            # tenant2 has the name we're looking for
+            mock_get_config.side_effect = [
+                {"config_value": "Tenant 1"},  # tenant1
+                {"config_value": "Existing Tenant"},  # tenant2 - match!
+                {"config_value": "Tenant 3"}   # tenant3
+            ]
+
+            # Execute
+            result = check_tenant_name_exists(tenant_name)
+
+            # Assert
+            assert result is True
+
+    def test_check_tenant_name_exists_excludes_specified_tenant(self):
+        """Test check_tenant_name_exists excludes the specified tenant ID when checking"""
+        # Setup
+        tenant_name = "My Tenant"
+        exclude_tenant_id = "tenant2"
+        tenant_ids = ["tenant1", "tenant2", "tenant3"]
+
+        # Mock with fresh mocks
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
+            # tenant2 has the name, but should be excluded
+            mock_get_config.side_effect = [
+                {"config_value": "My Tenant"},  # tenant1 - match (not excluded)
+                {"config_value": "My Tenant"},  # tenant2 - would match but excluded
+                {"config_value": "Tenant 3"}   # tenant3
+            ]
+
+            # Execute
+            result = check_tenant_name_exists(tenant_name, exclude_tenant_id=exclude_tenant_id)
+
+            # Assert - should return True because tenant1 has the name
+            assert result is True
+
+    def test_check_tenant_name_exists_empty_tenant_list(self):
+        """Test check_tenant_name_exists returns False when no tenants exist"""
+        # Setup
+        tenant_name = "Any Tenant"
+
+        # Mock dependencies - no tenants
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=[]):
+
+            # Execute
+            result = check_tenant_name_exists(tenant_name)
+
+            # Assert
+            assert result is False
+
+    def test_check_tenant_name_exists_case_sensitive(self):
+        """Test check_tenant_name_exists is case-sensitive"""
+        # Setup
+        tenant_name = "my tenant"  # lowercase
+        tenant_ids = ["tenant1"]
+
+        # Mock with fresh mock
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
+            mock_get_config.return_value = {"config_value": "My Tenant"}  # different case
+
+            # Execute
+            result = check_tenant_name_exists(tenant_name)
+
+            # Assert - should return False because comparison is case-sensitive
+            assert result is False
+
+    def test_check_tenant_name_exists_with_empty_name_config(self):
+        """Test check_tenant_name_exists handles tenants with empty name config"""
+        # Setup
+        tenant_name = "Test Tenant"
+        tenant_ids = ["tenant1", "tenant2"]
+
+        # Mock with fresh mocks
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
+            # tenant1 has empty name config (empty dict is falsy), tenant2 has different name
+            mock_get_config.side_effect = [
+                None,  # tenant1 - empty/falsy config
+                {"config_value": "Other Tenant"}  # tenant2
+            ]
+
+            # Execute
+            result = check_tenant_name_exists(tenant_name)
+
+            # Assert - should return False because no tenant has "Test Tenant"
+            assert result is False
+
+            # Assert
+            assert result is False
+

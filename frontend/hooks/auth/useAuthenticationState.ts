@@ -147,7 +147,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
           setIsAuthenticated(true);
 
           setTimeout(() => {
-            message.success(t("auth.registrationSuccess"));
+            message.success(t("auth.registerSuccessAutoLogin"));
 
             // Emit register success event to close register modal
             authEventUtils.emitRegisterSuccess();

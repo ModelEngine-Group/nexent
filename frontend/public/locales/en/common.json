@@ -1309,6 +1309,10 @@
   "tenantResources.models.type.vlm": "Visual Language Model",
 
   "tenantResources.models.confirmDelete": "Delete model?",
+  "tenantResources.models.editModel": "Edit Model",
+  "tenantResources.models.deleteModel": "Delete Model",
+  "tenantResources.models.deleteSuccess": "Model deleted",
+  "tenantResources.models.deleteFailed": "Delete failed",
   "tenantResources.models.enterDescription": "Enter model description",
   "tenantResources.models.enterName": "Enter model name",
 
@@ -1322,6 +1326,8 @@
   "tenantResources.tenants.tenants": "Tenants",
   "tenantResources.tenants.unnamed": "Unnamed Tenant",
   "tenantResources.tenants.updated": "Tenant updated",
+  "tenantResources.tenants.nameExists": "Tenant name '{{name}}' already exists, please use a different name",
+  "tenantResources.tenants.nameRequired": "Please enter a tenant name",
 
   "tenantResources.users.confirmDelete": "Delete user \"{{name}}\"?",
   "tenantResources.users.deleteUser": "Delete User",
