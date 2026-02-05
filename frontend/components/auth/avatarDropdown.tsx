@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
 import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
@@ -13,41 +13,15 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
-import { useGroupList } from "@/hooks/group/useGroupList";
 
 export function AvatarDropdown() {
-  const { user, groupIds, isAuthzReady } = useAuthorizationContext();
+  const { user, isAuthzReady } = useAuthorizationContext();
   const { isLoading, logout, revoke, openLoginModal, openRegisterModal } =
     useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
   const { modal } = App.useApp();
   const { confirm } = useConfirmModal();
-
-  // Fetch groups for group name mapping
-  const { data: groupData } = useGroupList(user?.tenantId || null, 1, 100);
-  const groups = groupData?.groups || [];
-
-  // Create group name mapping from group_id to group_name
-  const groupNameMap = useMemo(() => {
-    const map = new Map<number, { name: string; description?: string }>();
-    groups.forEach((group) => {
-      map.set(group.group_id, {
-        name: group.group_name,
-        description: group.group_description,
-      });
-    });
-    return map;
-  }, [groups]);
-
-  // Get user's group info
-  const userGroups = useMemo(() => {
-    if (!groupIds || groupIds.length === 0) return [];
-    return groupIds.map((id) => ({
-      id,
-      ...groupNameMap.get(id) || { name: t("common.unknown"), description: "" },
-    }));
-  }, [groupIds, groupNameMap, t]);
 
   // Show loading while authentication is in progress
   if (isLoading) {
@@ -120,17 +94,10 @@ export function AvatarDropdown() {
       label: (
         <div className="py-1">
           <div className="font-medium">{user.email}</div>
-          <div className="mt-1 flex flex-wrap gap-1 max-w-[240px]">
+          <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
               {t(`auth.${(user.role).toLowerCase()}`)}
             </Tag>
-            {userGroups.length > 0 ? (
-              userGroups.map((group) => (
-                <Tag key={group.id} color="blue">
-                  {group.name}
-                </Tag>
-              ))
-            ) : null}
           </div>
         </div>
       ),
