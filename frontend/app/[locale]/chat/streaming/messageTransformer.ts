@@ -1,5 +1,4 @@
 import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
-import { USER_ROLES } from "@/const/modelConfig";
 import { ChatMessageType, TaskMessageType } from "@/types/chat";
 
 /**
@@ -26,7 +25,7 @@ export function transformMessagesToTaskMessages(
 
   // First preprocess, find all user message IDs and initialize task groups
   messages.forEach((message) => {
-    if (message.role === USER_ROLES.USER && message.id) {
+    if (message.role === MESSAGE_ROLES.USER && message.id) {
       conversationGroups.set(message.id, []);
       truncationBuffer.set(message.id, []);
     }
@@ -37,7 +36,7 @@ export function transformMessagesToTaskMessages(
   // Process all messages
   messages.forEach((message) => {
     // User messages - record the ID for associating subsequent tasks
-    if (message.role === USER_ROLES.USER && message.id) {
+    if (message.role === MESSAGE_ROLES.USER && message.id) {
       currentUserMsgId = message.id;
     }
     // Assistant messages - extract task messages from steps
