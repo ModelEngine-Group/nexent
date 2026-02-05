@@ -1310,6 +1310,10 @@
   "tenantResources.models.type.vlm": "视觉语言模型",
 
   "tenantResources.models.confirmDelete": "删除模型？",
+  "tenantResources.models.editModel": "编辑模型",
+  "tenantResources.models.deleteModel": "删除模型",
+  "tenantResources.models.deleteSuccess": "模型已删除",
+  "tenantResources.models.deleteFailed": "删除模型失败",
   "tenantResources.models.enterDescription": "输入模型描述",
   "tenantResources.models.enterName": "输入模型名称",
 
@@ -1323,6 +1327,8 @@
   "tenantResources.tenants.tenants": "租户",
   "tenantResources.tenants.unnamed": "未命名租户",
   "tenantResources.tenants.updated": "租户已更新",
+  "tenantResources.tenants.nameExists": "租户名称 '{{name}}' 已存在，请使用其他名称",
+  "tenantResources.tenants.nameRequired": "请输入租户名称",
 
   "tenantResources.users.confirmDelete": "删除用户\"{{name}}\"？",
   "tenantResources.users.deleteUser": "删除用户",

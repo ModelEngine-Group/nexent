@@ -103,8 +103,20 @@ function TenantList({
         message.success(t("tenantResources.tenants.created"));
       }
       setModalVisible(false);
-    } catch (err) {
-      message.error(t("tenantResources.tenantOperationFailed"));
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Tenant with name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        // Extract the duplicate name and show translated error
+        message.error(t("tenantResources.tenants.nameExists", { name: nameConflictMatch[1] }));
+      } else if (errorMessage.includes("Tenant name cannot be empty")) {
+        // Handle empty name error
+        message.error(t("tenantResources.tenants.nameRequired"));
+      } else {
+        // Show generic error for other cases
+        message.error(t("tenantResources.tenantOperationFailed"));
+      }
     }
   };
 

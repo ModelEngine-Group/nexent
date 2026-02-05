@@ -83,6 +83,32 @@ def _ensure_tenant_name_config(tenant_id: str) -> bool:
     return success
 
 
+def check_tenant_name_exists(tenant_name: str, exclude_tenant_id: Optional[str] = None) -> bool:
+    """
+    Check if a tenant with the given name already exists
+
+    Args:
+        tenant_name (str): Tenant name to check
+        exclude_tenant_id (Optional[str]): Tenant ID to exclude from check (for rename operations)
+
+    Returns:
+        bool: True if tenant name already exists, False otherwise
+    """
+    all_tenant_ids = get_all_tenant_ids()
+
+    for tid in all_tenant_ids:
+        # Skip if this is the tenant being updated
+        if exclude_tenant_id and tid == exclude_tenant_id:
+            continue
+
+        # Check if this tenant has the given name
+        name_config = get_single_config_info(tid, TENANT_NAME)
+        if name_config and name_config.get("config_value") == tenant_name:
+            return True
+
+    return False
+
+
 def get_all_tenants() -> List[Dict[str, Any]]:
     """
     Get all tenants
@@ -122,7 +148,7 @@ def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[st
         Dict[str, Any]: Created tenant information
 
     Raises:
-        ValidationError: When tenant creation fails
+        ValidationError: When tenant creation fails or tenant name already exists
     """
     # Generate a random UUID for tenant_id
     tenant_id = str(uuid.uuid4())
@@ -130,6 +156,10 @@ def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[st
     # Validate tenant name
     if not tenant_name or not tenant_name.strip():
         raise ValidationError("Tenant name cannot be empty")
+
+    # Check if tenant name already exists
+    if check_tenant_name_exists(tenant_name.strip()):
+        raise ValidationError(f"Tenant with name '{tenant_name.strip()}' already exists")
 
     try:
         # Create default group first
@@ -205,6 +235,10 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
     # Validate tenant name
     if not tenant_name or not tenant_name.strip():
         raise ValidationError("Tenant name cannot be empty")
+
+    # Check if tenant name already exists (exclude current tenant)
+    if check_tenant_name_exists(tenant_name.strip(), exclude_tenant_id=tenant_id):
+        raise ValidationError(f"Tenant with name '{tenant_name.strip()}' already exists")
 
     # Check if tenant name config exists
     name_config = get_single_config_info(tenant_id, TENANT_NAME)

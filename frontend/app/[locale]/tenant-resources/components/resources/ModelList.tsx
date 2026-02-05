@@ -68,13 +68,13 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const handleDelete = async (modelId: string, provider?: string) => {
     try {
       await modelService.deleteCustomModel(modelId, provider);
-      message.success("Model deleted");
+      message.success(t("tenantResources.models.deleteSuccess"));
       refetch();
     } catch (error: any) {
       if (error.response?.data?.message) {
         message.error(error.response.data.message);
       } else {
-        message.error("Delete failed");
+        message.error(t("tenantResources.models.deleteFailed"));
       }
     }
   };
@@ -160,7 +160,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           </Tooltip>
           <Popconfirm
             title={t("tenantResources.models.confirmDelete")}
-            description="This action cannot be undone."
+            description={t("common.cannotBeUndone")}
             onConfirm={() => handleDelete(record.displayName, record.source)}
           >
             <Tooltip title={t("tenantResources.models.deleteModel")}>
