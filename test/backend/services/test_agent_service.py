@@ -571,6 +571,53 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert tool_info.params == {}
 
 
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
+@patch('backend.services.agent_service.update_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null_tool_id(
+    mock_get_current_user_info,
+    mock_update_agent,
+    mock_query_tool_instances_by_agent_id,
+    mock_create_or_update_tool
+):
+    """
+    Test update_agent_info_impl when existing tool instance has null tool_id.
+
+    This test verifies that:
+    1. Instances with null tool_id are skipped (not causing errors)
+    2. Only valid tool instances are processed for enabling/disabling
+    """
+    # Setup
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+
+    # Mock existing tool instances: one with valid tool_id, one with null tool_id
+    mock_query_tool_instances_by_agent_id.return_value = [
+        {"tool_id": 1, "params": {"key1": "value1"}},  # Valid instance
+        {"tool_id": None, "params": {}},               # Instance with null tool_id - should be skipped
+    ]
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = [1]  # Enable only tool 1
+    request.related_agent_ids = None
+
+    # Execute
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    # Assert
+    assert result["agent_id"] == 123
+    mock_update_agent.assert_called_once()
+
+    # Verify only tool 1 was enabled; tool with null tool_id was skipped
+    assert mock_create_or_update_tool.call_count == 1
+    call_args = mock_create_or_update_tool.call_args
+    tool_info = call_args.kwargs['tool_info']
+    assert tool_info.tool_id == 1
+    assert tool_info.enabled is True
+
+
 @patch('backend.services.agent_service.update_related_agents')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.update_agent')
