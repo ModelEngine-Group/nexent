@@ -5,7 +5,6 @@ Analyze images using a large language model.
 Supports images from S3, HTTP, and HTTPS URLs.
 """
 
-import json
 import logging
 from io import BytesIO
 from typing import List
@@ -14,12 +13,12 @@ from jinja2 import Template, StrictUndefined
 from pydantic import Field
 from smolagents.tools import Tool
 
-from nexent.core.models import OpenAIVLModel
-from nexent.core.utils.observer import MessageObserver, ProcessType
-from nexent.core.utils.prompt_template_utils import get_prompt_template
-from nexent.core.utils.tools_common_message import ToolCategory, ToolSign
-from nexent.storage import MinIOStorageClient
-from nexent.multi_modal.load_save_object import LoadSaveObjectManager
+from ...core.models import OpenAIVLModel
+from ...core.utils.observer import MessageObserver, ProcessType
+from ...core.utils.prompt_template_utils import get_prompt_template
+from ...core.utils.tools_common_message import ToolCategory, ToolSign
+from ...storage import MinIOStorageClient
+from ...multi_modal.load_save_object import LoadSaveObjectManager
 
 logger = logging.getLogger("analyze_image_tool")
 
@@ -79,7 +78,7 @@ class AnalyzeImageTool(Tool):
     def _forward_impl(self, image_urls_list: List[bytes], query: str) -> List[str]:
         """
         Analyze images identified by S3 URL, HTTP URL, or HTTPS URL and return the identified text.
-        
+
         Note: This method is wrapped by load_object decorator which downloads
         the image from S3 URL, HTTP URL, or HTTPS URL and passes bytes to this method.
 
