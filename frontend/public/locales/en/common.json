@@ -525,6 +525,10 @@
   "knowledgeBase.summary.notGenerated": "Knowledge base summary was not generated, please change model configuration and retry",
   "knowledgeBase.name.new": "new_base",
   "knowledgeBase.message.getDocumentsFailed": "Failed to get documents",
+  "knowledgeBase.ingroup.permission.EDIT": "In Group Read/Write",
+  "knowledgeBase.ingroup.permission.READ_ONLY": "In Group Read Only",
+  "knowledgeBase.ingroup.permission.PRIVATE": "Personal Private",
+  "knowledgeBase.ingroup.permission.DEFAULT": "In Group Read Only (Default)",
 
   "document.error.fetch": "Failed to fetch documents",
   "document.error.load": "Failed to load documents",

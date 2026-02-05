@@ -521,6 +521,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
 
         tenant_id = user_tenant["tenant_id"]
         user_role = user_tenant["user_role"]
+        user_email = user_tenant["user_email"]
 
         # Get group IDs
         group_ids = query_group_ids_by_user(user_id)
@@ -533,10 +534,6 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
             permissions = [as_dict(record) for record in permission_records]
 
         permissions_data = format_role_permissions(permissions)
-
-        # Get user email from Supabase (placeholder for now)
-        # TODO: Implement user email retrieval from Supabase user object
-        user_email = "user@example.com"  # Placeholder
 
         return {
             "user": {

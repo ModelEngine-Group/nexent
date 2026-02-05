@@ -11,13 +11,13 @@ from jinja2 import Template, StrictUndefined
 from pydantic import Field
 from smolagents.tools import Tool
 
-from nexent.core import MessageObserver
-from nexent.core.utils.observer import ProcessType
-from nexent.core.utils.prompt_template_utils import get_prompt_template
-from nexent.core.utils.tools_common_message import ToolCategory, ToolSign
-from nexent.storage import MinIOStorageClient
-from nexent.multi_modal.load_save_object import LoadSaveObjectManager
-from nexent.utils.http_client_manager import http_client_manager
+from ...core import MessageObserver
+from ...core.utils.observer import ProcessType
+from ...core.utils.prompt_template_utils import get_prompt_template
+from ...core.utils.tools_common_message import ToolCategory, ToolSign
+from ...storage import MinIOStorageClient
+from ...multi_modal.load_save_object import LoadSaveObjectManager
+from ...utils.http_client_manager import http_client_manager
 
 
 logger = logging.getLogger("analyze_text_file_tool")
