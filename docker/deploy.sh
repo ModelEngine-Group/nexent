@@ -760,26 +760,6 @@ wait_for_elasticsearch_healthy() {
   fi
 }
 
-wait_for_postgresql_ready() {
-  # Function to wait for PostgreSQL to become ready
-  local retries=0
-  local max_retries=${1:-30}  # Default 5 minutes, can be overridden
-  while [ $retries -lt $max_retries ]; do
-      if docker exec nexent-postgresql pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
-          echo "   ✅ PostgreSQL is now ready!"
-          return 0
-      fi
-      echo "⏳ Waiting for PostgreSQL to become ready... (attempt $((retries + 1))/$max_retries)"
-      sleep 10
-      retries=$((retries + 1))
-  done
-
-  if [ $retries -eq $max_retries ]; then
-      echo "   ⚠️  Warning: PostgreSQL did not become ready within expected time"
-      echo "     You may need to check the container logs and try again"
-      return 1
-  fi
-}
 
 select_terminal_tool() {
     # Function to ask if user wants to create Terminal tool container
@@ -901,101 +881,30 @@ generate_random_password() {
 }
 
 create_default_super_admin_user() {
-  local email="suadmin@nexent.com"
-  local password
-  password="$(generate_random_password)"
-
-  echo "🔧 Creating super admin user..."
-  RESPONSE=$(docker exec nexent-config bash -c "curl -s -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\",\"email_confirm\":true}'" 2>/dev/null)
-
-  if [ -z "$RESPONSE" ]; then
-    echo "   ❌ No response received from Supabase."
-    return 1
-  elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
-    echo "   ✅ Default super admin user has been successfully created."
-    echo ""
-    echo "      Please save the following credentials carefully, which would ONLY be shown once."
-    echo "   📧 Email:    ${email}"
-    echo "   🔏 Password: ${password}"
-
-    # Extract user.id from RESPONSE JSON
-    local user_id
-    # Try using Python to parse JSON (most reliable)
-    user_id=$(echo "$RESPONSE" | docker exec -i nexent-config python3 -c "import sys, json; data = json.load(sys.stdin); print(data.get('user', {}).get('id', ''))" 2>/dev/null)
-
-    # Fallback to jq if Python fails
-    if [ -z "$user_id" ] && command -v jq >/dev/null 2>&1; then
-      user_id=$(echo "$RESPONSE" | jq -r '.user.id // empty' 2>/dev/null)
-    fi
-
-    # Final fallback: use grep and sed
-    if [ -z "$user_id" ]; then
-      user_id=$(echo "$RESPONSE" | grep -o '"user"[^}]*"id":"[^"]*"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' 2>/dev/null)
-    fi
-
-    if [ -z "$user_id" ]; then
-      echo "   ⚠️  Warning: Could not extract user.id from response. Skipping database insertion."
-    else
-      # Wait for PostgreSQL to be ready
-      echo "   ⏳ Waiting for PostgreSQL to be ready..."
-      if ! wait_for_postgresql_ready; then
-        echo "   ⚠️  Warning: PostgreSQL is not ready. Skipping database insertion."
-        return 0
-      fi
-
-      # Insert user_tenant_t record
-      echo "   🔧 Inserting super admin user into user_tenant_t table..."
-      local sql="INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by) VALUES ('${user_id}', '', 'SU', '${email}', 'system', 'system') ON CONFLICT (user_id, tenant_id) DO NOTHING;"
-
-      if docker exec -i nexent-postgresql psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$sql" >/dev/null 2>&1; then
-        echo "   ✅ Super admin user inserted into user_tenant_t table successfully."
-      else
-        echo "   ⚠️  Warning: Failed to insert super admin user into user_tenant_t table."
-      fi
-    fi
-  elif echo "$RESPONSE" | grep -q '"error_code":"user_already_exists"' || echo "$RESPONSE" | grep -q '"code":422'; then
-    echo "   🚧 Default super admin user already exists. Skipping creation."
-    echo "   📧 Email:    ${email}"
-
-    # Even if user already exists, try to ensure the user_tenant_t record exists
-    # Get user_id from Supabase auth.users table
-    echo "   🔧 Retrieving user_id from Supabase database..."
-    local user_id
-    if [ "$DEPLOYMENT_VERSION" = "full" ] && docker ps | grep -q "supabase-db-mini"; then
-      # Query Supabase auth.users table to get user_id by email
-      user_id=$(docker exec supabase-db-mini psql -U postgres -d "$SUPABASE_POSTGRES_DB" -t -c "SELECT id FROM auth.users WHERE email = '${email}' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
-    fi
-
-    if [ -z "$user_id" ]; then
-      echo "   ⚠️  Warning: Could not retrieve user_id. Skipping database insertion."
-      echo "   💡 Note: If user_tenant_t record is missing, you may need to insert it manually."
-      return 0
-    fi
-
-    # Wait for PostgreSQL to be ready
-    echo "   ⏳ Waiting for PostgreSQL to be ready..."
-    if ! wait_for_postgresql_ready; then
-      echo "   ⚠️  Warning: PostgreSQL is not ready. Skipping database insertion."
-      return 0
-    fi
-
-    # Insert user_tenant_t record
-    echo "   🔧 Inserting super admin user into user_tenant_t table..."
-    local sql="INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by) VALUES ('${user_id}', '', 'SU', '${email}', 'system', 'system') ON CONFLICT (user_id, tenant_id) DO NOTHING;"
-
-    if docker exec -i nexent-postgresql psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$sql" >/dev/null 2>&1; then
-      echo "   ✅ Super admin user inserted into user_tenant_t table successfully."
-    else
-      echo "   ⚠️  Warning: Failed to insert super admin user into user_tenant_t table."
-    fi
-  else
-    echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
+  # Call the dedicated script for creating super admin user
+  local script_path="$SCRIPT_DIR/create-su.sh"
+  
+  if [ ! -f "$script_path" ]; then
+    echo "   ❌ ERROR create-su.sh not found at $script_path"
     return 1
   fi
-
-  echo ""
-  echo "--------------------------------"
-  echo ""
+  
+  # Make sure the script is executable
+  chmod +x "$script_path"
+  
+  # Export necessary environment variables for the script
+  export SUPABASE_KEY
+  export POSTGRES_USER
+  export POSTGRES_DB
+  export DEPLOYMENT_VERSION
+  export SUPABASE_POSTGRES_DB
+  
+  # Execute the script with current environment variables
+  if bash "$script_path"; then
+    return 0
+  else
+    return 1
+  fi
 }
 
 choose_image_env() {
@@ -1030,7 +939,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="$(get_app_version)"
+  APP_VERSION="latest"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
