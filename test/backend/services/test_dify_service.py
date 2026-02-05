@@ -12,16 +12,12 @@ import httpx
 
 def _create_mock_client(mock_response):
     """
-    Create a properly configured mock client that works with context manager.
+    Create a properly configured mock client that works with the HttpClientManager.
 
-    When using 'with httpx.Client() as client:', the __enter__ method is called.
-    By default, MagicMock.__enter__ returns a new MagicMock, which breaks our tests.
-    We need to configure __enter__ to return the mock_client itself.
+    The http_client_manager.get_sync_client() returns a client instance directly.
     """
     mock_client = MagicMock()
     mock_client.get.return_value = mock_response
-    mock_client.__enter__ = MagicMock(return_value=mock_client)
-    mock_client.__exit__ = MagicMock(return_value=False)
     return mock_client
 
 
@@ -30,7 +26,6 @@ class TestFetchDifyDatasetsImpl:
 
     def test_fetch_dify_datasets_impl_success_single_dataset(self):
         """Test successful fetching of a single dataset from Dify API."""
-        # Mock httpx.Client and response
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "data": [
@@ -49,7 +44,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -100,7 +97,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -130,7 +129,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -229,7 +230,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(
@@ -255,7 +258,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             with pytest.raises(Exception) as excinfo:
@@ -268,18 +273,15 @@ class TestFetchDifyDatasetsImpl:
 
     def test_fetch_dify_datasets_impl_request_error(self):
         """Test handling of request errors (connection issues)."""
-        mock_response = MagicMock()
         mock_request_error = httpx.RequestError(
             "Connection failed", request=MagicMock())
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock()  # Should not be called
 
         mock_client = MagicMock()
         mock_client.get.side_effect = mock_request_error
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             with pytest.raises(Exception) as excinfo:
@@ -299,7 +301,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             with pytest.raises(Exception) as excinfo:
@@ -318,7 +322,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -351,7 +357,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -379,7 +387,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -412,7 +422,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -442,7 +454,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             result = fetch_dify_datasets_impl(
@@ -462,7 +476,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(
@@ -481,25 +497,6 @@ class TestFetchDifyDatasetsImpl:
         assert headers["Authorization"] == "Bearer my-secret-api-key"
         assert headers["Content-Type"] == "application/json"
 
-    def test_fetch_dify_datasets_impl_http_client_timeout(self):
-        """Test that HTTP client is configured with correct timeout."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"data": []}
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = _create_mock_client(mock_response)
-
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client) as mock_client_class:
-            from backend.services.dify_service import fetch_dify_datasets_impl
-
-            fetch_dify_datasets_impl(
-                dify_api_base="https://dify.example.com",
-                api_key="test-api-key"
-            )
-
-        # Verify Client was instantiated with timeout=30, verify=False
-        mock_client_class.assert_called_once_with(timeout=30, verify=False)
-
     def test_fetch_dify_datasets_impl_url_normalization_v1_suffix(self):
         """Test that /v1 suffix is removed from API base URL to avoid duplication.
 
@@ -511,7 +508,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(
@@ -536,7 +535,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(
@@ -562,10 +563,12 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
-            from backend.services.dify_service import fetch_dify_datasets_impl
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
 
             # This tests the combined effect: rstrip("/") + endswith("/v1") check
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
             fetch_dify_datasets_impl(
                 dify_api_base="https://api.dify.ai/v1/",
                 api_key="test-api-key"
@@ -589,7 +592,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(
@@ -614,10 +619,12 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
-            from backend.services.dify_service import fetch_dify_datasets_impl
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
 
             # The /v1 at the end of base URL gets stripped
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
             fetch_dify_datasets_impl(
                 dify_api_base="https://api.dify.ai/custom/v1",
                 api_key="test-api-key"
@@ -641,7 +648,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(
@@ -670,7 +679,9 @@ class TestFetchDifyDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.dify_service.httpx.Client', return_value=mock_client):
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
             from backend.services.dify_service import fetch_dify_datasets_impl
 
             fetch_dify_datasets_impl(

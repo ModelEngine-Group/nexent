@@ -8,9 +8,11 @@ to DataMate-compatible format for frontend compatibility.
 """
 import json
 import logging
+from typing import Any, Dict
 
 import httpx
-from typing import Any, Dict
+
+from nexent.utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("dify_service")
 
@@ -90,63 +92,68 @@ def fetch_dify_datasets_impl(
     logger.info(f"Fetching Dify datasets from: {url}")
 
     try:
-        with httpx.Client(timeout=30, verify=False) as client:
-            response = client.get(url, headers=headers)
-            response.raise_for_status()
+        # Use shared HttpClientManager for connection pooling
+        client = http_client_manager.get_sync_client(
+            base_url=api_base,
+            timeout=30.0,
+            verify_ssl=False
+        )
+        response = client.get(url, headers=headers)
+        response.raise_for_status()
 
-            result = response.json()
+        result = response.json()
 
-            # Parse Dify API response
-            datasets_data = result.get("data", [])
+        # Parse Dify API response
+        datasets_data = result.get("data", [])
 
-            # Transform to DataMate-compatible format
-            indices = []
-            indices_info = []
-            embedding_available = False  # Default value if no datasets or all skipped
+        # Transform to DataMate-compatible format
+        indices = []
+        indices_info = []
+        embedding_available = False  # Default value if no datasets or all skipped
 
-            for dataset in datasets_data:
-                dataset_id = dataset.get("id", "")
-                dataset_name = dataset.get("name", "")
-                document_count = dataset.get("document_count", 0)
-                created_at = dataset.get("created_at", 0)
-                updated_at = dataset.get("updated_at", 0)
-                embedding_available = dataset.get("embedding_available", False)
+        for dataset in datasets_data:
+            dataset_id = dataset.get("id", "")
+            dataset_name = dataset.get("name", "")
+            document_count = dataset.get("document_count", 0)
+            created_at = dataset.get("created_at", 0)
+            updated_at = dataset.get("updated_at", 0)
+            embedding_available = dataset.get("embedding_available", False)
 
-                if not dataset_id:
-                    continue
+            if not dataset_id:
+                continue
 
-                indices.append(dataset_id)
+            indices.append(dataset_id)
 
-                # Create indices_info entry (compatible with DataMate format)
-                indices_info.append({
-                    "name": dataset_id,
-                    "display_name": dataset_name,
-                    "stats": {
-                        "base_info": {
-                            "doc_count": document_count,
-                            "chunk_count": 0,  # Dify doesn't provide chunk count directly
-                            "store_size": "",
-                            "process_source": "Dify",
-                            "embedding_model": dataset.get("embedding_model", ""),
-                            "embedding_dim": 0,
-                            "creation_date": created_at * 1000 if created_at else 0,  # Convert to milliseconds
-                            "update_date": updated_at * 1000 if updated_at else 0
-                        },
-                        "search_performance": {
-                            "total_search_count": 0,
-                            "hit_count": 0
-                        }
+            # Create indices_info entry (compatible with DataMate format)
+            indices_info.append({
+                "name": dataset_id,
+                "display_name": dataset_name,
+                "stats": {
+                    "base_info": {
+                        "doc_count": document_count,
+                        "chunk_count": 0,  # Dify doesn't provide chunk count directly
+                        "store_size": "",
+                        "process_source": "Dify",
+                        "embedding_model": dataset.get("embedding_model", ""),
+                        "embedding_dim": 0,
+                        "creation_date": created_at * 1000 if created_at else 0,  # Convert to milliseconds
+                        "update_date": updated_at * 1000 if updated_at else 0
+                    },
+                    "search_performance": {
+                        "total_search_count": 0,
+                        "hit_count": 0
                     }
-                })
-
-            return {
-                "indices": indices,
-                "count": len(indices),
-                "indices_info": indices_info,
-                "pagination": {
-                    "embedding_available": embedding_available
                 }
+            })
+
+        return {
+            "indices": indices,
+            "count": len(indices),
+            "indices_info": indices_info,
+            "pagination": {
+                "embedding_available": embedding_available
             }
+        }
 
     except httpx.RequestError as e:
         logger.error(f"Dify API request failed: {str(e)}")
