@@ -902,19 +902,9 @@ export default function AgentImportWizard({
         agentInfo.model_id = selectedModelId;
         agentInfo.model_name = selectedModelName;
 
-        // Preserve business logic model fields if they were passed from market
-        // Otherwise clear them when user selects a new model
-        if (preservedBusinessLogicModelId !== undefined && preservedBusinessLogicModelId !== null) {
-          agentInfo.business_logic_model_id = preservedBusinessLogicModelId;
-        } else {
-          agentInfo.business_logic_model_id = null;
-        }
 
-        if (preservedBusinessLogicModelName !== undefined && preservedBusinessLogicModelName !== null) {
-          agentInfo.business_logic_model_name = preservedBusinessLogicModelName;
-        } else {
-          agentInfo.business_logic_model_name = null;
-        }
+        agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
+        agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
       });
     } else {
       // Individual mode: apply models to all agents
@@ -924,19 +914,8 @@ export default function AgentImportWizard({
           agentInfo.model_id = modelSelection.modelId;
           agentInfo.model_name = modelSelection.modelName;
 
-          // Preserve business logic model fields if they were passed from market
-          // Otherwise clear them when user selects a new model
-          if (preservedBusinessLogicModelId !== undefined && preservedBusinessLogicModelId !== null) {
-            agentInfo.business_logic_model_id = preservedBusinessLogicModelId;
-          } else {
-            agentInfo.business_logic_model_id = null;
-          }
-
-          if (preservedBusinessLogicModelName !== undefined && preservedBusinessLogicModelName !== null) {
-            agentInfo.business_logic_model_name = preservedBusinessLogicModelName;
-          } else {
-            agentInfo.business_logic_model_name = null;
-          }
+          agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
+          agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
         }
       });
     }
