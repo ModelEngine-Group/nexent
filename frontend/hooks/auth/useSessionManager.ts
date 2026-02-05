@@ -60,13 +60,15 @@ export const refreshSession = async (): Promise<boolean> => {
   // ============================================================================
 
 export function useSessionManager() {
-  const { isSpeedMode } = useDeployment();
+  const { isSpeedMode, isDeploymentReady } = useDeployment();
   const reconcileExpiryRef = useRef<() => void>(() => {});
 
   // Initialize session management when hook is used
   useEffect(() => {
-    // In speed mode, skip session validation
-    if (isSpeedMode) return;
+    // In speed mode or before deployment is ready, skip session validation
+    // This prevents the modal from showing when isSpeedMode is initially false
+    // and then becomes true after API returns deployment_version
+    if (isSpeedMode || !isDeploymentReady) return;
 
     const session = getSessionFromStorage();
     if (!session) {
@@ -80,14 +82,15 @@ export function useSessionManager() {
 
     // Session is expired or invalid
     handleSessionExpired();
-  }, [isSpeedMode]);
+  }, [isSpeedMode, isDeploymentReady]);
 
   /**
    * Proactive session expiry watcher
    * Triggers session-expired even if user does not make any API request
    */
   useEffect(() => {
-    if (isSpeedMode) return;
+    // In speed mode or before deployment is ready, skip session watching
+    if (isSpeedMode || !isDeploymentReady) return;
 
     let timeoutId: number | null = null;
     let intervalId: number | null = null;

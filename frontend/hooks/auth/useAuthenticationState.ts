@@ -29,10 +29,14 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const [authServiceUnavailable, setAuthServiceUnavailable] =
     useState<boolean>(false);
 
-  if (isSpeedMode) {
-    log.info("Speed mode: valid session found, emitting login success event");
-    authEventUtils.emitLoginSuccess();
-  }
+  // Speed mode: skip authentication checks, consider user as authenticated
+  useEffect(() => {
+    if (isSpeedMode) {
+      // In speed mode, user is considered authenticated without session
+      setIsAuthenticated(true);
+      setIsAuthChecking(false);
+    }
+  }, [isSpeedMode]);
 
   // Initialize authentication state based on session
   useEffect(() => {
