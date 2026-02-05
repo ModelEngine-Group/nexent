@@ -883,22 +883,22 @@ generate_random_password() {
 create_default_super_admin_user() {
   # Call the dedicated script for creating super admin user
   local script_path="$SCRIPT_DIR/create-su.sh"
-  
+
   if [ ! -f "$script_path" ]; then
     echo "   ❌ ERROR create-su.sh not found at $script_path"
     return 1
   fi
-  
+
   # Make sure the script is executable
   chmod +x "$script_path"
-  
+
   # Export necessary environment variables for the script
   export SUPABASE_KEY
   export POSTGRES_USER
   export POSTGRES_DB
   export DEPLOYMENT_VERSION
   export SUPABASE_POSTGRES_DB
-  
+
   # Execute the script with current environment variables
   if bash "$script_path"; then
     return 0
@@ -939,7 +939,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="latest"
+  APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
