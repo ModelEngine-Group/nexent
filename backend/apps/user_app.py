@@ -11,7 +11,6 @@ from starlette.responses import JSONResponse
 from consts.model import (
     UserListRequest, UserUpdateRequest
 )
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 from services.user_service import (
     get_users, update_user, delete_user
 )
@@ -118,6 +117,10 @@ async def delete_user_endpoint(
     """
     Soft delete user and remove from all groups
 
+    This performs basic deletion (user-tenant relationship + groups).
+    For complete cleanup including configs, conversations, memories, and
+    Supabase account deletion, use the user revocation endpoint.
+
     Args:
         user_id: User identifier
         authorization: Bearer token for authentication
@@ -135,7 +138,7 @@ async def delete_user_endpoint(
         if not success:
             raise ValueError(f"Failed to delete user {user_id}")
 
-        logger.info(f"Soft deleted user {user_id} by user {current_user_id}")
+        logger.info(f"Soft deleted user {user_id} by admin {current_user_id}")
 
         return JSONResponse(
             status_code=HTTPStatus.OK,

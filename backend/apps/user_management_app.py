@@ -11,7 +11,8 @@ from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_session_by_authorization, revoke_regular_user, get_user_info
+    get_session_by_authorization, get_user_info
+from services.user_service import delete_user_and_cleanup
 from consts.exceptions import UnauthorizedError
 from utils.auth_utils import get_current_user_id
 
@@ -276,7 +277,7 @@ async def revoke_user_account(request: Request):
                                 detail="Admin account cannot be deleted via this endpoint")
 
         # Orchestrate revoke for regular user
-        await revoke_regular_user(user_id=user_id, tenant_id=tenant_id)
+        await delete_user_and_cleanup(user_id=user_id, tenant_id=tenant_id)
 
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "User account revoked"})
     except UnauthorizedError as e:
