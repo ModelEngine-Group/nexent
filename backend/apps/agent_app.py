@@ -77,13 +77,20 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
 
 
 @agent_config_router.post("/search_info")
-async def search_agent_info_api(agent_id: int = Body(...), authorization: Optional[str] = Header(None)):
+async def search_agent_info_api(
+    agent_id: int = Body(...),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None)
+):
     """
     Search agent info by agent_id
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        return await get_agent_info_impl(agent_id, tenant_id)
+        _, auth_tenant_id = get_current_user_id(authorization)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        return await get_agent_info_impl(agent_id, effective_tenant_id)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(

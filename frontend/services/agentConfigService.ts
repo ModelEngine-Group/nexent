@@ -637,11 +637,15 @@ export const regenerateAgentNameBatch = async (payload: {
 /**
  * search agent info by agent id
  * @param agentId agent id
+ * @param tenantId optional tenant ID for filtering
  * @returns agent detail info
  */
-export const searchAgentInfo = async (agentId: number) => {
+export const searchAgentInfo = async (agentId: number, tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.searchInfo, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.agent.searchInfo}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.searchInfo;
+    const response = await fetch(url, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(agentId),

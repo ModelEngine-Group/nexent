@@ -137,7 +137,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     setEditModalVisible(true);
 
     try {
-      const res = await searchAgentInfo(Number(agent.id));
+      const res = await searchAgentInfo(Number(agent.id), tenantId ?? undefined);
       if (res.success && res.data) {
         const detail = res.data;
         setEditingAgent(agent);
