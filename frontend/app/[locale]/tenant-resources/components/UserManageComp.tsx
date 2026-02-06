@@ -173,7 +173,7 @@ function TenantList({
                     title={t("tenantResources.tenants.confirmDelete", {
                       name: tenant.tenant_name,
                     })}
-                    description="This action cannot be undone."
+                    description={t("common.cannotBeUndone")}
                     onConfirm={(e) => {
                       e?.stopPropagation();
                       handleDelete(tenant.tenant_id);
