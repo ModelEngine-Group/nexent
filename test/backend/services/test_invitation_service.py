@@ -15,7 +15,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from consts.exceptions import NotFoundException, UnauthorizedError
+from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from backend.services.invitation_service import (
     create_invitation_code,
     update_invitation_code,
@@ -205,6 +205,32 @@ def test_create_invitation_code_user_not_found(mock_get_user_info):
             code_type="ADMIN_INVITE",
             user_id="test_user"
         )
+
+
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('backend.services.invitation_service.query_invitation_by_code')
+def test_create_invitation_code_duplicate(mock_query_invitation_by_code, mock_get_user_info, mock_user_info):
+    """Test creating invitation code with duplicate code raises DuplicateError"""
+    # Setup mocks
+    mock_user_info["user_role"] = "SU"
+    mock_get_user_info.return_value = mock_user_info
+    # Simulate that the invitation code already exists
+    mock_query_invitation_by_code.return_value = {
+        "invitation_id": 1,
+        "invitation_code": "EXISTING",
+        "status": "IN_USE"
+    }
+
+    with pytest.raises(DuplicateError, match="Invitation code 'EXISTING' already exists"):
+        create_invitation_code(
+            tenant_id="test_tenant",
+            code_type="ADMIN_INVITE",
+            invitation_code="existing",  # lowercase, will be converted to uppercase
+            user_id="test_user"
+        )
+
+    # Verify that query_invitation_by_code was called with the uppercase code
+    mock_query_invitation_by_code.assert_called_once_with("EXISTING")
 
 
 @patch('backend.services.invitation_service.get_tenant_default_group_id')

@@ -102,3 +102,8 @@ class ToolExecutionException(Exception):
 class MCPContainerError(Exception):
     """Raised when MCP container operation fails."""
     pass
+
+
+class DuplicateError(Exception):
+    """Raised when a duplicate resource already exists."""
+    pass

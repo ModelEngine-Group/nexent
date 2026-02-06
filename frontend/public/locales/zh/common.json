@@ -1366,6 +1366,7 @@
   "tenantResources.invitation.invitationCodeInvalid": "邀请码只能包含字母和数字",
   "tenantResources.invitation.noGroups": "暂无用户组",
   "tenantResources.invitation.noExpiry": "永久有效",
+  "tenantResources.invitation.alreadyExists": "邀请码已存在",
 
   "tenantResources.invitation.codeType.ADMIN_INVITE": "管理员邀请",
   "tenantResources.invitation.codeType.DEV_INVITE": "开发者邀请",
