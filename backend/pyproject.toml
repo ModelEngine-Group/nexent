@@ -6,7 +6,7 @@ dependencies = [
     "uvicorn>=0.34.0",
     "fastapi>=0.115.12",
     "aiohttp>=3.8.0",
-    "psycopg2-binary==2.9.10",
+    "psycopg2-binary==2.9.11",
     "PyJWT>=2.8.0",
     "sqlalchemy~=2.0.37",
     "supabase>=2.18.1",
