@@ -22,6 +22,11 @@ sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
 
+# Mock for memory_service import used in delete_user_and_cleanup
+nexent_memory_service = MagicMock()
+sys.modules['nexent.memory'] = MagicMock()
+sys.modules['nexent.memory.memory_service'] = nexent_memory_service
+
 # Create mock ToolConfig class for imports
 from pydantic import BaseModel
 class MockToolConfig(BaseModel):
@@ -44,7 +49,7 @@ patch('database.user_tenant_db.soft_delete_user_tenant_by_user_id').start()
 patch('database.group_db.remove_user_from_all_groups').start()
 
 # Import unit under test
-from backend.services.user_service import get_users, update_user, delete_user
+from backend.services.user_service import get_users, update_user, delete_user, delete_user_and_cleanup
 
 
 @pytest.fixture(autouse=True)
@@ -481,6 +486,93 @@ class TestDataValidation:
 
         # Verify database function was not called
         mock_update_role.assert_not_called()
+
+
+class TestDeleteUserAndCleanup:
+    """Test cases for delete_user_and_cleanup function"""
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_success(self, mocker):
+        """Test successful complete user deletion and cleanup"""
+        # Mock all the dependencies
+        mock_delete_user = mocker.patch(
+            "backend.services.user_service.delete_user",
+            return_value=True
+        )
+        mock_soft_delete_configs = mocker.patch(
+            "backend.services.user_service.soft_delete_all_configs_by_user_id"
+        )
+        mock_soft_delete_convs = mocker.patch(
+            "backend.services.user_service.soft_delete_all_conversations_by_user",
+            return_value=5
+        )
+        mock_build_config = mocker.patch(
+            "backend.services.user_service.build_memory_config",
+            return_value={"key": "value"}
+        )
+        mock_clear_memory = mocker.patch(
+            "backend.services.user_service.clear_memory",
+            new_callable=mocker.AsyncMock
+        )
+        mock_get_admin = mocker.patch(
+            "backend.services.user_service.get_supabase_admin_client"
+        )
+
+        # Setup mock admin client
+        mock_admin = MagicMock()
+        mock_admin.auth.admin.delete_user = MagicMock()
+        mock_get_admin.return_value = mock_admin
+
+        user_id = "user123"
+        tenant_id = "tenant456"
+
+        await delete_user_and_cleanup(user_id, tenant_id)
+
+        # Verify all steps were called
+        mock_delete_user.assert_called_once_with(user_id, user_id)
+        mock_soft_delete_configs.assert_called_once_with(user_id, actor=user_id)
+        mock_soft_delete_convs.assert_called_once_with(user_id)
+        mock_build_config.assert_called_once_with(tenant_id)
+        # clear_memory called for user and user_agent
+        assert mock_clear_memory.call_count == 2
+        mock_get_admin.assert_called_once()
+        mock_admin.auth.admin.delete_user.assert_called_once_with(user_id)
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_best_effort(self, mocker):
+        """Test that errors in individual steps don't fail the entire cleanup"""
+        # Mock all dependencies with exceptions
+        mocker.patch(
+            "backend.services.user_service.delete_user",
+            side_effect=Exception("delete failed")
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_all_configs_by_user_id",
+            side_effect=Exception("configs failed")
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_all_conversations_by_user",
+            side_effect=Exception("convs failed")
+        )
+        mocker.patch(
+            "backend.services.user_service.build_memory_config",
+            side_effect=Exception("config failed")
+        )
+        mocker.patch(
+            "backend.services.user_service.clear_memory",
+            new_callable=mocker.AsyncMock,
+            side_effect=Exception("memory failed")
+        )
+        mocker.patch(
+            "backend.services.user_service.get_supabase_admin_client",
+            side_effect=Exception("admin failed")
+        )
+
+        user_id = "user123"
+        tenant_id = "tenant456"
+
+        # Should not raise, errors are logged and swallowed
+        await delete_user_and_cleanup(user_id, tenant_id)
 
 
 # Run tests when executed directly

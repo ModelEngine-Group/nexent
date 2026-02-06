@@ -51,7 +51,6 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         signin_user,
         refresh_user_token,
         get_session_by_authorization,
-        revoke_regular_user,
         get_user_info,
         format_role_permissions
     )
@@ -1117,70 +1116,6 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
             await get_session_by_authorization("Bearer invalid-token")
 
         self.assertEqual(str(context.exception), "Session is invalid or expired")
-
-
-class TestRevokeRegularUser(unittest.IsolatedAsyncioTestCase):
-    """Tests for revoke_regular_user orchestration"""
-
-    @patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_conversations_by_user')
-    @patch('backend.services.user_management_service.build_memory_config')
-    @patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock)
-    @patch('backend.services.user_management_service.get_supabase_admin_client')
-    async def test_revoke_regular_user_happy_path(self, mock_get_admin, mock_clear, mock_build, mock_soft_conv, mock_soft_cfg, mock_soft_ut):
-        mock_admin = MagicMock()
-        mock_admin.auth.admin.delete_user = MagicMock()
-        mock_get_admin.return_value = mock_admin
-
-        await revoke_regular_user("u1", "t1")
-
-        mock_soft_ut.assert_called_once_with("u1", actor="u1")
-        mock_soft_cfg.assert_called_once_with("u1", actor="u1")
-        mock_soft_conv.assert_called_once_with("u1")
-        mock_build.assert_called_once_with("t1")
-        # clear_memory called for user and user_agent
-        assert mock_clear.await_count == 2
-        mock_get_admin.assert_called_once()
-        mock_admin.auth.admin.delete_user.assert_called_once_with("u1")
-
-    @patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id', side_effect=Exception("db"))
-    @patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id', side_effect=Exception("db"))
-    @patch('backend.services.user_management_service.soft_delete_all_conversations_by_user', side_effect=Exception("db"))
-    @patch('backend.services.user_management_service.build_memory_config', side_effect=Exception("cfg"))
-    @patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock)
-    @patch('backend.services.user_management_service.get_supabase_admin_client', side_effect=Exception("admin"))
-    async def test_revoke_regular_user_best_effort(self, *_):
-        # Should not raise even if all steps fail; function swallows errors for idempotency
-        await revoke_regular_user("u1", "t1")
-
-    @patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_conversations_by_user')
-    @patch('backend.services.user_management_service.build_memory_config')
-    @patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock)
-    @patch('backend.services.user_management_service.get_supabase_admin_client')
-    async def test_revoke_regular_user_admin_client_unavailable(self, mock_get_admin, *_):
-        """Cover lines 371-372: admin client None or missing .auth.admin"""
-        # Return an object without auth.admin; should trigger RuntimeError branch and be logged
-        class NoAdmin:
-            pass
-        mock_get_admin.return_value = NoAdmin()
-
-        await revoke_regular_user("u1", "t1")
-        # No exception should escape
-
-    @patch('backend.services.user_management_service.logging.info', side_effect=Exception("log_fail"))
-    async def test_revoke_regular_user_outer_exception_swallowed(self, _mock_log):
-        """Cover lines 378-381: unexpected outer exception is swallowed"""
-        # Make earlier steps no-op by patching called functions to simple stubs
-        with patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id'), \
-                patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id'), \
-                patch('backend.services.user_management_service.soft_delete_all_conversations_by_user'), \
-                patch('backend.services.user_management_service.build_memory_config', return_value={}), \
-                patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock):
-            # Should not raise despite logging.info raising, ensuring outer try/except is covered
-            await revoke_regular_user("u1", "t1")
 
 
 class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):

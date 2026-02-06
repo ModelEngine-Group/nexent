@@ -27,6 +27,11 @@ sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
 
+# Mock for memory_service import used in delete_user_and_cleanup
+nexent_memory_service = MagicMock()
+sys.modules['nexent.memory'] = MagicMock()
+sys.modules['nexent.memory.memory_service'] = nexent_memory_service
+
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()

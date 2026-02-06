@@ -193,22 +193,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         dataSource={models}
         loading={isLoading}
         rowKey="id"
-        pagination={false}
+        pagination={{ pageSize: 10 }}
         scroll={{ x: true }}
         className="flex-1"
       />
-
-      <div className="flex justify-end mt-4 flex-shrink-0">
-        <Pagination
-          current={page}
-          pageSize={pageSize}
-          total={total}
-          onChange={handlePageChange}
-          showSizeChanger
-          showQuickJumper
-          showTotal={(total) => `Total ${total} items`}
-        />
-      </div>
 
       <ModelAddDialog
         isOpen={addDialogVisible}
