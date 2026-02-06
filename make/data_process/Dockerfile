@@ -42,6 +42,9 @@ RUN uv sync --no-cache-dir --extra data-process $(test -n "$MIRROR" && echo "-i 
 COPY sdk /opt/sdk
 RUN uv pip install --no-cache-dir /opt/sdk $(test -n "$MIRROR" && echo "-i $MIRROR") && \
     uv cache clean
+
+# Pre-download tiktoken cl100k_base model to avoid network issues during runtime
+RUN uv run python -c "import tiktoken; enc = tiktoken.get_encoding('cl100k_base')"
 # Layer 3: copy backend code
 COPY backend /opt/backend
 
