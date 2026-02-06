@@ -179,6 +179,8 @@ function TenantList({
                       handleDelete(tenant.tenant_id);
                     }}
                     onCancel={(e) => e?.stopPropagation()}
+                    okText={t("common.confirm")}
+                    cancelText={t("common.cancel")}
                   >
                     <Button
                       type="text"
@@ -205,6 +207,8 @@ function TenantList({
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
       >
         <Form layout="vertical" form={form}>
           <Form.Item

@@ -811,14 +811,17 @@ ALTER TABLE nexent.role_permission_t ADD CONSTRAINT role_permission_t_pkey PRIMA
 
 
 -- Insert role permission data with conflict handling
+-- =============================================================================
+-- Note: Super Admin (SU) role menu visibility is restricted to only 4 pages:
+--   - Home page: /
+--   - Tenant resources: /tenant-resources
+--   - Monitoring: /monitoring
+--   - User profile: /users
+-- All other menu items are hidden for SU role
+-- =============================================================================
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
 (1, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(2, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(3, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(4, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
 (5, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(6, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(7, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
 (8, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
 (211, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
 (9, 'SU', 'RESOURCE', 'AGENT', 'READ'),

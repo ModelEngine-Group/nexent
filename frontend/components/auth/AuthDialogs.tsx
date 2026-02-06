@@ -113,7 +113,7 @@ export function AuthDialogs() {
 
       {/* Permission denied dialog - shown when user is not authorized */}
       <Modal
-        title={t("无权限访问")}
+        title={t("page.permissionDenied.title")}
         open={isAuthzPromptModalOpen}
         onCancel={closeAuthzPromptModal}
         footer={[
@@ -124,7 +124,7 @@ export function AuthDialogs() {
         centered
       >
         <div className="py-2">
-          <p className="text-gray-600">{t("暂时没有该页面权限，请咨询管理员提升相应权限!")}</p>
+          <p className="text-gray-600">{t("page.permissionDenied.content")}</p>
         </div>
       </Modal>
 
