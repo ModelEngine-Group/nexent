@@ -34,29 +34,20 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     if (isSpeedMode) {
       // In speed mode, user is considered authenticated without session
       setIsAuthenticated(true);
-      setIsAuthChecking(false);
-    }
-  }, [isSpeedMode]);
-
-  // Initialize authentication state based on session
-  useEffect(() => {
-    if (isSpeedMode) return;
-    // Check session validity directly
-    if (checkSessionValid()) {
-      // Session is valid, restore it to state
-      const storedSession = getSessionFromStorage();
-      if (storedSession) {
-        setSession(storedSession);
-      }
-      setIsAuthenticated(true);
     } else {
-      // No valid session
-      setSession(null);
-      setIsAuthenticated(false);
+      if (checkSessionValid()) {
+        const storedSession = getSessionFromStorage();
+        if (storedSession) {
+          setSession(storedSession);
+        }
+        setIsAuthenticated(true);
+      } else {
+        setSession(null);
+        setIsAuthenticated(false);
+      }
     }
     setIsAuthChecking(false);
   }, [isSpeedMode]);
-
 
   const clearLocalSession = useCallback(() => {
     removeSessionFromStorage();
