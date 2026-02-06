@@ -13,7 +13,7 @@ dependencies = [
     "websocket-client>=1.8.0",
     "pyyaml>=6.0.2",
     "redis>=5.0.0",
-    "fastmcp==2.12.0",
+    "fastmcp==2.14.5",
     "langchain>=0.3.26",
     "scikit-learn>=1.0.0",
     "numpy>=1.24.0"
