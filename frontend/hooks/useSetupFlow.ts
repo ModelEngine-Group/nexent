@@ -1,16 +1,11 @@
 import {useRouter} from "next/navigation";
 import {useTranslation} from "react-i18next";
-import {useAuthorization} from "@/hooks/auth/useAuthorization";
-import {useDeployment} from "@/components/providers/deploymentProvider";
 
 interface UseSetupFlowOptions {
   // Options reserved for future use
 }
 
 interface UseSetupFlowReturn {
-  // User and deployment info
-  user: ReturnType<typeof useAuthorization>["user"];
-  isSpeedMode: boolean;
 
   // Animation config
   pageVariants: {
@@ -47,10 +42,6 @@ export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowRet
   const router = useRouter();
   const {t} = useTranslation();
 
-  // Get user and deployment info
-  const auth = useAuthorization();
-  const { isSpeedMode } = useDeployment();
-
   // Animation variants for smooth page transitions
   const pageVariants = {
     initial: {
@@ -74,10 +65,6 @@ export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowRet
   };
 
   return {
-    // User and deployment info
-    user: auth.user,
-    isSpeedMode,
-
     // Animation
     pageVariants,
     pageTransition,
