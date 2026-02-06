@@ -62,7 +62,9 @@ def mock_invitation_info():
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_admin_invite(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -80,6 +82,8 @@ def test_create_invitation_code_admin_invite(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the generated code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     result = create_invitation_code(
         tenant_id="test_tenant",
@@ -108,7 +112,9 @@ def test_create_invitation_code_admin_invite(
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_dev_invite_admin_role(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -126,6 +132,8 @@ def test_create_invitation_code_dev_invite_admin_role(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the generated code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     result = create_invitation_code(
         tenant_id="test_tenant",
@@ -239,7 +247,9 @@ def test_create_invitation_code_duplicate(mock_query_invitation_by_code, mock_ge
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_default_empty_group_ids(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -257,6 +267,8 @@ def test_create_invitation_code_default_empty_group_ids(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the generated code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     # Test ADMIN_INVITE with no default group - should result in empty group_ids
     result = create_invitation_code(
@@ -278,7 +290,9 @@ def test_create_invitation_code_default_empty_group_ids(
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_provided_code_uppercase_conversion(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -294,6 +308,8 @@ def test_create_invitation_code_provided_code_uppercase_conversion(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the provided code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     result = create_invitation_code(
         tenant_id="test_tenant",
