@@ -245,13 +245,13 @@ export default function UserManageComp() {
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
-  // For non-super admins, automatically select their first tenant when data loads
+  // For non-super admins, automatically select their own tenant based on user.tenantId
   const [tenantId, setTenantId] = useState<string | null>(null);
   useEffect(() => {
-    if (!isSuperAdmin && tenants.length > 0 && !tenantId) {
-      setTenantId(tenants[0].tenant_id);
+    if (!isSuperAdmin && user?.tenantId && !tenantId) {
+      setTenantId(user.tenantId);
     }
-  }, [isSuperAdmin, tenants, tenantId]);
+  }, [isSuperAdmin, tenantId, user?.tenantId]);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
