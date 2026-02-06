@@ -49,7 +49,7 @@ patch('database.user_tenant_db.soft_delete_user_tenant_by_user_id').start()
 patch('database.group_db.remove_user_from_all_groups').start()
 
 # Import unit under test
-from backend.services.user_service import get_users, update_user, delete_user, delete_user_and_cleanup
+from backend.services.user_service import get_users, update_user, delete_user_and_cleanup
 
 
 @pytest.fixture(autouse=True)
@@ -330,90 +330,6 @@ class TestUpdateUser:
             await update_user(user_id, update_data, updated_by)
 
 
-@pytest.mark.asyncio
-class TestDeleteUser:
-    """Test cases for delete_user function"""
-
-    async def test_delete_user_success(self):
-        """Test successfully deleting user"""
-        from backend.services import user_service
-        mock_soft_delete = user_service.soft_delete_user_tenant_by_user_id
-        mock_remove_groups = user_service.remove_user_from_all_groups
-
-        user_id = "user123"
-        deleted_by = "deleter456"
-
-        mock_soft_delete.return_value = True
-
-        result = await delete_user(user_id, deleted_by)
-
-        assert result is True
-
-        # Verify both operations were called
-        mock_soft_delete.assert_called_once_with(user_id, deleted_by)
-        mock_remove_groups.assert_called_once_with(user_id, deleted_by)
-
-    async def test_delete_user_not_found(self):
-        """Test deleting user that doesn't exist"""
-        from backend.services import user_service
-        mock_soft_delete = user_service.soft_delete_user_tenant_by_user_id
-        mock_remove_groups = user_service.remove_user_from_all_groups
-
-        user_id = "user123"
-        deleted_by = "deleter456"
-
-        mock_soft_delete.return_value = False
-
-        # Execute & Assert
-        with pytest.raises(ValueError, match=f"User {user_id} not found in any tenant"):
-            await delete_user(user_id, deleted_by)
-
-        # Verify calls
-        mock_soft_delete.assert_called_once_with(user_id, deleted_by)
-        mock_remove_groups.assert_not_called()
-
-    async def test_delete_user_group_removal_fails(self):
-        """Test deleting user when group removal fails but tenant deletion succeeds"""
-        from backend.services import user_service
-        mock_soft_delete = user_service.soft_delete_user_tenant_by_user_id
-        mock_remove_groups = user_service.remove_user_from_all_groups
-
-        user_id = "user123"
-        deleted_by = "deleter456"
-
-        mock_soft_delete.return_value = True
-        mock_remove_groups.side_effect = Exception("Group removal failed")
-
-        # Execute - should not raise exception (soft failure for group removal)
-        result = await delete_user(user_id, deleted_by)
-
-        # Assert - deletion should still succeed
-        assert result is True
-
-        # Verify both operations were attempted
-        mock_soft_delete.assert_called_once_with(user_id, deleted_by)
-        mock_remove_groups.assert_called_once_with(user_id, deleted_by)
-
-    async def test_delete_user_tenant_deletion_fails(self):
-        """Test deleting user when tenant deletion fails"""
-        from backend.services import user_service
-        mock_soft_delete = user_service.soft_delete_user_tenant_by_user_id
-        mock_remove_groups = user_service.remove_user_from_all_groups
-
-        user_id = "user123"
-        deleted_by = "deleter456"
-
-        mock_soft_delete.side_effect = Exception("Tenant deletion failed")
-
-        # Execute & Assert
-        with pytest.raises(Exception, match="Tenant deletion failed"):
-            await delete_user(user_id, deleted_by)
-
-        # Verify calls - group removal should not be attempted if tenant deletion fails
-        mock_soft_delete.assert_called_once_with(user_id, deleted_by)
-        mock_remove_groups.assert_not_called()
-
-
 class TestDataValidation:
     """Test data validation and edge cases"""
 
@@ -495,9 +411,13 @@ class TestDeleteUserAndCleanup:
     async def test_delete_user_and_cleanup_success(self, mocker):
         """Test successful complete user deletion and cleanup"""
         # Mock all the dependencies
-        mock_delete_user = mocker.patch(
-            "backend.services.user_service.delete_user",
+        mock_soft_delete_tenant = mocker.patch(
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
             return_value=True
+        )
+        mock_remove_groups = mocker.patch(
+            "backend.services.user_service.remove_user_from_all_groups",
+            return_value=1
         )
         mock_soft_delete_configs = mocker.patch(
             "backend.services.user_service.soft_delete_all_configs_by_user_id"
@@ -529,7 +449,8 @@ class TestDeleteUserAndCleanup:
         await delete_user_and_cleanup(user_id, tenant_id)
 
         # Verify all steps were called
-        mock_delete_user.assert_called_once_with(user_id, user_id)
+        mock_soft_delete_tenant.assert_called_once_with(user_id, user_id)
+        mock_remove_groups.assert_called_once_with(user_id, user_id)
         mock_soft_delete_configs.assert_called_once_with(user_id, actor=user_id)
         mock_soft_delete_convs.assert_called_once_with(user_id)
         mock_build_config.assert_called_once_with(tenant_id)
@@ -543,8 +464,12 @@ class TestDeleteUserAndCleanup:
         """Test that errors in individual steps don't fail the entire cleanup"""
         # Mock all dependencies with exceptions
         mocker.patch(
-            "backend.services.user_service.delete_user",
-            side_effect=Exception("delete failed")
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
+            side_effect=Exception("tenant deletion failed")
+        )
+        mocker.patch(
+            "backend.services.user_service.remove_user_from_all_groups",
+            side_effect=Exception("groups removal failed")
         )
         mocker.patch(
             "backend.services.user_service.soft_delete_all_configs_by_user_id",

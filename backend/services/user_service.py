@@ -108,47 +108,11 @@ async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str
         raise
 
 
-async def delete_user(user_id: str, deleted_by: str) -> bool:
-    """
-    Soft delete user and remove from all groups
-
-    Args:
-        user_id (str): User ID to delete
-        deleted_by (str): ID of the user performing the deletion
-
-    Returns:
-        bool: True if deletion successful
-
-    Raises:
-        ValueError: When user not found
-    """
-    try:
-        # Soft delete user-tenant relationship
-        tenant_deleted = soft_delete_user_tenant_by_user_id(user_id, deleted_by)
-
-        if not tenant_deleted:
-            raise ValueError(f"User {user_id} not found in any tenant")
-
-        # Remove user from all groups
-        try:
-            remove_user_from_all_groups(user_id, deleted_by)
-        except Exception as group_exc:
-            # Log the error but don't fail the entire deletion
-            logger.warning(f"Failed to remove user {user_id} from groups: {str(group_exc)}")
-
-        logger.info(f"Soft deleted user {user_id} by user {deleted_by}")
-        return True
-
-    except Exception as exc:
-        logger.error(f"Failed to delete user {user_id}: {str(exc)}")
-        raise
-
-
 async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
     Permanently delete user account and all related data.
 
-    This is used for user self-revocation and performs complete cleanup:
+    This performs complete cleanup:
     1) Soft-delete user-tenant relation and remove from all groups
     2) Soft-delete memory user configs and all conversations
     3) Clear user-level memories in memory store
@@ -163,7 +127,11 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
 
         # 1) Core user deletion (soft-delete user-tenant and groups)
         try:
-            await delete_user(user_id, user_id)
+            tenant_deleted = soft_delete_user_tenant_by_user_id(user_id, user_id)
+            if not tenant_deleted:
+                raise ValueError(f"User {user_id} not found in any tenant")
+
+            remove_user_from_all_groups(user_id, user_id)
             logger.debug("\tUser tenant relationship and groups deleted.")
         except Exception as e:
             logger.error(f"Failed core deletion for user {user_id}: {e}")
