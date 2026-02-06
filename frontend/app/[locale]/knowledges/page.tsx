@@ -23,10 +23,7 @@ export default function KnowledgesContent() {
     isSpeedMode,
     pageVariants,
     pageTransition,
-    canAccessProtectedData,
-  } = useSetupFlow({
-    requireAdmin: false, // Knowledge base accessible to all users
-  });
+  } = useSetupFlow();
 
   // Knowledge base specific initialization
   useEffect(() => {
@@ -65,20 +62,18 @@ export default function KnowledgesContent() {
   return (
     <>
       <div className="w-full h-full p-8">
-        {canAccessProtectedData ? (
-          <motion.div
-            initial="initial"
-            animate="in"
-            exit="out"
-            variants={pageVariants}
-            transition={pageTransition}
-            style={{ width: "100%", height: "100%" }}
-          >
-            <div className="w-full h-full flex items-center justify-center">
-              <DataConfig isActive={true} />
-            </div>
-          </motion.div>
-        ) : null}
+        <motion.div
+          initial="initial"
+          animate="in"
+          exit="out"
+          variants={pageVariants}
+          transition={pageTransition}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            <DataConfig isActive={true} />
+          </div>
+        </motion.div>
       </div>
     </>
   );
