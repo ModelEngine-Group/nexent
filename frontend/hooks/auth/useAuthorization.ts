@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
 import { User, AuthInfoResponse, AuthorizationContextType } from "@/types/auth";
 import { getSessionFromStorage } from "@/lib/session";
@@ -19,6 +19,7 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 export function useAuthorization(): AuthorizationContextType {
   const router = useRouter();
   const pathname = usePathname();
+  const queryClient = useQueryClient();
 
   const { isSpeedMode } = useDeployment();
 
@@ -33,6 +34,9 @@ export function useAuthorization(): AuthorizationContextType {
 
   // True when authorization data is ready (permissions loaded)
   const [isAuthzReady, setIsAuthzReady] = useState(false);
+
+  // Track if initialization has been attempted to prevent duplicate calls
+  const initializationAttemptedRef = useRef(false);
 
   // Query for current user authorization info
   // enabled: false prevents automatic query execution on mount
@@ -53,10 +57,6 @@ export function useAuthorization(): AuthorizationContextType {
     enabled: false, // Disabled by default, enabled by manual refetch() calls
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
-    refetchInterval: 10 * 60 * 1000, // Auto refresh every 10 minutes
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
   });
 
   // Update state when authorization data is received
@@ -179,18 +179,52 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Initialize authorization data on mount if user is already authenticated
   useEffect(() => {
+    // Prevent duplicate initialization attempts
+    if (initializationAttemptedRef.current) {
+      return;
+    }
+
     const initializeAuthz = () => {
+      // Check if data already exists in cache and is still fresh
+      const cachedData = queryClient.getQueryData<AuthInfoResponse>(["currentUserInfo"]);
+      const queryState = queryClient.getQueryState(["currentUserInfo"]);
+
+      // If we have cached data, check if it's still fresh (within staleTime)
+      if (cachedData && queryState) {
+        // Check if data is fresh (updated within staleTime)
+        if (queryState.dataUpdatedAt) {
+          const timeSinceUpdate = Date.now() - queryState.dataUpdatedAt;
+          const staleTime = 5 * 60 * 1000; // 5 minutes
+          if (timeSinceUpdate < staleTime) {
+            log.info("Using cached authorization data, skipping refetch", {
+              timeSinceUpdate: Math.round(timeSinceUpdate / 1000) + "s",
+            });
+            // Data will be processed by the useEffect that watches currentUserInfo
+            initializationAttemptedRef.current = true;
+            return;
+          }
+        } else if (cachedData) {
+          // If we have cached data but no timestamp, still use it to avoid unnecessary refetch
+          // This can happen if data was set manually or from a previous session
+          log.info("Using cached authorization data (no timestamp), skipping refetch");
+          initializationAttemptedRef.current = true;
+          return;
+        }
+      }
+
       // In speed mode, always fetch authorization info
       // In full mode, only fetch if session exists
       if (!isSpeedMode) {
         const session = getSessionFromStorage();
         if (!session?.access_token) {
+          initializationAttemptedRef.current = true;
           return;
         }
         const now = Date.now();
         const expiresAt = session.expires_at * 1000;
 
         if (expiresAt <= now) {
+          initializationAttemptedRef.current = true;
           return;
         }
       }
@@ -200,6 +234,7 @@ export function useAuthorization(): AuthorizationContextType {
           ? "Speed mode: fetching authorization info..."
           : "Valid session found on initialization, fetching authorization info..."
       );
+      initializationAttemptedRef.current = true;
       refetch().catch((error) => {
         log.error("Initial refetch error:", error);
       });
@@ -208,7 +243,7 @@ export function useAuthorization(): AuthorizationContextType {
     // Small delay to ensure authentication state is initialized
     const timeoutId = setTimeout(initializeAuthz, 100);
     return () => clearTimeout(timeoutId);
-  }, [isSpeedMode, refetch]);
+  }, [isSpeedMode, refetch, queryClient]);
 
   // Authz prompt modal control functions (defined before useLayoutEffect)
   const openAuthzPromptModal = useCallback(() => setIsAuthzPromptModalOpen(true), []);
