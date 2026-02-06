@@ -39,7 +39,7 @@ export function ChatAgentSelector({
   const duplicateAgentInfo = useMemo(() => {
     // Create a map to track agents by name
     const nameToAgents = new Map<string, Agent[]>();
-    
+
     agents.forEach((agent: Agent) => {
       const agentName = agent.name;
       if (!nameToAgents.has(agentName)) {

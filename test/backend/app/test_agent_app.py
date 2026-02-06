@@ -527,6 +527,7 @@ def test_import_agent_api_exception(mocker, mock_auth_header):
 
 
 def test_list_all_agent_info_api_success(mocker, mock_auth_header):
+    """Test list_all_agent_info_api success case without tenant_id query parameter (uses auth tenant_id)."""
     # Setup mocks using pytest-mock
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
     mock_list_all_agent = mocker.patch(
@@ -556,7 +557,7 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
         }
     ]
 
-    # Test the endpoint
+    # Test the endpoint without tenant_id query parameter
     response = config_client.get(
         "/agent/list",
         headers=mock_auth_header
@@ -565,6 +566,7 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 200
     mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    # Should use auth tenant_id when query parameter is not provided
     mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
     assert len(response.json()) == 2
     assert response.json()[0]["agent_id"] == 1
@@ -577,7 +579,48 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     assert response.json()[1]["permission"] == "READ_ONLY"
 
 
+def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header):
+    """Test list_all_agent_info_api success case with explicit tenant_id query parameter."""
+    # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_list_all_agent = mocker.patch(
+        "apps.agent_app.list_all_agent_info_impl", new_callable=mocker.AsyncMock)
+    # Mock return values - auth tenant_id is different from explicit tenant_id
+    mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
+    mock_list_all_agent.return_value = [
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Test agent 3",
+            "group_ids": [4, 5],
+            "permission": "EDIT",
+            "is_available": True,
+            "unavailable_reasons": []
+        }
+    ]
+
+    # Test the endpoint with explicit tenant_id query parameter
+    explicit_tenant_id = "explicit_tenant_123"
+    response = config_client.get(
+        "/agent/list",
+        params={"tenant_id": explicit_tenant_id},
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 200
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    # Should use explicit tenant_id when provided, not auth tenant_id
+    mock_list_all_agent.assert_called_once_with(tenant_id=explicit_tenant_id, user_id="test_user")
+    assert len(response.json()) == 1
+    assert response.json()[0]["agent_id"] == 3
+    assert response.json()[0]["display_name"] == "Display Agent 3"
+    assert response.json()[0]["group_ids"] == [4, 5]
+
+
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
+    """Test list_all_agent_info_api exception handling without tenant_id query parameter."""
     # Setup mocks using pytest-mock
     mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
     mock_list_all_agent = mocker.patch(
@@ -586,7 +629,7 @@ def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.side_effect = Exception("Test error")
 
-    # Test the endpoint
+    # Test the endpoint without tenant_id query parameter
     response = config_client.get(
         "/agent/list",
         headers=mock_auth_header
@@ -596,6 +639,32 @@ def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
     assert response.status_code == 500
     mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
     mock_list_all_agent.assert_called_once_with(tenant_id="test_tenant", user_id="test_user")
+    assert "Agent list error" in response.json()["detail"]
+
+
+def test_list_all_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
+    """Test list_all_agent_info_api exception handling with explicit tenant_id query parameter."""
+    # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_list_all_agent = mocker.patch(
+        "apps.agent_app.list_all_agent_info_impl", new_callable=mocker.AsyncMock)
+    # Mock return values and exception
+    mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
+    mock_list_all_agent.side_effect = Exception("Test error with explicit tenant")
+
+    # Test the endpoint with explicit tenant_id query parameter
+    explicit_tenant_id = "explicit_tenant_456"
+    response = config_client.get(
+        "/agent/list",
+        params={"tenant_id": explicit_tenant_id},
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 500
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    # Should use explicit tenant_id even when exception occurs
+    mock_list_all_agent.assert_called_once_with(tenant_id=explicit_tenant_id, user_id="test_user")
     assert "Agent list error" in response.json()["detail"]
 
 

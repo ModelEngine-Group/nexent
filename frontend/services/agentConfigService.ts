@@ -98,11 +98,15 @@ export const fetchTools = async () => {
 
 /**
  * get agent list from backend (basic info only)
+ * @param tenantId optional tenant ID for filtering
  * @returns list of agents with basic info (id, name, description, is_available)
  */
-export const fetchAgentList = async () => {
+export const fetchAgentList = async (tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.list, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
