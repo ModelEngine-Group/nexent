@@ -637,6 +637,62 @@ class TestUpdateToolInfoImpl:
         with pytest.raises(Exception):
             update_tool_info_impl(mock_request, "test_tenant", "test_user")
 
+    @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
+    def test_update_tool_info_impl_with_version_no_zero(self, mock_create_update):
+        """Test update_tool_info_impl when version_no is 0"""
+        mock_request = Mock(spec=ToolInstanceInfoRequest)
+        mock_request.version_no = 0
+        mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 0}
+        mock_tool_instance = {"id": 1, "name": "test_tool"}
+        mock_create_update.return_value = mock_tool_instance
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
+
+        assert result["tool_instance"] == mock_tool_instance
+        # Verify that create_or_update_tool_by_tool_info was called with version_no=0
+        mock_create_update.assert_called_once_with(
+            mock_request, "test_tenant", "test_user", version_no=0)
+
+    @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
+    def test_update_tool_info_impl_without_version_no(self, mock_create_update):
+        """Test update_tool_info_impl when version_no is not provided (should default to 0)"""
+        # Create a simple object without version_no attribute
+        class MockToolInfoWithoutVersion:
+            def __init__(self):
+                self.agent_id = 1
+                self.tool_id = 1
+                # Explicitly do not set version_no
+        
+        mock_request = MockToolInfoWithoutVersion()
+        mock_tool_instance = {"id": 1, "name": "test_tool"}
+        mock_create_update.return_value = mock_tool_instance
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
+
+        assert result["tool_instance"] == mock_tool_instance
+        # Verify that create_or_update_tool_by_tool_info was called with version_no=0 (default)
+        mock_create_update.assert_called_once_with(
+            mock_request, "test_tenant", "test_user", version_no=0)
+
+    @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
+    def test_update_tool_info_impl_with_version_no_non_zero(self, mock_create_update):
+        """Test update_tool_info_impl when version_no is not 0"""
+        mock_request = Mock(spec=ToolInstanceInfoRequest)
+        mock_request.version_no = 5
+        mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 5}
+        mock_tool_instance = {"id": 1, "name": "test_tool"}
+        mock_create_update.return_value = mock_tool_instance
+
+        from backend.services.tool_configuration_service import update_tool_info_impl
+        result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
+
+        assert result["tool_instance"] == mock_tool_instance
+        # Verify that create_or_update_tool_by_tool_info was called with version_no=5
+        mock_create_update.assert_called_once_with(
+            mock_request, "test_tenant", "test_user", version_no=5)
+
 
 class TestListAllTools:
     """ test the function of list_all_tools"""
