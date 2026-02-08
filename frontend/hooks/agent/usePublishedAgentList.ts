@@ -1,17 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchAgentList as fetchAgentListService } from "@/services/agentConfigService";
+import { fetchPublishedAgentList as fetchPublishedAgentListService } from "@/services/agentConfigService";
 import { useMemo, useEffect } from "react";
 import { Agent } from "@/types/agentConfig";
 
-export function useAgentList() {
+export function usePublishedAgentList() {
 	const queryClient = useQueryClient();
 
 	const query = useQuery({
-		queryKey: ["agents"],
+		queryKey: ["publishedAgentsList"],
 		queryFn: async () => {
-			const res = await fetchAgentListService();
+			const res = await fetchPublishedAgentListService();
 			if (!res || !res.success) {
-				throw new Error(res?.message || "Failed to fetch agents");
+				throw new Error(res?.message || "Failed to fetch published agents");
 			}
 			return res.data || [];
 		},
@@ -29,8 +29,6 @@ export function useAgentList() {
 		...query,
 		agents,
 		availableAgents,
-		invalidate: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
+		invalidate: () => queryClient.invalidateQueries({ queryKey: ["publishedAgents"] }),
 	};
 }
-
-
