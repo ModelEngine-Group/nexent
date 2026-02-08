@@ -29,6 +29,38 @@ try:
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
+    # Define placeholder objects to avoid NameError when OpenTelemetry is not available
+    Status = None
+    StatusCode = None
+    PrometheusMetricReader = None
+    MeterProvider = None
+    BatchSpanProcessor = None
+    TracerProvider = None
+    RequestsInstrumentor = None
+    FastAPIInstrumentor = None
+    JaegerExporter = None
+    Resource = None
+    # Create a mock trace module with a get_current_span function that returns None
+    class _MockTraceModule:
+        @staticmethod
+        def get_current_span():
+            return None
+        @staticmethod
+        def get_tracer(*args, **kwargs):
+            return None
+        @staticmethod
+        def set_tracer_provider(*args, **kwargs):
+            pass
+    trace = _MockTraceModule()
+    # Create a mock metrics module
+    class _MockMetricsModule:
+        @staticmethod
+        def get_meter(*args, **kwargs):
+            return None
+        @staticmethod
+        def set_meter_provider(*args, **kwargs):
+            pass
+    metrics = _MockMetricsModule()
 import logging
 import time
 import functools

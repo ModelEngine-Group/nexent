@@ -27,20 +27,48 @@ from unittest.mock import Mock, MagicMock, patch
 @pytest.fixture(autouse=True)
 def mock_opentelemetry():
     """Mock all OpenTelemetry dependencies."""
+    # Create mock classes that can be instantiated
+    mock_status = MagicMock()
+    mock_status_code = MagicMock()
+    mock_trace_module = MagicMock()
+    mock_trace_module.get_current_span = MagicMock(return_value=None)
+    mock_trace_module.get_tracer = MagicMock(return_value=MagicMock())
+    mock_trace_module.set_tracer_provider = MagicMock()
+    mock_metrics_module = MagicMock()
+    mock_metrics_module.get_meter = MagicMock(return_value=MagicMock())
+    mock_metrics_module.set_meter_provider = MagicMock()
+    
+    # Create mock Resource class with create method
+    mock_resource_class = MagicMock()
+    mock_resource_instance = MagicMock()
+    mock_resource_class.create = MagicMock(return_value=mock_resource_instance)
+    
     with patch.dict('sys.modules', {
         'opentelemetry': MagicMock(),
-        'opentelemetry.trace': MagicMock(),
-        'opentelemetry.metrics': MagicMock(),
-        'opentelemetry.trace.status': MagicMock(),
-        'opentelemetry.exporter.prometheus': MagicMock(),
-        'opentelemetry.sdk.metrics': MagicMock(),
-        'opentelemetry.sdk.trace.export': MagicMock(),
-        'opentelemetry.sdk.trace': MagicMock(),
-        'opentelemetry.instrumentation.requests': MagicMock(),
-        'opentelemetry.instrumentation.fastapi': MagicMock(),
-        'opentelemetry.exporter.jaeger.thrift': MagicMock(),
-        'opentelemetry.sdk.resources': MagicMock(),
-    }):
+        'opentelemetry.trace': mock_trace_module,
+        'opentelemetry.metrics': mock_metrics_module,
+        'opentelemetry.trace.status': MagicMock(Status=mock_status, StatusCode=mock_status_code),
+        'opentelemetry.exporter.prometheus': MagicMock(PrometheusMetricReader=MagicMock),
+        'opentelemetry.sdk.metrics': MagicMock(MeterProvider=MagicMock),
+        'opentelemetry.sdk.trace.export': MagicMock(BatchSpanProcessor=MagicMock),
+        'opentelemetry.sdk.trace': MagicMock(TracerProvider=MagicMock),
+        'opentelemetry.instrumentation.requests': MagicMock(RequestsInstrumentor=MagicMock),
+        'opentelemetry.instrumentation.fastapi': MagicMock(FastAPIInstrumentor=MagicMock),
+        'opentelemetry.exporter.jaeger.thrift': MagicMock(JaegerExporter=MagicMock),
+        'opentelemetry.sdk.resources': MagicMock(Resource=mock_resource_class),
+    }), patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True), \
+        patch('sdk.nexent.monitor.monitoring.trace', mock_trace_module), \
+        patch('sdk.nexent.monitor.monitoring.metrics', mock_metrics_module), \
+        patch('sdk.nexent.monitor.monitoring.Status', mock_status), \
+        patch('sdk.nexent.monitor.monitoring.StatusCode', mock_status_code), \
+        patch('sdk.nexent.monitor.monitoring.Resource', mock_resource_class), \
+        patch('sdk.nexent.monitor.monitoring.TracerProvider', MagicMock), \
+        patch('sdk.nexent.monitor.monitoring.MeterProvider', MagicMock), \
+        patch('sdk.nexent.monitor.monitoring.JaegerExporter', MagicMock), \
+        patch('sdk.nexent.monitor.monitoring.BatchSpanProcessor', MagicMock), \
+        patch('sdk.nexent.monitor.monitoring.PrometheusMetricReader', MagicMock), \
+        patch('sdk.nexent.monitor.monitoring.RequestsInstrumentor', MagicMock), \
+        patch('sdk.nexent.monitor.monitoring.FastAPIInstrumentor', MagicMock):
         yield
 
 
@@ -64,23 +92,24 @@ class TestMonitoringConfig:
 
     def test_custom_config(self):
         """Test configuration with custom values."""
-        config = MonitoringConfig(
-            enable_telemetry=True,
-            service_name="test-service",
-            jaeger_endpoint="http://test:14268/api/traces",
-            prometheus_port=9000,
-            telemetry_sample_rate=0.5,
-            llm_slow_request_threshold_seconds=10.0,
-            llm_slow_token_rate_threshold=20.0
-        )
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            config = MonitoringConfig(
+                enable_telemetry=True,
+                service_name="test-service",
+                jaeger_endpoint="http://test:14268/api/traces",
+                prometheus_port=9000,
+                telemetry_sample_rate=0.5,
+                llm_slow_request_threshold_seconds=10.0,
+                llm_slow_token_rate_threshold=20.0
+            )
 
-        assert config.enable_telemetry is True
-        assert config.service_name == "test-service"
-        assert config.jaeger_endpoint == "http://test:14268/api/traces"
-        assert config.prometheus_port == 9000
-        assert config.telemetry_sample_rate == 0.5
-        assert config.llm_slow_request_threshold_seconds == 10.0
-        assert config.llm_slow_token_rate_threshold == 20.0
+            assert config.enable_telemetry is True
+            assert config.service_name == "test-service"
+            assert config.jaeger_endpoint == "http://test:14268/api/traces"
+            assert config.prometheus_port == 9000
+            assert config.telemetry_sample_rate == 0.5
+            assert config.llm_slow_request_threshold_seconds == 10.0
+            assert config.llm_slow_token_rate_threshold == 20.0
 
 
 class TestMonitoringManager:
@@ -121,13 +150,14 @@ class TestMonitoringManager:
     def test_configure_enabled_telemetry(self):
         """Test configuration with telemetry enabled."""
         manager = MonitoringManager()
-        config = MonitoringConfig(enable_telemetry=True)
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            config = MonitoringConfig(enable_telemetry=True)
 
-        with patch.object(manager, '_init_telemetry') as mock_init:
-            manager.configure(config)
+            with patch.object(manager, '_init_telemetry') as mock_init:
+                manager.configure(config)
 
-            assert manager._config is config
-            mock_init.assert_called_once()
+                assert manager._config is config
+                mock_init.assert_called_once()
 
     def test_is_enabled_property(self):
         """Test is_enabled property behavior."""
@@ -137,14 +167,15 @@ class TestMonitoringManager:
         assert manager.is_enabled is False
 
         # Config with telemetry disabled
-        config_disabled = MonitoringConfig(enable_telemetry=False)
-        manager.configure(config_disabled)
-        assert manager.is_enabled is False
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            config_disabled = MonitoringConfig(enable_telemetry=False)
+            manager.configure(config_disabled)
+            assert manager.is_enabled is False
 
-        # Config with telemetry enabled
-        config_enabled = MonitoringConfig(enable_telemetry=True)
-        manager.configure(config_enabled)
-        assert manager.is_enabled is True
+            # Config with telemetry enabled
+            config_enabled = MonitoringConfig(enable_telemetry=True)
+            manager.configure(config_enabled)
+            assert manager.is_enabled is True
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     @patch('sdk.nexent.monitor.monitoring.metrics')
