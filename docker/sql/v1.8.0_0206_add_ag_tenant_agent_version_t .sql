@@ -60,9 +60,6 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
 
 ALTER TABLE nexent.ag_tenant_agent_version_t OWNER TO "root";
 
-ALTER TABLE nexent.ag_tenant_agent_version_t
-ADD CONSTRAINT ag_tenant_agent_version_t_pkey PRIMARY KEY (id);
-
 -- 步骤 7：添加COMMENT
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
