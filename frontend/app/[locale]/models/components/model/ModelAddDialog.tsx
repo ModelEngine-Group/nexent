@@ -17,6 +17,7 @@ import { modelService } from "@/services/modelService";
 import { ModelType, SingleModelConfig } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
+import { useZhipuModelList } from "@/hooks/model/UseZhipuModelList";
 import log from "@/lib/logger";
 import {
   ModelChunkSizeSlider,
@@ -217,13 +218,25 @@ export const ModelAddDialog = ({
   const [modelMaxTokens, setModelMaxTokens] = useState("4096");
 
   // Use the silicon model list hook
-  const { getModelList, getProviderSelectedModalList } = useSiliconModelList({
+  const siliconHook = useSiliconModelList({
     form,
     setModelList,
     setSelectedModelIds,
     setShowModelList,
     setLoadingModelList,
   });
+  const zhipuHook = useZhipuModelList({
+    form,
+    setModelList,
+    setSelectedModelIds,
+    setShowModelList,
+    setLoadingModelList,
+  });
+
+  // Choose the appropriate hook API based on selected provider
+  const getModelList = form.provider === "zhipu" ? zhipuHook.getModelList : siliconHook.getModelList;
+  const getProviderSelectedModalList = form.provider === "zhipu" ? zhipuHook.getProviderSelectedModalList : siliconHook.getProviderSelectedModalList;
+
 
   // When dialog opens, apply default provider and optional default batch mode
   useEffect(() => {
@@ -688,6 +701,7 @@ export const ModelAddDialog = ({
             >
               <Option value="modelengine">{t("model.provider.modelengine")}</Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
+              <Option value="zhipu">{t("model.provider.zhipu")}</Option>
             </Select>
             {/* ModelEngine URL input (only when provider is ModelEngine) */}
             {form.provider === "modelengine" && (
@@ -723,13 +737,13 @@ export const ModelAddDialog = ({
               {t("model.type.embedding")}
             </Option>
             <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
-            <Option value={MODEL_TYPES.RERANK} disabled>
+            <Option value={MODEL_TYPES.RERANK}>
               {t("model.type.rerank")}
             </Option>
-            <Option value={MODEL_TYPES.STT} disabled>
+            <Option value={MODEL_TYPES.STT}>
               {t("model.type.stt")}
             </Option>
-            <Option value={MODEL_TYPES.TTS} disabled>
+            <Option value={MODEL_TYPES.TTS}>
               {t("model.type.tts")}
             </Option>
           </Select>

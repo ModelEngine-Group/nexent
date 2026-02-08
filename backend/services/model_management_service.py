@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
-from consts.provider import ProviderEnum, SILICON_BASE_URL
+from consts.provider import ProviderEnum, SILICON_BASE_URL, ZHIPU_BASE_URL
 
 from database.model_management_db import (
     create_model_record,
@@ -142,6 +142,8 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         elif provider == ProviderEnum.MODELENGINE.value:
             # ModelEngine models carry their own base_url in each model dict
             model_url = ""
+        elif provider == ProviderEnum.ZHIPU.value:
+            model_url = ZHIPU_BASE_URL
         else:
             model_url = ""
 

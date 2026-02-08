@@ -18,7 +18,8 @@ export type ModelSource =
   | "custom"
   | "silicon"
   | "OpenAI-API-Compatible"
-  | "modelengine";
+  | "modelengine"
+  | "zhipu";
 
 // Model type
 export type ModelType =

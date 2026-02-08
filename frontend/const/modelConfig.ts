@@ -46,6 +46,7 @@ export const MODEL_PROVIDER_KEYS = [
   "jina",
   "deepseek",
   "aliyuncs",
+  "zhipu",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -58,6 +59,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   jina: "jina",
   deepseek: "deepseek",
   aliyuncs: "aliyuncs",
+  zhipu: "bigmodel",
 };
 
 // Icon filenames for providers
@@ -68,6 +70,7 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   jina: "/jina.png",
   deepseek: "/deepseek.png",
   aliyuncs: "/aliyuncs.png",
+  zhipu: "/zhipu.png",
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";

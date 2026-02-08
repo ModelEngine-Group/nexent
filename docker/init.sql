@@ -807,7 +807,7 @@ COMMENT ON COLUMN nexent.role_permission_t.permission_type IS 'Permission type';
 COMMENT ON COLUMN nexent.role_permission_t.permission_subtype IS 'Permission subtype';
 
 -- Add primary key constraint for role_permission_t table
-ALTER TABLE nexent.role_permission_t ADD CONSTRAINT role_permission_t_pkey PRIMARY KEY (role_permission_id);
+-- ALTER TABLE nexent.role_permission_t ADD CONSTRAINT role_permission_t_pkey PRIMARY KEY (role_permission_id);
 
 
 -- Insert role permission data with conflict handling

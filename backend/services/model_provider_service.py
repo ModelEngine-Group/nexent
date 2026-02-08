@@ -11,7 +11,7 @@ from consts.const import (
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import SILICON_GET_URL, ProviderEnum
+from consts.provider import SILICON_GET_URL, ProviderEnum, ZHIPU_GET_URL,ZHIPU_BASE_URL,HARDCODED_ZHIPU_MODELS
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from utils.model_name_utils import split_repo_name, add_repo_to_name
@@ -67,6 +67,85 @@ class SiliconModelProvider(AbstractModelProvider):
         except Exception as e:
             logger.error(f"Error getting models from silicon: {e}")
             return []
+
+class ZhipuModelProvider(AbstractModelProvider):
+    """Concrete implementation for Zhipu AI provider."""
+
+    async def get_models(self, provider_config: Dict) -> List[Dict]:
+        try:
+            model_type: str = provider_config["model_type"]
+            model_api_key: str = provider_config["api_key"]
+
+            headers = {"Authorization": f"Bearer {model_api_key}"}
+            if model_type in ("llm", "vlm"):
+                zhipu_url = f"{ZHIPU_GET_URL}?sub_type=chat"
+            elif model_type in ("embedding", "multi_embedding"):
+                zhipu_url = f"{ZHIPU_GET_URL}?sub_type=embedding"
+            else:
+                zhipu_url = ZHIPU_GET_URL
+
+            async with httpx.AsyncClient(verify=False) as client:
+                response = await client.get(zhipu_url, headers=headers)
+                response.raise_for_status()
+                all_models: List[Dict] = response.json().get("data", [])
+
+            logger.debug(f"Zhipu API returned {len(all_models)} models for type '{model_type}'")
+            # Filter models by type - Zhipu API may not filter by sub_type
+            # Zhipu API returns models with "object" field indicating type: "chat" or "embedding"
+            # Zhipu api_models only return chat models
+            seen_ids = set()
+            final_list = []
+            api_models=[]
+            if(model_type=='llm'):
+                api_models=all_models
+            # Normalize API models and add in API order
+            for item in api_models:
+                mid = item.get("id")
+                if not mid:
+                    continue
+                # ensure canonical fields to match hardcoded shape
+                # object/owned_by exist in hardcoded items
+                item.setdefault("object", item.get("object", "model"))
+                item.setdefault("owned_by", item.get("owned_by", "zhipu"))
+                item.setdefault("model_tag", "chat")
+                item.setdefault("model_type", model_type)
+                item.setdefault("max_tokens", DEFAULT_LLM_MAX_TOKENS)
+                final_list.append(item)
+                seen_ids.add(mid)
+
+            # Append all hardcoded models of the same type (if any), but avoid duplicates
+            hardcoded = HARDCODED_ZHIPU_MODELS.get(model_type, [])
+            for model in hardcoded:
+                hid = model.get("id")
+                if not hid or hid in seen_ids:
+                    continue
+                model_with_tag = model.copy()
+                # normalize hardcoded entries to include same canonical keys
+                model_with_tag.setdefault("object", model_with_tag.get("object", "model"))
+                model_with_tag.setdefault("owned_by", model_with_tag.get("owned_by", "zhipu"))
+                if model_type in ("llm", "vlm"):
+                    model_with_tag.setdefault("model_tag", "chat")
+                    model_with_tag.setdefault("model_type", model_type)
+                    model_with_tag.setdefault("max_tokens", DEFAULT_LLM_MAX_TOKENS)
+                elif model_type in ("embedding", "multi_embedding"):
+                    model_with_tag.setdefault("model_tag", "embedding")
+                    model_with_tag.setdefault("model_type", model_type)
+                final_list.append(model_with_tag)
+                seen_ids.add(hid)
+
+            # Log warning if filtered list is empty but we got API response
+            if not final_list and all_models:
+                logger.warning(
+                    f"Zhipu API returned {len(all_models)} models but none matched "
+                    f"filter for type '{model_type}'. Check API response format."
+                )
+            # Return normalized list (API models first, then hardcoded additions)
+            return final_list
+
+        except Exception as e:
+            logger.error(f"Error getting models from Zhipu: {e}")
+            return []
+
 
 
 class ModelEngineProvider(AbstractModelProvider):
@@ -287,6 +366,9 @@ async def get_provider_models(model_data: dict) -> List[dict]:
         model_list = await provider.get_models(model_data)
     elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
         provider = ModelEngineProvider()
+        model_list = await provider.get_models(model_data)
+    elif model_data["provider"] == ProviderEnum.ZHIPU.value:
+        provider = ZhipuModelProvider()
         model_list = await provider.get_models(model_data)
 
     return model_list
