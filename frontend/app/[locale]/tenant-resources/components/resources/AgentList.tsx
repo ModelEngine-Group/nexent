@@ -93,9 +93,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     value: "",
   });
 
-  const { agents, isLoading, refetch } = useAgentList({
-    staleTime: 0, // Always fetch fresh data for admin view
-  });
+  const { agents, isLoading, refetch } = useAgentList();
 
   // Fetch groups for group name mapping and selection
   const { data: groupData } = useGroupList(tenantId, 1, 100);
