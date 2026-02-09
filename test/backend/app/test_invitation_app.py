@@ -25,7 +25,7 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
 from consts.model import (
     InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 )
@@ -283,6 +283,27 @@ class TestInvitationCreation:
             data = response.json()
             assert "Invalid code type" in data["detail"]
 
+    def test_create_invitation_duplicate_code(self):
+        """Test invitation creation with duplicate invitation code returns 409 Conflict"""
+        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
+             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_create_invitation.side_effect = DuplicateError("Invitation code 'ABC123' already exists")
+
+            request_data = {
+                "tenant_id": "tenant-123",
+                "code_type": "ADMIN_INVITE",
+                "invitation_code": "ABC123",
+                "capacity": 10
+            }
+
+            response = client.post("/invitations", json=request_data, headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.CONFLICT
+            data = response.json()
+            assert "Invitation code 'ABC123' already exists" in data["detail"]
+
 
 class TestInvitationUpdate:
     """Test invitation update endpoint"""
@@ -415,6 +436,53 @@ class TestInvitationRetrieval:
             assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
             data = response.json()
             assert data["detail"] == "Failed to retrieve invitation code"
+
+
+class TestInvitationCodeCheck:
+    """Test invitation code check endpoint"""
+
+    def test_check_invitation_code_exists(self):
+        """Test checking invitation code that exists"""
+        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+            mock_get_invitation.return_value = {
+                "invitation_id": 1,
+                "invitation_code": "ABC123",
+                "code_type": "ADMIN_INVITE",
+                "status": "IN_USE"
+            }
+
+            response = client.get("/invitations/ABC123/check")
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Invitation code check completed"
+            assert data["data"]["invitation_code"] == "ABC123"
+            assert data["data"]["exists"] is True
+            mock_get_invitation.assert_called_once_with("ABC123")
+
+    def test_check_invitation_code_not_exists(self):
+        """Test checking invitation code that doesn't exist"""
+        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+            mock_get_invitation.return_value = None
+
+            response = client.get("/invitations/NOTFOUND/check")
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["data"]["invitation_code"] == "NOTFOUND"
+            assert data["data"]["exists"] is False
+            mock_get_invitation.assert_called_once_with("NOTFOUND")
+
+    def test_check_invitation_code_unexpected_error(self):
+        """Test checking invitation code with unexpected error"""
+        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+            mock_get_invitation.side_effect = Exception("Database error")
+
+            response = client.get("/invitations/ABC123/check")
+
+            assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+            data = response.json()
+            assert data["detail"] == "Failed to check invitation code"
 
 
 class TestInvitationAvailability:

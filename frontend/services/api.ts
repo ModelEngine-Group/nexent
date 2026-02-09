@@ -270,6 +270,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/invitations/${invitationCode}`,
     delete: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}`,
+    check: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
 };
 

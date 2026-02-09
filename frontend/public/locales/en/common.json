@@ -1365,6 +1365,7 @@
   "tenantResources.invitation.invitationCodeInvalid": "Invitation code can only contain letters and numbers",
   "tenantResources.invitation.noGroups": "No groups",
   "tenantResources.invitation.noExpiry": "Permenant",
+  "tenantResources.invitation.alreadyExists": "Invitation code already exists",
 
   "tenantResources.invitation.codeType.ADMIN_INVITE": "Admin Invite",
   "tenantResources.invitation.codeType.DEV_INVITE": "Dev Invite",

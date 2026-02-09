@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import dayjs from "dayjs";
 import {
   Table,
   Button,
@@ -25,6 +26,7 @@ import {
   createInvitation,
   updateInvitation,
   deleteInvitation,
+  checkInvitationCodeExists,
   type Invitation,
   type CreateInvitationRequest,
   type UpdateInvitationRequest,
@@ -94,7 +96,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
       capacity: invitation.capacity,
       invitation_code: invitation.invitation_code,
       group_ids: invitation.group_ids || [],
-      expiry_date: invitation.expiry_date || undefined,
+      expiry_date: invitation.expiry_date ? dayjs(invitation.expiry_date) : undefined,
     });
     setModalVisible(true);
   };
@@ -126,11 +128,17 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         return;
       }
 
+      // Format expiry_date from dayjs to string
+      const formattedExpiryDate =
+        values.expiry_date && dayjs(values.expiry_date).isValid()
+          ? dayjs(values.expiry_date).format("YYYY-MM-DD")
+          : undefined;
+
       if (editingInvitation) {
         // Update invitation
         const updateData: UpdateInvitationRequest = {
           capacity: values.capacity,
-          expiry_date: values.expiry_date || undefined,
+          expiry_date: formattedExpiryDate,
           group_ids: values.group_ids || [],
         };
         await updateInvitation(editingInvitation.invitation_code, updateData);
@@ -143,7 +151,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           invitation_code: values.invitation_code?.toUpperCase(),
           capacity: values.capacity,
           group_ids: values.group_ids || [],
-          expiry_date: values.expiry_date || undefined,
+          expiry_date: formattedExpiryDate,
         };
         await createInvitation(createData);
         message.success(t("tenantResources.invitation.invitationCreated"));
@@ -389,7 +397,13 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
 
       {/* Create/Edit Modal */}
       <Modal
-        title={editingInvitation ? t("tenantResources.invitation.editInvitation") : t("tenantResources.invitation.createInvitation")}
+        title={
+          <span>
+            {editingInvitation
+              ? `${t("tenantResources.invitation.editInvitation")}: ${editingInvitation.invitation_code}`
+              : t("tenantResources.invitation.createInvitation")}
+          </span>
+        }
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
@@ -399,17 +413,59 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         maskClosable={false}
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            name="code_type"
-            label={t("tenantResources.invitation.codeType")}
-            rules={[{ required: true, message: t("tenantResources.invitation.codeTypeRequired") }]}
-          >
-            <Select placeholder={t("tenantResources.invitation.codeType")}>
-              <Select.Option value="ADMIN_INVITE">{t("tenantResources.invitation.codeType.ADMIN_INVITE")}</Select.Option>
-              <Select.Option value="DEV_INVITE">{t("tenantResources.invitation.codeType.DEV_INVITE")}</Select.Option>
-              <Select.Option value="USER_INVITE">{t("tenantResources.invitation.codeType.USER_INVITE")}</Select.Option>
-            </Select>
-          </Form.Item>
+          {!editingInvitation && (
+            <Form.Item
+              name="code_type"
+              label={t("tenantResources.invitation.codeType")}
+              rules={[{ required: true, message: t("tenantResources.invitation.codeTypeRequired") }]}
+            >
+              <Select
+                placeholder={t("tenantResources.invitation.codeType")}
+                options={[
+                  { value: "ADMIN_INVITE", label: t("tenantResources.invitation.codeType.ADMIN_INVITE") },
+                  { value: "DEV_INVITE", label: t("tenantResources.invitation.codeType.DEV_INVITE") },
+                  { value: "USER_INVITE", label: t("tenantResources.invitation.codeType.USER_INVITE") },
+                ]}
+              />
+            </Form.Item>
+          )}
+
+          {!editingInvitation && (
+            <Form.Item
+              name="invitation_code"
+              label={t("tenantResources.invitation.invitationCode")}
+              rules={[
+                {
+                  pattern: /^[A-Z0-9]*$/,
+                  message: t("tenantResources.invitation.invitationCodeInvalid")
+                },
+                {
+                  validator: async (_, value) => {
+                    if (!value) {
+                      return Promise.reject(new Error("Required"));
+                    }
+                    try {
+                      const exists = await checkInvitationCodeExists(value);
+                      if (exists) {
+                        return Promise.reject(new Error(t("tenantResources.invitation.alreadyExists")));
+                      }
+                      return Promise.resolve();
+                    } catch {
+                      return Promise.reject(new Error("Failed to check invitation code"));
+                    }
+                  },
+                }
+              ]}
+            >
+              <Input
+                placeholder={t("tenantResources.invitation.invitationCode")}
+                onChange={(e) => {
+                  const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+                  form.setFieldsValue({ invitation_code: value });
+                }}
+              />
+            </Form.Item>
+          )}
 
           <Form.Item
             name="capacity"
@@ -431,26 +487,6 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
             <Input type="number" placeholder={t("tenantResources.invitation.capacity")} min={1} />
           </Form.Item>
 
-          <Form.Item
-            name="invitation_code"
-            label={t("tenantResources.invitation.invitationCode")}
-            rules={[
-              {
-                pattern: /^[A-Z0-9]*$/,
-                message: t("tenantResources.invitation.invitationCodeInvalid")
-              }
-            ]}
-          >
-            <Input
-              placeholder={t("tenantResources.invitation.invitationCode")}
-              onChange={(e) => {
-                // Convert to uppercase and filter invalid characters
-                const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-                form.setFieldsValue({ invitation_code: value });
-              }}
-            />
-          </Form.Item>
-
           <Form.Item name="group_ids" label={t("tenantResources.invitation.groupNames")}>
             <Select
               mode="multiple"
@@ -467,11 +503,6 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               format="YYYY-MM-DD"
               placeholder={t("tenantResources.invitation.expiryDate")}
               style={{ width: "100%" }}
-              onChange={(date) => {
-                form.setFieldsValue({
-                  expiry_date: date ? (date as { format: (fmt: string) => string }).format("YYYY-MM-DD") : undefined,
-                });
-              }}
             />
           </Form.Item>
         </Form>
