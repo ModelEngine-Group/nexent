@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import dayjs from "dayjs";
 import {
   Table,
   Button,
@@ -95,7 +96,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
       capacity: invitation.capacity,
       invitation_code: invitation.invitation_code,
       group_ids: invitation.group_ids || [],
-      expiry_date: invitation.expiry_date || undefined,
+      expiry_date: invitation.expiry_date ? dayjs(invitation.expiry_date) : undefined,
     });
     setModalVisible(true);
   };
@@ -128,9 +129,10 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
       }
 
       // Format expiry_date from dayjs to string
-      const formattedExpiryDate = values.expiry_date
-        ? values.expiry_date.format("YYYY-MM-DD")
-        : undefined;
+      const formattedExpiryDate =
+        values.expiry_date && dayjs(values.expiry_date).isValid()
+          ? dayjs(values.expiry_date).format("YYYY-MM-DD")
+          : undefined;
 
       if (editingInvitation) {
         // Update invitation
