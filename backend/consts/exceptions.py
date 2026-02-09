@@ -27,7 +27,7 @@ class MemoryPreparationException(Exception):
     """Raised when memory preprocessing or retrieval fails prior to agent run."""
     pass
 
-  
+
 class MCPConnectionError(Exception):
     """Raised when MCP connection fails."""
     pass
@@ -101,6 +101,11 @@ class ToolExecutionException(Exception):
 
 class MCPContainerError(Exception):
     """Raised when MCP container operation fails."""
+    pass
+
+
+class DuplicateError(Exception):
+    """Raised when a duplicate resource already exists."""
     pass
 
 

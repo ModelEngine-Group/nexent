@@ -143,6 +143,55 @@ export const fetchAgentList = async () => {
 };
 
 /**
+ * Fetch published agent list - gets agents with their current published version info
+ * First queries all agents with version_no=0, then retrieves the published version snapshot
+ * for each agent that has current_version_no > 0
+ * @returns list of published agents with version information
+ */
+export const fetchPublishedAgentList = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.publishedList, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+
+    // Convert backend data to frontend format
+    const formattedAgents = data.map((agent: any) => ({
+      id: String(agent.agent_id),
+      name: agent.name,
+      display_name: agent.display_name || agent.name,
+      description: agent.description,
+      author: agent.author,
+      model_id: agent.model_id,
+      model_name: agent.model_name,
+      model_display_name: agent.model_display_name,
+      is_available: agent.is_available,
+      unavailable_reasons: agent.unavailable_reasons || [],
+      group_ids: agent.group_ids || [],
+      is_new: agent.is_new || false,
+      permission: agent.permission,
+      published_version_no: agent.published_version_no,
+    }));
+
+    return {
+      success: true,
+      data: formattedAgents,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to fetch published agent list:", error);
+    return {
+      success: false,
+      data: [],
+      message: "agentConfig.agents.publishedListFetchFailed",
+    };
+  }
+};
+
+/**
  * get creating sub agent id
  * @param mainAgentId current main agent id
  * @returns new sub agent id
@@ -648,6 +697,7 @@ export const searchAgentInfo = async (agentId: number) => {
             };
           })
         : [],
+      current_version_no: data.current_version_no
     };
 
     return {

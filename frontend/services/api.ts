@@ -34,6 +34,7 @@ export const API_ENDPOINTS = {
     run: `${API_BASE_URL}/agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
     stop: (conversationId: number) =>
@@ -44,8 +45,17 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
-    clearNew: (agentId: string | number) =>
-      `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
+    versions: {
+      version: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      detail: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/detail`,
+      list: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions`,
+      current: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/current_version`,
+      rollback: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
+      compare: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions/compare`,
+      delete: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+    },
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -271,6 +281,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/invitations/${invitationCode}`,
     delete: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}`,
+    check: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
 };
 

@@ -20,6 +20,7 @@ import {
   CircleOff,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
@@ -122,11 +123,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   // Get permission tooltip key
   const getPermissionTooltipKey = (permission: string) => {
     return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
-  };
-
-  // Check if knowledge base allows edit/delete actions based on permission
-  const canEditOrDelete = (permission: string) => {
-    return permission === "EDIT" || permission === "CREATOR";
   };
 
   // Search and filter states
@@ -481,35 +477,38 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             </div>
                           </Tooltip>
                         </div>
-                        {canEditOrDelete(kb.permission) && (
                           <div className="flex items-center ml-2">
-                            {/* Edit button */}
-                            <Tooltip title={t("common.edit")}>
-                              <Button
-                                type="text"
-                                icon={<SquarePen className="h-4 w-4" />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditModal(kb);
-                                }}
-                                size="small"
-                              />
-                            </Tooltip>
-                            {/* Delete button */}
-                            <Tooltip title={t("common.delete")}>
-                              <Button
-                                type="text"
-                                danger
-                                icon={<Trash2 className="h-4 w-4" />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDelete(kb.id);
-                                }}
-                                size="small"
-                              />
-                            </Tooltip>
+                            <Can permission="kb.edit">
+                              {/* Edit button */}
+                              <Tooltip title={t("common.edit")}>
+                                <Button
+                                  type="text"
+                                  icon={<SquarePen className="h-4 w-4" />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditModal(kb);
+                                  }}
+                                  size="small"
+                                />
+                              </Tooltip>
+                            </Can>
+                            <Can permission="kb.delete">
+                              {/* Delete button */}
+                              <Tooltip title={t("common.delete")}>
+                                <Button
+                                  type="text"
+                                  danger
+                                  icon={<Trash2 className="h-4 w-4" />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(kb.id);
+                                  }}
+                                  size="small"
+                                />
+                              </Tooltip>
+                            </Can>
                           </div>
-                        )}
+                        
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}

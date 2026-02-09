@@ -279,6 +279,7 @@ class AgentInfoRequest(BaseModel):
     enabled_tool_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
+    version_no: int = 0
 
 
 class AgentIDRequest(BaseModel):
@@ -290,6 +291,7 @@ class ToolInstanceInfoRequest(BaseModel):
     agent_id: int
     params: Dict[str, Any]
     enabled: bool
+    version_no: int = 0
 
 
 class ToolInstanceSearchRequest(BaseModel):
@@ -674,3 +676,74 @@ class AdminTenantModelResponse(BaseModel):
     page: int = Field(1, description="Current page number")
     page_size: int = Field(20, description="Items per page")
     total_pages: int = Field(0, description="Total number of pages")
+
+# Agent Version Management Data Models
+# ---------------------------------------------------------------------------
+class VersionPublishRequest(BaseModel):
+    """Request model for publishing a new version"""
+    version_name: Optional[str] = Field(None, description="User-defined version name for display")
+    release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
+
+
+class VersionListItemResponse(BaseModel):
+    """Response model for version list item"""
+    id: int = Field(..., description="Version record ID")
+    version_no: int = Field(..., description="Version number")
+    version_name: Optional[str] = Field(None, description="User-defined version name")
+    release_note: Optional[str] = Field(None, description="Release notes")
+    source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
+    source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
+    status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
+    created_by: str = Field(..., description="User who published this version")
+    create_time: Optional[str] = Field(None, description="Publish timestamp")
+
+
+class VersionListResponse(BaseModel):
+    """Response model for version list"""
+    items: List[VersionListItemResponse] = Field(..., description="Version list items")
+    total: int = Field(..., description="Total count")
+
+
+class VersionDetailResponse(BaseModel):
+    """Response model for version detail including snapshot data"""
+    id: int = Field(..., description="Version record ID")
+    version_no: int = Field(..., description="Version number")
+    version_name: Optional[str] = Field(None, description="User-defined version name")
+    release_note: Optional[str] = Field(None, description="Release notes")
+    source_version_no: Optional[int] = Field(None, description="Source version number")
+    source_type: Optional[str] = Field(None, description="Source type")
+    status: str = Field(..., description="Version status")
+    created_by: str = Field(..., description="User who published this version")
+    create_time: Optional[str] = Field(None, description="Publish timestamp")
+    agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
+    tool_instances: List[dict] = Field(default_factory=list, description="Tool instance snapshots")
+    relations: List[dict] = Field(default_factory=list, description="Relation snapshots")
+
+
+class VersionRollbackRequest(BaseModel):
+    """Request model for rollback to a specific version"""
+    version_name: Optional[str] = Field(None, description="New version name for the rollback version")
+    release_note: Optional[str] = Field(None, description="Release notes for the rollback version")
+
+
+class VersionStatusRequest(BaseModel):
+    """Request model for updating version status"""
+    status: str = Field(..., description="New status: DISABLED / ARCHIVED")
+
+
+class VersionCompareRequest(BaseModel):
+    """Request model for comparing two versions"""
+    version_no_a: int = Field(..., description="First version number for comparison")
+    version_no_b: int = Field(..., description="Second version number for comparison")
+
+
+class CurrentVersionResponse(BaseModel):
+    """Response model for current published version"""
+    version_no: int = Field(..., description="Current published version number")
+    version_name: Optional[str] = Field(None, description="Version name")
+    status: str = Field(..., description="Version status")
+    source_type: Optional[str] = Field(None, description="Source type")
+    source_version_no: Optional[int] = Field(None, description="Source version number")
+    release_note: Optional[str] = Field(None, description="Release notes")
+    created_by: str = Field(..., description="User who published this version")
+    create_time: Optional[str] = Field(None, description="Publish timestamp")
