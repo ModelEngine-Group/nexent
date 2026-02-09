@@ -1143,7 +1143,7 @@ class TestPreviewFileImpl:
                    return_value={'success': True}), \
              patch('backend.services.file_management_service._validate_uploaded_pdf', 
                    return_value=True), \
-             patch('backend.services.file_management_service.copy_object', 
+             patch('backend.services.file_management_service.copy_file',
                    return_value={'success': True}), \
              patch('backend.services.file_management_service.delete_file', 
                    return_value={'success': True}):
@@ -1261,6 +1261,7 @@ class TestValidateUploadedPdf:
         mock_stream = BytesIO(mock_pdf_content)
         
         with patch('backend.services.file_management_service.get_file_stream', return_value=mock_stream), \
+               patch('backend.services.file_management_service.get_file_size', return_value=len(mock_pdf_content)), \
              patch('os.path.getsize', return_value=len(mock_pdf_content)):
             
             result = _validate_uploaded_pdf('temp/file.pdf', '/local/path/file.pdf')
@@ -1275,6 +1276,7 @@ class TestValidateUploadedPdf:
         mock_stream = BytesIO(mock_pdf_content)
         
         with patch('backend.services.file_management_service.get_file_stream', return_value=mock_stream), \
+               patch('backend.services.file_management_service.get_file_size', return_value=len(mock_pdf_content)), \
              patch('os.path.getsize', return_value=999):  # Different size
             
             result = _validate_uploaded_pdf('temp/file.pdf', '/local/path/file.pdf')
@@ -1289,6 +1291,7 @@ class TestValidateUploadedPdf:
         mock_stream = BytesIO(mock_content)
         
         with patch('backend.services.file_management_service.get_file_stream', return_value=mock_stream), \
+               patch('backend.services.file_management_service.get_file_size', return_value=len(mock_content)), \
              patch('os.path.getsize', return_value=len(mock_content)):
             
             result = _validate_uploaded_pdf('temp/file.pdf', '/local/path/file.pdf')
@@ -1303,6 +1306,7 @@ class TestValidateUploadedPdf:
         mock_stream = BytesIO(mock_content)
         
         with patch('backend.services.file_management_service.get_file_stream', return_value=mock_stream), \
+               patch('backend.services.file_management_service.get_file_size', return_value=len(mock_content)), \
              patch('os.path.getsize', return_value=len(mock_content)):
             
             result = _validate_uploaded_pdf('temp/file.pdf', '/local/path/file.pdf')
@@ -1314,6 +1318,7 @@ class TestValidateUploadedPdf:
         from backend.services.file_management_service import _validate_uploaded_pdf
         
         with patch('backend.services.file_management_service.get_file_stream', return_value=None), \
+             patch('backend.services.file_management_service.get_file_size', return_value=100), \
              patch('os.path.getsize', return_value=100):
             
             result = _validate_uploaded_pdf('temp/file.pdf', '/local/path/file.pdf')
@@ -1324,7 +1329,9 @@ class TestValidateUploadedPdf:
         """Test PDF validation handles exceptions gracefully"""
         from backend.services.file_management_service import _validate_uploaded_pdf
         
-        with patch('backend.services.file_management_service.get_file_stream', side_effect=Exception('Network error')):
+        with patch('backend.services.file_management_service.get_file_stream', side_effect=Exception('Network error')), \
+             patch('backend.services.file_management_service.get_file_size', return_value=100), \
+             patch('os.path.getsize', return_value=100):
             
             result = _validate_uploaded_pdf('temp/file.pdf', '/local/path/file.pdf')
             

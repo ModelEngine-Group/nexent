@@ -371,7 +371,40 @@ class MinIOStorageClient(StorageClient):
             logger.error(f"Failed to delete file {object_name}: {e}")
             return False, str(e)
 
-    def exists(
+    def copy_file(
+        self,
+        source_object: str,
+        dest_object: str,
+        bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Copy a file within the same bucket.
+
+        Args:
+            source_object: Source object name
+            dest_object: Destination object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Destination object name or error message)
+        """
+        bucket = bucket or self.default_bucket
+        if bucket is None:
+            return False, "Bucket name is required"
+
+        try:
+            copy_source = {"Bucket": bucket, "Key": source_object}
+            self.client.copy_object(
+                Bucket=bucket,
+                Key=dest_object,
+                CopySource=copy_source
+            )
+            return True, dest_object
+        except Exception as e:
+            logger.error(f"Failed to copy object {source_object} to {dest_object}: {e}")
+            return False, str(e)
+
+    def file_exists(
         self,
         object_name: str,
         bucket: Optional[str] = None

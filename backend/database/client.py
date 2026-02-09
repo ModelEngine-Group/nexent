@@ -213,9 +213,22 @@ class MinioClient:
         """
         return self._storage_client.get_file_stream(object_name, bucket)
 
-    def copy_object(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+    def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
         """
-        Copy an object within the same bucket (atomic operation)
+        Check if file exists in MinIO
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            bool: True if file exists, False otherwise
+        """
+        return self._storage_client.file_exists(object_name, bucket)
+
+    def copy_file(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Copy a file within the same bucket (atomic operation)
 
         Args:
             source_object: Source object name
@@ -225,17 +238,7 @@ class MinioClient:
         Returns:
             Tuple[bool, str]: (Success status, Destination object name or error message)
         """
-        try:
-            bucket = bucket or self.storage_config.default_bucket
-            copy_source = {'Bucket': bucket, 'Key': source_object}
-            self._storage_client.client.copy_object(
-                Bucket=bucket,
-                Key=dest_object,
-                CopySource=copy_source
-            )
-            return (True, dest_object)
-        except Exception as e:
-            return (False, str(e))
+        return self._storage_client.copy_file(source_object, dest_object, bucket)
 
 
 # Create global database and MinIO client instances

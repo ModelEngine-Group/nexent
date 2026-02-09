@@ -118,7 +118,7 @@ def setup_mocks_for_ray_config(mocker, initialized=False):
         sys.modules["database"] = db_pkg
     if "database.attachment_db" not in sys.modules:
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
-            get_file_size_from_minio=lambda object_name, bucket=None: 0,
+            get_file_size=lambda object_name, bucket=None: 0,
         )
         setattr(sys.modules["database"], "attachment_db", sys.modules["database.attachment_db"])
     if "database.model_management_db" not in sys.modules:

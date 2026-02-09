@@ -27,7 +27,7 @@ def stub_project_modules(monkeypatch):
 
     # database.attachment_db
     attach_mod = types.ModuleType("database.attachment_db")
-    setattr(attach_mod, "get_file_size_from_minio", lambda object_name, bucket=None: 777)
+    setattr(attach_mod, "get_file_size", lambda object_name, bucket=None: 777)
     sys.modules["database.attachment_db"] = attach_mod
 
     # Ensure parent package exists
@@ -471,7 +471,7 @@ def test_get_file_size_minio_ok_and_request_error(fmu, monkeypatch):
     def raise_req(*a, **k):
         raise _ReqExc("x")
 
-    monkeypatch.setattr(fmu, "get_file_size_from_minio", raise_req)
+    monkeypatch.setattr(fmu, "get_file_size", raise_req)
     assert fmu.get_file_size("minio", "obj") == 0
 
 

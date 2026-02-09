@@ -200,7 +200,27 @@ class StorageClient(ABC):
         pass
 
     @abstractmethod
-    def exists(
+    def copy_file(
+        self,
+        source_object: str,
+        dest_object: str,
+        bucket: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Copy a file within the same bucket.
+
+        Args:
+            source_object: Source object name
+            dest_object: Destination object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Destination object name or error message)
+        """
+        pass
+
+    @abstractmethod
+    def file_exists(
         self,
         object_name: str,
         bucket: Optional[str] = None

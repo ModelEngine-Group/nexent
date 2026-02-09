@@ -132,7 +132,7 @@ def import_tasks_with_fake_ray(monkeypatch, initialized=False):
     if "database.attachment_db" not in sys.modules:
         sys.modules["database.attachment_db"] = types.SimpleNamespace(
             get_file_stream=lambda source: io.BytesIO(b"stub-bytes"),
-            get_file_size_from_minio=lambda object_name, bucket=None: 0,
+            get_file_size=lambda object_name, bucket=None: 0,
         )
     # Stub model_management_db module required by ray_actors
     if "database.model_management_db" not in sys.modules:

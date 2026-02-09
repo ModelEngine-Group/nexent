@@ -13,7 +13,7 @@ from fastapi import UploadFile
 
 from consts.const import DATA_PROCESS_SERVICE
 from consts.model import ProcessParams
-from database.attachment_db import get_file_size_from_minio
+from database.attachment_db import get_file_size
 from utils.auth_utils import get_current_user_id
 from utils.config_utils import tenant_config_manager
 
@@ -320,7 +320,7 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
     """Query the actual size(bytes) of the file."""
     try:
         if source_type == "minio":
-            return get_file_size_from_minio(path_or_url)
+            return get_file_size(path_or_url)
 
         elif source_type == "local":
             # For local files, use os.path.getsize to get file size

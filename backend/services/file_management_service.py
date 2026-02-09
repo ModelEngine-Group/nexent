@@ -17,10 +17,11 @@ from database.attachment_db import (
     get_file_url,
     get_content_type,
     get_file_stream,
+    get_file_size,
     delete_file,
     list_files,
     file_exists,
-    copy_object
+    copy_file
 )
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -41,48 +42,6 @@ _conversion_locks: dict[str, asyncio.Lock] = {}
 _conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
-
-
-def _validate_uploaded_pdf(temp_object_name: str, local_pdf_path: str) -> bool:
-    """
-    Validate uploaded PDF integrity by comparing size and verifying PDF header.
-    
-    Args:
-        temp_object_name: Temporary object name in MinIO
-        local_pdf_path: Local PDF file path for size comparison
-        
-    Returns:
-        bool: True if validation passes, False otherwise
-    """
-    try:
-        # 1. Check file size matches
-        local_size = os.path.getsize(local_pdf_path)
-        remote_stream = get_file_stream(temp_object_name)
-        if remote_stream is None:
-            logger.warning(f"PDF validation failed: cannot read remote file {temp_object_name}")
-            return False
-        
-        remote_data = remote_stream.getvalue()
-        remote_size = len(remote_data)
-        if local_size != remote_size:
-            logger.warning(f"PDF validation failed: size mismatch (local={local_size}, remote={remote_size})")
-            return False
-        
-        # 2. Verify PDF header (magic number)
-        if not remote_data.startswith(b'%PDF-'):
-            logger.warning(f"PDF validation failed: invalid PDF header")
-            return False
-        
-        # 3. Check minimum size (valid PDF should be >100 bytes)
-        if remote_size < 100:
-            logger.warning(f"PDF validation failed: file too small ({remote_size} bytes)")
-            return False
-        
-        return True
-    except Exception as e:
-        logger.error(f"PDF validation error: {str(e)}")
-        return False
-
 
 
 async def upload_files_impl(destination: str, file: List[UploadFile], folder: str = None, index_name: Optional[str] = None) -> tuple:
@@ -342,7 +301,7 @@ async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
                         raise Exception("Uploaded PDF validation failed - file may be corrupted")
                     
                     # Phase 4: Atomic move from temp to final location
-                    copy_result = copy_object(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
+                    copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
                     if not copy_result.get('success'):
                         delete_file(temp_pdf_object_name)
                         raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
@@ -378,3 +337,52 @@ async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
     # Unsupported file type
     else:
         raise Exception(f"Unsupported file type for preview: {content_type}")
+
+def _validate_uploaded_pdf(temp_object_name: str, local_pdf_path: str) -> bool:
+    """
+    Validate uploaded PDF integrity by comparing size and verifying PDF header.
+    
+    Args:
+        temp_object_name: Temporary object name in MinIO
+        local_pdf_path: Local PDF file path for size comparison
+        
+    Returns:
+        bool: True if validation passes, False otherwise
+    """
+    try:
+        # 1. Check file size matches using metadata (avoid full buffering)
+        local_size = os.path.getsize(local_pdf_path)
+        remote_size = get_file_size(temp_object_name)
+        if remote_size <= 0:
+            logger.warning(f"PDF validation failed: cannot read remote size for {temp_object_name}")
+            return False
+        if local_size != remote_size:
+            logger.warning(f"PDF validation failed: size mismatch (local={local_size}, remote={remote_size})")
+            return False
+
+        # 2. Verify PDF header (magic number) by reading only first few bytes
+        remote_stream = get_file_stream(temp_object_name)
+        if remote_stream is None:
+            logger.warning(f"PDF validation failed: cannot read remote file {temp_object_name}")
+            return False
+        try:
+            header = remote_stream.read(5)
+        finally:
+            try:
+                remote_stream.close()
+            except Exception:
+                pass
+        if not header.startswith(b'%PDF-'):
+            logger.warning("PDF validation failed: invalid PDF header")
+            return False
+
+        # 3. Check minimum size (valid PDF should be >100 bytes)
+        if remote_size < 100:
+            logger.warning(f"PDF validation failed: file too small ({remote_size} bytes)")
+            return False
+
+        return True
+    except Exception as e:
+        logger.error(f"PDF validation error: {str(e)}")
+        return False
+

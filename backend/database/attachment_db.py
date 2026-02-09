@@ -161,7 +161,7 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
     return response
 
 
-def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> int:
+def get_file_size(object_name: str, bucket: Optional[str] = None) -> int:
     """
     Get file size by object name
     """
@@ -181,16 +181,14 @@ def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
         bool: True if file exists, False otherwise
     """
     try:
-        bucket = bucket or minio_client.storage_config.default_bucket
-        minio_client.client.stat_object(bucket, object_name)
-        return True
+        return minio_client.file_exists(object_name, bucket)
     except Exception:
         return False
 
 
-def copy_object(source_object: str, dest_object: str, bucket: Optional[str] = None) -> Dict[str, Any]:
+def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None) -> Dict[str, Any]:
     """
-    Copy an object within the same bucket (atomic operation in MinIO).
+    Copy a file within the same bucket (atomic operation in MinIO).
     
     Args:
         source_object: Source object name
@@ -200,7 +198,7 @@ def copy_object(source_object: str, dest_object: str, bucket: Optional[str] = No
     Returns:
         Dict[str, Any]: Result containing success flag and error message (if any)
     """
-    success, result = minio_client.copy_object(source_object, dest_object, bucket)
+    success, result = minio_client.copy_file(source_object, dest_object, bucket)
     if success:
         return {"success": True, "object_name": result}
     else:
