@@ -9,7 +9,8 @@ from http import HTTPStatus
 
 from services.datamate_service import (
     sync_datamate_knowledge_bases_and_create_records,
-    fetch_datamate_knowledge_base_file_list
+    fetch_datamate_knowledge_base_file_list,
+    test_datamate_connection
 )
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import DataMateConnectionError
@@ -51,7 +52,7 @@ async def get_datamate_knowledge_base_files_endpoint(
                                   description="ID of the DataMate knowledge base"),
     authorization: Optional[str] = Header(None)
 ):
-    """Get all files from a DataMate knowledge base."""
+    """Get all files from a specific DataMate knowledge base."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         result = await fetch_datamate_knowledge_base_file_list(knowledge_base_id, tenant_id)
@@ -59,3 +60,40 @@ async def get_datamate_knowledge_base_files_endpoint(
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error fetching DataMate knowledge base files: {str(e)}")
+
+
+@router.post("/test_connection")
+async def test_datamate_connection_endpoint(
+    authorization: Optional[str] = Header(None),
+    request: SyncDatamateRequest = Body(None)
+):
+    """
+    Test connection to DataMate server.
+
+    Returns:
+        JSON with success status and message
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        datamate_url = request.datamate_url if request else None
+
+        # Test the connection
+        is_connected, error_message = await test_datamate_connection(tenant_id, datamate_url)
+
+        if is_connected:
+            return JSONResponse(
+                status_code=HTTPStatus.OK,
+                content={"success": True, "message": "Connection successful"}
+            )
+        else:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Cannot connect to DataMate server: {error_message}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error testing DataMate connection: {str(e)}"
+        )

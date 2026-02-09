@@ -13,7 +13,6 @@ from utils.config_utils import tenant_config_manager
 from database.knowledge_db import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
 from nexent.vector_database.datamate_core import DataMateCore
 from consts.const import MODEL_ENGINE_ENABLED
-from consts.exceptions import DataMateConnectionError
 
 
 logger = logging.getLogger("datamate_service")
@@ -146,9 +145,6 @@ async def sync_datamate_knowledge_bases_and_create_records(
 
     Returns:
         Dictionary containing knowledge bases list and created records.
-
-    Raises:
-        RuntimeError: If DataMate URL is not configured or API request fails
     """
     # Check if ModelEngine is enabled
     if str(MODEL_ENGINE_ENABLED).lower() != "true":
@@ -168,97 +164,109 @@ async def sync_datamate_knowledge_bases_and_create_records(
     if not effective_datamate_url:
         logger.warning(
             f"DataMate URL not configured for tenant {tenant_id}, skipping sync")
-        raise DataMateConnectionError(
-            f"Unable to connect to DataMate: server URL not configured. Please check your DataMate server URL settings.")
+        return {
+            "indices": [],
+            "count": 0,
+            "indices_info": [],
+            "created_records": []
+        }
 
     logger.info(
         f"Starting DataMate sync for tenant {tenant_id} using URL: {effective_datamate_url}")
 
-    core = _get_datamate_core(tenant_id, effective_datamate_url)
+    try:
+        core = _get_datamate_core(tenant_id, effective_datamate_url)
 
-    # Run synchronous SDK calls in executor to avoid blocking event loop
-    loop = asyncio.get_event_loop()
+        # Run synchronous SDK calls in executor to avoid blocking event loop
+        loop = asyncio.get_event_loop()
 
-    # Step 1: Get knowledge base ids
-    knowledge_base_ids = await loop.run_in_executor(
-        None,
-        core.get_user_indices
-    )
+        # Step 1: Get knowledge base ids
+        knowledge_base_ids = await loop.run_in_executor(
+            None,
+            core.get_user_indices
+        )
 
-    if not knowledge_base_ids:
+        if not knowledge_base_ids:
+            return {
+                "indices": [],
+                "count": 0,
+            }
+
+        # Step 2: Get detailed information for all knowledge bases
+        details, knowledge_base_names = await loop.run_in_executor(
+            None,
+            lambda: core.get_indices_detail(knowledge_base_ids)
+        )
+
+        response = {
+            "indices": knowledge_base_names,
+            "count": len(knowledge_base_names),
+        }
+
+        embedding_model_names = [
+            detail['base_info']['embedding_model'] for detail in details.values()]
+
+        # Add indices_info for consistency with list_indices method
+        indices_info = []
+        for i, kb_id in enumerate(knowledge_base_ids):
+            if kb_id in details:
+                kb_detail = details[kb_id]
+                knowledge_base_name = knowledge_base_names[i] if i < len(
+                    knowledge_base_names) else kb_id
+                indices_info.append({
+                    "name": kb_id,  # Internal index name (used as ID)
+                    "display_name": knowledge_base_name,  # User-facing knowledge base name
+                    "stats": kb_detail,
+                })
+        response["indices_info"] = indices_info
+
+        # Create knowledge records in local database
+        await _create_datamate_knowledge_records(
+            knowledge_base_ids, knowledge_base_names, embedding_model_names, tenant_id, user_id
+        )
+
+        # Step 3: Handle deleted knowledge bases (soft delete)
+        # Get all existing DataMate records for this tenant
+        loop = asyncio.get_event_loop()
+        existing_records = await loop.run_in_executor(
+            None,
+            get_knowledge_info_by_tenant_and_source,
+            tenant_id,
+            "datamate"
+        )
+
+        # Find records that exist in DB but not in API response
+        existing_index_names = {record['index_name']
+                                for record in existing_records}
+        api_index_names = set(knowledge_base_ids)
+
+        # Records to delete (exist in DB but not in API)
+        records_to_delete = existing_index_names - api_index_names
+
+        # Soft delete records that are no longer in DataMate
+        for index_name in records_to_delete:
+            try:
+                delete_result = await loop.run_in_executor(
+                    None,
+                    delete_knowledge_record,
+                    {"index_name": index_name, "user_id": user_id}
+                )
+                if delete_result:
+                    logger.info(
+                        f"Soft deleted DataMate knowledge base record: {index_name}")
+                else:
+                    logger.warning(
+                        f"Failed to soft delete DataMate knowledge base record: {index_name}")
+            except Exception as e:
+                logger.error(
+                    f"Error soft deleting DataMate knowledge base record {index_name}: {str(e)}")
+                # Continue with other records even if one fails
+
+        return response
+    except Exception as e:
+        logger.error(
+            f"Error syncing DataMate knowledge bases and creating records: {str(e)}")
         return {
             "indices": [],
             "count": 0,
         }
-
-    # Step 2: Get detailed information for all knowledge bases
-    details, knowledge_base_names = await loop.run_in_executor(
-        None,
-        lambda: core.get_indices_detail(knowledge_base_ids)
-    )
-
-    response = {
-        "indices": knowledge_base_names,
-        "count": len(knowledge_base_names),
-    }
-
-    embedding_model_names = [
-        detail['base_info']['embedding_model'] for detail in details.values()]
-
-    # Add indices_info for consistency with list_indices method
-    indices_info = []
-    for i, kb_id in enumerate(knowledge_base_ids):
-        if kb_id in details:
-            kb_detail = details[kb_id]
-            knowledge_base_name = knowledge_base_names[i] if i < len(
-                knowledge_base_names) else kb_id
-            indices_info.append({
-                "name": kb_id,  # Internal index name (used as ID)
-                "display_name": knowledge_base_name,  # User-facing knowledge base name
-                "stats": kb_detail,
-            })
-    response["indices_info"] = indices_info
-
-    # Create knowledge records in local database
-    await _create_datamate_knowledge_records(
-        knowledge_base_ids, knowledge_base_names, embedding_model_names, tenant_id, user_id
-    )
-
-    # Step 3: Handle deleted knowledge bases (soft delete)
-    # Get all existing DataMate records for this tenant
-    loop = asyncio.get_event_loop()
-    existing_records = await loop.run_in_executor(
-        None,
-        get_knowledge_info_by_tenant_and_source,
-        tenant_id,
-        "datamate"
-    )
-
-    # Find records that exist in DB but not in API response
-    existing_index_names = {record['index_name']
-                            for record in existing_records}
-    api_index_names = set(knowledge_base_ids)
-
-    # Records to delete (exist in DB but not in API)
-    records_to_delete = existing_index_names - api_index_names
-
-    # Soft delete records that are no longer in DataMate
-    for index_name in records_to_delete:
-        try:
-            delete_result = await loop.run_in_executor(
-                None,
-                delete_knowledge_record,
-                {"index_name": index_name, "user_id": user_id}
-            )
-            if delete_result:
-                logger.info(
-                    f"Soft deleted DataMate knowledge base record: {index_name}")
-            else:
-                logger.warning(
-                    f"Failed to soft delete DataMate knowledge base record: {index_name}")
-        except Exception as e:
-            logger.error(
-                f"Error soft deleting DataMate knowledge base record {index_name}: {str(e)}")
-            # Continue with other records even if one fails
-
-    return response
