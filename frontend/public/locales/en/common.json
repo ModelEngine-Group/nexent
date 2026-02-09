@@ -289,7 +289,7 @@
   "agent.displayName": "Agent Name",
   "agent.displayNamePlaceholder": "Please enter agent name",
   "agent.author": "Author",
-  "agent.authorPlaceholder": "Please enter author name (optional)",
+  "agent.authorPlaceholder": "Please enter author name",
   "agent.author.hint": "Default: {{email}}",
   "agent.description": "Agent Description",
   "agent.descriptionPlaceholder": "Please enter agent description",
