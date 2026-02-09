@@ -44,6 +44,7 @@ import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agentVersionService";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { message } from "antd";
 
@@ -106,6 +107,9 @@ export function VersionCardItem({
   // Local expanded state for this version card
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Get user context for tenantId
+  const { user } = useAuthorizationContext();
+
   // Get invalidate functions for refreshing data
   const { invalidate: invalidateAgentVersionList } = useAgentVersionList(agentId);
   const { invalidate: invalidateAgentInfo } = useAgentInfo(agentId);
@@ -117,7 +121,7 @@ export function VersionCardItem({
   );
 
   const { tools: toolList } = useToolList();
-  const { agents: agentList } = useAgentList();
+  const { agents: agentList } = useAgentList(user?.tenantId ?? null);
 
   // Modal state
   const [compareModalOpen, setCompareModalOpen] = useState(false);
