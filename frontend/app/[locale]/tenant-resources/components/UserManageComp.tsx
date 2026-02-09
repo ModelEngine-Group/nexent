@@ -103,8 +103,20 @@ function TenantList({
         message.success(t("tenantResources.tenants.created"));
       }
       setModalVisible(false);
-    } catch (err) {
-      message.error(t("tenantResources.tenantOperationFailed"));
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Tenant with name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        // Extract the duplicate name and show translated error
+        message.error(t("tenantResources.tenants.nameExists", { name: nameConflictMatch[1] }));
+      } else if (errorMessage.includes("Tenant name cannot be empty")) {
+        // Handle empty name error
+        message.error(t("tenantResources.tenants.nameRequired"));
+      } else {
+        // Show generic error for other cases
+        message.error(t("tenantResources.tenantOperationFailed"));
+      }
     }
   };
 
@@ -233,13 +245,13 @@ export default function UserManageComp() {
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
-  // For non-super admins, automatically select their first tenant when data loads
+  // For non-super admins, automatically select their own tenant based on user.tenantId
   const [tenantId, setTenantId] = useState<string | null>(null);
   useEffect(() => {
-    if (!isSuperAdmin && tenants.length > 0 && !tenantId) {
-      setTenantId(tenants[0].tenant_id);
+    if (!isSuperAdmin && user?.tenantId && !tenantId) {
+      setTenantId(user.tenantId);
     }
-  }, [isSuperAdmin, tenants, tenantId]);
+  }, [isSuperAdmin, tenantId, user?.tenantId]);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
@@ -272,9 +284,9 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-      <Row className="h-full">
+      <Row className="flex-1 min-h-0 h-full" align="stretch">
         <Can permission="tenant.list:read">
-          <Col className="h-full" style={{ width: 300 }}>
+          <Col className="flex flex-col h-full" style={{ width: 300 }}>
             <div className="h-full pr-6">
               <div className="sticky top-6">
                 <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
@@ -292,10 +304,10 @@ export default function UserManageComp() {
             </div>
           </Col>
         </Can>
-        <Col className="flex-1 p-6">
-          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+        <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
             {/* Tenant name header */}
-            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 {currentTenantName}
               </h2>
@@ -304,6 +316,7 @@ export default function UserManageComp() {
             {tenantId ? (
               <Tabs
                 defaultActiveKey="users"
+                className="h-full flex flex-col"
                 items={[
                   {
                     key: "users",

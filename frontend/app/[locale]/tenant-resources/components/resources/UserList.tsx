@@ -182,13 +182,15 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
   );
 
   return (
-    <div>
+    <div className="h-full flex flex-col overflow-hidden">
       <Table
         dataSource={users}
         columns={columns}
         rowKey={(r) => String(r.id)}
         loading={isLoading}
         pagination={{ pageSize: 10 }}
+        scroll={{ x: true }}
+        className="flex-1"
       />
 
       <Modal

@@ -1,10 +1,10 @@
 "use client";
 
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAuthentication } from "@/hooks/auth/useAuthentication";
 
 export function usePermission() {
-  const { hasPermission, hasAnyPermission, isAuthzReady, isLoading } = useAuthorization();
+  const { hasPermission, hasAnyPermission, isAuthzReady, isLoading } = useAuthorizationContext();
   const { isAuthenticated } = useAuthentication();
 
   return {

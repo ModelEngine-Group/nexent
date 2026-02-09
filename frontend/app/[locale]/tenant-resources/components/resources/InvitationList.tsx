@@ -347,8 +347,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
   }, [invitations, tenantId]);
 
   return (
-    <div>
-      <div className="mb-4 flex justify-between items-center">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="mb-4 flex justify-between items-center flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate} icon={<Plus className="h-4 w-4"/>}>
@@ -366,6 +366,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           rowKey="invitation_id"
           pagination={{ pageSize: 10 }}
           scroll={{ x: 1000 }}
+          className="flex-1"
         />
       ) : (
         // Multi-tenant view with collapse

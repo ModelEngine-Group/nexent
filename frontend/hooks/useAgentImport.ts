@@ -13,6 +13,8 @@ export interface ImportAgentData {
     mcp_server_name: string;
     mcp_url: string;
   }>;
+  business_logic_model_id?: number | null;
+  business_logic_model_name?: string | null;
 }
 
 export interface UseAgentImportOptions {

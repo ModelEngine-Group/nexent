@@ -87,8 +87,11 @@ export const PROVIDER_LINKS: Record<string, string> = {
 
 // User role constants
 export const USER_ROLES = {
-  USER: "user",
-  ADMIN: "admin",
+  SPEED: "SPEED",
+  SU: "SU",
+  ADMIN: "ADMIN",
+  DEV: "DEV",
+  USER: "USER",
 } as const;
 
 // Memory tab key constants

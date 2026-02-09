@@ -26,9 +26,7 @@ export default function SpacePage() {
 
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { pageVariants, pageTransition } = useSetupFlow({
-    requireAdmin: false,
-  });
+  const { pageVariants, pageTransition } = useSetupFlow();
   const [isImporting, setIsImporting] = useState(false);
   const { agents, isLoading, invalidate } = useAgentList();
 

@@ -520,16 +520,16 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="flex flex-col">
-      <div className="flex justify-between items-center mb-4">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex justify-between items-center mb-4 flex-shrink-0">
         <div />
         <Button type="primary" icon={<Plus size={16} />} onClick={() => setAddModalVisible(true)}>
           {t("tenantResources.mcp.addService")}
         </Button>
       </div>
 
-      <div className="space-y-6">
-        <div>
+      <div className="space-y-6 flex-1 overflow-auto">
+        <div className="min-w-0">
           <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.serverList.title")}</Title>
           <Table
             columns={serverColumns}
@@ -543,7 +543,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
           />
         </div>
 
-        <div>
+        <div className="min-w-0">
           <Title level={5} style={{ marginBottom: 12 }}>{t("mcpConfig.containerList.title")}</Title>
           <Table
             columns={containerColumns}

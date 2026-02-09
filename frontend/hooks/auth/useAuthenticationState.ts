@@ -29,26 +29,25 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const [authServiceUnavailable, setAuthServiceUnavailable] =
     useState<boolean>(false);
 
-  
-
-  // Initialize authentication state based on session
+  // Speed mode: skip authentication checks, consider user as authenticated
   useEffect(() => {
-    // Check session validity directly
-    if (checkSessionValid()) {
-      // Session is valid, restore it to state
-      const storedSession = getSessionFromStorage();
-      if (storedSession) {
-        setSession(storedSession);
-      }
+    if (isSpeedMode) {
+      // In speed mode, user is considered authenticated without session
       setIsAuthenticated(true);
     } else {
-      // No valid session
-      setSession(null);
-      setIsAuthenticated(false);
+      if (checkSessionValid()) {
+        const storedSession = getSessionFromStorage();
+        if (storedSession) {
+          setSession(storedSession);
+        }
+        setIsAuthenticated(true);
+      } else {
+        setSession(null);
+        setIsAuthenticated(false);
+      }
     }
     setIsAuthChecking(false);
-  }, []);
-
+  }, [isSpeedMode]);
 
   const clearLocalSession = useCallback(() => {
     removeSessionFromStorage();
@@ -139,7 +138,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
           setIsAuthenticated(true);
 
           setTimeout(() => {
-            message.success(t("auth.registrationSuccess"));
+            message.success(t("auth.registerSuccessAutoLogin"));
 
             // Emit register success event to close register modal
             authEventUtils.emitRegisterSuccess();

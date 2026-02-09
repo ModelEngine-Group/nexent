@@ -68,13 +68,13 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const handleDelete = async (modelId: string, provider?: string) => {
     try {
       await modelService.deleteCustomModel(modelId, provider);
-      message.success("Model deleted");
+      message.success(t("tenantResources.models.deleteSuccess"));
       refetch();
     } catch (error: any) {
       if (error.response?.data?.message) {
         message.error(error.response.data.message);
       } else {
-        message.error("Delete failed");
+        message.error(t("tenantResources.models.deleteFailed"));
       }
     }
   };
@@ -160,7 +160,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           </Tooltip>
           <Popconfirm
             title={t("tenantResources.models.confirmDelete")}
-            description="This action cannot be undone."
+            description={t("common.cannotBeUndone")}
             onConfirm={() => handleDelete(record.displayName, record.source)}
           >
             <Tooltip title={t("tenantResources.models.deleteModel")}>
@@ -178,8 +178,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate}>
@@ -193,20 +193,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         dataSource={models}
         loading={isLoading}
         rowKey="id"
-        pagination={false}
+        pagination={{ pageSize: 10 }}
+        scroll={{ x: true }}
+        className="flex-1"
       />
-
-      <div className="flex justify-end mt-4">
-        <Pagination
-          current={page}
-          pageSize={pageSize}
-          total={total}
-          onChange={handlePageChange}
-          showSizeChanger
-          showQuickJumper
-          showTotal={(total) => `Total ${total} items`}
-        />
-      </div>
 
       <ModelAddDialog
         isOpen={addDialogVisible}

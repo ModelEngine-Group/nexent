@@ -45,9 +45,7 @@ export default function MemoryContent() {
   const { confirm } = useConfirmModal();
 
   // Use custom hook for common setup flow logic
-  const { pageVariants, pageTransition } = useSetupFlow({
-    requireAdmin: false,
-  });
+  const { pageVariants, pageTransition } = useSetupFlow();
 
   // Mock user and tenant IDs (should come from context)
   const currentUserId = "user1";

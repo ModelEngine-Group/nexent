@@ -117,6 +117,28 @@ def query_all_enabled_tool_instances(agent_id: int, tenant_id: str):
         return [as_dict(tool) for tool in tools]
 
 
+def query_tool_instances_by_agent_id(agent_id: int, tenant_id: str, version_no: int = 0):
+    """
+    Query all ToolInstance for an agent (regardless of enabled status).
+    Default version_no=0 queries the draft version.
+
+    Args:
+        agent_id: Agent ID for filtering, mandatory
+        tenant_id: Tenant ID for filtering, mandatory
+        version_no: Version number to filter. Default 0 = draft/editing state
+
+    Returns:
+        List of ToolInstance objects
+    """
+    with get_db_session() as session:
+        query = session.query(ToolInstance).filter(
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.agent_id == agent_id,
+            ToolInstance.delete_flag != 'Y')
+        tools = query.all()
+        return [as_dict(tool) for tool in tools]
+
+
 def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools

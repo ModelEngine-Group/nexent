@@ -760,6 +760,7 @@ wait_for_elasticsearch_healthy() {
   fi
 }
 
+
 select_terminal_tool() {
     # Function to ask if user wants to create Terminal tool container
     echo "🔧 Terminal Tool Container Setup:"
@@ -880,33 +881,30 @@ generate_random_password() {
 }
 
 create_default_super_admin_user() {
-  local email="suadmin@nexent.com"
-  local password
-  password="$(generate_random_password)"
+  # Call the dedicated script for creating super admin user
+  local script_path="$SCRIPT_DIR/create-su.sh"
 
-  echo "🔧 Creating super admin user..."
-  RESPONSE=$(docker exec nexent-config bash -c "curl -s -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"${password}\",\"email_confirm\":true}'" 2>/dev/null)
-
-  if [ -z "$RESPONSE" ]; then
-    echo "   ❌ No response received from Supabase."
-    return 1
-  elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
-    echo "   ✅ Default super admin user has been successfully created."
-    echo ""
-    echo "      Please save the following credentials carefully, which would ONLY be shown once."
-    echo "   📧 Email:    ${email}"
-    echo "   🔏 Password: ${password}"
-  elif echo "$RESPONSE" | grep -q '"error_code":"user_already_exists"' || echo "$RESPONSE" | grep -q '"code":422'; then
-    echo "   🚧 Default super admin user already exists. Skipping creation."
-    echo "   📧 Email:    ${email}"
-  else
-    echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
+  if [ ! -f "$script_path" ]; then
+    echo "   ❌ ERROR create-su.sh not found at $script_path"
     return 1
   fi
 
-  echo ""
-  echo "--------------------------------"
-  echo ""
+  # Make sure the script is executable
+  chmod +x "$script_path"
+
+  # Export necessary environment variables for the script
+  export SUPABASE_KEY
+  export POSTGRES_USER
+  export POSTGRES_DB
+  export DEPLOYMENT_VERSION
+  export SUPABASE_POSTGRES_DB
+
+  # Execute the script with current environment variables
+  if bash "$script_path"; then
+    return 0
+  else
+    return 1
+  fi
 }
 
 choose_image_env() {

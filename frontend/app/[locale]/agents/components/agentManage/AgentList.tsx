@@ -97,12 +97,6 @@ export default function AgentList({
       return;
     }
 
-    // Check if can switch (has unsaved changes)
-    const canSwitch = await checkUnsavedChanges.saveWithModal();
-    if (!canSwitch) {
-      return;
-    }
-
     // Load agent detail and set as current
     try {
       const result = await searchAgentInfo(Number(agent.id));
@@ -120,6 +114,12 @@ export default function AgentList({
     } catch (error) {
       log.error("Failed to load agent detail:", error);
       message.error(t("agentConfig.agents.detailsLoadFailed"));
+    }
+
+    // Check if can switch (has unsaved changes)
+    const canSwitch = await checkUnsavedChanges.saveWithModal();
+    if (!canSwitch) {
+      return;
     }
   };
 
