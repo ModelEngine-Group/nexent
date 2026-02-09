@@ -104,7 +104,8 @@ export function useKnowledgeBasesForToolConfig(
         }
       } else {
         // Default: knowledge_base_search or unknown - only get Nexent knowledge bases
-        kbs = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+        const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+        kbs = result.knowledgeBases;
       }
 
       // Sort by updatedAt descending
@@ -201,7 +202,8 @@ export function usePrefetchKnowledgeBases() {
               kbs = [];
             }
           } else {
-            kbs = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+            const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+            kbs = result.knowledgeBases;
           }
 
           return kbs.sort((a, b) => {
