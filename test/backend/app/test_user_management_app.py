@@ -680,7 +680,7 @@ class TestCurrentUserInfo:
 class TestRevokeUserAccount:
     """Tests for the /user/revoke endpoint"""
 
-    @patch('apps.user_management_app.revoke_regular_user', new_callable=AsyncMock)
+    @patch('apps.user_management_app.delete_user_and_cleanup', new_callable=AsyncMock)
     @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_current_user_id')
     def test_revoke_success_regular_user(self, mock_get_ids, mock_validate, mock_revoke):
@@ -731,7 +731,7 @@ class TestRevokeUserAccount:
         assert response.json()[
             "detail"] == "User not logged in or session invalid"
 
-    @patch('apps.user_management_app.revoke_regular_user', new_callable=AsyncMock)
+    @patch('apps.user_management_app.delete_user_and_cleanup', new_callable=AsyncMock)
     @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_current_user_id')
     def test_revoke_error(self, mock_get_ids, mock_validate, mock_revoke):

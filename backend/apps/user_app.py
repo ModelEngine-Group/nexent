@@ -11,10 +11,10 @@ from starlette.responses import JSONResponse
 from consts.model import (
     UserListRequest, UserUpdateRequest
 )
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 from services.user_service import (
-    get_users, update_user, delete_user
+    get_users, update_user, delete_user_and_cleanup
 )
+from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("user_app")
@@ -116,7 +116,13 @@ async def delete_user_endpoint(
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
-    Soft delete user and remove from all groups
+    Permanently delete user and all related data.
+
+    This performs complete cleanup including:
+    - Soft-delete user-tenant relationship and groups
+    - Soft-delete memory configs and conversations
+    - Clear user-level memories
+    - Permanently delete user from Supabase
 
     Args:
         user_id: User identifier
@@ -129,13 +135,17 @@ async def delete_user_endpoint(
         # Get current user ID from token for access control
         current_user_id, _ = get_current_user_id(authorization)
 
-        # Delete user (soft delete)
-        success = await delete_user(user_id, current_user_id)
+        # Get user tenant ID for cleanup operations
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        if not user_tenant:
+            raise ValueError(f"User {user_id} not found")
 
-        if not success:
-            raise ValueError(f"Failed to delete user {user_id}")
+        tenant_id = user_tenant["tenant_id"]
 
-        logger.info(f"Soft deleted user {user_id} by user {current_user_id}")
+        # Perform complete user cleanup
+        await delete_user_and_cleanup(user_id, tenant_id)
+
+        logger.info(f"Permanently deleted user {user_id} by admin {current_user_id}")
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
