@@ -62,7 +62,9 @@ export function AuthDialogs() {
 
           {/* Subtitle */}
           <p className="text-center text-gray-500 mb-8 mt-4 ml-10 mr-10 text-sm">
-            {t("A powerful AI agent platform for intelligent conversations and automation")}
+            {t(
+              "A powerful AI agent platform for intelligent conversations and automation"
+            )}
           </p>
 
           {/* Action buttons */}
@@ -118,7 +120,7 @@ export function AuthDialogs() {
         onCancel={closeAuthzPromptModal}
         footer={[
           <Button key="confirm" onClick={closeAuthzPromptModal}>
-            {t("page.permissionDenied.confirm")}
+            {t("common.confirm")}
           </Button>,
         ]}
         centered
