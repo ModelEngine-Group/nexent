@@ -7,7 +7,7 @@ import {
   LoaderCircle,
   ChevronRight,
   ChevronDown,
-  Settings
+  Settings,
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
@@ -121,6 +121,39 @@ const translateError = (
     const configError =
       errorMessage.replace(/^.*?invalid[^:]*:?\s*/i, "").trim() || errorMessage;
     return t("model.dialog.error.invalidConfiguration", { error: configError });
+  }
+
+  // ModelEngine specific errors
+  if (
+    errorLower.includes("authentication failed") ||
+    errorLower.includes("invalid api key")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (
+    errorLower.includes("access forbidden") ||
+    errorLower.includes("insufficient permissions")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (
+    errorLower.includes("endpoint not found") ||
+    errorLower.includes("url may be incorrect")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (errorLower.includes("server error") || errorLower.includes("http 5")) {
+    return t("model.dialog.error.serverError");
+  }
+  if (
+    errorLower.includes("connection failed") ||
+    errorLower.includes("network") ||
+    errorLower.includes("timeout")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (errorLower.includes("ssl certificate")) {
+    return t("model.dialog.error.apiConnectionFailed");
   }
 
   // Return original error if no pattern matches
@@ -686,7 +719,9 @@ export const ModelAddDialog = ({
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
             >
-              <Option value="modelengine">{t("model.provider.modelengine")}</Option>
+              <Option value="modelengine">
+                {t("model.provider.modelengine")}
+              </Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
             {/* ModelEngine URL input (only when provider is ModelEngine) */}
@@ -868,7 +903,9 @@ export const ModelAddDialog = ({
               min="1"
               placeholder="10"
               value={form.chunkingBatchSize}
-              onChange={(e) => handleFormChange("chunkingBatchSize", e.target.value)}
+              onChange={(e) =>
+                handleFormChange("chunkingBatchSize", e.target.value)
+              }
             />
           </div>
         )}
@@ -953,9 +990,15 @@ export const ModelAddDialog = ({
                 className="flex items-center focus:outline-none"
               >
                 {showModelList ? (
-                  <ChevronDown className="text-sm text-gray-700 mr-1" size={14} />
+                  <ChevronDown
+                    className="text-sm text-gray-700 mr-1"
+                    size={14}
+                  />
                 ) : (
-                  <ChevronRight className="text-sm text-gray-700 mr-1" size={14} />
+                  <ChevronRight
+                    className="text-sm text-gray-700 mr-1"
+                    size={14}
+                  />
                 )}
                 <span className="text-sm font-medium text-gray-700">
                   {t("model.dialog.modelList.title")}
@@ -1173,7 +1216,11 @@ export const ModelAddDialog = ({
               {form.type === "llm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <a href={PROVIDER_LINKS.openai} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.openai}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/openai.png"
                         alt="OpenAI"
@@ -1182,12 +1229,24 @@ export const ModelAddDialog = ({
                     </a>
                   </Tooltip>
                   <Tooltip title="Kimi">
-                    <a href={PROVIDER_LINKS.kimi} target="_blank" rel="noopener noreferrer">
-                      <img src="/kimi.png" alt="Kimi" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.kimi}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/kimi.png"
+                        alt="Kimi"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <a href={PROVIDER_LINKS.deepseek} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.deepseek}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/deepseek.png"
                         alt="Deepseek"
@@ -1196,8 +1255,16 @@ export const ModelAddDialog = ({
                     </a>
                   </Tooltip>
                   <Tooltip title="Qwen">
-                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
-                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.qwen}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/qwen.png"
+                        alt="Qwen"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
@@ -1206,7 +1273,11 @@ export const ModelAddDialog = ({
               {form.type === "embedding" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <a href={PROVIDER_LINKS.openai} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.openai}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/openai.png"
                         alt="OpenAI"
@@ -1215,18 +1286,42 @@ export const ModelAddDialog = ({
                     </a>
                   </Tooltip>
                   <Tooltip title="Qwen">
-                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
-                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.qwen}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/qwen.png"
+                        alt="Qwen"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Jina">
-                    <a href={PROVIDER_LINKS.jina} target="_blank" rel="noopener noreferrer">
-                      <img src="/jina.png" alt="Jina" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.jina}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/jina.png"
+                        alt="Jina"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Baai">
-                    <a href={PROVIDER_LINKS.baai} target="_blank" rel="noopener noreferrer">
-                      <img src="/baai.png" alt="Baai" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.baai}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/baai.png"
+                        alt="Baai"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
@@ -1235,12 +1330,24 @@ export const ModelAddDialog = ({
               {form.type === "vlm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="Qwen">
-                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
-                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.qwen}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/qwen.png"
+                        alt="Qwen"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <a href={PROVIDER_LINKS.deepseek} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.deepseek}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/deepseek.png"
                         alt="Deepseek"
