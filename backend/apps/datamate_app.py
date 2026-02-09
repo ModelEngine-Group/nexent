@@ -10,7 +10,7 @@ from http import HTTPStatus
 from services.datamate_service import (
     sync_datamate_knowledge_bases_and_create_records,
     fetch_datamate_knowledge_base_file_list,
-    test_datamate_connection
+    check_datamate_connection
 )
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import DataMateConnectionError
@@ -78,7 +78,7 @@ async def test_datamate_connection_endpoint(
         datamate_url = request.datamate_url if request else None
 
         # Test the connection
-        is_connected, error_message = await test_datamate_connection(tenant_id, datamate_url)
+        is_connected, error_message = await check_datamate_connection(tenant_id, datamate_url)
 
         if is_connected:
             return JSONResponse(

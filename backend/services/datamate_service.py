@@ -270,3 +270,67 @@ async def sync_datamate_knowledge_bases_and_create_records(
             "indices": [],
             "count": 0,
         }
+
+
+async def check_datamate_connection(
+    tenant_id: str,
+    datamate_url: Optional[str] = None
+) -> tuple:
+    """
+    Test connection to DataMate server.
+
+    Args:
+        tenant_id: Tenant ID for configuration lookup.
+        datamate_url: Optional DataMate server URL from request (for dynamic configuration).
+
+    Returns:
+        Tuple of (is_connected: bool, error_message: str).
+        is_connected is True if connection successful, False otherwise.
+        error_message contains error details if connection failed, empty string if successful.
+    """
+    # Check if ModelEngine is enabled
+    if str(MODEL_ENGINE_ENABLED).lower() != "true":
+        logger.info(
+            f"ModelEngine is disabled (MODEL_ENGINE_ENABLED={MODEL_ENGINE_ENABLED}), skipping DataMate connection test")
+        return (False, "ModelEngine is disabled")
+
+    # Use provided datamate_url from request, fallback to tenant config
+    effective_datamate_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
+        DATAMATE_URL, tenant_id=tenant_id)
+
+    if not effective_datamate_url:
+        logger.warning(
+            f"DataMate URL not configured for tenant {tenant_id}")
+        return (False, "DataMate URL not configured")
+
+    logger.info(
+        f"Testing DataMate connection for tenant {tenant_id} using URL: {effective_datamate_url}")
+
+    try:
+        core = _get_datamate_core(tenant_id, effective_datamate_url)
+
+        # Run synchronous SDK call in executor to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+
+        # Test connection by fetching user indices
+        await loop.run_in_executor(
+            None,
+            core.get_user_indices
+        )
+
+        logger.info(
+            f"DataMate connection test successful for tenant {tenant_id}")
+        return (True, "")
+
+    except ValueError as e:
+        # Configuration error (e.g., missing DataMate URL)
+        error_msg = str(e)
+        logger.error(
+            f"DataMate connection test failed (configuration error) for tenant {tenant_id}: {error_msg}")
+        return (False, error_msg)
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(
+            f"DataMate connection test failed for tenant {tenant_id}: {error_msg}")
+        return (False, error_msg)
