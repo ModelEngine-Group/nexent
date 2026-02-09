@@ -737,13 +737,13 @@ export const ModelAddDialog = ({
               {t("model.type.embedding")}
             </Option>
             <Option value={MODEL_TYPES.VLM}>{t("model.type.vlm")}</Option>
-            <Option value={MODEL_TYPES.RERANK}>
+            <Option value={MODEL_TYPES.RERANK} disabled>
               {t("model.type.rerank")}
             </Option>
-            <Option value={MODEL_TYPES.STT}>
+            <Option value={MODEL_TYPES.STT} disabled>
               {t("model.type.stt")}
             </Option>
-            <Option value={MODEL_TYPES.TTS}>
+            <Option value={MODEL_TYPES.TTS} disabled>
               {t("model.type.tts")}
             </Option>
           </Select>

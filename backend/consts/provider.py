@@ -6,7 +6,6 @@ class ProviderEnum(str, Enum):
     SILICON = "silicon"
     OPENAI = "openai"
     MODELENGINE = "modelengine"
-    ANTHROPIC = "anthropic"
     ZHIPU = "zhipu"
 
 
