@@ -125,12 +125,21 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
 
 
 @agent_config_router.delete("")
-async def delete_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
+async def delete_agent_api(
+    request: AgentIDRequest,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
     """
     Delete an agent
     """
     try:
-        await delete_agent_impl(request.agent_id, authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
         return {}
     except Exception as e:
         logger.error(f"Agent delete error: {str(e)}")

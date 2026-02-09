@@ -428,12 +428,16 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
 
 def test_delete_agent_api_success(mocker, mock_auth_header):
+    """Test delete_agent_api success case without tenant_id query parameter (uses auth tenant_id)."""
     # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
     mock_delete_agent = mocker.patch(
         "apps.agent_app.delete_agent_impl", new_callable=mocker.AsyncMock)
+    # Mock return values
+    mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_delete_agent.return_value = None
 
-    # Test the endpoint
+    # Test the endpoint without tenant_id query parameter
     response = config_client.request(
         "DELETE",
         "/agent",
@@ -443,18 +447,52 @@ def test_delete_agent_api_success(mocker, mock_auth_header):
 
     # Assertions
     assert response.status_code == 200
-    mock_delete_agent.assert_called_once_with(
-        123, mock_auth_header["Authorization"])
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    # Should use auth tenant_id when query parameter is not provided
+    mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
+    assert response.json() == {}
+
+
+def test_delete_agent_api_with_explicit_tenant_id(mocker, mock_auth_header):
+    """Test delete_agent_api success case with explicit tenant_id query parameter."""
+    # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_delete_agent = mocker.patch(
+        "apps.agent_app.delete_agent_impl", new_callable=mocker.AsyncMock)
+    # Mock return values - auth tenant_id is different from explicit tenant_id
+    mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
+    mock_delete_agent.return_value = None
+
+    # Test the endpoint with explicit tenant_id query parameter
+    explicit_tenant_id = "explicit_tenant_123"
+    response = config_client.request(
+        "DELETE",
+        "/agent",
+        json={"agent_id": 456},
+        params={"tenant_id": explicit_tenant_id},
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 200
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    # Should use explicit tenant_id when provided, not auth tenant_id
+    mock_delete_agent.assert_called_once_with(456, explicit_tenant_id, "test_user")
     assert response.json() == {}
 
 
 def test_delete_agent_api_exception(mocker, mock_auth_header):
+    """Test delete_agent_api exception handling without tenant_id query parameter."""
     # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
     mock_delete_agent = mocker.patch(
         "apps.agent_app.delete_agent_impl", new_callable=mocker.AsyncMock)
+    mock_logger = mocker.patch("apps.agent_app.logger")
+    # Mock return values and exception
+    mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_delete_agent.side_effect = Exception("Test error")
 
-    # Test the endpoint
+    # Test the endpoint without tenant_id query parameter
     response = config_client.request(
         "DELETE",
         "/agent",
@@ -464,7 +502,42 @@ def test_delete_agent_api_exception(mocker, mock_auth_header):
 
     # Assertions
     assert response.status_code == 500
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
     assert "Agent delete error" in response.json()["detail"]
+    # Verify error was logged
+    mock_logger.error.assert_called_once_with("Agent delete error: Test error")
+
+
+def test_delete_agent_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
+    """Test delete_agent_api exception handling with explicit tenant_id query parameter."""
+    # Setup mocks using pytest-mock
+    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_delete_agent = mocker.patch(
+        "apps.agent_app.delete_agent_impl", new_callable=mocker.AsyncMock)
+    mock_logger = mocker.patch("apps.agent_app.logger")
+    # Mock return values and exception
+    mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
+    mock_delete_agent.side_effect = Exception("Test error with explicit tenant")
+
+    # Test the endpoint with explicit tenant_id query parameter
+    explicit_tenant_id = "explicit_tenant_456"
+    response = config_client.request(
+        "DELETE",
+        "/agent",
+        json={"agent_id": 789},
+        params={"tenant_id": explicit_tenant_id},
+        headers=mock_auth_header
+    )
+
+    # Assertions
+    assert response.status_code == 500
+    mock_get_user_info.assert_called_once_with(mock_auth_header["Authorization"], ANY)
+    # Should use explicit tenant_id even when exception occurs
+    mock_delete_agent.assert_called_once_with(789, explicit_tenant_id, "test_user")
+    assert "Agent delete error" in response.json()["detail"]
+    # Verify error was logged
+    mock_logger.error.assert_called_once_with("Agent delete error: Test error with explicit tenant")
 
 
 @pytest.mark.asyncio

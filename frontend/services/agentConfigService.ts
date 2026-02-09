@@ -422,11 +422,15 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
 /**
  * Delete Agent
  * @param agentId agent id
+ * @param tenantId optional tenant ID for filtering (uses auth if not provided)
  * @returns delete result
  */
-export const deleteAgent = async (agentId: number) => {
+export const deleteAgent = async (agentId: number, tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.delete, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.delete}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.delete;
+    const response = await fetch(url, {
       method: "DELETE",
       headers: getAuthHeaders(),
       body: JSON.stringify({ agent_id: agentId }),

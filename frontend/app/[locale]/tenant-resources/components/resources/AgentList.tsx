@@ -93,9 +93,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     value: "",
   });
 
-  const { agents, isLoading, refetch } = useAgentList(tenantId, {
-    staleTime: 0, // Always fetch fresh data for admin view
-  });
+  const { agents, isLoading, refetch } = useAgentList(tenantId);
 
   // Fetch groups for group name mapping and selection
   const { data: groupData } = useGroupList(tenantId, 1, 100);
@@ -119,7 +117,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const handleDelete = async (agent: AgentListRow) => {
     try {
       // Agent ID is string in frontend type but number in backend service
-      const res = await deleteAgent(Number(agent.id));
+      const res = await deleteAgent(Number(agent.id), tenantId ?? undefined);
       if (res.success) {
         message.success(t("businessLogic.config.error.agentDeleteSuccess"));
         queryClient.invalidateQueries({ queryKey: ["agents"] });
