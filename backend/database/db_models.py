@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, PrimaryKeyConstraint, Sequence, String, Text, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -201,7 +201,9 @@ class AgentInfo(TableBase):
     __tablename__ = "ag_tenant_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
-    agent_id = Column(Integer, primary_key=True, nullable=False, doc="ID")
+    agent_id = Column(Integer, Sequence(
+        "ag_tenant_agent_t_agent_id_seq", schema=SCHEMA), nullable=False, primary_key=True, autoincrement=True, doc="ID")
+    version_no = Column(Integer, default=0, nullable=False, primary_key=True, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     name = Column(String(100), doc="Agent name")
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
@@ -223,6 +225,7 @@ class AgentInfo(TableBase):
     business_logic_model_id = Column(Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
+    current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
 
 
 class ToolInstance(TableBase):
@@ -240,6 +243,7 @@ class ToolInstance(TableBase):
     user_id = Column(String(100), doc="User ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, doc="Enabled")
+    version_no = Column(Integer, default=0, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
 class KnowledgeRecord(TableBase):
@@ -342,11 +346,11 @@ class AgentRelation(TableBase):
     __tablename__ = "ag_agent_relation_t"
     __table_args__ = {"schema": SCHEMA}
 
-    relation_id = Column(Integer, primary_key=True,
-                         nullable=False, doc="Relationship ID, primary key")
-    selected_agent_id = Column(Integer, doc="Selected agent ID")
+    relation_id = Column(Integer, primary_key=True, autoincrement=True, nullable=False, doc="Relationship ID, primary key")
+    selected_agent_id = Column(Integer, primary_key=True, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
+    version_no = Column(Integer, default=0, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
 class PartnerMappingId(TableBase):
@@ -449,3 +453,22 @@ class RolePermission(SimpleTableBase):
     permission_category = Column(String(30), doc="Permission category")
     permission_type = Column(String(30), doc="Permission type")
     permission_subtype = Column(String(30), doc="Permission subtype")
+
+
+class AgentVersion(TableBase):
+    """
+    Agent version metadata table. Stores version info, release notes, and version lineage.
+    """
+    __tablename__ = "ag_tenant_agent_version_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    id = Column(BigInteger, Sequence("ag_tenant_agent_version_t_id_seq", schema=SCHEMA),
+                primary_key=True, nullable=False, doc="Primary key, auto-increment")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
+    agent_id = Column(Integer, nullable=False, doc="Agent ID")
+    version_no = Column(Integer, nullable=False, doc="Version number, starts from 1. Does not include 0 (draft)")
+    version_name = Column(String(100), doc="User-defined version name for display")
+    release_note = Column(Text, doc="Release notes / publish remarks")
+    source_version_no = Column(Integer, doc="Source version number. If this version is a rollback, record the source version")
+    source_type = Column(String(30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
+    status = Column(String(30), default="RELEASED", doc="Version status: RELEASED / DISABLED / ARCHIVED")

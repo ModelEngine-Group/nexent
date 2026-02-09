@@ -255,6 +255,8 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
 
     Args:
         tool_info: ToolInstanceInfoRequest containing tool configuration data
+        tenant_id: Tenant ID
+        user_id: User ID
 
     Returns:
         Dictionary containing the updated tool instance
@@ -262,8 +264,10 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
+    # Use version_no from request if provided, otherwise default to 0
+    version_no = getattr(tool_info, 'version_no', 0)
     tool_instance = create_or_update_tool_by_tool_info(
-        tool_info, tenant_id, user_id)
+        tool_info, tenant_id, user_id, version_no=version_no)
     return {
         "tool_instance": tool_instance
     }

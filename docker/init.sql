@@ -296,7 +296,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.delete_flag IS 'Whether it is deleted. O
 
 -- Create the ag_tenant_agent_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
-    agent_id SERIAL PRIMARY KEY NOT NULL,
+    agent_id INTEGER NOT NULL,
     name VARCHAR(100),
     display_name VARCHAR(100),
     description VARCHAR,
@@ -316,11 +316,14 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     enabled BOOLEAN DEFAULT FALSE,
     is_new BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
+    version_no INTEGER DEFAULT 0 NOT NULL,
+    current_version_no INTEGER NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
-    delete_flag VARCHAR(1) DEFAULT 'N'
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (agent_id, version_no)
 );
 
 -- Create a function to update the update_time column
@@ -366,6 +369,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.is_new IS 'Whether this agent is marked as new for the user';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -375,18 +380,20 @@ WHERE delete_flag = 'N';
 
 -- Create the ag_tool_instance_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_instance_t (
-    tool_instance_id SERIAL PRIMARY KEY NOT NULL,
+    tool_instance_id INTEGER NOT NULL,
     tool_id INTEGER,
     agent_id INTEGER,
     params JSON,
     user_id VARCHAR(100),
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
+    version_no INTEGER DEFAULT 0 NOT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
-    delete_flag VARCHAR(1) DEFAULT 'N'
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (tool_instance_id, version_no)
 );
 
 -- Add comment to the table
@@ -400,6 +407,7 @@ COMMENT ON COLUMN nexent.ag_tool_instance_t.params IS 'Parameter configuration';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.user_id IS 'User ID';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.tenant_id IS 'Tenant ID';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.enabled IS 'Enable flag';
+COMMENT ON COLUMN nexent.ag_tool_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.update_time IS 'Update time';
 
@@ -554,15 +562,17 @@ COMMENT ON COLUMN nexent.user_tenant_t.delete_flag IS 'Delete flag, Y/N';
 
 -- Create the ag_agent_relation_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
-    relation_id SERIAL PRIMARY KEY NOT NULL,
+    relation_id INTEGER NOT NULL,
     selected_agent_id INTEGER,
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
+    version_no INTEGER DEFAULT 0 NOT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
-    delete_flag VARCHAR(1) DEFAULT 'N'
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (relation_id, version_no)
 );
 
 -- Create a function to update the update_time column
@@ -588,6 +598,7 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.relation_id IS 'Relationship ID, pr
 COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_id IS 'Selected agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.parent_agent_id IS 'Parent agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.created_by IS 'Creator ID, audit field';
@@ -999,3 +1010,46 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
 VALUES ('user_id', 'tenant_id', 'SPEED', '', 'system', 'system')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;
+
+-- Create the ag_tenant_agent_version_t table for agent version management
+CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
+    agent_id INTEGER NOT NULL,
+    version_no INTEGER NOT NULL,
+    version_name VARCHAR(100),
+    release_note TEXT,
+    source_version_no INTEGER NULL,
+    source_type VARCHAR(30) NULL,
+    status VARCHAR(30) DEFAULT 'RELEASED',
+    created_by VARCHAR(100) NOT NULL,
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.ag_tenant_agent_version_t OWNER TO "root";
+
+-- Add comments for version fields in existing tables
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
+COMMENT ON COLUMN nexent.ag_tool_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+
+-- Add comments for ag_tenant_agent_version_t table
+COMMENT ON TABLE nexent.ag_tenant_agent_version_t IS 'Agent version metadata table. Stores version info, release notes, and version lineage.';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.id IS 'Primary key, auto-increment';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.agent_id IS 'Agent ID';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.version_no IS 'Version number, starts from 1. Does not include 0 (draft)';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.version_name IS 'User-defined version name for display (e.g., "Stable v2.1", "Hotfix-001"). NULL means use version_no as display.';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.release_note IS 'Release notes / publish remarks';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_version_no IS 'Source version number. If this version is a rollback, record the source version number.';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_type IS 'Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish).';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.status IS 'Version status: RELEASED / DISABLED / ARCHIVED';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.created_by IS 'User who published this version';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.create_time IS 'Version creation timestamp';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who updated this version';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';
