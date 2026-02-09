@@ -213,6 +213,30 @@ class MinioClient:
         """
         return self._storage_client.get_file_stream(object_name, bucket)
 
+    def copy_object(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Copy an object within the same bucket (atomic operation)
+
+        Args:
+            source_object: Source object name
+            dest_object: Destination object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Destination object name or error message)
+        """
+        try:
+            bucket = bucket or self.storage_config.default_bucket
+            copy_source = {'Bucket': bucket, 'Key': source_object}
+            self._storage_client.client.copy_object(
+                Bucket=bucket,
+                Key=dest_object,
+                CopySource=copy_source
+            )
+            return (True, dest_object)
+        except Exception as e:
+            return (False, str(e))
+
 
 # Create global database and MinIO client instances
 db_client = PostgresClient()
