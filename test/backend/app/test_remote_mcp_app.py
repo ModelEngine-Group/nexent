@@ -663,6 +663,55 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
     @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_with_tenant_id_param(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server from config with explicit tenant_id parameter"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        # Mock container manager
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add-from-config",
+            params={"tenant_id": "explicit_tenant789"},
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "env": {"NODE_ENV": "production"},
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        # Verify that explicit tenant_id is used
+        mock_check_name.assert_called_once_with(mcp_name="test-service", tenant_id="explicit_tenant789")
+        mock_container_manager.start_mcp_container.assert_called_once()
+        call_kwargs = mock_container_manager.start_mcp_container.call_args[1]
+        assert call_kwargs["tenant_id"] == "explicit_tenant789"
+        mock_add_server.assert_called_once()
+        add_call_kwargs = mock_add_server.call_args[1]
+        assert add_call_kwargs["tenant_id"] == "explicit_tenant789"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
     def test_add_mcp_from_config_multiple_servers(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_info):
         """Test adding multiple MCP servers from config"""
         mock_get_user_info.return_value = ("user123", "tenant456", "en")
@@ -1213,6 +1262,35 @@ class TestListMCPContainers:
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.attach_mcp_container_permissions')
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
+    def test_list_mcp_containers_with_tenant_id_param(self, mock_get_list, mock_attach_perm, mock_container_manager_class, mock_get_user_info):
+        """Test listing MCP containers with explicit tenant_id parameter"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.list_mcp_containers.return_value = []
+        mock_attach_perm.return_value = []
+
+        response = client.get(
+            "/mcp/containers",
+            params={"tenant_id": "explicit_tenant789"},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        # Verify that explicit tenant_id is used
+        mock_container_manager.list_mcp_containers.assert_called_once_with(
+            tenant_id="explicit_tenant789")
+        mock_attach_perm.assert_called_once_with(
+            containers=[],
+            tenant_id="explicit_tenant789",
+            user_id="user123",
+        )
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.attach_mcp_container_permissions', return_value=[])
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list', return_value=[])
     def test_list_mcp_containers_empty(self, mock_get_list, mock_attach_perm, mock_container_manager_class, mock_get_user_info):
@@ -1416,10 +1494,10 @@ class TestUploadMCPImageValidation:
         assert "File size exceeds 1GB limit" in data["detail"]
 
     @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
-    @patch('apps.remote_mcp_app.get_current_user_id')
-    def test_upload_mcp_image_auto_service_name(self, mock_get_user_id, mock_upload_service):
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    def test_upload_mcp_image_auto_service_name(self, mock_get_user_info, mock_upload_service):
         """Test upload with auto-generated service name"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
 
         mock_upload_service.return_value = {
             "message": "MCP container started successfully from uploaded image",
@@ -1689,10 +1767,10 @@ class TestUploadMCPImageWithServiceLayer:
         )
 
     @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
-    @patch('apps.remote_mcp_app.get_current_user_id')
-    def test_upload_mcp_image_auto_service_name(self, mock_get_user_id, mock_upload_service):
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    def test_upload_mcp_image_auto_service_name(self, mock_get_user_info, mock_upload_service):
         """Test upload with auto-generated service name"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
 
         mock_upload_service.return_value = {
             "message": "MCP container started successfully from uploaded image",
@@ -1880,10 +1958,10 @@ class TestUploadMCPImageValidationAdditional:
         assert "port" in str(data["detail"]).lower()
 
     @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
-    @patch('apps.remote_mcp_app.get_current_user_id')
-    def test_upload_mcp_image_env_vars_validation_in_service(self, mock_get_user_id, mock_upload_service):
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    def test_upload_mcp_image_env_vars_validation_in_service(self, mock_get_user_info, mock_upload_service):
         """Test environment variables validation now handled in service layer"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
 
         # Test with array instead of object - now handled in service layer
         mock_upload_service.side_effect = ValueError(
@@ -1919,11 +1997,11 @@ class MockMCPUpdateRequest:
 class TestUpdateRemoteProxy:
     """Test endpoint for updating remote MCP servers"""
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_success(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_success(self, mock_update_server, mock_get_user_info):
         """Test successful update of remote MCP proxy"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.return_value = None  # No exception means success
 
         update_data = MockMCPUpdateRequest(
@@ -1949,7 +2027,7 @@ class TestUpdateRemoteProxy:
         assert data["status"] == "success"
         assert "Successfully updated remote MCP proxy" in data["message"]
 
-        mock_get_user_id.assert_called_once_with("Bearer test_token")
+        mock_get_user_info.assert_called_once()
         # Verify the service was called with correct tenant_id and user_id
         # The update_data parameter is automatically parsed by FastAPI from the JSON request
         mock_update_server.assert_called_once()
@@ -1960,11 +2038,37 @@ class TestUpdateRemoteProxy:
         assert "update_data" in call_kwargs
         assert call_kwargs["update_data"] is not None
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_name_conflict(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_with_tenant_id_param(self, mock_update_server, mock_get_user_info):
+        """Test updating remote MCP proxy with explicit tenant_id parameter"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_update_server.return_value = None
+
+        response = client.put(
+            "/mcp/update",
+            params={"tenant_id": "explicit_tenant789"},
+            json={
+                "current_service_name": "old_service",
+                "current_mcp_url": "http://old.url",
+                "new_service_name": "new_service",
+                "new_mcp_url": "http://new.url"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        # Verify that explicit tenant_id is used
+        mock_update_server.assert_called_once()
+        call_kwargs = mock_update_server.call_args[1]
+        assert call_kwargs["tenant_id"] == "explicit_tenant789"
+        assert call_kwargs["user_id"] == "user123"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
+    def test_update_remote_proxy_name_conflict(self, mock_update_server, mock_get_user_info):
         """Test update MCP proxy with name conflict"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.side_effect = MCPNameIllegal(
             "New MCP name already exists")
 
@@ -1983,11 +2087,11 @@ class TestUpdateRemoteProxy:
         data = response.json()
         assert "New MCP name already exists" in data["detail"]
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_connection_failed(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_connection_failed(self, mock_update_server, mock_get_user_info):
         """Test update MCP proxy with connection failure"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.side_effect = MCPConnectionError(
             "New MCP server connection failed")
 
@@ -2006,11 +2110,11 @@ class TestUpdateRemoteProxy:
         data = response.json()
         assert "New MCP server connection failed" in data["detail"]
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_current_name_not_exist(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_current_name_not_exist(self, mock_update_server, mock_get_user_info):
         """Test update MCP proxy when current name doesn't exist"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.side_effect = MCPNameIllegal(
             "MCP name does not exist")
 
@@ -2029,13 +2133,13 @@ class TestUpdateRemoteProxy:
         data = response.json()
         assert "MCP name does not exist" in data["detail"]
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_database_error(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_database_error(self, mock_update_server, mock_get_user_info):
         """Test update MCP proxy with database error"""
         from sqlalchemy.exc import SQLAlchemyError
 
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.side_effect = SQLAlchemyError(
             "Database connection failed")
 
@@ -2054,11 +2158,11 @@ class TestUpdateRemoteProxy:
         data = response.json()
         assert "Failed to update remote MCP proxy" in data["detail"]
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_same_name_and_url(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_same_name_and_url(self, mock_update_server, mock_get_user_info):
         """Test update MCP proxy with same name and URL (no-op update)"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.return_value = None
 
         response = client.put(
@@ -2090,11 +2194,11 @@ class TestUpdateRemoteProxy:
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
-    @patch('apps.remote_mcp_app.get_current_user_id')
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.update_remote_mcp_server_list')
-    def test_update_remote_proxy_with_special_characters(self, mock_update_server, mock_get_user_id):
+    def test_update_remote_proxy_with_special_characters(self, mock_update_server, mock_get_user_info):
         """Test update MCP proxy with special characters in names and URLs"""
-        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_update_server.return_value = None
 
         response = client.put(
