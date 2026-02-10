@@ -1,127 +1,48 @@
+"""Test module for model_provider_service.
+
+IMPORTANT: This module must set up mocks BEFORE any imports that would
+trigger the database.client module initialization (which includes MinIO
+connection attempts).
+
+The mock setup MUST happen at the very beginning before any imports
+from backend.services or database modules.
+"""
+import pytest
 from backend.services.model_provider_service import (
     SiliconModelProvider,
     prepare_model_dict,
     merge_existing_model_tokens,
     get_provider_models,
 )
-from unittest import mock
+from test.common.test_mocks import setup_common_mocks, bootstrap_test_env
 import sys
-import pytest
+from unittest import mock
 
-# Create a generic MockModule to stand-in for optional/imported-at-runtime modules
+# CRITICAL: Set up mocks BEFORE any imports that trigger module loading
+# This prevents MinIO client initialization from trying to connect to localhost:9000
+
+# Mock database client modules BEFORE any imports
+# This must be done first to prevent real module initialization
+sys.modules["database.client"] = mock.MagicMock()
+sys.modules["database.model_management_db"] = mock.MagicMock()
+sys.modules["backend.database.client"] = mock.MagicMock()
+sys.modules["backend.database.model_management_db"] = mock.MagicMock()
+
+# Now set up common mocks (this must happen after the above sys.modules patches)
+
+# Bootstrap the test environment first
+bootstrap_test_env()
+
+# Then set up common mocks
+setup_common_mocks()
+
+# Now we can safely import the module under test
 
 
-class MockModule(mock.MagicMock):
-    @classmethod
-    def __getattr__(cls, item):
-        return mock.MagicMock()
-
-
-# ---------------------------------------------------------------------------
-# Mock database.client module to prevent MinioClient initialization
-# This must be done BEFORE importing model_provider_service since it imports
-# database.model_management_db which imports database.client
-# ---------------------------------------------------------------------------
-# Mock nexent.storage modules that MinioClient depends on
-nexent_mock = mock.MagicMock()
-nexent_storage_mock = mock.MagicMock()
-nexent_storage_factory_mock = mock.MagicMock()
-storage_client_mock = mock.MagicMock()
-nexent_storage_factory_mock.create_storage_client_from_config = mock.MagicMock(
-    return_value=storage_client_mock)
-nexent_storage_factory_mock.MinIOStorageConfig = mock.MagicMock()
-nexent_storage_mock.storage_client_factory = nexent_storage_factory_mock
-nexent_mock.storage = nexent_storage_mock
-sys.modules['nexent'] = nexent_mock
-sys.modules['nexent.storage'] = nexent_storage_mock
-sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
-
-# Mock database.db_models
-db_models_mock = mock.MagicMock()
-db_models_mock.TableBase = mock.MagicMock()
-sys.modules['database'] = mock.MagicMock()
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
-
-# Mock sqlalchemy
-sqlalchemy_mock = mock.MagicMock()
-sys.modules['sqlalchemy'] = sqlalchemy_mock
-sys.modules['sqlalchemy.orm'] = mock.MagicMock()
-sys.modules['sqlalchemy.orm.class_mapper'] = mock.MagicMock()
-sys.modules['sqlalchemy.orm.sessionmaker'] = mock.MagicMock()
-
-# Mock psycopg2
-sys.modules['psycopg2'] = mock.MagicMock()
-sys.modules['psycopg2.extensions'] = mock.MagicMock()
-
-# Mock database.client module - provide minimal exports needed by model_management_db
-# This prevents MinioClient from being instantiated
-db_client_mock = mock.MagicMock()
-db_client_mock.clean_string_values = mock.MagicMock(
-    side_effect=lambda x: x)
-sys.modules['database.client'] = db_client_mock
-sys.modules['backend.database.client'] = db_client_mock
-
-# ---------------------------------------------------------------------------
-# Insert minimal stub modules so that the service under test can be imported
-# without its real heavy dependencies being present during unit-testing.
-# ---------------------------------------------------------------------------
-for module_path in [
-    "consts", "consts.provider", "consts.model", "consts.const", "consts.exceptions",
-    "utils", "utils.model_name_utils",
-    "services", "services.model_health_service",
-    "database", "database.client", "database.model_management_db",
-    "services.providers", "services.providers.base",
-    "services.providers.silicon_provider", "services.providers.modelengine_provider",
-]:
-    sys.modules.setdefault(module_path, MockModule())
-
-# Provide concrete attributes required by the module under test
-sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
-
-# Mock constants for token and chunk sizes
+# Set required constants for tests
 sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
 sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
 sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
-
-# Mock ProviderEnum for get_provider_models tests
-
-
-class _ProviderEnumStub:
-    SILICON = mock.Mock(value="silicon")
-    MODELENGINE = mock.Mock(value="modelengine")
-
-
-sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
-
-# Minimal ModelConnectStatusEnum stub so that prepare_model_dict can access
-# `ModelConnectStatusEnum.NOT_DETECTED.value` without importing the real enum.
-
-
-class _EnumStub:
-    NOT_DETECTED = mock.Mock(value="not_detected")
-    DETECTING = mock.Mock(value="detecting")
-
-
-sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
-
-# Mock exception classes
-
-
-class _TimeoutExceptionStub(Exception):
-    """Mock TimeoutException for testing."""
-    pass
-
-
-sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
-
-# Mock the database function that merge_existing_model_tokens depends on
-sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = mock.MagicMock()
-
-# ---------------------------------------------------------------------------
-# Now that the import prerequisites are satisfied we can safely import the
-# module under test.
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
