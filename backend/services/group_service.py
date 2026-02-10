@@ -295,7 +295,6 @@ def update_group(group_id: int, updates: Dict[str, Any], user_id: str) -> bool:
 def delete_group(group_id: int, user_id: str) -> bool:
     """
     Delete group.
-    TODO: Clear user-group relationship, knowledgebases, agents, invitation codes under the group
 
     Args:
         group_id (int): Group ID

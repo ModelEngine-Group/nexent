@@ -50,6 +50,11 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     useState<Group | null>(null);
   const [groupUsers, setGroupUsers] = useState<User[]>([]);
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [editFormInitialValues, setEditFormInitialValues] = useState<{
+    name: string;
+    description: string;
+    members: string[];
+  } | null>(null);
 
   const [form] = Form.useForm();
   const [editGroupForm] = Form.useForm();
@@ -61,31 +66,34 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   };
 
   const openEdit = async (g: Group) => {
-    setEditingGroup(g);
-    // Load current group members first
     try {
       const members = await getGroupMembers(g.group_id);
       setGroupUsers(members);
-      // Available users are all users minus current members
       const memberIds = new Set(members.map((u) => u.id));
       setAvailableUsers(allUsers.filter((u) => !memberIds.has(u.id)));
 
-      // Set form values after loading members
-      editGroupForm.setFieldsValue({
-        name: g.group_name,
-        description: g.group_description || "",
+      const formValues = {
+        name: g.group_name || "",
+        description: (g.group_description || "").toString(),
         members: members.map((u) => u.id),
-      });
+      };
+      setEditFormInitialValues(formValues);
+      setEditingGroup(g);
+      editGroupForm.resetFields();
+      editGroupForm.setFieldsValue(formValues);
     } catch (error) {
       message.error("Failed to load group members");
       setGroupUsers([]);
       setAvailableUsers(allUsers);
-      // Set form values even if member loading fails
-      editGroupForm.setFieldsValue({
-        name: g.group_name,
-        description: g.group_description || "",
+      const formValues = {
+        name: g.group_name || "",
+        description: (g.group_description || "").toString(),
         members: [],
-      });
+      };
+      setEditFormInitialValues(formValues);
+      setEditingGroup(g);
+      editGroupForm.resetFields();
+      editGroupForm.setFieldsValue(formValues);
     }
 
     setModalVisible(true);
@@ -126,6 +134,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       if (editingGroup) {
         const updateData: UpdateGroupRequest = {
           group_name: values.name,
+          group_description: values.description,
         };
         await updateGroup(editingGroup.group_id, updateData);
         message.success("Group updated");
@@ -155,17 +164,17 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
   const handleEditGroupSubmit = async () => {
     try {
-      const values = await editGroupForm.validateFields();
       if (!editingGroup) return;
 
-      // Update group info
+      await editGroupForm.validateFields();
+      const values = editGroupForm.getFieldsValue(true);
+
       const updateData: UpdateGroupRequest = {
         group_name: values.name,
         group_description: values.description,
       };
       await updateGroup(editingGroup.group_id, updateData);
 
-      // Update group members using batch API
       const newMemberIds = (values.members as string[]) || [];
       await updateGroupMembers(editingGroup.group_id, newMemberIds);
 
@@ -283,13 +292,21 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         }
         open={modalVisible}
         onOk={editingGroup ? handleEditGroupSubmit : handleSubmit}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => {
+          setModalVisible(false);
+          editGroupForm.resetFields();
+        }}
+        destroyOnClose
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}
       >
         {editingGroup ? (
-          <Form layout="vertical" form={editGroupForm}>
+          <Form
+            key={editingGroup.group_id}
+            layout="vertical"
+            form={editGroupForm}
+          >
             <Form.Item
               name="name"
               label={t("tenantResources.tenants.name")}

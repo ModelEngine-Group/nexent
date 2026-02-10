@@ -125,6 +125,7 @@ from backend.database.group_db import (
     add_group,
     modify_group,
     remove_group,
+    remove_group_users,
     add_user_to_group,
     remove_user_from_group,
     remove_user_from_all_groups,
@@ -689,11 +690,27 @@ def test_remove_group_no_rows_affected(monkeypatch, mock_session):
     """Test removing group when no rows are affected"""
     session, query = mock_session
 
-    mock_update = MagicMock()
-    mock_update.return_value = 0  # No rows affected
-    mock_filter = MagicMock()
-    mock_filter.update = mock_update
-    query.filter.return_value = mock_filter
+    # First query: TenantGroupInfo
+    mock_group_filter = MagicMock()
+    mock_group_filter.update.return_value = 0  # No rows affected for TenantGroupInfo
+    mock_group_filter.filter.return_value = mock_group_filter
+
+    # Second query: TenantGroupUser
+    mock_user_filter = MagicMock()
+    mock_user_filter.update.return_value = 0
+    mock_user_filter.filter.return_value = mock_user_filter
+
+    # Setup session.query() to return different mocks for different model classes
+    query_call_count = [0]
+    def query_call_side_effect(model_class):
+        query_call_count[0] += 1
+        if query_call_count[0] == 1:
+            # First call: TenantGroupInfo
+            return mock_group_filter
+        else:
+            # Second call: TenantGroupUser
+            return mock_user_filter
+    session.query.side_effect = query_call_side_effect
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -703,6 +720,43 @@ def test_remove_group_no_rows_affected(monkeypatch, mock_session):
     result = remove_group(group_id=999, updated_by="test_user")
 
     assert result is False
+
+
+def test_remove_group_success(monkeypatch, mock_session):
+    """Test successfully removing group and its user relationships"""
+    session, query = mock_session
+
+    # First query: TenantGroupInfo - need filter() to return the same mock so update() works
+    mock_group_filter = MagicMock()
+    mock_group_filter.update.return_value = 1  # One row affected for TenantGroupInfo
+    # Make filter() return the same mock so chained .update() works
+    mock_group_filter.filter.return_value = mock_group_filter
+
+    # Second query: TenantGroupUser
+    mock_user_filter = MagicMock()
+    mock_user_filter.update.return_value = 3  # Three user-group relationships removed
+    mock_user_filter.filter.return_value = mock_user_filter
+
+    # Setup session.query() to return different mocks for different model classes
+    query_call_count = [0]
+    def query_call_side_effect(model_class):
+        query_call_count[0] += 1
+        if query_call_count[0] == 1:
+            # First call: TenantGroupInfo
+            return mock_group_filter
+        else:
+            # Second call: TenantGroupUser
+            return mock_user_filter
+    session.query.side_effect = query_call_side_effect
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_group(group_id=123, updated_by="admin_user")
+
+    assert result is True
 
 
 def test_remove_user_from_group_no_rows_affected(monkeypatch, mock_session):
@@ -951,3 +1005,43 @@ def test_check_group_name_exists_database_error(monkeypatch, mock_session):
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         check_group_name_exists("test_tenant", "test_group")
+
+
+def test_remove_group_users_success(monkeypatch, mock_session):
+    """Test successfully removing all users from a group"""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.update.return_value = 5  # Five user-group relationships removed
+    mock_filter.filter.return_value = mock_filter
+
+    session.query.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_group_users(group_id=123, removed_by="admin_user")
+
+    assert result == 5
+
+
+def test_remove_group_users_no_rows_affected(monkeypatch, mock_session):
+    """Test removing users from group when no relationships exist"""
+    session, query = mock_session
+
+    mock_filter = MagicMock()
+    mock_filter.update.return_value = 0  # No rows affected
+    mock_filter.filter.return_value = mock_filter
+
+    session.query.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = remove_group_users(group_id=999, removed_by="admin_user")
+
+    assert result == 0
