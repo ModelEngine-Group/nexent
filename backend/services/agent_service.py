@@ -707,9 +707,9 @@ async def get_creating_sub_agent_id_service(tenant_id: str, user_id: str = None)
         return create_agent(agent_info={"enabled": False}, tenant_id=tenant_id, user_id=user_id)["agent_id"]
 
 
-async def get_agent_info_impl(agent_id: int, tenant_id: str):
+async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0):
     try:
-        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
+        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
@@ -918,7 +918,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
 async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
     """
     Delete an agent and all related data.
-    
+
     Args:
         agent_id: Agent ID to delete
         tenant_id: Tenant ID
@@ -1362,6 +1362,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "is_new": agent.get("is_new", False),
                 "group_ids": convert_string_to_list(agent.get("group_ids")),
                 "permission": permission,
+                "is_published": agent.get("current_version_no") is not None,
             })
 
         return simple_agent_list

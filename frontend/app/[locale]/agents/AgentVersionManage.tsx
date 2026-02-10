@@ -25,11 +25,13 @@ import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { VersionCardItem } from "./AgentVersionCard";
 import log from "@/lib/logger";
+import { useQueryClient } from "@tanstack/react-query";
 
 const { TextArea } = Input;
 
 export default function AgentVersionManage() {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
 
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
@@ -67,6 +69,7 @@ export default function AgentVersionManage() {
       publishForm.resetFields();
       invalidateAgentVersionList();
       invalidateAgentInfo();
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     } catch (error) {
       log.error("Failed to publish version:", error);
       message.error(t("agent.version.publishFailed"));

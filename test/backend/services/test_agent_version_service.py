@@ -903,3 +903,22 @@ def test_list_published_agents_impl_disabled_agent(monkeypatch):
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
     
     assert len(result) == 0  # Should be filtered out
+
+
+@pytest.mark.asyncio
+async def test_list_published_agents_impl_exception_handling(monkeypatch):
+    """Test exception handling in list_published_agents_impl (covers lines 742-744)"""
+    # Mock query_all_agent_info_by_tenant_id to raise an exception
+    test_exception = RuntimeError("Database connection failed")
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        side_effect=test_exception
+    )
+    
+    # Mock get_user_tenant_by_user_id to avoid early exception
+    agent_service_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+    
+    # Verify that the exception is caught and re-raised as ValueError
+    with pytest.raises(ValueError, match="Failed to list published agents: Database connection failed"):
+        await list_published_agents_impl(tenant_id="tenant1", user_id="user1")

@@ -250,13 +250,18 @@ export async function fetchAgentVersionDetail(
 /**
  * Fetch agent version list from backend
  * @param agentId The agent ID to fetch versions for
+ * @param tenantId optional tenant ID for filtering
  * @returns Promise containing the version list response
  */
 export async function fetchAgentVersionList(
-  agentId: number
+  agentId: number,
+  tenantId?: string
 ): Promise<FetchAgentVersionListResult> {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.versions.list(agentId), {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.versions.list(agentId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.versions.list(agentId);
+    const response = await fetch(url, {
       method: "GET",
       headers: getAuthHeaders(),
     });

@@ -47,6 +47,7 @@ import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agen
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { message } from "antd";
+import { useQueryClient } from "@tanstack/react-query";
 
 const { Text } = Typography;
 
@@ -109,6 +110,7 @@ export function VersionCardItem({
 
   // Get user context for tenantId
   const { user } = useAuthorizationContext();
+  const queryClient = useQueryClient();
 
   // Get invalidate functions for refreshing data
   const { invalidate: invalidateAgentVersionList } = useAgentVersionList(agentId);
@@ -185,6 +187,7 @@ export function VersionCardItem({
         setCompareModalOpen(false);
         invalidateAgentVersionList?.();
         invalidateAgentInfo?.();
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
       } else {
         message.error(result.message || t("agent.version.rollbackError"));
       }
@@ -220,6 +223,7 @@ export function VersionCardItem({
         setDeleteModalOpen(false);
         invalidateAgentVersionList?.();
         invalidateAgentInfo?.();
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
       } else {
         message.error(result.message || t("agent.version.deleteError"));
       }
