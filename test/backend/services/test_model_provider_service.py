@@ -1,50 +1,85 @@
-"""Test module for model_provider_service.
-
-IMPORTANT: This module must set up mocks BEFORE any imports that would
-trigger the database.client module initialization (which includes MinIO
-connection attempts).
-
-The mock setup MUST happen at the very beginning before any imports
-from backend.services or database modules.
-"""
 from backend.services.model_provider_service import (
     SiliconModelProvider,
     prepare_model_dict,
     merge_existing_model_tokens,
     get_provider_models,
 )
-import pytest
-from test.common.test_mocks import setup_common_mocks, bootstrap_test_env
-import sys
 from unittest import mock
+import sys
+import pytest
 
-# CRITICAL: Set up mocks BEFORE any imports that trigger module loading
-# This prevents MinIO client initialization from trying to connect to localhost:9000
+# Create a generic MockModule to stand-in for optional/imported-at-runtime modules
 
-# Mock database client modules BEFORE any imports
-# This must be done first to prevent real module initialization
-sys.modules["database.client"] = mock.MagicMock()
-sys.modules["database.model_management_db"] = mock.MagicMock()
-sys.modules["backend.database.client"] = mock.MagicMock()
-sys.modules["backend.database.model_management_db"] = mock.MagicMock()
 
-# Now set up common mocks (this must happen after the above sys.modules patches)
+class MockModule(mock.MagicMock):
+    @classmethod
+    def __getattr__(cls, item):
+        return mock.MagicMock()
 
-# Bootstrap the test environment first
-bootstrap_test_env()
 
-# Then set up common mocks
-setup_common_mocks()
+# ---------------------------------------------------------------------------
+# Insert minimal stub modules so that the service under test can be imported
+# without its real heavy dependencies being present during unit-testing.
+# ---------------------------------------------------------------------------
+for module_path in [
+    "consts", "consts.provider", "consts.model", "consts.const", "consts.exceptions",
+    "utils", "utils.model_name_utils",
+    "services", "services.model_health_service",
+    "database", "database.model_management_db",
+]:
+    sys.modules.setdefault(module_path, MockModule())
 
-# Now we can safely import the module under test
+# Provide concrete attributes required by the module under test
+sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
+
+# Mock constants for token and chunk sizes
 sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
 sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
 sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
+# Mock ProviderEnum for get_provider_models tests
+
+
+class _ProviderEnumStub:
+    SILICON = mock.Mock(value="silicon")
+    MODELENGINE = mock.Mock(value="modelengine")
+
+
+sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
+
+# Minimal ModelConnectStatusEnum stub so that prepare_model_dict can access
+# `ModelConnectStatusEnum.NOT_DETECTED.value` without importing the real enum.
+
+
+class _EnumStub:
+    NOT_DETECTED = mock.Mock(value="not_detected")
+    DETECTING = mock.Mock(value="detecting")
+
+
+sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
+
+# Mock exception classes
+
+
+class _TimeoutExceptionStub(Exception):
+    """Mock TimeoutException for testing."""
+    pass
+
+
+sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
+
+# Mock the database function that merge_existing_model_tokens depends on
+sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = mock.MagicMock()
+
+# ---------------------------------------------------------------------------
+# Now that the import prerequisites are satisfied we can safely import the
+# module under test.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Test-cases for SiliconModelProvider.get_models
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_models_llm_success():
@@ -137,7 +172,7 @@ async def test_get_models_unknown_type():
 
 @pytest.mark.asyncio
 async def test_get_models_exception():
-    """HTTP errors should be caught and error response returned."""
+    """HTTP errors should be caught and an error response returned."""
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
     with mock.patch("backend.services.providers.silicon_provider.httpx.AsyncClient") as mock_client, \
@@ -151,16 +186,15 @@ async def test_get_models_exception():
 
         result = await SiliconModelProvider().get_models(provider_config)
 
-        # Exception should be caught and error response returned
-        assert isinstance(result, list)
+        # Should return error response for exception
         assert len(result) == 1
         assert result[0]["_error"] == "connection_failed"
-
 
 # ---------------------------------------------------------------------------
 # Test-cases for prepare_model_dict (already indirectly covered elsewhere but
 # re-asserted here directly against the provider service implementation).
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_prepare_model_dict_llm():
@@ -764,7 +798,7 @@ async def test_get_provider_models_silicon_with_different_model_types():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_llm_success():
     """ModelEngine provider should return LLM models with correct type mapping."""
-    from backend.services.providers.modelengine_provider import ModelEngineProvider
+    from backend.services.model_provider_service import ModelEngineProvider
 
     provider_config = {"model_type": "llm",
                        "base_url": "https://model-engine.com", "api_key": "test-key"}
@@ -813,7 +847,7 @@ async def test_modelengine_get_models_llm_success():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_embedding_success():
     """ModelEngine provider should return embedding models with correct type mapping."""
-    from backend.services.providers.modelengine_provider import ModelEngineProvider
+    from backend.services.model_provider_service import ModelEngineProvider
 
     provider_config = {"model_type": "embedding",
                        "base_url": "https://model-engine.com", "api_key": "test-key"}
@@ -859,7 +893,7 @@ async def test_modelengine_get_models_embedding_success():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_all_types():
     """ModelEngine provider should return all models when no type filter specified."""
-    from backend.services.providers.modelengine_provider import ModelEngineProvider
+    from backend.services.model_provider_service import ModelEngineProvider
 
     provider_config = {"base_url": "https://model-engine.com",
                        "api_key": "test-key"}  # No model_type filter
@@ -915,7 +949,7 @@ async def test_modelengine_get_models_all_types():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_exception():
     """ModelEngine provider should return empty list on exception."""
-    from backend.services.providers.modelengine_provider import ModelEngineProvider
+    from backend.services.model_provider_service import ModelEngineProvider
 
     provider_config = {"model_type": "llm"}
 
@@ -1119,3 +1153,331 @@ async def test_get_provider_models_modelengine_empty_result():
 
         assert result == []
         mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+# ---------------------------------------------------------------------------
+# Test-cases for SiliconModelProvider empty model list (line 54)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_silicon_get_models_empty_list():
+    """Silicon provider should return empty list when API returns empty data."""
+    provider_config = {"model_type": "llm", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.silicon_provider.httpx.AsyncClient") as mock_client, \
+            mock.patch("backend.services.providers.silicon_provider.SILICON_GET_URL", "https://silicon.com"):
+
+        mock_client_instance = mock.AsyncMock()
+        mock_client.return_value.__aenter__.return_value = mock_client_instance
+
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": []}  # Empty model list
+        mock_response.raise_for_status = mock.Mock()
+        mock_client_instance.get.return_value = mock_response
+
+        result = await SiliconModelProvider().get_models(provider_config)
+
+        # Should return empty list when API returns empty data
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Test-cases for ModelEngineProvider HTTP error responses (lines 67-68)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_http_401_error():
+    """ModelEngine provider should return error response for 401 Unauthorized."""
+    from backend.services.model_provider_service import ModelEngineProvider
+    from backend.services.providers.base import _classify_provider_error
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "invalid-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        mock_response = mock.AsyncMock()
+        mock_response.status = 401
+        mock_response.text = mock.AsyncMock(return_value="Invalid API key")
+        mock_response.raise_for_status = mock.Mock()
+
+        mock_get_cm = mock.MagicMock()
+        mock_get_cm.__aenter__ = mock.AsyncMock(return_value=mock_response)
+        mock_get_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_instance = mock.MagicMock()
+        mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
+
+        mock_session_cm = mock.MagicMock()
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
+        mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_class.return_value = mock_session_cm
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        # Should return error response for 401
+        assert len(result) == 1
+        assert result[0]["_error"] == "authentication_failed"
+        assert result[0]["_http_code"] == 401
+
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_http_403_error():
+    """ModelEngine provider should return error response for 403 Forbidden."""
+    from backend.services.model_provider_service import ModelEngineProvider
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        mock_response = mock.AsyncMock()
+        mock_response.status = 403
+        mock_response.text = mock.AsyncMock(return_value="Access forbidden")
+        mock_response.raise_for_status = mock.Mock()
+
+        mock_get_cm = mock.MagicMock()
+        mock_get_cm.__aenter__ = mock.AsyncMock(return_value=mock_response)
+        mock_get_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_instance = mock.MagicMock()
+        mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
+
+        mock_session_cm = mock.MagicMock()
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
+        mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_class.return_value = mock_session_cm
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        assert len(result) == 1
+        assert result[0]["_error"] == "access_forbidden"
+        assert result[0]["_http_code"] == 403
+
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_http_404_error():
+    """ModelEngine provider should return error response for 404 Not Found."""
+    from backend.services.model_provider_service import ModelEngineProvider
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        mock_response = mock.AsyncMock()
+        mock_response.status = 404
+        mock_response.text = mock.AsyncMock(return_value="Endpoint not found")
+        mock_response.raise_for_status = mock.Mock()
+
+        mock_get_cm = mock.MagicMock()
+        mock_get_cm.__aenter__ = mock.AsyncMock(return_value=mock_response)
+        mock_get_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_instance = mock.MagicMock()
+        mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
+
+        mock_session_cm = mock.MagicMock()
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
+        mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_class.return_value = mock_session_cm
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        assert len(result) == 1
+        assert result[0]["_error"] == "endpoint_not_found"
+        assert result[0]["_http_code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_http_500_error():
+    """ModelEngine provider should return error response for 500 Server Error."""
+    from backend.services.model_provider_service import ModelEngineProvider
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        mock_response = mock.AsyncMock()
+        mock_response.status = 500
+        mock_response.text = mock.AsyncMock(
+            return_value="Internal server error")
+        mock_response.raise_for_status = mock.Mock()
+
+        mock_get_cm = mock.MagicMock()
+        mock_get_cm.__aenter__ = mock.AsyncMock(return_value=mock_response)
+        mock_get_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_instance = mock.MagicMock()
+        mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
+
+        mock_session_cm = mock.MagicMock()
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
+        mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
+
+        mock_session_class.return_value = mock_session_cm
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        assert len(result) == 1
+        assert result[0]["_error"] == "server_error"
+        assert result[0]["_http_code"] == 500
+
+
+# ---------------------------------------------------------------------------
+# Test-cases for ModelEngineProvider exception handling (lines 114-115)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_connection_error():
+    """ModelEngine provider should handle connection errors gracefully."""
+    from backend.services.model_provider_service import ModelEngineProvider
+    import aiohttp
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        # Create a mock exception with required attributes
+        mock_error = Exception("Connection refused")
+        mock_error.lower = mock.Mock(return_value="connection refused")
+        mock_session_class.side_effect = mock_error
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        # Should return error response for connection failure
+        assert len(result) == 1
+        assert result[0]["_error"] == "connection_failed"
+
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_timeout_error():
+    """ModelEngine provider should handle timeout errors gracefully."""
+    from backend.services.model_provider_service import ModelEngineProvider
+    import aiohttp
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        # Simulate timeout error
+        mock_session_class.side_effect = aiohttp.ServerTimeoutError(
+            "Connection timed out")
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        # Should return error response for timeout
+        assert len(result) == 1
+        assert result[0]["_error"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_modelengine_get_models_generic_exception():
+    """ModelEngine provider should handle generic exceptions gracefully."""
+    from backend.services.model_provider_service import ModelEngineProvider
+
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
+
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
+
+        # Simulate generic exception
+        mock_session_class.side_effect = Exception("Unexpected error")
+
+        result = await ModelEngineProvider().get_models(provider_config)
+
+        # Should return error response
+        assert len(result) == 1
+        assert result[0]["_error"] == "connection_failed"
+
+
+# ---------------------------------------------------------------------------
+# Test-cases for get_model_engine_raw_url edge cases
+# ---------------------------------------------------------------------------
+
+def test_get_model_engine_raw_url_empty_string():
+    """Should return empty string for empty input."""
+    from backend.services.model_provider_service import get_model_engine_raw_url
+
+    result = get_model_engine_raw_url("")
+    assert result == ""
+
+
+def test_get_model_engine_raw_url_none_input():
+    """Should handle None input gracefully."""
+    from backend.services.model_provider_service import get_model_engine_raw_url
+
+    result = get_model_engine_raw_url(None)
+    assert result == ""
+
+
+def test_get_model_engine_raw_url_with_open_path():
+    """Should strip /open/router/v1 paths correctly."""
+    from backend.services.model_provider_service import get_model_engine_raw_url
+
+    test_cases = [
+        ("https://120.253.225.102:50001/open/router/v1",
+         "https://120.253.225.102:50001"),
+        ("https://model-engine.com/open/router/v1/models", "https://model-engine.com"),
+        ("https://120.253.225.102:50001/open/router/v1/some/deep/path",
+         "https://120.253.225.102:50001"),
+    ]
+
+    for input_url, expected in test_cases:
+        result = get_model_engine_raw_url(input_url)
+        assert result == expected, f"Failed for input: {input_url}"
+
+
+def test_get_model_engine_raw_url_without_open_path():
+    """Should return URL unchanged when no /open/ path."""
+    from backend.services.model_provider_service import get_model_engine_raw_url
+
+    test_cases = [
+        ("https://model-engine.com", "https://model-engine.com"),
+        ("https://120.253.225.102:50001", "https://120.253.225.102:50001"),
+        ("http://localhost:8080", "http://localhost:8080"),
+    ]
+
+    for input_url, expected in test_cases:
+        result = get_model_engine_raw_url(input_url)
+        assert result == expected, f"Failed for input: {input_url}"
+
+
+def test_get_model_engine_raw_url_trailing_slash():
+    """Should remove trailing slashes correctly."""
+    from backend.services.model_provider_service import get_model_engine_raw_url
+
+    test_cases = [
+        ("https://model-engine.com/", "https://model-engine.com"),
+        ("https://120.253.225.102:50001/", "https://120.253.225.102:50001"),
+        ("https://model-engine.com/open/router/v1/", "https://model-engine.com"),
+    ]
+
+    for input_url, expected in test_cases:
+        result = get_model_engine_raw_url(input_url)
+        assert result == expected, f"Failed for input: {input_url}"
