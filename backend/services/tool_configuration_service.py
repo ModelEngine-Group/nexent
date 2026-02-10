@@ -20,6 +20,7 @@ from database.tool_db import (
     query_tool_instances_by_id,
     update_tool_table_from_scan_tool_list,
     search_last_tool_instance_by_tool_id,
+    check_tool_list_initialized,
 )
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
@@ -315,6 +316,28 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
         # Convert all failures (including SystemExit) to domain error to avoid process exit
         raise MCPConnectionError(
             f"failed to get tool from remote MCP server, detail: {e}")
+
+
+async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
+    """
+    Initialize tool list for a new tenant.
+    This function scans and populates available tools from local, MCP, and LangChain sources.
+
+    Args:
+        tenant_id: Tenant ID for MCP tools (required for MCP tools)
+        user_id: User ID for tracking who initiated the scan
+
+    Returns:
+        Dictionary containing initialization result with tool count
+    """
+    # Check if tools have already been initialized for this tenant
+    if check_tool_list_initialized(tenant_id):
+        logger.info(f"Tool list already initialized for tenant {tenant_id}, skipping")
+        return {"status": "already_initialized", "message": "Tool list already exists"}
+
+    logger.info(f"Initializing tool list for new tenant: {tenant_id}")
+    await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+    return {"status": "success", "message": "Tool list initialized successfully"}
 
 
 async def update_tool_list(tenant_id: str, user_id: str):

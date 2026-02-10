@@ -827,7 +827,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             agent_id = created["agent_id"]
         else:
             # Update agent
-            update_agent(agent_id, request, tenant_id, user_id)
+            update_agent(agent_id, request, user_id)
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
@@ -915,9 +915,15 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     return {"agent_id": agent_id}
 
 
-async def delete_agent_impl(agent_id: int, authorization: str = Header(None)):
-    user_id, tenant_id, _ = get_current_user_info(authorization)
-
+async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Delete an agent and all related data.
+    
+    Args:
+        agent_id: Agent ID to delete
+        tenant_id: Tenant ID
+        user_id: User ID performing the deletion
+    """
     try:
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)

@@ -5,19 +5,19 @@ import { McpServer } from "@/types/agentConfig";
 
 export const MCP_SERVERS_QUERY_KEY = ["mcp", "servers"] as const;
 
-export function useMcpServerList(options?: { enabled?: boolean; staleTime?: number }) {
+export function useMcpServerList(options?: { enabled?: boolean; staleTime?: number; tenantId?: string | null }) {
   const queryClient = useQueryClient();
 
   const fetchServerList = useCallback(async () => {
-    const res = await getMcpServerList();
+    const res = await getMcpServerList(options?.tenantId);
     if (!res || !res.success) {
       throw new Error(res?.message || "Failed to load MCP server list");
     }
     return res;
-  }, []);
+  }, [options?.tenantId]);
 
   const query = useQuery({
-    queryKey: MCP_SERVERS_QUERY_KEY,
+    queryKey: [...MCP_SERVERS_QUERY_KEY, options?.tenantId],
     queryFn: fetchServerList,
     staleTime: options?.staleTime ?? 60_000,
     enabled: options?.enabled ?? true,

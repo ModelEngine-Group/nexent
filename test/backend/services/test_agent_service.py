@@ -431,30 +431,25 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
 
     # Assert
     mock_update_agent.assert_called_once_with(
-        123, request, "test_tenant", "test_user")
+        123, request, "test_user")
 
 
 @patch('backend.services.agent_service.delete_tools_by_agent_id')
 @patch('backend.services.agent_service.delete_agent_relationship')
 @patch('backend.services.agent_service.delete_agent_by_id')
-@patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_success(mock_get_current_user_info, mock_delete_agent, mock_delete_related,
+async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
                                          mock_delete_tools):
     """
     Test successful deletion of an agent.
 
     This test verifies that:
-    1. The function correctly gets the current user and tenant IDs
-    2. It calls the delete_agent_by_id function with the correct parameters
-    3. It also deletes all related agent relationships
+    1. It calls the delete_agent_by_id function with the correct parameters
+    2. It also deletes all related agent relationships
+    3. It deletes all tools associated with the agent
     """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-
     # Execute
-    await delete_agent_impl(123, authorization="Bearer token")
+    await delete_agent_impl(123, "test_tenant", "test_user")
 
     # Assert
     mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
@@ -939,9 +934,8 @@ def test_resolve_user_tenant_language_partial_override(mock_get_current_user_inf
 
 
 @patch('backend.services.agent_service.delete_agent_by_id')
-@patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, mock_delete_agent):
+async def test_delete_agent_impl_exception_handling(mock_delete_agent):
     """
     Test exception handling in delete_agent_impl function.
 
@@ -950,13 +944,11 @@ async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, 
     2. The function raises a ValueError with an appropriate message
     """
     # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
     mock_delete_agent.side_effect = Exception("Delete failed")
 
     # Execute & Assert
     with pytest.raises(ValueError) as context:
-        await delete_agent_impl(123, authorization="Bearer token")
+        await delete_agent_impl(123, "test_tenant", "test_user")
 
     assert "Failed to delete agent" in str(context.value)
 
@@ -2158,7 +2150,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_agents.return_value = mock_agents
     mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user, not admin
     mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
-    
+
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
     # This should match the actual implementation in utils.str_utils
     def convert_side_effect(x):
@@ -2173,7 +2165,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
                 result.append(int(stripped))
         return result
     mock_convert_list.side_effect = convert_side_effect
-    
+
     # Mock check_agent_availability to return (is_available, unavailable_reasons)
     mock_check_availability.return_value = (True, [])
     mock_get_model.return_value = None
@@ -2241,7 +2233,7 @@ async def test_list_all_agent_info_impl_group_filtering(
     mock_query_agents.return_value = mock_agents
     mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user
     mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
-    
+
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
     # This should match the actual implementation in utils.str_utils
     def convert_side_effect(x):
@@ -2256,7 +2248,7 @@ async def test_list_all_agent_info_impl_group_filtering(
                 result.append(int(stripped))
         return result
     mock_convert_list.side_effect = convert_side_effect
-    
+
     # Mock check_agent_availability to return (is_available, unavailable_reasons)
     mock_check_availability.return_value = (True, [])
     mock_get_model.return_value = None

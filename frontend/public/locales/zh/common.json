@@ -837,6 +837,9 @@
   "login.expired.okText": "立即登录",
   "login.expired.cancelText": "返回首页",
 
+  "page.permissionDenied.title": "无权限访问",
+  "page.permissionDenied.content": "暂时没有该页面权限。",
+
   "auth.notLoggedIn": "您尚未登录",
   "auth.login": "登录",
   "auth.register": "注册",
@@ -1270,6 +1273,7 @@
   "tenantResources.groups.totalMembers": "总成员数",
   "tenantResources.groups.updated": "用户组已更新",
   "tenantResources.groups.noDescription": "无描述",
+  "tenantResources.groups.duplicateName": "用户组名称已存在，请使用其他名称",
 
   "tenantResources.knowledgeBases.enterDescription": "可选描述",
   "tenantResources.knowledgeBases.enterName": "例如：公司文档",
@@ -1321,6 +1325,10 @@
   "tenantResources.models.deleteModel": "删除模型",
   "tenantResources.models.deleteSuccess": "模型已删除",
   "tenantResources.models.deleteFailed": "删除模型失败",
+  "tenantResources.models.checkConnectivity": "检查连通性",
+  "tenantResources.models.connectivitySuccess": "模型连通性正常",
+  "tenantResources.models.connectivityFailed": "模型无法连接",
+  "tenantResources.models.connectivityError": "检查连通性时发生错误",
   "tenantResources.models.enterDescription": "输入模型描述",
   "tenantResources.models.enterName": "输入模型名称",
 

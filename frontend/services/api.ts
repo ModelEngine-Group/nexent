@@ -135,7 +135,15 @@ export const API_ENDPOINTS = {
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,
-    adminModelList: `${API_BASE_URL}/model/admin/list`,
+    // Manage tenant model operations
+    manageModelList: `${API_BASE_URL}/model/manage/list`,
+    manageModelCreate: `${API_BASE_URL}/model/manage/create`,
+    manageModelBatchCreate: `${API_BASE_URL}/model/manage/batch_create`,
+    manageModelHealthcheck: `${API_BASE_URL}/model/manage/healthcheck`,
+    manageModelUpdate: (displayName: string) =>
+      `${API_BASE_URL}/model/manage/update?display_name=${encodeURIComponent(displayName)}`,
+    manageModelDelete: (displayName: string) =>
+      `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
   },
   knowledgeBase: {
     // Elasticsearch service

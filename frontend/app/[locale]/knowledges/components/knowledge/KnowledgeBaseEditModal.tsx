@@ -4,6 +4,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Select, message } from "antd";
 import { useGroupList } from "@/hooks/group/useGroupList";
+import { Can } from "@/components/permission/Can";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
@@ -90,30 +91,34 @@ export function KnowledgeBaseEditModal({
           <Input placeholder={t("tenantResources.knowledgeBase.enterName")} />
         </Form.Item>
 
-        <Form.Item
-          name="ingroup_permission"
-          label={t("tenantResources.knowledgeBase.permission")}
-          rules={[
-            { required: true, message: t("tenantResources.knowledgeBase.permissionRequired") },
-          ]}
-        >
-          <Select placeholder={t("tenantResources.knowledgeBase.permission")}>
-            <Select.Option value="EDIT">{t("tenantResources.knowledgeBase.permission.EDIT")}</Select.Option>
-            <Select.Option value="READ_ONLY">{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</Select.Option>
-            <Select.Option value="PRIVATE">{t("tenantResources.knowledgeBase.permission.PRIVATE")}</Select.Option>
-          </Select>
-        </Form.Item>
+        <Can permission="kb.groups:read">
+          <Form.Item
+            name="ingroup_permission"
+            label={t("tenantResources.knowledgeBase.permission")}
+            rules={[
+              { required: true, message: t("tenantResources.knowledgeBase.permissionRequired") },
+            ]}
+          >
+            <Select placeholder={t("tenantResources.knowledgeBase.permission")}>
+              <Select.Option value="EDIT">{t("tenantResources.knowledgeBase.permission.EDIT")}</Select.Option>
+              <Select.Option value="READ_ONLY">{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</Select.Option>
+              <Select.Option value="PRIVATE">{t("tenantResources.knowledgeBase.permission.PRIVATE")}</Select.Option>
+            </Select>
+          </Form.Item>
+        </Can>
 
-        <Form.Item name="group_ids" label={t("tenantResources.knowledgeBase.groupNames")}>
-          <Select
-            mode="multiple"
-            placeholder={t("tenantResources.knowledgeBase.groupNames")}
-            options={groups.map((group) => ({
-              label: group.group_name,
-              value: group.group_id,
-            }))}
-          />
-        </Form.Item>
+        <Can permission="group:read">
+          <Form.Item name="group_ids" label={t("tenantResources.knowledgeBase.groupNames")}>
+            <Select
+              mode="multiple"
+              placeholder={t("tenantResources.knowledgeBase.groupNames")}
+              options={groups.map((group) => ({
+                label: group.group_name,
+                value: group.group_id,
+              }))}
+            />
+          </Form.Item>
+        </Can>
       </Form>
     </Modal>
   );

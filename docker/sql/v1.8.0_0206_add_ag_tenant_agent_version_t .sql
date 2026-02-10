@@ -45,12 +45,12 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
     version_no INTEGER NOT NULL,
     version_name VARCHAR(100),                    -- 用户自定义版本名称
     release_note TEXT,                            -- 发布备注
-    
+
     source_version_no INTEGER NULL,               -- 来源版本号（回滚时记录）
     source_type VARCHAR(30) NULL,                 -- 来源类型：NORMAL(正常发布) / ROLLBACK(回滚产生)
-    
+
     status VARCHAR(30) DEFAULT 'RELEASED',        -- 版本状态：RELEASED / DISABLED / ARCHIVED
-    
+
     created_by VARCHAR(100) NOT NULL,
     create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
     updated_by VARCHAR(100),
@@ -78,7 +78,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_version_no IS 'Source 
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_type IS 'Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish).';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.status IS 'Version status: RELEASED / DISABLED / ARCHIVED';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.created_by IS 'User who published this version';
-COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.created_time IS 'Version creation timestamp';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.create_time IS 'Version creation timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who updated this version';
-COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
 COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';

@@ -162,10 +162,6 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (159, 'SPEED', 'RESOURCE', 'KB', 'READ'),
 (160, 'SPEED', 'RESOURCE', 'KB', 'UPDATE'),
 (161, 'SPEED', 'RESOURCE', 'KB', 'DELETE'),
-(162, 'SPEED', 'RESOURCE', 'KB.GROUPS', 'READ'),
-(163, 'SPEED', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
-(164, 'SPEED', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
-(165, 'SPEED', 'RESOURCE', 'USER.ROLE', 'READ'),
 (166, 'SPEED', 'RESOURCE', 'MCP', 'CREATE'),
 (167, 'SPEED', 'RESOURCE', 'MCP', 'READ'),
 (168, 'SPEED', 'RESOURCE', 'MCP', 'UPDATE'),
@@ -187,8 +183,4 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (184, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
-(188, 'SPEED', 'RESOURCE', 'GROUP', 'CREATE'),
-(189, 'SPEED', 'RESOURCE', 'GROUP', 'READ'),
-(190, 'SPEED', 'RESOURCE', 'GROUP', 'UPDATE'),
-(191, 'SPEED', 'RESOURCE', 'GROUP', 'DELETE');
+(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE')
