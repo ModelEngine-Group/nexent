@@ -831,7 +831,7 @@
   "login.expired.cancelText": "返回首页",
 
   "page.permissionDenied.title": "无权限访问",
-  "page.permissionDenied.content": "暂时没有该页面权限。",
+  "page.permissionDenied.content": "请切换有权限访问该页面的账号或访问其他页面。",
 
   "auth.notLoggedIn": "您尚未登录",
   "auth.login": "登录",

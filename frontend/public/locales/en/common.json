@@ -830,7 +830,7 @@
   "login.expired.cancelText": "Back to Home",
 
   "page.permissionDenied.title": "Access Denied",
-  "page.permissionDenied.content": "You don't have permission to access this page.",
+  "page.permissionDenied.content": "Please switch to an account with access permissions or visit another page.",
 
   "auth.notLoggedIn": "You are not logged in",
   "auth.login": "Login",
