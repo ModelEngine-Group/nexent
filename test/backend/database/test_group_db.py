@@ -132,7 +132,8 @@ from backend.database.group_db import (
     query_groups_by_user,
     query_group_ids_by_user,
     check_user_in_group,
-    count_group_users
+    count_group_users,
+    check_group_name_exists
 )
 
 
@@ -863,3 +864,90 @@ def test_database_error_handling(monkeypatch, mock_session):
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         query_groups(123)
+
+
+def test_check_group_name_exists_found(monkeypatch, mock_session):
+    """Test checking group name exists - name found"""
+    session, query = mock_session
+
+    # Mock finding a group with the same name
+    mock_group = MockTenantGroupInfo(group_id=1, group_name="test_group")
+
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = mock_group
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = check_group_name_exists("test_tenant", "test_group")
+
+    assert result is True
+    # Verify the filter was called
+    query.filter.assert_called_once()
+
+
+def test_check_group_name_exists_not_found(monkeypatch, mock_session):
+    """Test checking group name exists - name not found"""
+    session, query = mock_session
+
+    # Mock not finding any group with the same name
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = None
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    result = check_group_name_exists("test_tenant", "new_group")
+
+    assert result is False
+
+
+def test_check_group_name_exists_with_exclusion(monkeypatch, mock_session):
+    """Test checking group name exists - exclude specific group ID"""
+    session, query = mock_session
+
+    # Mock not finding any group (because the found group is excluded)
+    mock_filter = MagicMock()
+    mock_filter.first.return_value = None
+
+    # Mock the chain for .filter().filter()
+    mock_inner_filter = MagicMock()
+    mock_inner_filter.first.return_value = None
+    mock_filter.filter.return_value = mock_inner_filter
+
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    # When updating group 1 to name "test_group", exclude group 1
+    result = check_group_name_exists("test_tenant", "test_group", exclude_group_id=1)
+
+    assert result is False
+    # Verify filter().filter() was called (second filter for exclusion)
+    mock_filter.filter.assert_called_once_with(
+        db_models_mock.TenantGroupInfo.group_id != 1
+    )
+
+
+def test_check_group_name_exists_database_error(monkeypatch, mock_session):
+    """Test checking group name exists - database error"""
+    session, query = mock_session
+
+    query.filter.side_effect = MockSQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database error"):
+        check_group_name_exists("test_tenant", "test_group")

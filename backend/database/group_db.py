@@ -344,3 +344,30 @@ def remove_user_from_all_groups(user_id: str, removed_by: str) -> int:
         })
 
         return result
+
+
+def check_group_name_exists(tenant_id: str, group_name: str, exclude_group_id: Optional[int] = None) -> bool:
+    """
+    Check if a group with the given name already exists in the tenant
+
+    Args:
+        tenant_id (str): Tenant ID
+        group_name (str): Group name to check
+        exclude_group_id (Optional[int]): Group ID to exclude (for update operations)
+
+    Returns:
+        bool: True if group name exists, False otherwise
+    """
+    with get_db_session() as session:
+        query = session.query(TenantGroupInfo).filter(
+            TenantGroupInfo.tenant_id == tenant_id,
+            TenantGroupInfo.group_name == group_name,
+            TenantGroupInfo.delete_flag == "N"
+        )
+
+        # Exclude specific group ID for update operations
+        if exclude_group_id is not None:
+            query = query.filter(TenantGroupInfo.group_id != exclude_group_id)
+
+        result = query.first()
+        return result is not None

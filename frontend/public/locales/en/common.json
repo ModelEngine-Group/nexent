@@ -1265,6 +1265,7 @@
   "tenantResources.groups.totalMembers": "Total Members",
   "tenantResources.groups.updated": "Group updated",
   "tenantResources.groups.noDescription": "No Description",
+  "tenantResources.groups.duplicateName": "Group name already exists, please use a different name",
 
   "tenantResources.knowledgeBases.enterDescription": "Optional description",
   "tenantResources.knowledgeBases.enterName": "e.g., Company Documents",

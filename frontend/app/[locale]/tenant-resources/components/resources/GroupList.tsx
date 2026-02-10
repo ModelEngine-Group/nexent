@@ -141,7 +141,13 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       // Invalidate all group queries to ensure all components get updated data
       queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
-      if (err.response?.data?.message) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
+                                errorMessage.match(/Group name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        message.error(t("tenantResources.groups.duplicateName"));
+      } else if (err.response?.data?.message) {
         message.error(err.response.data.message);
       }
     }
@@ -171,7 +177,13 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       // Refresh user list in case user roles/status changed
       await refetchUsers();
     } catch (err: any) {
-      if (err.response?.data?.message) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
+                                errorMessage.match(/Group name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        message.error(t("tenantResources.groups.duplicateName"));
+      } else if (err.response?.data?.message) {
         message.error(err.response.data.message);
       } else {
         message.error("Failed to update group");
