@@ -11,16 +11,17 @@ import {
   Typography,
   Space,
   Switch,
-  Divider,
   App,
+  Popover,
 } from "antd";
 import {
   UserRound,
   LockKeyhole,
   ShieldCheck,
   KeyRound,
-  Crown,
   BookMarked,
+  HelpCircle,
+  Users,
 } from "lucide-react";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -484,77 +485,112 @@ export function RegisterModal() {
             />
           </Form.Item>
 
-          <Divider />
-
           <Form.Item
             name="inviteCode"
             label={t("auth.inviteCodeLabel")}
+            rules={[{ required: true, message: t("auth.inviteCodeRequired") }]}
           >
             <Input
               prefix={<KeyRound className="text-gray-400" size={16} />}
-              placeholder={t("auth.inviteCodeRequired")}
+              placeholder={t("auth.inviteCodePlaceholder")}
               size="large"
             />
           </Form.Item>
 
+          <Form.Item>
+            <Popover
+              content={
+                <div className="max-w-sm">
+                  {/* Method 1: Open Source Contribution */}
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-3 mb-3">
+                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100 mb-2">
+                      {t("auth.inviteCodeHint.method1.title")}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-start">
+                        <span className="mr-1 leading-none">✨</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.step1")}
+                          <a
+                            href="https://github.com/ModelEngine-Group/nexent"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            {t("auth.inviteCodeHint.projectLink")}
+                          </a>
+                          {t("auth.inviteCodeHint.starAction")}
+                        </div>
+                      </div>
+                      <div className="flex items-start">
+                        <span className="mr-1 leading-none">💬</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.step2")}
+                          <a
+                            href={t("auth.inviteCodeHint.contributionWallUrl")}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            {t("auth.inviteCodeHint.contributionWallLink")}
+                          </a>
+                          {t("auth.inviteCodeHint.step2Action")}
+                          <a
+                            href={t("auth.inviteCodeHint.documentationUrl")}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1 text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center"
+                            title={t("auth.inviteCodeHint.viewDocumentation")}
+                          >
+                            <BookMarked size={16} />
+                          </a>
+                        </div>
+                      </div>
+                      <div className="flex items-start">
+                        <span className="mr-1 leading-none">🎁</span>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.step3")}
+                          <a
+                            href="http://nexent.tech/contact"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            {t("auth.inviteCodeHint.communityLink")}
+                          </a>
+                          {t("auth.inviteCodeHint.step3Action")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
-          <>
-            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-              <div className="text-sm text-blue-800 dark:text-blue-200">
-                <div className="font-medium mb-2">
-                  {t("auth.inviteCodeHint.title")}
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center">
-                    ✨ {t("auth.inviteCodeHint.step1")}
-                    <a
-                      href="https://github.com/ModelEngine-Group/nexent"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      {t("auth.inviteCodeHint.projectLink")}
-                    </a>
-                    {t("auth.inviteCodeHint.starAction")}
-                  </div>
-                  <div className="flex items-center">
-                    💬 {t("auth.inviteCodeHint.step2")}
-                    <a
-                      href={t("auth.inviteCodeHint.contributionWallUrl")}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      {t("auth.inviteCodeHint.contributionWallLink")}
-                    </a>
-                    {t("auth.inviteCodeHint.step2Action")}
-                    <a
-                      href={t("auth.inviteCodeHint.documentationUrl")}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-2 text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center"
-                      title={t("auth.inviteCodeHint.viewDocumentation")}
-                    >
-                      <BookMarked size={16} />
-                    </a>
-                  </div>
-                  <div className="flex items-center">
-                    🎁 {t("auth.inviteCodeHint.step3")}
-                    <a
-                      href="http://nexent.tech/contact"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      {t("auth.inviteCodeHint.communityLink")}
-                    </a>
-                    {t("auth.inviteCodeHint.step3Action")}
+                  {/* Method 2: Contact Tenant Administrator */}
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-3">
+                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100 mb-2">
+                      {t("auth.inviteCodeHint.method2.title")}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-start">
+                        <Users size={16} className="text-blue-600 dark:text-blue-400 mr-1 mt-0.5" />
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          {t("auth.inviteCodeHint.method2.description")}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              }
+              title={t("auth.inviteCodeHint.popoverTitle")}
+              trigger="hover"
+              mouseEnterDelay={0.3}
+              overlayClassName="max-w-xs"
+            >
+              <div className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer text-sm">
+                <HelpCircle size={16} className="mr-1" />
+                {t("auth.inviteCodeHint.howToGetCode")}
               </div>
-            </div>
-
-          </>
+            </Popover>
+          </Form.Item>
 
 
           <Form.Item>

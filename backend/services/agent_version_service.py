@@ -133,6 +133,8 @@ def get_version_list_impl(
         "items": items,
         "total": total,
     }
+
+
 def get_version_impl(
     agent_id: int,
     tenant_id: str,
@@ -142,6 +144,7 @@ def get_version_impl(
     Get version
     """
     return search_version_by_version_no(agent_id, tenant_id, version_no)
+
 
 def get_version_detail_impl(
     agent_id: int,
@@ -263,6 +266,8 @@ def _check_version_snapshot_availability(
             unavailable_reasons.append("all_tools_disabled")
 
     return len(unavailable_reasons) == 0, unavailable_reasons
+
+
 def rollback_version_impl(
     agent_id: int,
     tenant_id: str,

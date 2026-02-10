@@ -119,14 +119,18 @@ export function AuthDialogs() {
         open={isAuthzPromptModalOpen}
         onCancel={closeAuthzPromptModal}
         footer={[
-          <Button key="confirm" onClick={closeAuthzPromptModal}>
+          <Button key="confirm" onClick={closeAuthzPromptModal} type="primary">
             {t("common.confirm")}
           </Button>,
         ]}
         centered
+        closable={false}
       >
-        <div className="py-2">
-          <p className="text-gray-600">{t("page.permissionDenied.content")}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <ExclamationCircleOutlined
+            style={{ color: "#faad14", fontSize: "20px" }}
+          />
+          <span>{t("page.permissionDenied.content")}</span>
         </div>
       </Modal>
 

@@ -6,19 +6,20 @@ import {
 
 /**
  * Hook to fetch agent version list using React Query
- * @param options - Configuration options including agentId and query settings
+ * @param agentId The agent ID to fetch versions for
+ * @param tenantId optional tenant ID for filtering
  * @returns Query result containing version list data and utilities
  */
-export function useAgentVersionList(agentId: number | null) {
+export function useAgentVersionList(agentId: number | null, tenantId?: string) {
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: ["agentVersions", agentId],
+    queryKey: ["agentVersions", agentId, tenantId],
     queryFn: async () => {
       if (agentId === undefined || agentId === null) {
         throw new Error("Agent ID is required");
       }
-      const res = await fetchAgentVersionList(agentId);
+      const res = await fetchAgentVersionList(agentId, tenantId);
       if (!res.success) {
         throw new Error(res.message || "Failed to fetch agent versions");
       }
@@ -36,6 +37,6 @@ export function useAgentVersionList(agentId: number | null) {
     agentVersionList,
     total,
     invalidate: () =>
-      queryClient.invalidateQueries({ queryKey: ["agentVersions", agentId] }),
+      queryClient.invalidateQueries({ queryKey: ["agentVersions", agentId, tenantId] }),
   };
 }

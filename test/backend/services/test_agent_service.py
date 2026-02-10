@@ -325,7 +325,66 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "unavailable_reasons": []
     }
     assert result == expected_result
-    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
+    mock_search_tools.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant")
+    mock_query_sub_agents_id.assert_called_once_with(
+        main_agent_id=123, tenant_id="test_tenant")
+    mock_check_availability.assert_called_once()
+
+
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+    """
+    Test get_agent_info_impl with explicit version_no parameter.
+
+    This test verifies that:
+    1. The function correctly passes version_no to search_agent_info_by_agent_id
+    2. It works correctly when version_no is explicitly provided
+    """
+    # Setup
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent"
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+
+    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_search_tools.return_value = mock_tools
+
+    mock_sub_agent_ids = [456, 789]
+    mock_query_sub_agents_id.return_value = mock_sub_agent_ids
+
+    # Mock get_model_by_model_id - return None for model_id=None
+    mock_get_model_by_model_id.return_value = None
+
+    # Mock check_agent_availability - agent is available
+    mock_check_availability.return_value = (True, [])
+
+    # Execute with explicit version_no
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant", version_no=5)
+
+    # Assert
+    expected_result = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+        "tools": mock_tools,
+        "sub_agent_id_list": mock_sub_agent_ids,
+        "model_name": None,
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
+    }
+    assert result == expected_result
+    # Verify version_no is passed correctly
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 5)
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
@@ -476,6 +535,8 @@ async def test_get_agent_info_impl_exception_handling(mock_search_agent_info):
         await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 
     assert "Failed to get agent info" in str(context.value)
+    # Verify version_no parameter is passed (default value 0)
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
 @patch('backend.services.agent_service.update_agent')
@@ -1300,7 +1361,7 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
         assert result["model_name"] is None
         assert result["is_available"] == True
         assert result["unavailable_reasons"] == []
-        mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+        mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
 @patch('backend.services.agent_service.check_agent_availability')
@@ -1344,7 +1405,7 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
     assert result["model_name"] is None
     assert result["is_available"] == True
     assert result["unavailable_reasons"] == []
-    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
@@ -1811,6 +1872,7 @@ async def test_list_all_agent_info_impl_success(
             "group_ids": "",
             "created_by": "user1",
             "create_time": 1,
+            "current_version_no": None,  # Not published
         },
         {
             "agent_id": 2,
@@ -1821,6 +1883,7 @@ async def test_list_all_agent_info_impl_success(
             "group_ids": "1,2,3",
             "created_by": "user2",
             "create_time": 2,
+            "current_version_no": 1,  # Published
         }
     ]
 
@@ -1844,6 +1907,7 @@ async def test_list_all_agent_info_impl_success(
     assert result[0]["unavailable_reasons"] == []
     assert result[0]["group_ids"] == []
     assert result[0]["permission"] == "EDIT"  # Admin can edit all
+    assert result[0]["is_published"] == False  # current_version_no is None
     assert result[1]["agent_id"] == 2
     assert result[1]["name"] == "Agent 2"
     assert result[1]["display_name"] == "Display Agent 2"
@@ -1851,6 +1915,95 @@ async def test_list_all_agent_info_impl_success(
     assert result[1]["unavailable_reasons"] == []
     assert result[1]["group_ids"] == [1, 2, 3]
     assert result[1]["permission"] == "EDIT"  # Admin can edit all
+    assert result[1]["is_published"] == True  # current_version_no is not None
+
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
+    mock_get_user_tenant.assert_called_once_with("admin_user")
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_is_published_field(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """
+    Test that is_published field is correctly set based on current_version_no.
+
+    This test verifies that:
+    1. is_published is False when current_version_no is None
+    2. is_published is False when current_version_no field is missing
+    3. is_published is True when current_version_no is not None
+    """
+    # Setup mock agents with different current_version_no values
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Unpublished agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+            "current_version_no": None,  # Not published
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Published agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user2",
+            "create_time": 2,
+            "current_version_no": 1,  # Published
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent without current_version_no field",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user3",
+            "create_time": 3,
+            # current_version_no field is missing
+        }
+    ]
+
+    # Configure mocks
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
+
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Assert
+    assert len(result) == 3
+    # Agent 1: current_version_no is None -> is_published should be False
+    assert result[0]["agent_id"] == 1
+    assert result[0]["is_published"] == False
+    # Agent 2: current_version_no is 1 -> is_published should be True
+    assert result[1]["agent_id"] == 2
+    assert result[1]["is_published"] == True
+    # Agent 3: current_version_no field is missing -> is_published should be False
+    assert result[2]["agent_id"] == 3
+    assert result[2]["is_published"] == False
 
     # Verify mock calls
     mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
@@ -2028,6 +2181,7 @@ async def test_list_all_agent_info_impl_model_unavailable(
             "group_ids": "7,8,9",
             "created_by": "user1",
             "create_time": 1,
+            "current_version_no": None,
         }
     ]
 
@@ -2044,6 +2198,7 @@ async def test_list_all_agent_info_impl_model_unavailable(
     assert result[0]["is_available"] is False
     assert result[0]["unavailable_reasons"] == ["model_unavailable"]
     assert result[0]["group_ids"] == [7, 8, 9]
+    assert result[0]["is_published"] == False  # current_version_no is None
 
 
 @pytest.mark.asyncio
@@ -2100,12 +2255,14 @@ async def test_list_all_agent_info_impl_duplicate_names(
     assert agent1["is_available"] is True
     assert "duplicate_name" not in agent1["unavailable_reasons"]
     assert agent1["group_ids"] == [10]
+    assert agent1["is_published"] == False  # current_version_no is missing/None
 
     # The later created agent (agent_id=2) should be unavailable due to duplication
     agent2 = next(a for a in result if a["agent_id"] == 2)
     assert agent2["is_available"] is False
     assert "duplicate_name" in agent2["unavailable_reasons"]
     assert agent2["group_ids"] == [10, 11]
+    assert agent2["is_published"] == False  # current_version_no is missing/None
 
 
 @pytest.mark.asyncio
