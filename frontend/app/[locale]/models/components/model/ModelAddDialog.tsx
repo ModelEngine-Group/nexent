@@ -40,6 +40,26 @@ interface ModelAddDialogProps {
   defaultIsBatchImport?: boolean;
 }
 
+// Default form state for resetting
+const DEFAULT_FORM_STATE = {
+  type: MODEL_TYPES.LLM as ModelType,
+  name: "",
+  displayName: "",
+  url: "",
+  apiKey: "",
+  maxTokens: "4096",
+  isMultimodal: false,
+  isBatchImport: false,
+  provider: "modelengine",
+  modelEngineUrl: "",
+  vectorDimension: "1024",
+  chunkSizeRange: [
+    DEFAULT_EXPECTED_CHUNK_SIZE,
+    DEFAULT_MAXIMUM_CHUNK_SIZE,
+  ] as [number, number],
+  chunkingBatchSize: "10",
+};
+
 // Connectivity status type comes from utils
 
 // Helper function to translate error messages from backend
@@ -193,26 +213,8 @@ export const ModelAddDialog = ({
     // For other errors, return generic error key without showing backend details
     return { key: "model.dialog.error.addFailed" };
   };
-  const [form, setForm] = useState({
-    type: MODEL_TYPES.LLM as ModelType,
-    name: "",
-    displayName: "",
-    url: "",
-    apiKey: "",
-    maxTokens: "4096",
-    isMultimodal: false,
-    // Whether to import multiple models at once
-    isBatchImport: false,
-    provider: "modelengine",
-    modelEngineUrl: "",
-    vectorDimension: "1024",
-    // Default chunk size range for embedding models
-    chunkSizeRange: [
-      DEFAULT_EXPECTED_CHUNK_SIZE,
-      DEFAULT_MAXIMUM_CHUNK_SIZE,
-    ] as [number, number],
-    chunkingBatchSize: "10",
-  });
+  // Form state - initialize with default values
+  const [form, setForm] = useState(DEFAULT_FORM_STATE);
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
   const [connectivityStatus, setConnectivityStatus] = useState<{
@@ -257,6 +259,22 @@ export const ModelAddDialog = ({
     setShowModelList,
     setLoadingModelList,
   });
+
+  // Reset form to default state
+  const resetForm = useCallback(() => {
+    setForm(DEFAULT_FORM_STATE);
+    setConnectivityStatus({ status: null, message: "" });
+    setModelList([]);
+    setModelSearchTerm("");
+    setSelectedModelIds(new Set());
+    setShowModelList(false);
+  }, []);
+
+  // Wrap onClose to reset form before closing
+  const handleClose = useCallback(() => {
+    resetForm();
+    onClose();
+  }, [onClose, resetForm]);
 
   // When dialog opens, apply default provider and optional default batch mode
   useEffect(() => {
@@ -322,16 +340,30 @@ export const ModelAddDialog = ({
     setForm((prev) => ({
       ...prev,
       [field]: value,
+      // When provider changes, clear provider-related fields
+      ...(field === "provider"
+        ? {
+            url: "",
+            apiKey: "",
+            modelEngineUrl: "",
+          }
+        : {}),
     }));
     // If the key configuration item changes, clear the verification status
     if (
-      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(field)
+      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(field) ||
+      field === "provider"
     ) {
       setConnectivityStatus({ status: null, message: "" });
     }
     // Clear model search term when model type changes
     if (field === "type") {
       setModelSearchTerm("");
+    }
+    // Clear model list when provider changes
+    if (field === "provider") {
+      setModelList([]);
+      setSelectedModelIds(new Set());
     }
   };
 
@@ -495,7 +527,10 @@ export const ModelAddDialog = ({
         }),
       });
       if (result === 200) {
+        // Reset form state before closing
+        resetForm();
         onSuccess();
+        handleClose();
       }
     } catch (error: any) {
       const errorMessage =
@@ -505,13 +540,6 @@ export const ModelAddDialog = ({
         t("model.dialog.error.addFailed", { error: translatedError })
       );
     }
-
-    setForm((prev) => ({
-      ...prev,
-      isBatchImport: false,
-    }));
-
-    onClose();
   };
 
   // Handle settings button click
@@ -637,34 +665,14 @@ export const ModelAddDialog = ({
         type: modelType,
       };
 
-      // Reset the form
-      setForm({
-        type: form.type,
-        name: "",
-        displayName: "",
-        url: "",
-        apiKey: "",
-        maxTokens: "4096",
-        isMultimodal: false,
-        isBatchImport: false,
-        provider: "silicon",
-        modelEngineUrl: "",
-        vectorDimension: "1024",
-        chunkSizeRange: [
-          DEFAULT_EXPECTED_CHUNK_SIZE,
-          DEFAULT_MAXIMUM_CHUNK_SIZE,
-        ],
-        chunkingBatchSize: "10",
-      });
-
-      // Reset the connectivity status
-      setConnectivityStatus({ status: null, message: "" });
+      // Reset form state
+      resetForm();
 
       // Call the success callback, pass the new added model information
       await onSuccess(addedModel);
 
       // Close the dialog
-      onClose();
+      handleClose();
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -684,7 +692,7 @@ export const ModelAddDialog = ({
     <Modal
       title={t("model.dialog.title")}
       open={isOpen}
-      onCancel={onClose}
+      onCancel={handleClose}
       footer={null}
       destroyOnHidden
     >
@@ -1364,7 +1372,7 @@ export const ModelAddDialog = ({
 
         {/* Footer Buttons */}
         <div className="flex justify-end space-x-3">
-          <Button onClick={onClose}>{t("common.button.cancel")}</Button>
+          <Button onClick={handleClose}>{t("common.button.cancel")}</Button>
           <Button
             type="primary"
             onClick={handleAddModel}
