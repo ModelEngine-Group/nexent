@@ -2690,5 +2690,121 @@ class TestGetLlmModel:
         assert mock_tenant_config.get_model_config.call_args_list[1][1]["tenant_id"] == "tenant2"
 
 
+class TestInitToolListForTenant:
+    """Test cases for init_tool_list_for_tenant function"""
+
+    @pytest.mark.asyncio
+    @patch('backend.services.tool_configuration_service.check_tool_list_initialized')
+    @patch('backend.services.tool_configuration_service.update_tool_list')
+    async def test_init_tool_list_for_tenant_success_new_tenant(self, mock_update_tool_list, mock_check_initialized):
+        """Test successful initialization for a new tenant"""
+        # Mock that tools are not yet initialized for this tenant
+        mock_check_initialized.return_value = False
+
+        # Mock update_tool_list to complete successfully
+        mock_update_tool_list = AsyncMock()
+
+        from backend.services.tool_configuration_service import init_tool_list_for_tenant
+
+        result = await init_tool_list_for_tenant("new_tenant_id", "user_id_123")
+
+        # Verify that initialization was skipped (tools already exist)
+        assert result["status"] == "success"
+        assert result["message"] == "Tool list initialized successfully"
+        mock_check_initialized.assert_called_once_with("new_tenant_id")
+        mock_update_tool_list.assert_called_once_with(tenant_id="new_tenant_id", user_id="user_id_123")
+
+    @pytest.mark.asyncio
+    @patch('backend.services.tool_configuration_service.check_tool_list_initialized')
+    async def test_init_tool_list_for_tenant_already_initialized(self, mock_check_initialized):
+        """Test that initialization is skipped for already initialized tenant"""
+        # Mock that tools are already initialized for this tenant
+        mock_check_initialized.return_value = True
+
+        from backend.services.tool_configuration_service import init_tool_list_for_tenant
+
+        result = await init_tool_list_for_tenant("existing_tenant_id", "user_id_456")
+
+        # Verify that initialization was skipped
+        assert result["status"] == "already_initialized"
+        assert result["message"] == "Tool list already exists"
+        mock_check_initialized.assert_called_once_with("existing_tenant_id")
+
+    @pytest.mark.asyncio
+    @patch('backend.services.tool_configuration_service.check_tool_list_initialized')
+    @patch('backend.services.tool_configuration_service.update_tool_list')
+    @patch('backend.services.tool_configuration_service.logger')
+    async def test_init_tool_list_for_tenant_logging(self, mock_logger, mock_update_tool_list, mock_check_initialized):
+        """Test that init_tool_list_for_tenant logs appropriately"""
+        mock_check_initialized.return_value = False
+        mock_update_tool_list = AsyncMock()
+
+        from backend.services.tool_configuration_service import init_tool_list_for_tenant
+
+        await init_tool_list_for_tenant("tenant_xyz", "user_abc")
+
+        # Verify that info log was called for new tenant
+        mock_logger.info.assert_any_call(f"Initializing tool list for new tenant: tenant_xyz")
+
+
+class TestUpdateToolList:
+    """Test cases for update_tool_list function"""
+
+    @pytest.mark.asyncio
+    @patch('backend.services.tool_configuration_service.get_local_tools')
+    @patch('backend.services.tool_configuration_service.get_langchain_tools')
+    @patch('backend.services.tool_configuration_service.get_all_mcp_tools')
+    @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
+    async def test_update_tool_list_success(self, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
+        """Test successful tool list update"""
+        # Mock tools
+        mock_local_tools = [MagicMock(), MagicMock()]
+        mock_langchain_tools = [MagicMock()]
+        mock_mcp_tools = [MagicMock(), MagicMock(), MagicMock()]
+
+        mock_get_local.return_value = mock_local_tools
+        mock_get_langchain.return_value = mock_langchain_tools
+        mock_get_mcp = AsyncMock(return_value=mock_mcp_tools)
+
+        from backend.services.tool_configuration_service import update_tool_list
+
+        await update_tool_list("tenant123", "user456")
+
+        # Verify all tools were gathered and update was called
+        mock_get_local.assert_called_once()
+        mock_get_langchain.assert_called_once()
+        mock_get_mcp.assert_called_once_with("tenant123")
+        mock_update_table.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch('backend.services.tool_configuration_service.get_local_tools')
+    @patch('backend.services.tool_configuration_service.get_langchain_tools')
+    @patch('backend.services.tool_configuration_service.get_all_mcp_tools')
+    @patch('backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list')
+    async def test_update_tool_list_combines_all_sources(self, mock_update_table, mock_get_mcp, mock_get_langchain, mock_get_local):
+        """Test that update_tool_list combines tools from all sources"""
+        mock_local_tools = [MagicMock(name="local_tool_1")]
+        mock_langchain_tools = [MagicMock(name="langchain_tool_1")]
+        mock_mcp_tools = [MagicMock(name="mcp_tool_1")]
+
+        mock_get_local.return_value = mock_local_tools
+        mock_get_langchain.return_value = mock_langchain_tools
+        mock_get_mcp = AsyncMock(return_value=mock_mcp_tools)
+
+        from backend.services.tool_configuration_service import update_tool_list
+
+        await update_tool_list("tenant123", "user456")
+
+        # Get the tool_list argument passed to update_tool_table_from_scan_tool_list
+        call_args = mock_update_table.call_args
+        combined_tool_list = call_args.kwargs["tool_list"]
+
+        # Verify that combined list contains tools from all sources
+        assert len(combined_tool_list) == 3
+        assert mock_local_tools[0] in combined_tool_list
+        assert mock_langchain_tools[0] in combined_tool_list
+        assert mock_mcp_tools[0] in combined_tool_list
+
+
 if __name__ == '__main__':
     unittest.main()

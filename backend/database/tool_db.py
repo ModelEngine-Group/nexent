@@ -168,6 +168,25 @@ def query_tool_instances_by_agent_id(agent_id: int, tenant_id: str, version_no: 
         return [as_dict(tool) for tool in tools]
 
 
+def check_tool_list_initialized(tenant_id: str) -> bool:
+    """
+    Check if tool list has been initialized for the tenant.
+
+    Args:
+        tenant_id: Tenant ID to check
+
+    Returns:
+        True if tools have been initialized, False otherwise
+    """
+    with get_db_session() as session:
+        # Check if any tools exist for this tenant
+        count = session.query(ToolInfo).filter(
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.author == tenant_id
+        ).count()
+        return count > 0
+
+
 def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools

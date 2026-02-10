@@ -52,7 +52,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         get_user_info,
-        format_role_permissions
+        format_role_permissions,
+        init_tool_list_for_tenant
     )
 
 # Functions to test
@@ -553,13 +554,17 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_get_client.return_value = mock_client
         mock_parse_response.return_value = {"user": "data"}
 
-        result = await signup_user("test@example.com", "password123")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user("test@example.com", "password123")
 
-        self.assertEqual(result, {"user": "data"})
-        mock_verify_code.assert_not_called()
-        mock_generate_tts.assert_not_called()
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="test@example.com")
-        mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            self.assertEqual(result, {"user": "data"})
+            mock_verify_code.assert_not_called()
+            mock_generate_tts.assert_not_called()
+            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="test@example.com")
+            mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            # Verify init_tool_list_for_tenant was called for new tenant
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.parse_supabase_response')
     @patch('backend.services.user_management_service.insert_user_tenant')
@@ -576,11 +581,15 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_get_client.return_value = mock_client
         mock_parse_response.return_value = {"user": "data"}
 
-        result = await signup_user("user@example.com", "password123")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user("user@example.com", "password123")
 
-        self.assertEqual(result, {"user": "data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="user@example.com")
-        mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            self.assertEqual(result, {"user": "data"})
+            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="user@example.com")
+            mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_no_user_returned(self, mock_get_client):
@@ -637,16 +646,20 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             {"group_id": 3, "user_id": "user-123", "already_member": False}
         ]
 
-        result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
 
-        # Verify generate_tts_stt_4_admin was called for admin user
-        mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
+            # Verify generate_tts_stt_4_admin was called for admin user
+            mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
 
-        self.assertEqual(result, {"user": "admin_data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
-        mock_use_invite.assert_called_once_with("ADMIN123", "user-123")
-        mock_add_groups.assert_called_once_with("user-123", [1, 2, 3], "user-123")
-        mock_parse_response.assert_called_once_with(False, mock_response, "ADMIN")
+            self.assertEqual(result, {"user": "admin_data"})
+            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
+            mock_use_invite.assert_called_once_with("ADMIN123", "user-123")
+            mock_add_groups.assert_called_once_with("user-123", [1, 2, 3], "user-123")
+            mock_parse_response.assert_called_once_with(False, mock_response, "ADMIN")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
@@ -687,13 +700,17 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             {"group_id": 5, "user_id": "user-456", "already_member": False}
         ]
 
-        result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
 
-        self.assertEqual(result, {"user": "dev_data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
-        mock_use_invite.assert_called_once_with("DEV456", "user-456")
-        mock_add_groups.assert_called_once_with("user-456", [4, 5], "user-456")
-        mock_parse_response.assert_called_once_with(False, mock_response, "DEV")
+            self.assertEqual(result, {"user": "dev_data"})
+            mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
+            mock_use_invite.assert_called_once_with("DEV456", "user-456")
+            mock_add_groups.assert_called_once_with("user-456", [4, 5], "user-456")
+            mock_parse_response.assert_called_once_with(False, mock_response, "DEV")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-456")
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -724,7 +741,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
              patch('backend.services.user_management_service.insert_user_tenant'), \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
-             patch('backend.services.user_management_service.use_invitation_code'):
+             patch('backend.services.user_management_service.use_invitation_code'), \
+             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
 
             mock_user = MagicMock()
             mock_user.id = "user-123"
@@ -741,6 +759,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             # Verify the code was converted to uppercase in the check
             mock_check_available.assert_called_with("LOWERCASE")
             mock_get_invite_code.assert_called_with("LOWERCASE")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -772,7 +792,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
              patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
              patch('backend.services.user_management_service.use_invitation_code'), \
-             patch('backend.services.user_management_service.generate_tts_stt_4_admin') as mock_generate_tts:
+             patch('backend.services.user_management_service.generate_tts_stt_4_admin') as mock_generate_tts, \
+             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
 
             mock_user = MagicMock()
             mock_user.id = "user-123"
@@ -789,6 +810,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
             mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
             mock_parse.assert_called_with(False, mock_response, "ADMIN")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -806,7 +829,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
              patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
-             patch('backend.services.user_management_service.use_invitation_code'):
+             patch('backend.services.user_management_service.use_invitation_code'), \
+             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
 
             mock_user = MagicMock()
             mock_user.id = "user-123"
@@ -822,6 +846,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             # Verify DEV role was assigned and TTS/STT generation was NOT called
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
             mock_parse.assert_called_with(False, mock_response, "DEV")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.check_invitation_available')
     async def test_signup_user_with_invite_code_validation_exception_conversion(self, mock_check_available):
