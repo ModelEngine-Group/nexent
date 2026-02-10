@@ -2,7 +2,6 @@ import os
 import subprocess
 import sys
 import logging
-import argparse  # Add argparse for command line arguments
 
 # Configure logger
 logger = logging.getLogger("run_all_test")
@@ -47,13 +46,7 @@ def check_required_packages():
     return True
 
 
-def run_tests(specific_test_file=None):
-    """Find and run all test files in the app directory using pytest with coverage
-
-    Args:
-        specific_test_file: Optional path to a specific test file to run.
-                           If provided, only this file will be executed.
-    """
+def run_tests():
     """Find and run all test files in the app directory using pytest with coverage"""
     # Get the script directory path
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -124,9 +117,6 @@ def run_tests(specific_test_file=None):
 
     # Run each test file with pytest-cov
     for test_file in test_files:
-        # If a specific test file is provided, skip other files
-        if specific_test_file and specific_test_file not in test_file:
-            continue
         # Get test file path relative to project root
         rel_path = os.path.relpath(test_file, project_root)
         # Replace backslashes with forward slashes for pytest
@@ -503,19 +493,5 @@ def generate_error_report(test_results):
 
 
 if __name__ == "__main__":
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Run test files for the Nexent project"
-    )
-    parser.add_argument(
-        "--test-file",
-        "-f",
-        help="Path to a specific test file to run (e.g., 'test/backend/services/test_model_provider_service.py')"
-    )
-    args = parser.parse_args()
-
-    # Get the specific test file path
-    specific_test_file = args.test_file
-
-    success = run_tests(specific_test_file=specific_test_file)
+    success = run_tests()
     sys.exit(0 if success else 1)

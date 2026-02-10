@@ -48,9 +48,9 @@ jobs:
           uv pip install -e "../sdk[dev]"
           cd ..
 
-      - name: Run specific test file
+      - name: Run all tests and collect coverage
         run: |
-          source backend/.venv/bin/activate && python test/run_all_test.py --test-file test/backend/services/test_model_provider_service.py
+          source backend/.venv/bin/activate && python test/run_all_test.py
           TEST_EXIT_CODE=$?
 
           if [ -f "test/coverage.xml" ]; then
