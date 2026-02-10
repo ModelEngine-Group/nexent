@@ -4,7 +4,7 @@ from typing import Dict, List
 import aiohttp
 
 from consts.const import DEFAULT_LLM_MAX_TOKENS
-from .base import AbstractModelProvider, _classify_provider_error
+from backend.services.providers.base import AbstractModelProvider, _classify_provider_error
 
 logger = logging.getLogger("model_provider")
 

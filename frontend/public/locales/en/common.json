@@ -685,7 +685,6 @@
   "model.dialog.error.invalidConfiguration": "Invalid configuration: {{error}}",
   "model.dialog.error.addFailedLog": "Failed to add model",
   "model.dialog.error.noModelsFetched": "No models retrieved. Please check if models are deployed on ModelEngine",
-  "model.dialog.error.apiConnectionFailed": "Failed to connect to ModelEngine. Please verify the URL and API Key",
   "model.dialog.error.provider": {
     "title": "Model Provider Connection Failed",
     "noModels": "No models retrieved. Please check if models are deployed on {{provider}}",

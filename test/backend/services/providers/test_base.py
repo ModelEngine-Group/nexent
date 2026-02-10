@@ -165,6 +165,251 @@ class TestClassifyProviderError:
         )
         assert result[0]["_error"] == "connection_failed"
 
+    def test_classify_client_connector_error_ssl(self):
+        """Test classification of aiohttp.ClientConnectorError with SSL error."""
+        import aiohttp
+        from unittest.mock import Mock, patch
+
+        # Create a subclass that overrides __str__
+        class MockClientConnectorError(aiohttp.ClientConnectorError):
+            def __init__(self, message):
+                mock_conn_key = Mock()
+                mock_conn_key.ssl = False
+                mock_os_error = Mock()
+                mock_os_error.errno = 1
+                mock_os_error.strerror = message
+                super().__init__(connection_key=mock_conn_key, os_error=mock_os_error)
+                self._message = message
+
+            def __str__(self):
+                return self._message
+
+        mock_exception = MockClientConnectorError("SSL certificate verification failed")
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            exception=mock_exception
+        )
+        assert result[0]["_error"] == "ssl_error"
+
+    def test_classify_client_connector_error_certificate_in_message(self):
+        """Test classification of aiohttp.ClientConnectorError with certificate in message."""
+        import aiohttp
+        from unittest.mock import Mock
+
+        class MockClientConnectorError(aiohttp.ClientConnectorError):
+            def __init__(self, message):
+                mock_conn_key = Mock()
+                mock_conn_key.ssl = False
+                mock_os_error = Mock()
+                mock_os_error.errno = 1
+                mock_os_error.strerror = message
+                super().__init__(connection_key=mock_conn_key, os_error=mock_os_error)
+                self._message = message
+
+            def __str__(self):
+                return self._message
+
+        mock_exception = MockClientConnectorError("Certificate has expired")
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            exception=mock_exception
+        )
+        assert result[0]["_error"] == "ssl_error"
+
+    def test_classify_client_connector_error_non_ssl(self):
+        """Test classification of aiohttp.ClientConnectorError without SSL error."""
+        import aiohttp
+        from unittest.mock import Mock
+
+        class MockClientConnectorError(aiohttp.ClientConnectorError):
+            def __init__(self, message):
+                mock_conn_key = Mock()
+                mock_conn_key.ssl = False
+                mock_os_error = Mock()
+                mock_os_error.errno = 111
+                mock_os_error.strerror = message
+                super().__init__(connection_key=mock_conn_key, os_error=mock_os_error)
+                self._message = message
+
+            def __str__(self):
+                return self._message
+
+        mock_exception = MockClientConnectorError("Connection refused")
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            exception=mock_exception
+        )
+        assert result[0]["_error"] == "connection_failed"
+
+    def test_classify_429_too_many_requests(self):
+        """Test classification of 429 Too Many Requests error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=429,
+            error_message="Rate limit exceeded"
+        )
+        assert result[0]["_error"] == "api_error"
+        assert result[0]["_http_code"] == 429
+
+    def test_classify_408_request_timeout(self):
+        """Test classification of 408 Request Timeout error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=408,
+            error_message="Request timed out"
+        )
+        assert result[0]["_error"] == "api_error"
+        assert result[0]["_http_code"] == 408
+
+    def test_classify_422_unprocessable_entity(self):
+        """Test classification of 422 Unprocessable Entity error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=422,
+            error_message="Validation failed"
+        )
+        assert result[0]["_error"] == "api_error"
+        assert result[0]["_http_code"] == 422
+
+    def test_classify_426_upgrade_required(self):
+        """Test classification of 426 Upgrade Required error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=426,
+            error_message="TLS upgrade required"
+        )
+        assert result[0]["_error"] == "api_error"
+        assert result[0]["_http_code"] == 426
+
+    def test_classify_428_precondition_failed(self):
+        """Test classification of 428 Precondition Failed error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=428,
+            error_message="Precondition required"
+        )
+        assert result[0]["_error"] == "api_error"
+        assert result[0]["_http_code"] == 428
+
+    def test_classify_503_service_unavailable(self):
+        """Test classification of 503 Service Unavailable error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=503,
+            error_message="Service temporarily unavailable"
+        )
+        assert result[0]["_error"] == "server_error"
+        assert result[0]["_http_code"] == 503
+
+    def test_classify_504_gateway_timeout(self):
+        """Test classification of 504 Gateway Timeout error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=504,
+            error_message="Gateway timeout"
+        )
+        assert result[0]["_error"] == "server_error"
+        assert result[0]["_http_code"] == 504
+
+    def test_classify_507_insufficient_storage(self):
+        """Test classification of 507 Insufficient Storage error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=507,
+            error_message="Insufficient storage"
+        )
+        assert result[0]["_error"] == "server_error"
+        assert result[0]["_http_code"] == 507
+
+    def test_classify_509_bandwidth_limit_exceeded(self):
+        """Test classification of 509 Bandwidth Limit Exceeded error."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=509,
+            error_message="Bandwidth limit exceeded"
+        )
+        assert result[0]["_error"] == "server_error"
+        assert result[0]["_http_code"] == 509
+
+    def test_classify_error_message_only_no_status_no_exception(self):
+        """Test classification when only error_message is provided (no status_code, no exception)."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            error_message="Something went wrong"
+        )
+        assert result[0]["_error"] == "connection_failed"
+        assert "TestProvider" in result[0]["_message"]
+
+    def test_classify_with_empty_error_message(self):
+        """Test classification with empty error message string."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=400,
+            error_message=""
+        )
+        assert result[0]["_error"] == "api_error"
+        assert result[0]["_http_code"] == 400
+
+    def test_classify_with_none_error_message(self):
+        """Test classification with None error message."""
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            status_code=500,
+            error_message=None
+        )
+        assert result[0]["_error"] == "server_error"
+        assert result[0]["_http_code"] == 500
+
+    def test_classify_client_connector_error_connection_error(self):
+        """Test classification of aiohttp.ClientConnectorError with connection error."""
+        import aiohttp
+        from unittest.mock import Mock
+
+        class MockClientConnectorError(aiohttp.ClientConnectorError):
+            def __init__(self, message):
+                mock_conn_key = Mock()
+                mock_conn_key.ssl = False
+                mock_os_error = Mock()
+                mock_os_error.errno = 113
+                mock_os_error.strerror = message
+                super().__init__(connection_key=mock_conn_key, os_error=mock_os_error)
+                self._message = message
+
+            def __str__(self):
+                return self._message
+
+        mock_exception = MockClientConnectorError("Host unreachable")
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            exception=mock_exception
+        )
+        assert result[0]["_error"] == "connection_failed"
+
+    def test_classify_client_connector_error_dns_resolution_failed(self):
+        """Test classification of aiohttp.ClientConnectorError with DNS resolution failure."""
+        import aiohttp
+        from unittest.mock import Mock
+
+        class MockClientConnectorError(aiohttp.ClientConnectorError):
+            def __init__(self, message):
+                mock_conn_key = Mock()
+                mock_conn_key.ssl = False
+                mock_os_error = Mock()
+                mock_os_error.errno = -2
+                mock_os_error.strerror = message
+                super().__init__(connection_key=mock_conn_key, os_error=mock_os_error)
+                self._message = message
+
+            def __str__(self):
+                return self._message
+
+        mock_exception = MockClientConnectorError("Could not resolve host")
+        result = _classify_provider_error(
+            provider_name="TestProvider",
+            exception=mock_exception
+        )
+        assert result[0]["_error"] == "connection_failed"
+
 
 class TestAbstractModelProvider:
     """Tests for AbstractModelProvider abstract class."""
@@ -196,3 +441,95 @@ class TestAbstractModelProvider:
 
         provider = ConcreteProvider()
         assert isinstance(provider, AbstractModelProvider)
+
+    def test_concrete_provider_get_models_returns_list(self):
+        """Test that concrete provider get_models returns a list of models."""
+
+        class ConcreteProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return [
+                    {"id": "model-1", "name": "Model 1"},
+                    {"id": "model-2", "name": "Model 2"},
+                ]
+
+        provider = ConcreteProvider()
+        # get_models is async, so we need to get the coroutine and inspect it
+        coroutine = provider.get_models({})
+        assert hasattr(coroutine, '__await__')
+
+    @pytest.mark.asyncio
+    async def test_concrete_provider_get_models_with_config(self):
+        """Test that concrete provider get_models accepts and uses config."""
+
+        class ConcreteProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return [{"id": provider_config.get("model_id", "default")}]
+
+        provider = ConcreteProvider()
+        result = await provider.get_models({"model_id": "custom-model"})
+        assert result[0]["id"] == "custom-model"
+
+    @pytest.mark.asyncio
+    async def test_concrete_provider_get_models_empty_config(self):
+        """Test that concrete provider get_models handles empty config."""
+
+        class ConcreteProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return [{"id": "default"}]
+
+        provider = ConcreteProvider()
+        result = await provider.get_models({})
+        assert result[0]["id"] == "default"
+
+    @pytest.mark.asyncio
+    async def test_concrete_provider_get_models_none_config(self):
+        """Test that concrete provider get_models handles None config."""
+
+        class ConcreteProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return [{"id": "test"}]
+
+        provider = ConcreteProvider()
+        result = await provider.get_models(None)
+        assert result[0]["id"] == "test"
+
+    @pytest.mark.asyncio
+    async def test_concrete_provider_get_models_is_async(self):
+        """Test that get_models is properly defined as async."""
+
+        class ConcreteProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return [{"id": "async-test"}]
+
+        provider = ConcreteProvider()
+        result = await provider.get_models({})
+        assert result[0]["id"] == "async-test"
+
+    def test_provider_with_additional_methods(self):
+        """Test that concrete providers can have additional methods."""
+
+        class ExtendedProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return [{"id": "test"}]
+
+            def get_provider_info(self):
+                return {"name": "ExtendedProvider", "version": "1.0"}
+
+        provider = ExtendedProvider()
+        assert isinstance(provider, AbstractModelProvider)
+        assert provider.get_provider_info()["name"] == "ExtendedProvider"
+
+    def test_provider_inheritance_chain(self):
+        """Test that providers can inherit from other provider classes."""
+
+        class BaseProvider(AbstractModelProvider):
+            async def get_models(self, provider_config):
+                return []
+
+        class ExtendedProvider(BaseProvider):
+            async def get_models(self, provider_config):
+                return [{"id": "extended"}]
+
+        provider = ExtendedProvider()
+        assert isinstance(provider, AbstractModelProvider)
+        assert isinstance(provider, BaseProvider)

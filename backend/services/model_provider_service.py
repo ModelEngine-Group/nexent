@@ -10,9 +10,9 @@ from consts.provider import ProviderEnum
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from utils.model_name_utils import split_repo_name, add_repo_to_name
-from .providers.base import AbstractModelProvider
-from .providers.silicon_provider import SiliconModelProvider
-from .providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
+from backend.services.providers.base import AbstractModelProvider
+from backend.services.providers.silicon_provider import SiliconModelProvider
+from backend.services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
 
 logger = logging.getLogger("model_provider")
 
