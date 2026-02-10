@@ -79,18 +79,20 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
 @agent_config_router.post("/search_info")
 async def search_agent_info_api(
     agent_id: int = Body(...),
+    version_no: int = Body(0),
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None)
 ):
     """
-    Search agent info by agent_id
+    Search agent info by agent_id and version_no
+    version_no defaults to 0 (current/draft version)
     """
     try:
         _, auth_tenant_id = get_current_user_id(authorization)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
-        return await get_agent_info_impl(agent_id, effective_tenant_id)
+        return await get_agent_info_impl(agent_id, effective_tenant_id, version_no)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(
@@ -317,17 +319,22 @@ async def compare_versions_api(
 @agent_config_router.get("/{agent_id}/versions", response_model=VersionListResponse)
 async def get_version_list_api(
     agent_id: int,
-    authorization: str = Header(None),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    request: Request = None
 ):
     """
     Get version list for an agent
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        logger.info(f"Get version list for agent_id: {agent_id}, tenant_id: {tenant_id}")
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        logger.info(f"Get version list for agent_id: {agent_id}, tenant_id: {effective_tenant_id}")
         result = get_version_list_impl(
             agent_id=agent_id,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
         )
         logger.info(f"Version list: {result}")
         return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))

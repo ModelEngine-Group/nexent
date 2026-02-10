@@ -129,6 +129,8 @@ export const fetchAgentList = async (tenantId?: string) => {
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
       permission: agent.permission,
+      is_published: agent.is_published,
+      current_version_no: agent.current_version_no,
     }));
 
     return {
@@ -642,9 +644,10 @@ export const regenerateAgentNameBatch = async (payload: {
  * search agent info by agent id
  * @param agentId agent id
  * @param tenantId optional tenant ID for filtering
+ * @param versionNo optional version number (default 0 for current/draft version)
  * @returns agent detail info
  */
-export const searchAgentInfo = async (agentId: number, tenantId?: string) => {
+export const searchAgentInfo = async (agentId: number, tenantId?: string, versionNo?: number) => {
   try {
     const url = tenantId 
       ? `${API_ENDPOINTS.agent.searchInfo}?tenant_id=${encodeURIComponent(tenantId)}`
@@ -652,7 +655,10 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string) => {
     const response = await fetch(url, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify(agentId),
+      body: JSON.stringify({
+        agent_id: agentId,
+        version_no: versionNo ?? 0,
+      }),
     });
 
     if (!response.ok) {

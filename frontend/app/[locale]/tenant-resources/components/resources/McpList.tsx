@@ -358,16 +358,16 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
         const key = `${record.service_name}__${record.mcp_url}`;
         return (
           <Tag
-            color={isAvailable ? "success" : "error"}
+            color={healthCheckLoading[key] ? "#2E4053" : isAvailable ? "#229954" : "#E74C3C"}
             className="inline-flex items-center"
             variant="solid"
           >
             {healthCheckLoading[key] ? (
-              <LoaderCircle className="animate-spin mr-1" size={12} />
+              <LoaderCircle className="w-3 h-3 animate-spin mr-1" />
             ) : isAvailable ? (
-              <CircleCheck className="mr-1" size={12} />
+              <CircleCheck className="w-3 h-3 mr-1" />
             ) : (
-              <CircleX className="mr-1" size={12} />
+              <CircleX className="w-3 h-3 mr-1" />
             )}
             {t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}
           </Tag>
@@ -467,13 +467,13 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "15%",
       render: (status: string) => {
         const statusConfig: Record<string, { color: string; icon: React.ReactNode }> = {
-          running: { color: "success", icon: <CircleCheck size={12} /> },
-          exited: { color: "error", icon: <CircleX size={12} /> },
-          created: { color: "processing", icon: <LoaderCircle size={12} className="animate-spin" /> },
-          paused: { color: "warning", icon: <AlertCircle size={12} /> },
-          restarting: { color: "processing", icon: <LoaderCircle size={12} className="animate-spin" /> },
+          running: { color: "#229954", icon: <CircleCheck className="w-3 h-3" /> },
+          exited: { color: "#E74C3C", icon: <CircleX className="w-3 h-3" /> },
+          created: { color: "#2E4053", icon: <LoaderCircle className="w-3 h-3 animate-spin" /> },
+          paused: { color: "#AEB6BF", icon: <AlertCircle className="w-3 h-3" /> },
+          restarting: { color: "#2E4053", icon: <LoaderCircle className="w-3 h-3 animate-spin" /> },
         };
-        const config = statusConfig[status || ""] || { color: "default", icon: <AlertCircle size={12} /> };
+        const config = statusConfig[status || ""] || { color: "#2E4053", icon: <AlertCircle className="w-3 h-3" /> };
         return (
           <Tag color={config.color} className="inline-flex items-center" variant="solid">
             <span className="mr-1">{config.icon}</span>
