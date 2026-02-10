@@ -98,6 +98,9 @@ def file_process(self,
 - `.odt` - OpenDocument文本
 - `.pptx` - PowerPoint 2007及更高版本
 - `.ppt` - PowerPoint 97-2003版本
+- `.xml` - XML数据文件
+- `.json` - JSON数据文件
+- `.csv` - 逗号分隔值文件
 
 ## 💡 使用示例
 

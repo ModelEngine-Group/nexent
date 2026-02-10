@@ -67,7 +67,8 @@ quality = [
     "pytest>=8.1.0"
 ]
 data_process = [
-    "unstructured[all-docs]"
+    "unstructured[all-docs]",
+    "orjson>=3.10"
 ]
 performance = [
     # OpenTelemetry Core Components

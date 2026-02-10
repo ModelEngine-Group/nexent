@@ -272,6 +272,7 @@ def get_content_type(file_path: str) -> str:
                   '.html': 'text/html',
                   '.htm': 'text/html',
                   '.json': 'application/json',
+                  '.epub': 'application/epuub',
                   '.xml': 'application/xml',
                   '.zip': 'application/zip',
                   '.rar': 'application/x-rar-compressed',

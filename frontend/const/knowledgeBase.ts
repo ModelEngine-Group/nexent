@@ -120,7 +120,12 @@ export const FILE_EXTENSIONS = {
   PPT: 'ppt',
   PPTX: 'pptx',
   TXT: 'txt',
-  MD: 'md'
+  MD: 'md',
+  EPUB: 'epub',
+  CSV: 'csv',
+  HTML: 'html',
+  XML: 'xml',
+  JSON: 'json'
 } as const;
 
 // File type constants
@@ -131,6 +136,11 @@ export const FILE_TYPES = {
   POWERPOINT: 'PowerPoint',
   TEXT: 'Text',
   MARKDOWN: 'Markdown',
+  EPUB: 'EPUB',
+  CSV: 'CSV',
+  JSON: 'JSON',
+  HTML: 'HTML',
+  XML: 'XML',
   UNKNOWN: 'Unknown'
 } as const;
 
@@ -144,5 +154,10 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.PPT]: FILE_TYPES.POWERPOINT,
   [FILE_EXTENSIONS.PPTX]: FILE_TYPES.POWERPOINT,
   [FILE_EXTENSIONS.TXT]: FILE_TYPES.TEXT,
-  [FILE_EXTENSIONS.MD]: FILE_TYPES.MARKDOWN
+  [FILE_EXTENSIONS.MD]: FILE_TYPES.MARKDOWN,
+  [FILE_EXTENSIONS.CSV]: FILE_TYPES.CSV,
+  [FILE_EXTENSIONS.JSON]: FILE_EXTENSIONS.JSON,
+  [FILE_EXTENSIONS.HTML]: FILE_TYPES.HTML,
+  [FILE_EXTENSIONS.XML]: FILE_TYPES.XML,
+  [FILE_EXTENSIONS.EPUB]: FILE_TYPES.EPUB
 } as const;
