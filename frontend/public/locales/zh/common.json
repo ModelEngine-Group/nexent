@@ -1266,6 +1266,7 @@
   "tenantResources.groups.totalMembers": "总成员数",
   "tenantResources.groups.updated": "用户组已更新",
   "tenantResources.groups.noDescription": "无描述",
+  "tenantResources.groups.duplicateName": "用户组名称已存在，请使用其他名称",
 
   "tenantResources.knowledgeBases.enterDescription": "可选描述",
   "tenantResources.knowledgeBases.enterName": "例如：公司文档",

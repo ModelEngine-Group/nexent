@@ -155,10 +155,12 @@ def test_get_groups_by_tenant_success(mock_query_groups_by_tenant, mock_count_us
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.check_group_name_exists')
 @patch('backend.services.group_service.add_group')
-def test_create_group_success(mock_add_group, mock_get_user, mock_user_info):
+def test_create_group_success(mock_add_group, mock_check_name, mock_get_user, mock_user_info):
     """Test creating group successfully"""
     mock_get_user.return_value = mock_user_info
+    mock_check_name.return_value = False  # Name doesn't exist
     mock_add_group.return_value = 123
 
     result = create_group(
@@ -176,6 +178,7 @@ def test_create_group_success(mock_add_group, mock_get_user, mock_user_info):
         group_description="Description",
         created_by="test_user"
     )
+    mock_check_name.assert_called_once_with("test_tenant", "Test Group")
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
@@ -193,6 +196,24 @@ def test_create_group_unauthorized(mock_get_user, mock_user_info):
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.check_group_name_exists')
+def test_create_group_duplicate_name(mock_check_name, mock_get_user, mock_user_info):
+    """Test creating group with duplicate name"""
+    mock_get_user.return_value = mock_user_info
+    mock_check_name.return_value = True  # Simulate name already exists
+
+    with pytest.raises(ValidationError, match="Group name 'Test Group' already exists"):
+        create_group(
+            tenant_id="test_tenant",
+            group_name="Test Group",
+            group_description="Description",
+            user_id="test_user"
+        )
+
+    mock_check_name.assert_called_once_with("test_tenant", "Test Group")
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
 def test_create_group_user_not_found(mock_get_user):
     """Test creating group when user doesn't exist"""
     mock_get_user.return_value = None
@@ -206,12 +227,14 @@ def test_create_group_user_not_found(mock_get_user):
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.check_group_name_exists')
 @patch('backend.services.group_service.query_groups')
 @patch('backend.services.group_service.modify_group')
-def test_update_group_success(mock_modify_group, mock_query_groups, mock_get_user, mock_user_info, mock_group_info):
+def test_update_group_success(mock_modify_group, mock_query_groups, mock_check_name, mock_get_user, mock_user_info, mock_group_info):
     """Test updating group successfully"""
     mock_get_user.return_value = mock_user_info
     mock_query_groups.return_value = mock_group_info
+    mock_check_name.return_value = False  # Name doesn't exist
     mock_modify_group.return_value = True
 
     result = update_group(
@@ -225,6 +248,11 @@ def test_update_group_success(mock_modify_group, mock_query_groups, mock_get_use
         group_id=123,
         updates={"group_name": "Updated Group"},
         updated_by="test_user"
+    )
+    mock_check_name.assert_called_once_with(
+        mock_group_info["tenant_id"],
+        "Updated Group",
+        exclude_group_id=123
     )
 
 
@@ -268,6 +296,29 @@ def test_update_group_unauthorized_role(mock_get_user, mock_user_info):
             updates={"group_name": "Updated Group"},
             user_id="test_user"
         )
+
+
+@patch('backend.services.group_service.get_user_tenant_by_user_id')
+@patch('backend.services.group_service.query_groups')
+@patch('backend.services.group_service.check_group_name_exists')
+def test_update_group_duplicate_name(mock_check_name, mock_query_groups, mock_get_user, mock_user_info, mock_group_info):
+    """Test updating group with duplicate name"""
+    mock_get_user.return_value = mock_user_info
+    mock_query_groups.return_value = mock_group_info
+    mock_check_name.return_value = True  # Simulate name already exists
+
+    with pytest.raises(ValidationError, match="Group name 'Test Group' already exists"):
+        update_group(
+            group_id=123,
+            updates={"group_name": "Test Group"},  # Trying to rename to existing name
+            user_id="test_user"
+        )
+
+    mock_check_name.assert_called_once_with(
+        mock_group_info["tenant_id"],
+        "Test Group",
+        exclude_group_id=123
+    )
 
 
 @patch('backend.services.group_service.get_user_tenant_by_user_id')
