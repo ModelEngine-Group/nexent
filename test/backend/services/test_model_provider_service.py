@@ -1,12 +1,21 @@
+from backend.services.model_provider_service import (
+    SiliconModelProvider,
+    prepare_model_dict,
+    merge_existing_model_tokens,
+    get_provider_models,
+)
 from unittest import mock
 import sys
 import pytest
 
 # Create a generic MockModule to stand-in for optional/imported-at-runtime modules
+
+
 class MockModule(mock.MagicMock):
     @classmethod
     def __getattr__(cls, item):
         return mock.MagicMock()
+
 
 # ---------------------------------------------------------------------------
 # Insert minimal stub modules so that the service under test can be imported
@@ -17,6 +26,8 @@ for module_path in [
     "utils", "utils.model_name_utils",
     "services", "services.model_health_service",
     "database", "database.model_management_db",
+    "services.providers", "services.providers.base",
+    "services.providers.silicon_provider", "services.providers.modelengine_provider",
 ]:
     sys.modules.setdefault(module_path, MockModule())
 
@@ -29,24 +40,33 @@ sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
 sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # Mock ProviderEnum for get_provider_models tests
+
+
 class _ProviderEnumStub:
     SILICON = mock.Mock(value="silicon")
     MODELENGINE = mock.Mock(value="modelengine")
+
 
 sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
 
 # Minimal ModelConnectStatusEnum stub so that prepare_model_dict can access
 # `ModelConnectStatusEnum.NOT_DETECTED.value` without importing the real enum.
+
+
 class _EnumStub:
     NOT_DETECTED = mock.Mock(value="not_detected")
     DETECTING = mock.Mock(value="detecting")
 
+
 sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
 
 # Mock exception classes
+
+
 class _TimeoutExceptionStub(Exception):
     """Mock TimeoutException for testing."""
     pass
+
 
 sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
 
@@ -57,12 +77,7 @@ sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = 
 # Now that the import prerequisites are satisfied we can safely import the
 # module under test.
 # ---------------------------------------------------------------------------
-from backend.services.model_provider_service import (
-    SiliconModelProvider,
-    prepare_model_dict,
-    merge_existing_model_tokens,
-    get_provider_models,
-)
+
 
 # ---------------------------------------------------------------------------
 # Test-cases for SiliconModelProvider.get_models
@@ -74,8 +89,8 @@ async def test_get_models_llm_success():
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
     # Patch HTTP client & constant inside the provider module
-    with mock.patch("backend.services.model_provider_service.httpx.AsyncClient") as mock_client, \
-         mock.patch("backend.services.model_provider_service.SILICON_GET_URL", "https://silicon.com"):
+    with mock.patch("backend.services.providers.silicon_provider.httpx.AsyncClient") as mock_client, \
+            mock.patch("backend.services.providers.silicon_provider.SILICON_GET_URL", "https://silicon.com"):
 
         # Prepare mocked http client / response behaviour
         mock_client_instance = mock.AsyncMock()
@@ -91,7 +106,8 @@ async def test_get_models_llm_success():
         result = await SiliconModelProvider().get_models(provider_config)
 
         # Assert returned value & correct HTTP call
-        assert result == [{"id": "gpt-4", "model_tag": "chat", "model_type": "llm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}]
+        assert result == [{"id": "gpt-4", "model_tag": "chat", "model_type": "llm",
+                           "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}]
         mock_client_instance.get.assert_called_once_with(
             "https://silicon.com?sub_type=chat",
             headers={"Authorization": "Bearer test-key"},
@@ -103,15 +119,16 @@ async def test_get_models_embedding_success():
     """Silicon provider should append embedding tag/type for embedding models."""
     provider_config = {"model_type": "embedding", "api_key": "test-key"}
 
-    with mock.patch("backend.services.model_provider_service.httpx.AsyncClient") as mock_client, \
-         mock.patch("backend.services.model_provider_service.SILICON_GET_URL", "https://silicon.com"):
+    with mock.patch("backend.services.providers.silicon_provider.httpx.AsyncClient") as mock_client, \
+            mock.patch("backend.services.providers.silicon_provider.SILICON_GET_URL", "https://silicon.com"):
 
         mock_client_instance = mock.AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_client_instance
 
         mock_response = mock.Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"id": "text-embedding-ada-002"}]}
+        mock_response.json.return_value = {
+            "data": [{"id": "text-embedding-ada-002"}]}
         mock_response.raise_for_status = mock.Mock()
         mock_client_instance.get.return_value = mock_response
 
@@ -133,8 +150,8 @@ async def test_get_models_unknown_type():
     """Unknown model types should not have extra annotations and should hit the base URL."""
     provider_config = {"model_type": "other", "api_key": "test-key"}
 
-    with mock.patch("backend.services.model_provider_service.httpx.AsyncClient") as mock_client, \
-         mock.patch("backend.services.model_provider_service.SILICON_GET_URL", "https://silicon.com"):
+    with mock.patch("backend.services.providers.silicon_provider.httpx.AsyncClient") as mock_client, \
+            mock.patch("backend.services.providers.silicon_provider.SILICON_GET_URL", "https://silicon.com"):
 
         mock_client_instance = mock.AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_client_instance
@@ -157,11 +174,11 @@ async def test_get_models_unknown_type():
 
 @pytest.mark.asyncio
 async def test_get_models_exception():
-    """HTTP errors should be caught and an empty list returned."""
+    """HTTP errors should be caught and error response returned."""
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
-    with mock.patch("backend.services.model_provider_service.httpx.AsyncClient") as mock_client, \
-         mock.patch("backend.services.model_provider_service.SILICON_GET_URL", "https://silicon.com"):
+    with mock.patch("backend.services.providers.silicon_provider.httpx.AsyncClient") as mock_client, \
+            mock.patch("backend.services.providers.silicon_provider.SILICON_GET_URL", "https://silicon.com"):
 
         mock_client_instance = mock.AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_client_instance
@@ -171,7 +188,11 @@ async def test_get_models_exception():
 
         result = await SiliconModelProvider().get_models(provider_config)
 
-        assert result == []
+        # Exception should be caught and error response returned
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["_error"] == "connection_failed"
+
 
 # ---------------------------------------------------------------------------
 # Test-cases for prepare_model_dict (already indirectly covered elsewhere but
@@ -182,9 +203,9 @@ async def test_get_models_exception():
 async def test_prepare_model_dict_llm():
     """LLM models should not call emb dim check; chunk sizes are None; base_url untouched."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "gpt-4")) as mock_split_repo, \
-         mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4") as mock_add_repo_to_name, \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock) as mock_emb_dim_check:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4") as mock_add_repo_to_name, \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock) as mock_emb_dim_check:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -199,7 +220,8 @@ async def test_prepare_model_dict_llm():
         mock_model_request.return_value = mock_model_req_instance
 
         provider = "openai"
-        model = {"id": "openai/gpt-4", "model_type": "llm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
+        model = {"id": "openai/gpt-4", "model_type": "llm",
+                 "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
         base_url = "https://api.openai.com/v1"
         api_key = "test-key"
 
@@ -226,9 +248,9 @@ async def test_prepare_model_dict_llm():
 async def test_prepare_model_dict_vlm():
     """VLM models should behave like LLM: no emb dim check; chunk sizes None; base_url untouched."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "gpt-4-vision")) as mock_split_repo, \
-         mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4-vision") as mock_add_repo_to_name, \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock) as mock_emb_dim_check:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/gpt-4-vision") as mock_add_repo_to_name, \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock) as mock_emb_dim_check:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -243,7 +265,8 @@ async def test_prepare_model_dict_vlm():
         mock_model_request.return_value = mock_model_req_instance
 
         provider = "openai"
-        model = {"id": "openai/gpt-4-vision", "model_type": "vlm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
+        model = {"id": "openai/gpt-4-vision", "model_type": "vlm",
+                 "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
         base_url = "https://api.openai.com/v1"
         api_key = "test-key"
 
@@ -269,10 +292,10 @@ async def test_prepare_model_dict_vlm():
 async def test_prepare_model_dict_embedding():
     """Embedding models should call embedding_dimension_check and adjust base_url & max_tokens."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "text-embedding-ada-002")) as mock_split_repo, \
-        mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/text-embedding-ada-002") as mock_add_repo_to_name, \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536) as mock_emb_dim_check, \
-         mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/text-embedding-ada-002") as mock_add_repo_to_name, \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536) as mock_emb_dim_check, \
+            mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -288,13 +311,15 @@ async def test_prepare_model_dict_embedding():
         mock_enum.NOT_DETECTED.value = "not_detected"
 
         provider = "openai"
-        model = {"id": "openai/text-embedding-ada-002", "model_type": "embedding", "max_tokens": 1024}
+        model = {"id": "openai/text-embedding-ada-002",
+                 "model_type": "embedding", "max_tokens": 1024}
         base_url = "https://api.openai.com/v1/"
         api_key = "test-key"
 
         result = await prepare_model_dict(provider, model, base_url, api_key)
 
-        mock_split_repo.assert_called_once_with("openai/text-embedding-ada-002")
+        mock_split_repo.assert_called_once_with(
+            "openai/text-embedding-ada-002")
         mock_add_repo_to_name.assert_called_once_with(
             "openai", "text-embedding-ada-002")
         # Verify chunk size defaults passed into ModelRequest for embedding models
@@ -377,10 +402,10 @@ async def test_prepare_model_dict_embedding_with_explicit_chunk_sizes():
 async def test_prepare_model_dict_multi_embedding_defaults():
     """multi_embedding should mirror embedding: default chunk sizes and emb base_url."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("openai", "text-embedding-3-large")) as mock_split_repo, \
-         mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/text-embedding-3-large") as mock_add_repo_to_name, \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536) as mock_emb_dim_check, \
-         mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="openai/text-embedding-3-large") as mock_add_repo_to_name, \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536) as mock_emb_dim_check, \
+            mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_enum:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -396,14 +421,17 @@ async def test_prepare_model_dict_multi_embedding_defaults():
         mock_enum.NOT_DETECTED.value = "not_detected"
 
         provider = "openai"
-        model = {"id": "openai/text-embedding-3-large", "model_type": "multi_embedding", "max_tokens": 1024}
+        model = {"id": "openai/text-embedding-3-large",
+                 "model_type": "multi_embedding", "max_tokens": 1024}
         base_url = "https://api.openai.com/v1/"
         api_key = "test-key"
 
         result = await prepare_model_dict(provider, model, base_url, api_key)
 
-        mock_split_repo.assert_called_once_with("openai/text-embedding-3-large")
-        mock_add_repo_to_name.assert_called_once_with("openai", "text-embedding-3-large")
+        mock_split_repo.assert_called_once_with(
+            "openai/text-embedding-3-large")
+        mock_add_repo_to_name.assert_called_once_with(
+            "openai", "text-embedding-3-large")
 
         _, kwargs = mock_model_request.call_args
         assert kwargs["expected_chunk_size"] == sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE
@@ -425,16 +453,19 @@ async def test_prepare_model_dict_multi_embedding_defaults():
 
 def test_merge_existing_model_tokens_embedding_type():
     """Embedding and multi_embedding model types should return model_list unchanged."""
-    model_list = [{"id": "openai/text-embedding-ada-002", "model_type": "embedding"}]
+    model_list = [
+        {"id": "openai/text-embedding-ada-002", "model_type": "embedding"}]
     tenant_id = "test-tenant"
     provider = "openai"
 
     # Test embedding type
-    result = merge_existing_model_tokens(model_list, tenant_id, provider, "embedding")
+    result = merge_existing_model_tokens(
+        model_list, tenant_id, provider, "embedding")
     assert result == model_list
 
     # Test multi_embedding type
-    result = merge_existing_model_tokens(model_list, tenant_id, provider, "multi_embedding")
+    result = merge_existing_model_tokens(
+        model_list, tenant_id, provider, "multi_embedding")
     assert result == model_list
 
 
@@ -446,7 +477,8 @@ def test_merge_existing_model_tokens_empty_model_list():
     model_type = "llm"
 
     with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=[]):
-        result = merge_existing_model_tokens(model_list, tenant_id, provider, model_type)
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type)
         assert result == model_list
 
 
@@ -458,7 +490,8 @@ def test_merge_existing_model_tokens_no_existing_models():
     model_type = "llm"
 
     with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=[]):
-        result = merge_existing_model_tokens(model_list, tenant_id, provider, model_type)
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type)
         assert result == model_list
 
 
@@ -488,11 +521,13 @@ def test_merge_existing_model_tokens_successful_merge():
     ]
 
     with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=existing_models):
-        result = merge_existing_model_tokens(model_list, tenant_id, provider, model_type)
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type)
 
         # Check that max_tokens were merged correctly
         assert result[0]["max_tokens"] == 8192  # gpt-4
-        assert result[1]["max_tokens"] == sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS  # gpt-3.5-turbo
+        # gpt-3.5-turbo
+        assert result[1]["max_tokens"] == sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS
         assert "max_tokens" not in result[2]    # claude-3 (no existing model)
 
         # Verify original model_list was not modified
@@ -519,7 +554,8 @@ def test_merge_existing_model_tokens_partial_match():
     ]
 
     with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=existing_models):
-        result = merge_existing_model_tokens(model_list, tenant_id, provider, model_type)
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type)
 
         # Only gpt-4 should have max_tokens
         assert result[0]["max_tokens"] == 8192
@@ -542,7 +578,8 @@ def test_merge_existing_model_tokens_different_provider():
     ]
 
     with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=existing_models):
-        result = merge_existing_model_tokens(model_list, tenant_id, provider, model_type)
+        result = merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type)
 
         assert result[0]["max_tokens"] == 100000
 
@@ -555,9 +592,11 @@ def test_merge_existing_model_tokens_verify_function_call():
     model_type = "llm"
 
     with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=[]) as mock_get_models:
-        merge_existing_model_tokens(model_list, tenant_id, provider, model_type)
+        merge_existing_model_tokens(
+            model_list, tenant_id, provider, model_type)
 
-        mock_get_models.assert_called_once_with(tenant_id, provider, model_type)
+        mock_get_models.assert_called_once_with(
+            tenant_id, provider, model_type)
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +613,8 @@ async def test_get_provider_models_silicon_success():
     }
 
     expected_models = [
-        {"id": "gpt-4", "model_tag": "chat", "model_type": "llm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
+        {"id": "gpt-4", "model_tag": "chat", "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
     ]
 
     with mock.patch("backend.services.model_provider_service.SiliconModelProvider") as mock_provider_class:
@@ -625,7 +665,8 @@ async def test_get_provider_models_silicon_exception():
 
     with mock.patch("backend.services.model_provider_service.SiliconModelProvider") as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
-        mock_provider_instance.get_models.side_effect = Exception("Provider error")
+        mock_provider_instance.get_models.side_effect = Exception(
+            "Provider error")
         mock_provider_class.return_value = mock_provider_instance
 
         # Since get_provider_models doesn't have exception handling,
@@ -742,13 +783,15 @@ async def test_get_provider_models_silicon_with_different_model_types():
 
         with mock.patch("backend.services.model_provider_service.SiliconModelProvider") as mock_provider_class:
             mock_provider_instance = mock.AsyncMock()
-            mock_provider_instance.get_models.return_value = [{"id": "test-model"}]
+            mock_provider_instance.get_models.return_value = [
+                {"id": "test-model"}]
             mock_provider_class.return_value = mock_provider_instance
 
             result = await get_provider_models(model_data)
 
             assert result == [{"id": "test-model"}]
-            mock_provider_instance.get_models.assert_called_once_with(model_data)
+            mock_provider_instance.get_models.assert_called_once_with(
+                model_data)
 
 
 # ---------------------------------------------------------------------------
@@ -758,13 +801,14 @@ async def test_get_provider_models_silicon_with_different_model_types():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_llm_success():
     """ModelEngine provider should return LLM models with correct type mapping."""
-    from backend.services.model_provider_service import ModelEngineProvider
+    from backend.services.providers.modelengine_provider import ModelEngineProvider
 
-    provider_config = {"model_type": "llm", "base_url": "https://model-engine.com", "api_key": "test-key"}
+    provider_config = {"model_type": "llm",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
 
-    with mock.patch("backend.services.model_provider_service.aiohttp.ClientSession") as mock_session_class, \
-         mock.patch("backend.services.model_provider_service.aiohttp.ClientTimeout"), \
-         mock.patch("backend.services.model_provider_service.aiohttp.TCPConnector"):
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
 
         # Setup mock response
         mock_response = mock.AsyncMock()
@@ -786,7 +830,8 @@ async def test_modelengine_get_models_llm_success():
         mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
 
         mock_session_cm = mock.MagicMock()
-        mock_session_cm.__aenter__ = mock.AsyncMock(return_value=mock_session_instance)
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
         mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
 
         mock_session_class.return_value = mock_session_cm
@@ -805,13 +850,14 @@ async def test_modelengine_get_models_llm_success():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_embedding_success():
     """ModelEngine provider should return embedding models with correct type mapping."""
-    from backend.services.model_provider_service import ModelEngineProvider
+    from backend.services.providers.modelengine_provider import ModelEngineProvider
 
-    provider_config = {"model_type": "embedding", "base_url": "https://model-engine.com", "api_key": "test-key"}
+    provider_config = {"model_type": "embedding",
+                       "base_url": "https://model-engine.com", "api_key": "test-key"}
 
-    with mock.patch("backend.services.model_provider_service.aiohttp.ClientSession") as mock_session_class, \
-         mock.patch("backend.services.model_provider_service.aiohttp.ClientTimeout"), \
-         mock.patch("backend.services.model_provider_service.aiohttp.TCPConnector"):
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
 
         mock_response = mock.AsyncMock()
         mock_response.status = 200
@@ -832,7 +878,8 @@ async def test_modelengine_get_models_embedding_success():
         mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
 
         mock_session_cm = mock.MagicMock()
-        mock_session_cm.__aenter__ = mock.AsyncMock(return_value=mock_session_instance)
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
         mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
 
         mock_session_class.return_value = mock_session_cm
@@ -849,13 +896,14 @@ async def test_modelengine_get_models_embedding_success():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_all_types():
     """ModelEngine provider should return all models when no type filter specified."""
-    from backend.services.model_provider_service import ModelEngineProvider
+    from backend.services.providers.modelengine_provider import ModelEngineProvider
 
-    provider_config = {"base_url": "https://model-engine.com", "api_key": "test-key"}  # No model_type filter
+    provider_config = {"base_url": "https://model-engine.com",
+                       "api_key": "test-key"}  # No model_type filter
 
-    with mock.patch("backend.services.model_provider_service.aiohttp.ClientSession") as mock_session_class, \
-         mock.patch("backend.services.model_provider_service.aiohttp.ClientTimeout"), \
-         mock.patch("backend.services.model_provider_service.aiohttp.TCPConnector"):
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session_class, \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientTimeout"), \
+            mock.patch("backend.services.providers.modelengine_provider.aiohttp.TCPConnector"):
 
         mock_response = mock.AsyncMock()
         mock_response.status = 200
@@ -868,7 +916,8 @@ async def test_modelengine_get_models_all_types():
                 {"id": "tts-model", "type": "tts"},
                 {"id": "rerank-model", "type": "rerank"},
                 {"id": "vlm-model", "type": "multimodal"},
-                {"id": "unknown-model", "type": "unknown"},  # Should be filtered out
+                # Should be filtered out
+                {"id": "unknown-model", "type": "unknown"},
             ]
         })
 
@@ -881,7 +930,8 @@ async def test_modelengine_get_models_all_types():
         mock_session_instance.get = mock.Mock(return_value=mock_get_cm)
 
         mock_session_cm = mock.MagicMock()
-        mock_session_cm.__aenter__ = mock.AsyncMock(return_value=mock_session_instance)
+        mock_session_cm.__aenter__ = mock.AsyncMock(
+            return_value=mock_session_instance)
         mock_session_cm.__aexit__ = mock.AsyncMock(return_value=None)
 
         mock_session_class.return_value = mock_session_cm
@@ -902,11 +952,11 @@ async def test_modelengine_get_models_all_types():
 @pytest.mark.asyncio
 async def test_modelengine_get_models_exception():
     """ModelEngine provider should return empty list on exception."""
-    from backend.services.model_provider_service import ModelEngineProvider
+    from backend.services.providers.modelengine_provider import ModelEngineProvider
 
     provider_config = {"model_type": "llm"}
 
-    with mock.patch("backend.services.model_provider_service.aiohttp.ClientSession") as mock_session:
+    with mock.patch("backend.services.providers.modelengine_provider.aiohttp.ClientSession") as mock_session:
 
         mock_session_instance = mock.AsyncMock()
         mock_session_instance.__aenter__.return_value = mock_session_instance
@@ -926,10 +976,10 @@ async def test_modelengine_get_models_exception():
 async def test_prepare_model_dict_modelengine_llm():
     """ModelEngine LLM models should have correct base_url path and ssl_verify=False."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("modelengine", "gpt-4")), \
-         mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="modelengine/gpt-4"), \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock), \
-         mock.patch("backend.services.model_provider_service.ProviderEnum") as mock_enum:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="modelengine/gpt-4"), \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock), \
+            mock.patch("backend.services.model_provider_service.ProviderEnum") as mock_enum:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -972,11 +1022,11 @@ async def test_prepare_model_dict_modelengine_llm():
 async def test_prepare_model_dict_modelengine_embedding():
     """ModelEngine embedding models should have correct embeddings path."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("modelengine", "text-embedding")), \
-         mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="modelengine/text-embedding"), \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536), \
-         mock.patch("backend.services.model_provider_service.ProviderEnum") as mock_enum, \
-         mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_status_enum:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="modelengine/text-embedding"), \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock, return_value=1536), \
+            mock.patch("backend.services.model_provider_service.ProviderEnum") as mock_enum, \
+            mock.patch("backend.services.model_provider_service.ModelConnectStatusEnum") as mock_status_enum:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -1021,10 +1071,10 @@ async def test_prepare_model_dict_modelengine_embedding():
 async def test_prepare_model_dict_modelengine_base_url_stripping():
     """ModelEngine should strip existing /open/ paths from base_url."""
     with mock.patch("backend.services.model_provider_service.split_repo_name", return_value=("modelengine", "gpt-4")), \
-         mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="modelengine/gpt-4"), \
-         mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
-         mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock), \
-         mock.patch("backend.services.model_provider_service.ProviderEnum") as mock_enum:
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="modelengine/gpt-4"), \
+            mock.patch("backend.services.model_provider_service.ModelRequest") as mock_model_request, \
+            mock.patch("backend.services.model_provider_service.embedding_dimension_check", new_callable=mock.AsyncMock), \
+            mock.patch("backend.services.model_provider_service.ProviderEnum") as mock_enum:
 
         mock_model_req_instance = mock.MagicMock()
         dump_dict = {
@@ -1071,7 +1121,8 @@ async def test_get_provider_models_modelengine_success():
     }
 
     expected_models = [
-        {"id": "gpt-4", "model_tag": "chat", "model_type": "llm", "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
+        {"id": "gpt-4", "model_tag": "chat", "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS}
     ]
 
     with mock.patch("backend.services.model_provider_service.ModelEngineProvider") as mock_provider_class:

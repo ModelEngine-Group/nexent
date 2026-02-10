@@ -1,339 +1,52 @@
 import logging
-from abc import ABC, abstractmethod
-from typing import Dict, List
-
-import httpx
-import aiohttp
+from typing import List
 
 from consts.const import (
-    DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_EXPECTED_CHUNK_SIZE,
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import SILICON_GET_URL, ProviderEnum
+from consts.provider import ProviderEnum
 from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from utils.model_name_utils import split_repo_name, add_repo_to_name
+from .providers.base import AbstractModelProvider
+from .providers.silicon_provider import SiliconModelProvider
+from .providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
 
-logger = logging.getLogger("model_provider_service")
+logger = logging.getLogger("model_provider")
 
-MODEL_ENGINE_NORTH_PREFIX = "open/router/v1"
 
 # =============================================================================
-# Provider Error Handling Utilities
+# Provider Factory and Public API
 # =============================================================================
 
 
-def _create_error_response(error_code: str, message: str, http_code: int = None) -> List[Dict]:
+async def get_provider_models(model_data: dict) -> List[dict]:
     """
-    Create a standardized error response for provider API failures.
+    Get model list based on provider.
 
     Args:
-        error_code: Machine-readable error code (e.g., 'authentication_failed')
-        message: Human-readable error message
-        http_code: HTTP status code if available
+        model_data: Model data containing provider information
 
     Returns:
-        List containing a single error dict with standardized format
+        List of models from the specified provider
     """
-    error_dict = {"_error": error_code, "_message": message}
-    if http_code:
-        error_dict["_http_code"] = http_code
-    return [error_dict]
+    model_list = []
+
+    if model_data["provider"] == ProviderEnum.SILICON.value:
+        provider = SiliconModelProvider()
+        model_list = await provider.get_models(model_data)
+    elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
+        provider = ModelEngineProvider()
+        model_list = await provider.get_models(model_data)
+
+    return model_list
 
 
-def _classify_provider_error(
-    provider_name: str,
-    status_code: int = None,
-    error_message: str = None,
-    exception: Exception = None
-) -> List[Dict]:
-    """
-    Classify provider errors and return standardized error response.
-
-    This function centralizes error classification logic for all model providers,
-    ensuring consistent error codes and messages across different providers.
-
-    Args:
-        provider_name: Name of the provider (for logging and messages)
-        status_code: HTTP status code if available
-        error_message: Error message from API if available
-        exception: Exception object if available
-
-    Returns:
-        List containing a single error dict with standardized format
-    """
-    # Classify by HTTP status code
-    if status_code:
-        if status_code == 401:
-            logger.error(
-                f"{provider_name} API authentication failed: Invalid API key")
-            return _create_error_response(
-                "authentication_failed",
-                "Invalid API key or authentication failed",
-                status_code
-            )
-        elif status_code == 403:
-            logger.error(
-                f"{provider_name} API access forbidden: Insufficient permissions")
-            return _create_error_response(
-                "access_forbidden",
-                "Access forbidden. Please check your permissions",
-                status_code
-            )
-        elif status_code == 404:
-            logger.error(
-                f"{provider_name} API endpoint not found: URL may be incorrect")
-            return _create_error_response(
-                "endpoint_not_found",
-                "API endpoint not found. Please verify the URL",
-                status_code
-            )
-        elif status_code >= 500:
-            logger.error(f"{provider_name} server error: HTTP {status_code}")
-            return _create_error_response(
-                "server_error",
-                f"Server error (HTTP {status_code})",
-                status_code
-            )
-        elif status_code >= 400:
-            logger.error(
-                f"{provider_name} API error (HTTP {status_code}): {error_message}")
-            return _create_error_response(
-                "api_error",
-                f"API error (HTTP {status_code})",
-                status_code
-            )
-
-    # Classify by exception type
-    if exception:
-        # aiohttp exceptions
-        if isinstance(exception, aiohttp.ClientConnectorError):
-            error_str = str(exception).lower()
-            if "certificate" in error_str or "ssl" in error_str:
-                logger.error(
-                    f"{provider_name} SSL certificate error: {exception}")
-                return _create_error_response(
-                    "ssl_error",
-                    "SSL certificate error. Please check the URL and SSL configuration"
-                )
-            else:
-                logger.error(f"{provider_name} connection failed: {exception}")
-                return _create_error_response(
-                    "connection_failed",
-                    f"Failed to connect to {provider_name}. Please check the URL and network connection"
-                )
-        elif isinstance(exception, aiohttp.ServerTimeoutError):
-            logger.error(f"{provider_name} server timeout: {exception}")
-            return _create_error_response(
-                "timeout",
-                "Connection timed out. Please check the URL and network connection"
-            )
-        elif isinstance(exception, aiohttp.ServerDisconnectedError):
-            logger.error(f"{provider_name} server disconnected: {exception}")
-            return _create_error_response(
-                "connection_failed",
-                f"Connection to {provider_name} was interrupted. Please try again"
-            )
-        elif isinstance(exception, aiohttp.ContentTypeError):
-            logger.error(
-                f"{provider_name} invalid response format: {exception}")
-            return _create_error_response(
-                "invalid_response",
-                "Invalid response from provider API"
-            )
-
-        # httpx exceptions
-        if isinstance(exception, httpx.HTTPStatusError):
-            status = exception.response.status_code
-            error_text = str(exception)
-            return _classify_provider_error(provider_name, status_code=status, error_message=error_text)
-        elif isinstance(exception, httpx.ConnectTimeout):
-            logger.error(f"{provider_name} connection timeout: {exception}")
-            return _create_error_response(
-                "timeout",
-                "Connection timed out. Please check the URL and network connection"
-            )
-        elif isinstance(exception, httpx.ReadTimeout):
-            logger.error(f"{provider_name} read timeout: {exception}")
-            return _create_error_response(
-                "timeout",
-                "Reading data timed out. Please try again"
-            )
-        elif isinstance(exception, (httpx.ConnectError, httpx.NetworkError)):
-            logger.error(f"{provider_name} network error: {exception}")
-            return _create_error_response(
-                "connection_failed",
-                f"Failed to connect to {provider_name}. Please check the URL and network connection"
-            )
-        elif isinstance(exception, httpx.InvalidURL):
-            logger.error(f"{provider_name} invalid URL: {exception}")
-            return _create_error_response(
-                "invalid_url",
-                "Invalid provider URL. Please verify the configuration"
-            )
-        elif isinstance(exception, httpx.InvalidResponse):
-            logger.error(f"{provider_name} invalid response: {exception}")
-            return _create_error_response(
-                "invalid_response",
-                "Invalid response from provider API"
-            )
-
-    # Generic connection error fallback
-    error_msg = error_message or str(
-        exception) if exception else "Unknown error"
-    logger.error(f"{provider_name} error: {error_msg}")
-    return _create_error_response(
-        "connection_failed",
-        f"Failed to connect to {provider_name}. Please check the URL and network connection"
-    )
-
-
-class AbstractModelProvider(ABC):
-    """Common interface that all model provider integrations must implement."""
-
-    @abstractmethod
-    async def get_models(self, provider_config: Dict) -> List[Dict]:
-        """Return a list of models provided by the concrete provider."""
-        raise NotImplementedError
-
-
-class SiliconModelProvider(AbstractModelProvider):
-    """Concrete implementation for SiliconFlow provider."""
-
-    async def get_models(self, provider_config: Dict) -> List[Dict]:
-        """
-        Fetch models from SiliconFlow API.
-
-        Args:
-            provider_config: Configuration dict containing model_type and api_key
-
-        Returns:
-            List of models with canonical fields. Returns error dict if API call fails.
-        """
-        try:
-            model_type: str = provider_config["model_type"]
-            model_api_key: str = provider_config["api_key"]
-
-            headers = {"Authorization": f"Bearer {model_api_key}"}
-
-            # Choose endpoint by model type
-            if model_type in ("llm", "vlm"):
-                silicon_url = f"{SILICON_GET_URL}?sub_type=chat"
-            elif model_type in ("embedding", "multi_embedding"):
-                silicon_url = f"{SILICON_GET_URL}?sub_type=embedding"
-            else:
-                silicon_url = SILICON_GET_URL
-
-            async with httpx.AsyncClient(verify=False) as client:
-                response = await client.get(silicon_url, headers=headers)
-                response.raise_for_status()
-                model_list: List[Dict] = response.json()["data"]
-
-            # Annotate models with canonical fields expected downstream
-            if model_type in ("llm", "vlm"):
-                for item in model_list:
-                    item["model_tag"] = "chat"
-                    item["model_type"] = model_type
-                    item["max_tokens"] = DEFAULT_LLM_MAX_TOKENS
-            elif model_type in ("embedding", "multi_embedding"):
-                for item in model_list:
-                    item["model_tag"] = "embedding"
-                    item["model_type"] = model_type
-
-            # Return empty list to indicate successful API call but no models
-            if not model_list:
-                return []
-
-            return model_list
-        except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
-            return _classify_provider_error("SiliconFlow", exception=e)
-
-
-class ModelEngineProvider(AbstractModelProvider):
-    """Concrete implementation for ModelEngine provider."""
-
-    async def get_models(self, provider_config: Dict) -> List[Dict]:
-        """
-        Fetch models from ModelEngine API.
-
-        Args:
-            provider_config: Configuration dict containing model_type, base_url, and api_key
-
-        Returns:
-            List of models with canonical fields. Returns error dict if API call fails.
-        """
-        try:
-            model_type: str = provider_config.get("model_type", "")
-            host = provider_config.get("base_url")
-            api_key = provider_config.get("api_key")
-            model_engine_url = get_model_engine_raw_url(host)
-            if not host or not api_key:
-                logger.warning("ModelEngine host or api key not configured")
-                return []
-
-            headers = {"Authorization": f"Bearer {api_key}"}
-
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30),
-                connector=aiohttp.TCPConnector(ssl=False)
-            ) as session:
-                async with session.get(
-                    f"{model_engine_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/models",
-                    headers=headers
-                ) as response:
-                    # Use centralized error classification
-                    if response.status >= 400:
-                        error_text = await response.text()
-                        return _classify_provider_error(
-                            "ModelEngine",
-                            status_code=response.status,
-                            error_message=error_text
-                        )
-
-                    data = await response.json()
-                    all_models = data.get("data", [])
-                    logger.info(
-                        f"ModelEngine API returned {len(all_models)} models")
-
-            # Type mapping from ModelEngine to internal types
-            type_map = {
-                "embed": "embedding",
-                "chat": "llm",
-                "asr": "stt",
-                "tts": "tts",
-                "rerank": "rerank",
-                "multimodal": "vlm",
-            }
-
-            logger.info(f"Filtering models by type: '{model_type}'")
-            filtered_models = []
-            for model in all_models:
-                me_type = model.get("type", "")
-                internal_type = type_map.get(me_type)
-
-                # If model_type filter is provided, only include matching models
-                if model_type and internal_type != model_type:
-                    logger.debug(
-                        f"Model '{model.get('id', 'unknown')}' skipped: "
-                        f"type '{me_type}' doesn't match filter '{model_type}'"
-                    )
-                    continue
-
-                if internal_type:
-                    filtered_models.append({
-                        "id": model.get("id", ""),
-                        "model_type": internal_type,
-                        "model_tag": me_type,
-                        "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
-                        "base_url": host,
-                        "api_key": api_key,
-                    })
-
-            return filtered_models
-        except Exception as e:
-            return _classify_provider_error("ModelEngine", exception=e)
+# =============================================================================
+# Model Dictionary Preparation
+# =============================================================================
 
 
 async def prepare_model_dict(provider: str, model: dict, model_url: str, model_api_key: str) -> dict:
@@ -352,7 +65,6 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     Returns:
         A dictionary ready to be passed to *create_model_record*.
     """
-
     # Split repo/name once so it can be reused multiple times.
     model_repo, model_name = split_repo_name(model["id"])
     model_display_name = add_repo_to_name(model_repo, model_name)
@@ -431,7 +143,7 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
 
 def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider: str, model_type: str) -> List[dict]:
     """
-    Merge existing model's max_tokens attribute into the model list
+    Merge existing model's max_tokens attribute into the model list.
 
     Args:
         model_list: List of models
@@ -467,33 +179,13 @@ def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider
     return model_list
 
 
-async def get_provider_models(model_data: dict) -> List[dict]:
-    """
-    Get model list based on provider
-
-    Args:
-        model_data: Model data containing provider information
-
-    Returns:
-        List[dict]: Model list
-    """
-    model_list = []
-
-    if model_data["provider"] == ProviderEnum.SILICON.value:
-        provider = SiliconModelProvider()
-        model_list = await provider.get_models(model_data)
-    elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
-        provider = ModelEngineProvider()
-        model_list = await provider.get_models(model_data)
-
-    return model_list
-
-
-def get_model_engine_raw_url(model_engine_url: str) -> str:
-    # Strip any existing path to get just the host
-    model_engine_raw_url = model_engine_url
-    if model_engine_url:
-        # Remove any trailing /open/router/v1 or similar paths to get base host
-        model_engine_raw_url = model_engine_url.split(
-            "/open/")[0] if "/open/" in model_engine_url else model_engine_url
-    return model_engine_raw_url
+# Re-export provider classes for backward compatibility
+__all__ = [
+    "AbstractModelProvider",
+    "SiliconModelProvider",
+    "ModelEngineProvider",
+    "prepare_model_dict",
+    "merge_existing_model_tokens",
+    "get_provider_models",
+    "get_model_engine_raw_url",
+]
