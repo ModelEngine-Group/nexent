@@ -212,7 +212,7 @@ export default function AgentGenerateDetail({
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
-      agentAuthor: editedAgent.author || "",
+      agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
       mainAgentModel:
         editedAgent.model || defaultLlmModel?.displayName || "",
       mainAgentMaxStep: editedAgent.max_step || 5,
@@ -643,15 +643,12 @@ export default function AgentGenerateDetail({
                 <Form.Item
                   name="agentAuthor"
                   label={t("agent.author")}
-                  help={
-                    !isSpeedMode &&
-                    !form.getFieldValue("agentAuthor") &&
-                    user?.email &&
-                    t("agent.author.hint", {
-                      defaultValue: "Default: {{email}}",
-                      email: user.email,
-                    })
-                  }
+                  rules={[
+                    {
+                      required: true,
+                      message: t("agent.authorPlaceholder"),
+                    },
+                  ]}
                   className="mb-3"
                 >
                   <Input

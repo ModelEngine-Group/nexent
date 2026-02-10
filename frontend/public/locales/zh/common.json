@@ -292,7 +292,7 @@
   "agent.displayName": "智能体名称",
   "agent.displayNamePlaceholder": "请输入智能体名称",
   "agent.author": "作者",
-  "agent.authorPlaceholder": "请输入作者名称（可选）",
+  "agent.authorPlaceholder": "请输入作者名称",
   "agent.author.hint": "默认：{{email}}",
   "agent.description": "智能体描述",
   "agent.userGroup": "用户组",
