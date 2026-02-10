@@ -830,6 +830,9 @@
   "login.expired.okText": "立即登录",
   "login.expired.cancelText": "返回首页",
 
+  "page.permissionDenied.title": "无权限访问",
+  "page.permissionDenied.content": "暂时没有该页面权限。",
+
   "auth.notLoggedIn": "您尚未登录",
   "auth.login": "登录",
   "auth.register": "注册",

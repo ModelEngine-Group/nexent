@@ -221,6 +221,8 @@ export default function KnowledgeList({
             title={t("knowledgeBase.modal.deleteConfirm.title")}
             description={t("common.cannotBeUndone")}
             onConfirm={() => handleDelete(record.id)}
+            okText={t("common.confirm")}
+            cancelText={t("common.cancel")}
           >
             <Tooltip title={t("common.delete")}>
               <Button

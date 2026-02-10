@@ -829,6 +829,9 @@
   "login.expired.okText": "Login Now",
   "login.expired.cancelText": "Back to Home",
 
+  "page.permissionDenied.title": "Access Denied",
+  "page.permissionDenied.content": "You don't have permission to access this page.",
+
   "auth.notLoggedIn": "You are not logged in",
   "auth.login": "Login",
   "auth.register": "Register",

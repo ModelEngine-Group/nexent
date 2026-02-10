@@ -218,6 +218,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 name: record.group_name,
               })}
               onConfirm={() => handleDelete(record.group_id)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.groups.deleteGroup")}>
                 <Button
@@ -266,6 +268,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         open={modalVisible}
         onOk={editingGroup ? handleEditGroupSubmit : handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}
       >
         {editingGroup ? (

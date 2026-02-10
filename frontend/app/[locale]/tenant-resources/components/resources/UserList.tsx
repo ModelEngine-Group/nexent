@@ -164,6 +164,8 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
                 name: record.username,
               })}
               onConfirm={() => handleDelete(record.id)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.users.deleteUser")}>
                 <Button
@@ -198,6 +200,8 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
       >
         <Form layout="vertical" form={form}>
           <Form.Item name="username" label={t("common.email")}>
@@ -224,6 +228,8 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         open={createGroupModalVisible}
         onOk={handleCreateGroup}
         onCancel={() => setCreateGroupModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
       >
         <Form layout="vertical" form={groupForm}>
           <Form.Item

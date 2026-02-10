@@ -173,12 +173,14 @@ function TenantList({
                     title={t("tenantResources.tenants.confirmDelete", {
                       name: tenant.tenant_name,
                     })}
-                    description="This action cannot be undone."
+                    description={t("common.cannotBeUndone")}
                     onConfirm={(e) => {
                       e?.stopPropagation();
                       handleDelete(tenant.tenant_id);
                     }}
                     onCancel={(e) => e?.stopPropagation()}
+                    okText={t("common.confirm")}
+                    cancelText={t("common.cancel")}
                   >
                     <Button
                       type="text"
@@ -205,6 +207,8 @@ function TenantList({
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
       >
         <Form layout="vertical" form={form}>
           <Form.Item
