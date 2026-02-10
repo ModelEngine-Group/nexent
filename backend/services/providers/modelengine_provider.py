@@ -86,7 +86,6 @@ class ModelEngineProvider(AbstractModelProvider):
                 "multimodal": "vlm",
             }
 
-            logger.info(f"Filtering models by type: '{model_type}'")
             filtered_models = []
             for model in all_models:
                 me_type = model.get("type", "")
@@ -94,10 +93,6 @@ class ModelEngineProvider(AbstractModelProvider):
 
                 # If model_type filter is provided, only include matching models
                 if model_type and internal_type != model_type:
-                    logger.debug(
-                        f"Model '{model.get('id', 'unknown')}' skipped: "
-                        f"type '{me_type}' doesn't match filter '{model_type}'"
-                    )
                     continue
 
                 if internal_type:
