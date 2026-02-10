@@ -7,7 +7,7 @@ import {
   LoaderCircle,
   ChevronRight,
   ChevronDown,
-  Settings
+  Settings,
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
@@ -54,10 +54,10 @@ const DEFAULT_FORM_STATE = {
   provider: "modelengine",
   modelEngineUrl: "",
   vectorDimension: "1024",
-  chunkSizeRange: [
-    DEFAULT_EXPECTED_CHUNK_SIZE,
-    DEFAULT_MAXIMUM_CHUNK_SIZE,
-  ] as [number, number],
+  chunkSizeRange: [DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE] as [
+    number,
+    number,
+  ],
   chunkingBatchSize: "10",
 };
 
@@ -353,7 +353,9 @@ export const ModelAddDialog = ({
     }));
     // If the key configuration item changes, clear the verification status
     if (
-      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(field) ||
+      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(
+        field
+      ) ||
       field === "provider"
     ) {
       setConnectivityStatus({ status: null, message: "" });
@@ -567,14 +569,16 @@ export const ModelAddDialog = ({
         });
       }
 
-      onSuccess();
+      // Reset form state and close dialog on success
+      resetForm();
+      handleClose();
 
-      if (result === 200) {
-        // Reset form state before closing
-        resetForm();
-        onSuccess();
-        handleClose();
-      }
+      // Notify parent to refresh model list - batch add returns all added models
+      const addedModels: AddedModel[] = enabledModels.map((model: any) => ({
+        name: model.displayName || model.id,
+        type: modelType,
+      }));
+      await onSuccess(addedModels.length > 0 ? addedModels[0] : undefined);
     } catch (error: any) {
       const errorMessage =
         error?.message || t("model.dialog.error.addFailedLog");
@@ -648,9 +652,15 @@ export const ModelAddDialog = ({
           apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue,
           displayName: form.displayName || form.name,
-          expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
-          maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
-          chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
+          expectedChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[0]
+            : undefined,
+          maximumChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[1]
+            : undefined,
+          chunkingBatchSize: isEmbeddingModel
+            ? parseInt(form.chunkingBatchSize) || 10
+            : undefined,
         });
       } else {
         await modelService.addCustomModel({
