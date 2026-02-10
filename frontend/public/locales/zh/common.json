@@ -1317,6 +1317,10 @@
   "tenantResources.models.deleteModel": "删除模型",
   "tenantResources.models.deleteSuccess": "模型已删除",
   "tenantResources.models.deleteFailed": "删除模型失败",
+  "tenantResources.models.checkConnectivity": "检查连通性",
+  "tenantResources.models.connectivitySuccess": "模型连通性正常",
+  "tenantResources.models.connectivityFailed": "模型无法连接",
+  "tenantResources.models.connectivityError": "检查连通性时发生错误",
   "tenantResources.models.enterDescription": "输入模型描述",
   "tenantResources.models.enterName": "输入模型名称",
 

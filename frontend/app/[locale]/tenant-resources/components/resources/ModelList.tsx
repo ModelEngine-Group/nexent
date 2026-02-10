@@ -3,10 +3,10 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Table, Button, Popconfirm, message, Tag, Pagination } from "antd";
-import { Edit, Trash2 } from "lucide-react";
+import { Edit, Trash2, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
-import { useAdminTenantModels } from "@/hooks/model/useAdminTenantModels";
+import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
@@ -20,13 +20,13 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Use admin API to get models for the specified tenant
+  // Use manage API to get models for the specified tenant
   const {
     models = [],
     total = 0,
     isLoading,
     refetch,
-  } = useAdminTenantModels({
+  } = useManageTenantModels({
     tenantId: tenantId || "",
     page,
     pageSize,
@@ -35,6 +35,9 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
+
+  // Track which models are being checked for connectivity
+  const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(new Set());
 
   const openCreate = () => {
     setAddDialogVisible(true);
@@ -65,9 +68,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     setEditDialogVisible(true);
   };
 
-  const handleDelete = async (modelId: string, provider?: string) => {
+  const handleDelete = async (displayName: string, _provider?: string) => {
+    if (!tenantId) {
+      message.error("Tenant ID is required");
+      return;
+    }
     try {
-      await modelService.deleteCustomModel(modelId, provider);
+      await modelService.deleteManageTenantModel({
+        tenantId,
+        displayName,
+      });
       message.success(t("tenantResources.models.deleteSuccess"));
       refetch();
     } catch (error: any) {
@@ -76,6 +86,37 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       } else {
         message.error(t("tenantResources.models.deleteFailed"));
       }
+    }
+  };
+
+  // Handle checking model connectivity
+  const handleCheckConnectivity = async (displayName: string) => {
+    if (!tenantId) {
+      message.error("Tenant ID is required");
+      return;
+    }
+
+    setCheckingConnectivity((prev) => new Set(prev).add(displayName));
+    try {
+      const isConnected = await modelService.checkManageTenantModelConnectivity(
+        tenantId,
+        displayName
+      );
+      if (isConnected) {
+        message.success(t("tenantResources.models.connectivitySuccess"));
+      } else {
+        message.warning(t("tenantResources.models.connectivityFailed"));
+      }
+      // Refresh the model list to get updated connectivity status
+      refetch();
+    } catch (error) {
+      message.error(t("tenantResources.models.connectivityError"));
+    } finally {
+      setCheckingConnectivity((prev) => {
+        const next = new Set(prev);
+        next.delete(displayName);
+        return next;
+      });
     }
   };
 
@@ -147,9 +188,18 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     {
       title: t("common.actions"),
       key: "actions",
-      width: 250,
+      width: 300,
       render: (_, record: ModelOption) => (
         <div className="flex items-center space-x-2">
+          <Tooltip title={t("tenantResources.models.checkConnectivity")}>
+            <Button
+              type="text"
+              icon={checkingConnectivity.has(record.displayName) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              onClick={() => handleCheckConnectivity(record.displayName)}
+              size="small"
+              loading={checkingConnectivity.has(record.displayName)}
+            />
+          </Tooltip>
           <Tooltip title={t("tenantResources.models.editModel")}>
             <Button
               type="text"
@@ -202,6 +252,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         isOpen={addDialogVisible}
         onClose={handleAddDialogClose}
         onSuccess={handleAddDialogSuccess}
+        tenantId={tenantId || undefined}
       />
 
       <ModelEditDialog
@@ -209,6 +260,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         model={editingModel}
         onClose={handleEditDialogClose}
         onSuccess={handleEditDialogSuccess}
+        tenantId={tenantId || undefined}
       />
     </div>
   );

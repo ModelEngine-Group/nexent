@@ -18,8 +18,13 @@ from consts.model import (
     BatchCreateModelsRequest,
     ModelRequest,
     ProviderModelRequest,
-    AdminTenantModelRequest,
-    AdminTenantModelResponse,
+    ManageTenantModelListRequest,
+    ManageTenantModelListResponse,
+    ManageTenantModelCreateRequest,
+    ManageTenantModelUpdateRequest,
+    ManageTenantModelDeleteRequest,
+    ManageTenantModelHealthcheckRequest,
+    ManageBatchCreateModelsRequest,
 )
 
 from fastapi import APIRouter, Header, Query, HTTPException
@@ -288,41 +293,6 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
                             detail=str(e))
 
 
-@router.post("/admin/list", response_model=AdminTenantModelResponse)
-async def get_model_list_for_admin(request: AdminTenantModelRequest, authorization: Optional[str] = Header(None)):
-    """Get model list for a specified tenant (admin only).
-
-    This endpoint allows super admin to query models for any tenant.
-
-    Args:
-        request: Contains target tenant_id, optional model_type filter, and pagination params
-        authorization: Bearer token for authentication
-
-    Returns:
-        JSONResponse: Model list for the specified tenant with pagination info
-    """
-    try:
-        user_id, _ = get_current_user_id(authorization)
-        logger.debug(
-            f"Start to list models for admin, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
-            f"page: {request.page}, page_size: {request.page_size}")
-
-        result = await list_models_for_admin(
-            request.tenant_id,
-            request.model_type,
-            request.page,
-            request.page_size
-        )
-        return JSONResponse(status_code=HTTPStatus.OK, content={
-            "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(result)
-        })
-    except Exception as e:
-        logging.error(f"Failed to list models for admin: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail=str(e))
-
-
 @router.post("/healthcheck")
 async def check_model_health(
         display_name: str = Query(..., description="Display name to check"),
@@ -371,5 +341,242 @@ async def check_temporary_model_health(request: ModelRequest):
         )
     except Exception as e:
         logging.error(f"Failed to verify model connectivity: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=str(e))
+
+
+# Manage Tenant Model CRUD Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/manage/healthcheck")
+async def manage_check_model_health(
+    request: ManageTenantModelHealthcheckRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Check and update model connectivity for a specified tenant (admin/manage operation).
+
+    This endpoint allows checking connectivity for any tenant's model, typically used by super admins.
+
+    Args:
+        request: Query request with target tenant_id and model display_name.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        Connectivity check result with updated status.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to check model connectivity for tenant, user_id: {user_id}, "
+            f"target_tenant_id: {request.tenant_id}, display_name: {request.display_name}")
+
+        result = await check_model_connectivity(request.display_name, request.tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully checked model connectivity",
+            "data": result
+        })
+    except LookupError as e:
+        logging.error(f"Failed to check model connectivity for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        logging.error(f"Invalid model configuration: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to check model connectivity for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/manage/create")
+async def manage_create_model(
+    request: ManageTenantModelCreateRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Create a model in a specified tenant (admin/manage operation).
+
+    This endpoint allows creating models for any tenant, typically used by super admins.
+
+    Args:
+        request: Model configuration with target tenant_id.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        Success message on successful creation.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to create model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}")
+
+        model_data = request.model_dump(exclude={'tenant_id'})
+        await create_model_for_tenant(user_id, request.tenant_id, model_data)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Model created successfully",
+            "data": {"tenant_id": request.tenant_id}
+        })
+    except ValueError as e:
+        logging.error(f"Failed to create model for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to create model for tenant: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/manage/update")
+async def manage_update_model(
+    request: ManageTenantModelUpdateRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Update a model in a specified tenant (admin/manage operation).
+
+    This endpoint allows updating models for any tenant, typically used by super admins.
+
+    Args:
+        request: Update payload with target tenant_id and current display_name.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        Success message on successful update.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to update model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"current_display_name: {request.current_display_name}")
+
+        model_data = request.model_dump(exclude={'tenant_id', 'current_display_name'})
+        await update_single_model_for_tenant(
+            user_id, request.tenant_id, request.current_display_name, model_data
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Model updated successfully",
+            "data": {"tenant_id": request.tenant_id}
+        })
+    except LookupError as e:
+        logging.error(f"Failed to update model for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        logging.error(f"Failed to update model for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to update model for tenant: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/manage/delete")
+async def manage_delete_model(
+    request: ManageTenantModelDeleteRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Delete a model from a specified tenant (admin/manage operation).
+
+    This endpoint allows deleting models from any tenant, typically used by super admins.
+
+    Args:
+        request: Delete request with target tenant_id and display_name.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        Success message with deleted model name.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to delete model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"display_name: {request.display_name}")
+
+        model_name = await delete_model_for_tenant(
+            user_id, request.tenant_id, request.display_name
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Model deleted successfully",
+            "data": {
+                "tenant_id": request.tenant_id,
+                "display_name": model_name
+            }
+        })
+    except LookupError as e:
+        logging.error(f"Failed to delete model for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to delete model for tenant: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/manage/batch_create")
+async def manage_batch_create_models(
+    request: ManageBatchCreateModelsRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Batch create/update models in a specified tenant (admin/manage operation).
+
+    This endpoint synchronizes provider models for any tenant by creating/updating/deleting records.
+    Typically used by super admins to bulk import models.
+
+    Args:
+        request: Batch payload with target tenant_id, provider, type, api_key, and models list.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        Success message on completion.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to batch create models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"provider: {request.provider}, type: {request.type}, models count: {len(request.models)}")
+
+        batch_model_config = request.model_dump()
+        await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Batch create models successfully",
+            "data": {
+                "tenant_id": request.tenant_id,
+                "provider": request.provider,
+                "type": request.type,
+                "models_count": len(request.models)
+            }
+        })
+    except Exception as e:
+        logging.error(f"Failed to batch create models for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/manage/list", response_model=ManageTenantModelListResponse)
+async def manage_list_models(
+    request: ManageTenantModelListRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """List models for a specified tenant (admin/manage operation).
+
+    This endpoint allows querying models for any tenant, typically used by super admins.
+
+    Args:
+        request: Query request with target tenant_id and pagination params.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        Paginated model list for the specified tenant.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to list models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"page: {request.page}, page_size: {request.page_size}")
+
+        result = await list_models_for_admin(
+            request.tenant_id,
+            request.model_type,
+            request.page,
+            request.page_size
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved model list",
+            "data": jsonable_encoder(result)
+        })
+    except Exception as e:
+        logging.error(f"Failed to list models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail=str(e))

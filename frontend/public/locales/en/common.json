@@ -1316,6 +1316,10 @@
   "tenantResources.models.deleteModel": "Delete Model",
   "tenantResources.models.deleteSuccess": "Model deleted",
   "tenantResources.models.deleteFailed": "Delete failed",
+  "tenantResources.models.checkConnectivity": "Check Connectivity",
+  "tenantResources.models.connectivitySuccess": "Model connectivity is healthy",
+  "tenantResources.models.connectivityFailed": "Model cannot connect",
+  "tenantResources.models.connectivityError": "Error checking connectivity",
   "tenantResources.models.enterDescription": "Enter model description",
   "tenantResources.models.enterName": "Enter model name",
 
