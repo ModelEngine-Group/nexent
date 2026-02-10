@@ -25,7 +25,7 @@ for module_path in [
     "consts", "consts.provider", "consts.model", "consts.const", "consts.exceptions",
     "utils", "utils.model_name_utils",
     "services", "services.model_health_service",
-    "database", "database.model_management_db",
+    "database", "database.client", "database.model_management_db",
     "services.providers", "services.providers.base",
     "services.providers.silicon_provider", "services.providers.modelengine_provider",
 ]:
