@@ -788,10 +788,10 @@ export const conversationService = {
     }
   },
 
-  // Generate conversation title
+  // Generate conversation title from user question
   async generateTitle(params: {
     conversation_id: number;
-    history: Array<{ role: 'user' | 'assistant'; content: string; }>;
+    question: string;
   }) {
     const response = await fetch(API_ENDPOINTS.conversation.generateTitle, {
       method: 'POST',
