@@ -609,6 +609,7 @@
   "document.chunk.error.updateFailed": "Failed to update chunk",
   "document.chunk.error.deleteFailed": "Failed to delete chunk",
   "document.chunk.error.missingChunkId": "Chunk identifier is missing",
+  "document.chunk.tooltip.disabledDueToModelMismatch": "The currently configured embedding model ({{currentModel}}) does not match the knowledge base model ({{knowledgeBaseModel}}). You cannot create chunks or perform retrieval until you use the same embedding model as the knowledge base.",
   "document.chunk.form.createTitle": "Create chunk",
   "document.chunk.form.editTitle": "Edit chunk",
   "document.chunk.form.documentName": "Document",

@@ -395,6 +395,7 @@ def create_chunk(
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
+            tenant_id=tenant_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:

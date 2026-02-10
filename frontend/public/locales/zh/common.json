@@ -611,6 +611,7 @@
   "document.chunk.error.updateFailed": "分片更新失败",
   "document.chunk.error.deleteFailed": "分片删除失败",
   "document.chunk.error.missingChunkId": "缺少分片 ID",
+  "document.chunk.tooltip.disabledDueToModelMismatch": "当前配置的向量模型 ({{currentModel}}) 与创建知识库所用模型 ({{knowledgeBaseModel}}) 不一致，无法创建分片或召回检索。",
   "document.chunk.form.createTitle": "新建分片",
   "document.chunk.form.editTitle": "编辑分片",
   "document.chunk.form.documentName": "所属文档",

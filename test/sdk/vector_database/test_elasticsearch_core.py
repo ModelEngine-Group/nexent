@@ -1132,6 +1132,192 @@ def test_hybrid_search_success(elasticsearch_core_instance):
         mock_semantic.assert_called_once()
 
 
+def test_hybrid_search_with_missing_embeddings_generates_and_stores(elasticsearch_core_instance):
+    """
+    Test hybrid search when chunks exist in accurate results but not in semantic results
+    (e.g., manually added chunks without embeddings).
+    The system should generate embeddings, store them in ES, and re-execute semantic search.
+    """
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.embedding_model_name = "test-model"
+    mock_embedding_model.get_embeddings.return_value = [[0.1] * 1024]
+
+    # Initial accurate search returns doc1, semantic search only returns doc2 (doc1 missing)
+    # This simulates a chunk that was manually added without embedding
+    with patch.object(elasticsearch_core_instance, 'accurate_search') as mock_accurate, \
+            patch.object(elasticsearch_core_instance, 'semantic_search') as mock_semantic, \
+            patch.object(elasticsearch_core_instance, 'client') as mock_client:
+
+        # First call: accurate returns doc1 (with content), semantic returns only doc2
+        mock_accurate.return_value = [
+            {
+                "score": 10.0,
+                "document": {"id": "doc1", "content": "Test doc 1 - needs embedding"},
+                "index": "test_index"
+            }
+        ]
+
+        # First semantic search doesn't find doc1 because it has no embedding
+        mock_semantic.side_effect = [
+            # First call returns doc2 only (doc1 missing because no embedding)
+            [
+                {
+                    "score": 0.8,
+                    "document": {"id": "doc2", "content": "Test doc 2"},
+                    "index": "test_index"
+                }
+            ],
+            # Second call (after generating embedding) finds doc1
+            [
+                {
+                    "score": 0.9,
+                    "document": {"id": "doc1", "content": "Test doc 1 - needs embedding"},
+                    "index": "test_index"
+                },
+                {
+                    "score": 0.8,
+                    "document": {"id": "doc2", "content": "Test doc 2"},
+                    "index": "test_index"
+                }
+            ]
+        ]
+
+        # Mock client.index for storing embedding
+        mock_client.index.return_value = {"result": "created"}
+
+        result = elasticsearch_core_instance.hybrid_search(
+            ["test_index"],
+            "test query",
+            mock_embedding_model,
+            top_k=5,
+            weight_accurate=0.3
+        )
+
+        # Verify semantic_search was called twice (initial + after embedding)
+        assert mock_semantic.call_count == 2
+
+        # Verify client.index was called to store the embedding
+        mock_client.index.assert_called_once()
+        call_args = mock_client.index.call_args
+        assert call_args.kwargs["id"] == "doc1"
+        assert "embedding" in call_args.kwargs["document"]
+
+        # Verify result includes doc1 with semantic_score
+        assert len(result) >= 1
+        doc_ids = [r["document"]["id"] for r in result]
+        assert "doc1" in doc_ids
+
+
+def test_hybrid_search_no_missing_embeddings_no_retry(elasticsearch_core_instance):
+    """
+    Test hybrid search when all chunks have embeddings (no missing embeddings).
+    Semantic search should only be called once.
+    """
+    mock_embedding_model = MagicMock()
+
+    with patch.object(elasticsearch_core_instance, 'accurate_search') as mock_accurate, \
+            patch.object(elasticsearch_core_instance, 'semantic_search') as mock_semantic:
+
+        # Both searches return the same documents
+        mock_accurate.return_value = [
+            {
+                "score": 10.0,
+                "document": {"id": "doc1", "content": "Test doc 1"},
+                "index": "test_index"
+            }
+        ]
+
+        mock_semantic.return_value = [
+            {
+                "score": 0.9,
+                "document": {"id": "doc1", "content": "Test doc 1"},
+                "index": "test_index"
+            }
+        ]
+
+        result = elasticsearch_core_instance.hybrid_search(
+            ["test_index"],
+            "test query",
+            mock_embedding_model,
+            top_k=5,
+            weight_accurate=0.3
+        )
+
+        # Semantic search should only be called once (no retry needed)
+        assert mock_semantic.call_count == 1
+        assert len(result) == 1
+        assert result[0]["document"]["id"] == "doc1"
+
+
+def test_hybrid_search_handles_embedding_generation_failure(elasticsearch_core_instance):
+    """
+    Test hybrid search when embedding generation fails for chunks without embeddings.
+    The search should still complete (gracefully handle failures).
+    """
+    mock_embedding_model = MagicMock()
+    mock_embedding_model.embedding_model_name = "test-model"
+    mock_embedding_model.get_embeddings.return_value = []  # Empty embedding
+
+    with patch.object(elasticsearch_core_instance, 'accurate_search') as mock_accurate, \
+            patch.object(elasticsearch_core_instance, 'semantic_search') as mock_semantic, \
+            patch.object(elasticsearch_core_instance, 'client') as mock_client:
+
+        mock_accurate.return_value = [
+            {
+                "score": 10.0,
+                "document": {"id": "doc1", "content": "Test doc 1"},
+                "index": "test_index"
+            }
+        ]
+
+        # Semantic only finds doc1 on second call
+        mock_semantic.side_effect = [
+            [],  # First call: doc1 not found (no embedding)
+            [
+                {
+                    "score": 0.9,
+                    "document": {"id": "doc1", "content": "Test doc 1"},
+                    "index": "test_index"
+                }
+            ]
+        ]
+
+        mock_client.index.return_value = {"result": "created"}
+
+        # Should not raise exception even if embedding generation fails initially
+        result = elasticsearch_core_instance.hybrid_search(
+            ["test_index"],
+            "test query",
+            mock_embedding_model,
+            top_k=5,
+            weight_accurate=0.3
+        )
+
+        # Verify the search completed
+        assert mock_semantic.call_count == 2
+
+
+def test_hybrid_search_empty_results(elasticsearch_core_instance):
+    """Test hybrid search with empty results from both searches."""
+    mock_embedding_model = MagicMock()
+
+    with patch.object(elasticsearch_core_instance, 'accurate_search') as mock_accurate, \
+            patch.object(elasticsearch_core_instance, 'semantic_search') as mock_semantic:
+
+        mock_accurate.return_value = []
+        mock_semantic.return_value = []
+
+        result = elasticsearch_core_instance.hybrid_search(
+            ["test_index"],
+            "test query",
+            mock_embedding_model,
+            top_k=5,
+            weight_accurate=0.3
+        )
+
+        assert len(result) == 0
+
+
 # ----------------------------------------------------------------------------
 # Tests for statistics and monitoring
 # ----------------------------------------------------------------------------

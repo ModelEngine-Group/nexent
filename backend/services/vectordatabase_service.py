@@ -170,8 +170,47 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
     return {"status": "available"}
 
 
-def get_embedding_model(tenant_id: str):
-    # Get the tenant config
+def get_embedding_model(tenant_id: str, model_name: Optional[str] = None):
+    """
+    Get the embedding model for the tenant, optionally using a specific model name.
+
+    Args:
+        tenant_id: Tenant ID
+        model_name: Optional specific model name to use (format: "model_repo/model_name" or just "model_name")
+                   If provided, will try to find the model in the tenant's model list.
+
+    Returns:
+        Embedding model instance or None
+    """
+    # If model_name is provided, try to find it in the tenant's models
+    if model_name:
+        try:
+            from database.model_management_db import get_models
+            models = get_models({"model_type": "embedding"}, tenant_id)
+            for model in models:
+                model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
+                if model_display_name == model_name:
+                    # Found the model, create embedding instance
+                    model_config = {
+                        "model_repo": model.get("model_repo", ""),
+                        "model_name": model["model_name"],
+                        "api_key": model.get("api_key", ""),
+                        "base_url": model.get("base_url", ""),
+                        "model_type": "embedding",
+                        "max_tokens": model.get("max_tokens", 1024),
+                        "ssl_verify": model.get("ssl_verify", True),
+                    }
+                    return OpenAICompatibleEmbedding(
+                        api_key=model_config.get("api_key", ""),
+                        base_url=model_config.get("base_url", ""),
+                        model_name=get_model_name_from_config(model_config) or "",
+                        embedding_dim=model_config.get("max_tokens", 1024),
+                        ssl_verify=model_config.get("ssl_verify", True),
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to get embedding model by name {model_name}: {e}")
+
+    # Fall back to default embedding model (current behavior)
     model_config = tenant_config_manager.get_model_config(
         key="EMBEDDING_ID", tenant_id=tenant_id)
 
@@ -1426,11 +1465,43 @@ class ElasticSearchService:
         chunk_request: ChunkCreateRequest,
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ):
         """
         Create a manual chunk entry in the specified index.
+        Automatically generates and stores embedding for semantic search.
         """
         try:
+            # Get knowledge base's embedding model name
+            embedding_model_name = None
+            if tenant_id:
+                try:
+                    knowledge_record = get_knowledge_record({
+                        "index_name": index_name,
+                        "tenant_id": tenant_id
+                    })
+                    embedding_model_name = knowledge_record.get("embedding_model_name") if knowledge_record else None
+                except Exception as e:
+                    logger.warning(f"Failed to get embedding model name for index {index_name}: {e}")
+
+            # Generate embedding if we have content and can get embedding model
+            embedding_vector = None
+            if chunk_request.content:
+                try:
+                    embedding_model = get_embedding_model(tenant_id, embedding_model_name) if tenant_id else None
+                    if embedding_model:
+                        embeddings = embedding_model.get_embeddings(chunk_request.content)
+                        if embeddings and len(embeddings) > 0:
+                            embedding_vector = embeddings[0]
+                            logger.debug(f"Generated embedding for chunk in index {index_name}")
+                        else:
+                            logger.warning(f"Failed to generate embedding for chunk in index {index_name}")
+                    else:
+                        logger.warning(f"No embedding model available for index {index_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate embedding for chunk: {e}")
+
+            # Build chunk payload
             chunk_payload = ElasticSearchService._build_chunk_payload(
                 base_fields={
                     "id": chunk_request.chunk_id or ElasticSearchService._generate_chunk_id(),
@@ -1443,6 +1514,13 @@ class ElasticSearchService:
                 metadata=chunk_request.metadata,
                 ensure_create_time=True,
             )
+
+            # Add embedding if generated
+            if embedding_vector:
+                chunk_payload["embedding"] = embedding_vector
+                if embedding_model_name:
+                    chunk_payload["embedding_model_name"] = embedding_model_name
+
             result = vdb_core.create_chunk(index_name, chunk_payload)
             return {
                 "status": "success",
