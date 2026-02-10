@@ -316,7 +316,7 @@ def test_update_agent_success(monkeypatch, mock_session):
     agent_info = MagicMock()
     agent_info.__dict__ = {"name": "updated_agent", "description": "updated description"}
 
-    update_agent(1, agent_info, "tenant1", "user1")
+    update_agent(1, agent_info, "user1")
 
     assert mock_agent.updated_by == "user1"
 
@@ -349,7 +349,7 @@ def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_sessio
         "group_ids": [1, 2],
     }
 
-    update_agent(1, agent_info, "tenant1", "user1")
+    update_agent(1, agent_info, "user1")
 
     # name should remain unchanged because None is skipped
     assert mock_agent.name == "test_agent"
@@ -376,7 +376,7 @@ def test_update_agent_not_found(monkeypatch, mock_session):
     agent_info.__dict__ = {"name": "updated_agent"}
 
     with pytest.raises(ValueError, match="ag_tenant_agent_t Agent not found"):
-        update_agent(999, agent_info, "tenant1", "user1")
+        update_agent(999, agent_info, "user1")
 
 def test_delete_agent_by_id_success(monkeypatch, mock_session):
     """测试成功删除agent"""
@@ -389,7 +389,7 @@ def test_delete_agent_by_id_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    
+
     # Restore real AgentInfo and ToolInstance classes for SQLAlchemy update
     # Use the real classes that were saved before mocking
     if _real_agent_info is not None:

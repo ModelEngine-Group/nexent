@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Table,
   Button,
@@ -33,6 +34,7 @@ import { type User } from "@/services/userService";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
   const { data, isLoading, refetch } = useGroupList(tenantId);
   const { data: userData, refetch: refetchUsers } = useUserList(
     tenantId,
@@ -105,7 +107,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     try {
       await deleteGroup(id);
       message.success("Group deleted");
-      refetch();
+      // Invalidate all group queries to ensure all components get updated data
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       if (err.response?.data?.message) {
         message.error(err.response.data.message);
@@ -135,7 +138,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         message.success("Group created");
       }
       setModalVisible(false);
-      refetch();
+      // Invalidate all group queries to ensure all components get updated data
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       if (err.response?.data?.message) {
         message.error(err.response.data.message);
@@ -162,8 +166,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       message.success(t("tenantResources.groups.updated"));
       setModalVisible(false);
 
-      // Force refresh group list to update user counts
-      await refetch();
+      // Invalidate all group queries to ensure all components get updated data
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
       // Refresh user list in case user roles/status changed
       await refetchUsers();
     } catch (err: any) {
@@ -218,6 +222,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 name: record.group_name,
               })}
               onConfirm={() => handleDelete(record.group_id)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.groups.deleteGroup")}>
                 <Button
@@ -266,6 +272,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         open={modalVisible}
         onOk={editingGroup ? handleEditGroupSubmit : handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}
       >
         {editingGroup ? (

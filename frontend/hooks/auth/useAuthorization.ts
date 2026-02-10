@@ -10,6 +10,7 @@ import { AUTH_EVENTS} from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { checkSessionValid } from "@/lib/session";
 
 /**
  * Custom hook for authorization management
@@ -123,7 +124,15 @@ export function useAuthorization(): AuthorizationContextType {
       return;
     }
 
-  }, [isSpeedMode]);
+    // On page refresh, if there is a valid session in storage,
+    // proactively load authorization info so that user/permissions are ready.
+    if (checkSessionValid()) {
+      log.info(
+        "Valid session detected on mount, fetching authorization info..."
+      );
+      fetchAuthzData();
+    }
+  }, [isSpeedMode, fetchAuthzData]);
 
   // Listen for authentication events
   useEffect(() => {

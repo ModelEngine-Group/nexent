@@ -637,28 +637,10 @@ class InvitationUseResponse(BaseModel):
         None, description="Associated group IDs")
 
 
-# Admin Model Management Data Models
+# Manage Tenant Model Data Models
 # ---------------------------------------------------------------------------
-class AdminModelListRequest(BaseModel):
-    """Request model for admin to list models across tenants"""
-    tenant_ids: List[str] = Field(
-        ..., min_items=1, description="List of tenant IDs to query")
-    model_type: Optional[str] = Field(
-        None, description="Filter by model type (e.g., 'llm', 'embedding')")
-    page: int = Field(1, ge=1, description="Page number for pagination")
-    page_size: int = Field(20, ge=1, le=100, description="Items per page")
-
-
-class TenantModelInfo(BaseModel):
-    """Model containing tenant info and their models"""
-    tenant_id: str = Field(..., description="Tenant identifier")
-    tenant_name: str = Field(..., description="Tenant display name")
-    models: List[Dict[str, Any]] = Field(
-        default_factory=list, description="List of models for this tenant")
-
-
-class AdminTenantModelRequest(BaseModel):
-    """Request model for admin to query models for a specific tenant"""
+class ManageTenantModelListRequest(BaseModel):
+    """Request model for listing models in a specific tenant (manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to query models for")
     model_type: Optional[str] = Field(
         None, description="Filter by model type (e.g., 'llm', 'embedding')")
@@ -666,8 +648,8 @@ class AdminTenantModelRequest(BaseModel):
     page_size: int = Field(20, ge=1, le=100, description="Items per page")
 
 
-class AdminTenantModelResponse(BaseModel):
-    """Response model for admin tenant model query"""
+class ManageTenantModelListResponse(BaseModel):
+    """Response model for tenant model list query"""
     tenant_id: str = Field(..., description="Tenant identifier")
     tenant_name: str = Field(..., description="Tenant display name")
     models: List[Dict[str, Any]] = Field(
@@ -676,6 +658,59 @@ class AdminTenantModelResponse(BaseModel):
     page: int = Field(1, description="Current page number")
     page_size: int = Field(20, description="Items per page")
     total_pages: int = Field(0, description="Total number of pages")
+
+
+class ManageTenantModelCreateRequest(BaseModel):
+    """Request model for creating a model in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
+    model_repo: Optional[str] = Field('', description="Model repository path")
+    model_name: str = Field(..., description="Model name")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'tts', 'stt')")
+    api_key: Optional[str] = Field('', description="API key for the model")
+    base_url: Optional[str] = Field('', description="Base URL for the model API")
+    max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
+    display_name: Optional[str] = Field('', description="Display name for the model")
+    expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
+    maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
+    chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+
+
+class ManageTenantModelUpdateRequest(BaseModel):
+    """Request model for updating a model in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to update model for")
+    current_display_name: str = Field(..., description="Current display name of the model to update")
+    model_repo: Optional[str] = Field(None, description="Model repository path")
+    model_name: Optional[str] = Field(None, description="Model name")
+    model_type: Optional[str] = Field(None, description="Model type")
+    api_key: Optional[str] = Field(None, description="API key for the model")
+    base_url: Optional[str] = Field(None, description="Base URL for the model API")
+    max_tokens: Optional[int] = Field(None, description="Maximum tokens for the model")
+    display_name: Optional[str] = Field(None, description="New display name for the model")
+    expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
+    maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
+    chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+
+
+class ManageTenantModelDeleteRequest(BaseModel):
+    """Request model for deleting a model from a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to delete model from")
+    display_name: str = Field(..., description="Display name of the model to delete")
+
+
+class ManageTenantModelHealthcheckRequest(BaseModel):
+    """Request model for checking model connectivity in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to check model connectivity")
+    display_name: str = Field(..., description="Display name of the model to check")
+
+
+class ManageBatchCreateModelsRequest(BaseModel):
+    """Request model for batch creating/updating models in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to batch create models for")
+    provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
+    type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+    api_key: str = Field('', description="API key for the models")
+    models: List[Dict[str, Any]] = Field(default_factory=list, description="List of models to create/update")
+
 
 # Agent Version Management Data Models
 # ---------------------------------------------------------------------------

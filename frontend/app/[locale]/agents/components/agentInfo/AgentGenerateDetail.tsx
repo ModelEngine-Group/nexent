@@ -39,6 +39,7 @@ import { useModelList } from "@/hooks/model/useModelList";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { USER_ROLES } from "@/const/auth";
+import { Can } from "@/components/permission/Can";
 import ExpandEditModal from "./ExpandEditModal";
 
 const { TextArea } = Input;
@@ -611,31 +612,33 @@ export default function AgentGenerateDetail({
                   />
                 </Form.Item>
 
-                <Form.Item
-                  name="group_ids"
-                  label={t("agent.userGroup")}
-                  className="mb-3"
-                >
-                  <Select
-                    mode="multiple"
-                    placeholder={t("agent.userGroup")}
-                    options={groupSelectOptions}
-                    allowClear
-                    onChange={(value) => {
-                      const nextGroupIds = normalizeNumberArray(value || []);
-                      const currentGroupIds = normalizeNumberArray(
-                        editedAgent.group_ids || []
-                      );
-                      if (
-                        JSON.stringify(nextGroupIds) ===
-                        JSON.stringify(currentGroupIds)
-                      ) {
-                        return;
-                      }
-                      onUpdateProfile({ group_ids: nextGroupIds });
-                    }}
-                  />
-                </Form.Item>
+                <Can permission="group:read">
+                  <Form.Item
+                    name="group_ids"
+                    label={t("agent.userGroup")}
+                    className="mb-3"
+                  >
+                    <Select
+                      mode="multiple"
+                      placeholder={t("agent.userGroup")}
+                      options={groupSelectOptions}
+                      allowClear
+                      onChange={(value) => {
+                        const nextGroupIds = normalizeNumberArray(value || []);
+                        const currentGroupIds = normalizeNumberArray(
+                          editedAgent.group_ids || []
+                        );
+                        if (
+                          JSON.stringify(nextGroupIds) ===
+                          JSON.stringify(currentGroupIds)
+                        ) {
+                          return;
+                        }
+                        onUpdateProfile({ group_ids: nextGroupIds });
+                      }}
+                    />
+                  </Form.Item>
+                </Can>
 
                 <Form.Item
                   name="agentAuthor"

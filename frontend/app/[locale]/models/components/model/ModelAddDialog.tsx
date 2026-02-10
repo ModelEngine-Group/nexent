@@ -7,7 +7,7 @@ import {
   LoaderCircle,
   ChevronRight,
   ChevronDown,
-  Settings,
+  Settings
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
@@ -38,6 +38,7 @@ interface ModelAddDialogProps {
   onSuccess: (model?: AddedModel) => Promise<void>;
   defaultProvider?: string; // Default provider to select when dialog opens
   defaultIsBatchImport?: boolean;
+  tenantId?: string; // Optional tenant ID for manage operations
 }
 
 // Default form state for resetting
@@ -186,6 +187,7 @@ export const ModelAddDialog = ({
   onSuccess,
   defaultProvider,
   defaultIsBatchImport,
+  tenantId,
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -419,46 +421,69 @@ export const ModelAddDialog = ({
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
 
-      const config = {
-        modelName: form.name,
-        modelType: modelType,
-        baseUrl: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : parseInt(form.maxTokens),
-        embeddingDim:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : undefined,
-      };
+      // Use manage interface if tenantId is provided
+      if (tenantId) {
+        // Call backend healthcheck API for tenant management
+        const result = await modelService.checkManageTenantModelConnectivity(
+          tenantId,
+          form.displayName || form.name
+        );
 
-      const result = await modelService.verifyModelConfigConnectivity(config);
-
-      // Set connectivity status
-      if (result.connectivity) {
-        setConnectivityStatus({
-          status: "available",
-          message: t("model.dialog.connectivity.status.available"),
-        });
+        // Set connectivity status
+        if (result) {
+          setConnectivityStatus({
+            status: "available",
+            message: t("model.dialog.connectivity.status.available"),
+          });
+        } else {
+          setConnectivityStatus({
+            status: "unavailable",
+            message: t("model.dialog.connectivity.status.unavailable"),
+          });
+        }
       } else {
-        // Set status to unavailable
-        setConnectivityStatus({
-          status: "unavailable",
-          message: t("model.dialog.connectivity.status.unavailable"),
-        });
-        // Show detailed error message using internationalized component (same as add failure)
-        if (result.error) {
-          const translatedError = translateError(result.error, t);
-          // Ensure translatedError is a valid string, fallback to original error if needed
-          const errorText =
-            translatedError && translatedError.length > 0
-              ? translatedError
-              : result.error || "Unknown error";
-          message.error(
-            t("model.dialog.error.connectivityFailed", { error: errorText })
-          );
+        // Use local config verification for non-tenant operations
+        const config = {
+          modelName: form.name,
+          modelType: modelType,
+          baseUrl: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : parseInt(form.maxTokens),
+          embeddingDim:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : undefined,
+        };
+
+        const result = await modelService.verifyModelConfigConnectivity(config);
+
+        // Set connectivity status
+        if (result.connectivity) {
+          setConnectivityStatus({
+            status: "available",
+            message: t("model.dialog.connectivity.status.available"),
+          });
+        } else {
+          // Set status to unavailable
+          setConnectivityStatus({
+            status: "unavailable",
+            message: t("model.dialog.connectivity.status.unavailable"),
+          });
+          // Show detailed error message using internationalized component (same as add failure)
+          if (result.error) {
+            const translatedError = translateError(result.error, t);
+            // Ensure translatedError is a valid string, fallback to original error if needed
+            const errorText =
+              translatedError && translatedError.length > 0
+                ? translatedError
+                : result.error || "Unknown error";
+            message.error(
+              t("model.dialog.error.connectivityFailed", { error: errorText })
+            );
+          }
         }
       }
     } catch (error) {
@@ -499,33 +524,51 @@ export const ModelAddDialog = ({
       const isEmbeddingType =
         modelType === MODEL_TYPES.EMBEDDING ||
         modelType === MODEL_TYPES.MULTI_EMBEDDING;
-      const result = await modelService.addBatchCustomModel({
-        api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        provider: form.provider,
-        type: modelType,
-        models: enabledModels.map((model: any) => {
-          // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
-          if (isEmbeddingType) {
-            const { max_tokens, ...modelWithoutMaxTokens } = model;
-            return {
-              ...modelWithoutMaxTokens,
-              // Add chunk size range for embedding models
-              ...(isEmbeddingModel
-                ? {
-                    expected_chunk_size: form.chunkSizeRange[0],
-                    maximum_chunk_size: form.chunkSizeRange[1],
-                    chunk_batch: parseInt(form.chunkingBatchSize) || 10,
-                  }
-                : {}),
-            };
-          } else {
-            return {
-              ...model,
-              max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
-            };
-          }
-        }),
+
+      // Prepare the model data
+      const modelsData = enabledModels.map((model: any) => {
+        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
+        if (isEmbeddingType) {
+          const { max_tokens, ...modelWithoutMaxTokens } = model;
+          return {
+            ...modelWithoutMaxTokens,
+            // Add chunk size range for embedding models
+            ...(isEmbeddingModel
+              ? {
+                  expected_chunk_size: form.chunkSizeRange[0],
+                  maximum_chunk_size: form.chunkSizeRange[1],
+                  chunk_batch: parseInt(form.chunkingBatchSize) || 10,
+                }
+              : {}),
+          };
+        } else {
+          return {
+            ...model,
+            max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
+          };
+        }
       });
+
+      // Use manage interface if tenantId is provided (for super admin), otherwise use current tenant
+      if (tenantId) {
+        await modelService.batchCreateManageTenantModels({
+          tenantId,
+          provider: form.provider,
+          type: modelType,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          models: modelsData,
+        });
+      } else {
+        await modelService.addBatchCustomModel({
+          api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          provider: form.provider,
+          type: modelType,
+          models: modelsData,
+        });
+      }
+
+      onSuccess();
+
       if (result === 200) {
         // Reset form state before closing
         resetForm();
@@ -595,23 +638,38 @@ export const ModelAddDialog = ({
         maxTokensValue = 0;
       }
 
-      // Add to the backend service
-      await modelService.addCustomModel({
-        name: form.name,
-        type: modelType,
-        url: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens: maxTokensValue,
-        displayName: form.displayName || form.name,
-        // Send chunk size range for embedding models
-        ...(isEmbeddingModel
-          ? {
-              expectedChunkSize: form.chunkSizeRange[0],
-              maximumChunkSize: form.chunkSizeRange[1],
-              chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
-            }
-          : {}),
-      });
+      // Add to the backend service - use manage interface if tenantId is provided
+      if (tenantId) {
+        await modelService.createManageTenantModel({
+          tenantId,
+          name: form.name,
+          type: modelType,
+          url: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens: maxTokensValue,
+          displayName: form.displayName || form.name,
+          expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
+          maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
+          chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
+        });
+      } else {
+        await modelService.addCustomModel({
+          name: form.name,
+          type: modelType,
+          url: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens: maxTokensValue,
+          displayName: form.displayName || form.name,
+          // Send chunk size range for embedding models
+          ...(isEmbeddingModel
+            ? {
+                expectedChunkSize: form.chunkSizeRange[0],
+                maximumChunkSize: form.chunkSizeRange[1],
+                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+        });
+      }
 
       // Create the model configuration object
       const modelConfig: SingleModelConfig = {

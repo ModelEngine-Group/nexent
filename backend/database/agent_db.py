@@ -204,7 +204,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         return result
 
 
-def update_agent(agent_id, agent_info, tenant_id, user_id, version_no: int = 0):
+def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
     """
     Update an existing agent in the database.
     Default version_no=0 updates the draft version.
@@ -222,7 +222,6 @@ def update_agent(agent_id, agent_info, tenant_id, user_id, version_no: int = 0):
         # update ag_tenant_agent_t
         agent = session.query(AgentInfo).filter(
             AgentInfo.agent_id == agent_id,
-            AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y'
         ).first()
