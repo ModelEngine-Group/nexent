@@ -77,13 +77,20 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
 
 
 @agent_config_router.post("/search_info")
-async def search_agent_info_api(agent_id: int = Body(...), authorization: Optional[str] = Header(None)):
+async def search_agent_info_api(
+    agent_id: int = Body(...),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None)
+):
     """
     Search agent info by agent_id
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        return await get_agent_info_impl(agent_id, tenant_id)
+        _, auth_tenant_id = get_current_user_id(authorization)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        return await get_agent_info_impl(agent_id, effective_tenant_id)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(
@@ -118,12 +125,21 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
 
 
 @agent_config_router.delete("")
-async def delete_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
+async def delete_agent_api(
+    request: AgentIDRequest,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
     """
     Delete an agent
     """
     try:
-        await delete_agent_impl(request.agent_id, authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
         return {}
     except Exception as e:
         logger.error(f"Agent delete error: {str(e)}")
@@ -209,13 +225,20 @@ async def regenerate_agent_name_batch_api(request: AgentNameBatchRegenerateReque
 
 
 @agent_config_router.get("/list")
-async def list_all_agent_info_api(authorization: Optional[str] = Header(None), request: Request = None):
+async def list_all_agent_info_api(
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    request: Request = None
+):
     """
     list all agent info
     """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, request)
-        return await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        return await list_all_agent_info_impl(tenant_id=effective_tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(

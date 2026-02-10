@@ -66,7 +66,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
     handleUploadImage,
     handleDeleteContainer,
     handleViewLogs,
-  } = useMcpConfig({ enabled: true });
+  } = useMcpConfig({ enabled: true, tenantId });
 
   // Add Modal State
   const [addModalVisible, setAddModalVisible] = useState(false);

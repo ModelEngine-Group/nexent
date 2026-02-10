@@ -98,11 +98,15 @@ export const fetchTools = async () => {
 
 /**
  * get agent list from backend (basic info only)
+ * @param tenantId optional tenant ID for filtering
  * @returns list of agents with basic info (id, name, description, is_available)
  */
-export const fetchAgentList = async () => {
+export const fetchAgentList = async (tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.list, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -418,11 +422,15 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
 /**
  * Delete Agent
  * @param agentId agent id
+ * @param tenantId optional tenant ID for filtering (uses auth if not provided)
  * @returns delete result
  */
-export const deleteAgent = async (agentId: number) => {
+export const deleteAgent = async (agentId: number, tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.delete, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.delete}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.delete;
+    const response = await fetch(url, {
       method: "DELETE",
       headers: getAuthHeaders(),
       body: JSON.stringify({ agent_id: agentId }),
@@ -633,11 +641,15 @@ export const regenerateAgentNameBatch = async (payload: {
 /**
  * search agent info by agent id
  * @param agentId agent id
+ * @param tenantId optional tenant ID for filtering
  * @returns agent detail info
  */
-export const searchAgentInfo = async (agentId: number) => {
+export const searchAgentInfo = async (agentId: number, tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.searchInfo, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.agent.searchInfo}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.searchInfo;
+    const response = await fetch(url, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(agentId),
