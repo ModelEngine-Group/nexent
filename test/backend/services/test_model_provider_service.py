@@ -7,13 +7,13 @@ connection attempts).
 The mock setup MUST happen at the very beginning before any imports
 from backend.services or database modules.
 """
-import pytest
 from backend.services.model_provider_service import (
     SiliconModelProvider,
     prepare_model_dict,
     merge_existing_model_tokens,
     get_provider_models,
 )
+import pytest
 from test.common.test_mocks import setup_common_mocks, bootstrap_test_env
 import sys
 from unittest import mock
@@ -37,9 +37,6 @@ bootstrap_test_env()
 setup_common_mocks()
 
 # Now we can safely import the module under test
-
-
-# Set required constants for tests
 sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
 sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
 sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
