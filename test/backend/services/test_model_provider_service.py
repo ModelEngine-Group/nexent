@@ -18,6 +18,51 @@ class MockModule(mock.MagicMock):
 
 
 # ---------------------------------------------------------------------------
+# Mock database.client module to prevent MinioClient initialization
+# This must be done BEFORE importing model_provider_service since it imports
+# database.model_management_db which imports database.client
+# ---------------------------------------------------------------------------
+# Mock nexent.storage modules that MinioClient depends on
+nexent_mock = mock.MagicMock()
+nexent_storage_mock = mock.MagicMock()
+nexent_storage_factory_mock = mock.MagicMock()
+storage_client_mock = mock.MagicMock()
+nexent_storage_factory_mock.create_storage_client_from_config = mock.MagicMock(
+    return_value=storage_client_mock)
+nexent_storage_factory_mock.MinIOStorageConfig = mock.MagicMock()
+nexent_storage_mock.storage_client_factory = nexent_storage_factory_mock
+nexent_mock.storage = nexent_storage_mock
+sys.modules['nexent'] = nexent_mock
+sys.modules['nexent.storage'] = nexent_storage_mock
+sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
+
+# Mock database.db_models
+db_models_mock = mock.MagicMock()
+db_models_mock.TableBase = mock.MagicMock()
+sys.modules['database'] = mock.MagicMock()
+sys.modules['database.db_models'] = db_models_mock
+sys.modules['backend.database.db_models'] = db_models_mock
+
+# Mock sqlalchemy
+sqlalchemy_mock = mock.MagicMock()
+sys.modules['sqlalchemy'] = sqlalchemy_mock
+sys.modules['sqlalchemy.orm'] = mock.MagicMock()
+sys.modules['sqlalchemy.orm.class_mapper'] = mock.MagicMock()
+sys.modules['sqlalchemy.orm.sessionmaker'] = mock.MagicMock()
+
+# Mock psycopg2
+sys.modules['psycopg2'] = mock.MagicMock()
+sys.modules['psycopg2.extensions'] = mock.MagicMock()
+
+# Mock database.client module - provide minimal exports needed by model_management_db
+# This prevents MinioClient from being instantiated
+db_client_mock = mock.MagicMock()
+db_client_mock.clean_string_values = mock.MagicMock(
+    side_effect=lambda x: x)
+sys.modules['database.client'] = db_client_mock
+sys.modules['backend.database.client'] = db_client_mock
+
+# ---------------------------------------------------------------------------
 # Insert minimal stub modules so that the service under test can be imported
 # without its real heavy dependencies being present during unit-testing.
 # ---------------------------------------------------------------------------
