@@ -99,11 +99,14 @@ export function KnowledgeBaseEditModal({
               { required: true, message: t("tenantResources.knowledgeBase.permissionRequired") },
             ]}
           >
-            <Select placeholder={t("tenantResources.knowledgeBase.permission")}>
-              <Select.Option value="EDIT">{t("tenantResources.knowledgeBase.permission.EDIT")}</Select.Option>
-              <Select.Option value="READ_ONLY">{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</Select.Option>
-              <Select.Option value="PRIVATE">{t("tenantResources.knowledgeBase.permission.PRIVATE")}</Select.Option>
-            </Select>
+            <Select
+              placeholder={t("tenantResources.knowledgeBase.permission")}
+              options={[
+                { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
+                { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
+                { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+              ]}
+            />
           </Form.Item>
         </Can>
 

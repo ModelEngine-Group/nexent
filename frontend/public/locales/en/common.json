@@ -536,6 +536,7 @@
   "knowledgeBase.summary.notGenerated": "Knowledge base summary was not generated, please change model configuration and retry",
   "knowledgeBase.name.new": "new_base",
   "knowledgeBase.message.getDocumentsFailed": "Failed to get documents",
+  "knowledgeBase.create.permission.groupPlaceholder": "User groups of this knowledge base",
   "knowledgeBase.ingroup.permission.EDIT": "In Group Read/Write",
   "knowledgeBase.ingroup.permission.READ_ONLY": "In Group Read Only",
   "knowledgeBase.ingroup.permission.PRIVATE": "Personal Private",
@@ -1327,6 +1328,7 @@
   "tenantResources.knowledgeBase.getSummaryFailed": "Failed to get knowledge base summary",
   "tenantResources.knowledgeBase.noSummary": "This knowledge base has no summary",
   "tenantResources.knowledgeBase.viewSummary": "Summary Overview",
+  "tenantResources.knowledgeBase.externalSourceDisabled": "External knowledge base - operation disabled",
 
   "tenantResources.models.status.available": "Available",
   "tenantResources.models.status.unavailable": "Unavailable",

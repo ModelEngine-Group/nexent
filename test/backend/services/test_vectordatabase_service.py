@@ -270,6 +270,99 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_group_permissions(self, mock_create_knowledge):
+        """
+        Test create_knowledge_base with group permissions.
+
+        Verifies that ingroup_permission and group_ids are correctly
+        passed to the knowledge record creation.
+        """
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 7,
+            "index_name": "7-uuid",
+            "knowledge_name": "kb1",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb1",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="EDIT",
+            group_ids=[1, 2, 3],
+        )
+
+        self.assertEqual(result["status"], "success")
+        # Verify that create_knowledge_record was called with group permissions
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[1]
+        self.assertEqual(call_kwargs["ingroup_permission"], "EDIT")
+        self.assertEqual(call_kwargs["group_ids"], [1, 2, 3])
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_partial_group_permissions(self, mock_create_knowledge):
+        """
+        Test create_knowledge_base with only ingroup_permission (no group_ids).
+
+        Verifies that the method handles partial group permissions correctly.
+        """
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 8,
+            "index_name": "8-uuid2",
+            "knowledge_name": "kb2",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb2",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="READ_ONLY",
+            # group_ids not provided
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[1]
+        self.assertEqual(call_kwargs["ingroup_permission"], "READ_ONLY")
+        # group_ids should not be in the call if not provided
+        self.assertNotIn("group_ids", call_kwargs)
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_empty_group_ids(self, mock_create_knowledge):
+        """
+        Test create_knowledge_base with empty group_ids list.
+
+        Verifies that an empty list of group_ids is passed correctly.
+        """
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 9,
+            "index_name": "9-uuid3",
+            "knowledge_name": "kb3",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb3",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="PRIVATE",
+            group_ids=[],
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_create_knowledge.assert_called_once()
+        call_kwargs = mock_create_knowledge.call_args[1]
+        self.assertEqual(call_kwargs["ingroup_permission"], "PRIVATE")
+        self.assertEqual(call_kwargs["group_ids"], [])
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_index_failure(self, mock_create_knowledge):
         """
         Test index creation failure.

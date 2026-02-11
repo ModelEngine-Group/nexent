@@ -389,6 +389,8 @@ class ElasticSearchService:
             vdb_core: VectorDatabaseCore,
             user_id: Optional[str],
             tenant_id: Optional[str],
+            ingroup_permission: Optional[str] = None,
+            group_ids: Optional[List[int]] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -412,6 +414,13 @@ class ElasticSearchService:
                 "tenant_id": tenant_id,
                 "embedding_model_name": embedding_model.model if embedding_model else None,
             }
+
+            # Add group permission and group IDs if provided
+            if ingroup_permission is not None:
+                knowledge_data["ingroup_permission"] = ingroup_permission
+            if group_ids is not None:
+                knowledge_data["group_ids"] = group_ids
+
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
 

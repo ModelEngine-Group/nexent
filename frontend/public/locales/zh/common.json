@@ -538,6 +538,7 @@
   "knowledgeBase.summary.notGenerated": "未生成知识库总结，请更换模型配置重试",
   "knowledgeBase.name.new": "新知识库",
   "knowledgeBase.message.getDocumentsFailed": "获取文档列表失败",
+  "knowledgeBase.create.permission.groupPlaceholder": "该知识库所属用户组",
   "knowledgeBase.ingroup.permission.EDIT": "同组可编辑",
   "knowledgeBase.ingroup.permission.READ_ONLY": "同组只读",
   "knowledgeBase.ingroup.permission.PRIVATE": "私有",
@@ -1329,6 +1330,7 @@
   "tenantResources.knowledgeBase.getSummaryFailed": "获取知识库摘要失败",
   "tenantResources.knowledgeBase.noSummary": "该知识库尚无摘要",
   "tenantResources.knowledgeBase.viewSummary": "摘要概览",
+  "tenantResources.knowledgeBase.externalSourceDisabled": "不可操作外部知识库",
 
   "tenantResources.models.status.available": "可用",
   "tenantResources.models.status.unavailable": "不可用",

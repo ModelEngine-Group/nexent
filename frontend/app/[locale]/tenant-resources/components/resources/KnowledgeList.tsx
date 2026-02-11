@@ -98,6 +98,12 @@ export default function KnowledgeList({
     return size;
   };
 
+  // Check if knowledge base is from external source (not Nexent)
+  const isExternalSource = (record: KnowledgeBase) => {
+    const source = record.source || record.knowledge_sources;
+    return source && source !== "nexent" && source !== "elasticsearch";
+  };
+
   const columns: ColumnsType<KnowledgeBase> = [
     {
       title: t("common.name"),
@@ -199,42 +205,51 @@ export default function KnowledgeList({
       key: "actions",
       width: 140,
       fixed: "right",
-      render: (_, record: KnowledgeBase) => (
-        <div className="flex items-center space-x-2">
-          <Tooltip title={t("common.edit")}>
-            <Button
-              type="text"
-              icon={<Edit className="h-4 w-4" />}
-              onClick={() => openEdit(record)}
-              size="small"
-            />
-          </Tooltip>
-          <Tooltip title={t("tenantResources.knowledgeBase.viewSummary")}>
-            <Button
-              type="text"
-              icon={<BookOpen className="h-4 w-4" />}
-              onClick={() => openEditSummary(record)}
-              size="small"
-            />
-          </Tooltip>
-          <Popconfirm
-            title={t("knowledgeBase.modal.deleteConfirm.title")}
-            description={t("common.cannotBeUndone")}
-            onConfirm={() => handleDelete(record.id)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("common.delete")}>
+      render: (_, record: KnowledgeBase) => {
+        if (isExternalSource(record)) {
+          return (
+            <span className="text-gray-400 text-sm">
+              {t("tenantResources.knowledgeBase.externalSourceDisabled")}
+            </span>
+          );
+        }
+        return (
+          <div className="flex items-center space-x-2">
+            <Tooltip title={t("common.edit")}>
               <Button
                 type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
+                icon={<Edit className="h-4 w-4" />}
+                onClick={() => openEdit(record)}
                 size="small"
               />
             </Tooltip>
-          </Popconfirm>
-        </div>
-      ),
+            <Tooltip title={t("tenantResources.knowledgeBase.viewSummary")}>
+              <Button
+                type="text"
+                icon={<BookOpen className="h-4 w-4" />}
+                onClick={() => openEditSummary(record)}
+                size="small"
+              />
+            </Tooltip>
+            <Popconfirm
+              title={t("knowledgeBase.modal.deleteConfirm.title")}
+              description={t("common.cannotBeUndone")}
+              onConfirm={() => handleDelete(record.id)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
+            >
+              <Tooltip title={t("common.delete")}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                />
+              </Tooltip>
+            </Popconfirm>
+          </div>
+        );
+      },
     },
   ];
 
