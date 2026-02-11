@@ -135,8 +135,32 @@ for module_path in [
     "utils.model_name_utils",
     "services",
     "services.model_health_service",
+    "services.providers",
+    "services.providers.base",
+    "services.providers.silicon_provider",
+    "services.providers.modelengine_provider",
 ]:
     sys.modules.setdefault(module_path, mock.MagicMock())
+
+# Mock AbstractModelProvider class from services.providers.base
+# This is needed because model_provider_service imports from services.providers.base
+mock_providers_base = sys.modules["services.providers.base"]
+mock_providers_base.AbstractModelProvider = type(
+    "AbstractModelProvider", (), {})
+
+# Mock SiliconModelProvider class from services.providers.silicon_provider
+mock_silicon_provider = sys.modules["services.providers.silicon_provider"]
+mock_silicon_provider.SiliconModelProvider = type(
+    "SiliconModelProvider", (), {})
+mock_silicon_provider.SiliconModelProvider.get_models = mock.AsyncMock()
+
+# Mock ModelEngineProvider class and related functions from services.providers.modelengine_provider
+mock_modelengine_provider = sys.modules["services.providers.modelengine_provider"]
+mock_modelengine_provider.ModelEngineProvider = type(
+    "ModelEngineProvider", (), {})
+mock_modelengine_provider.ModelEngineProvider.get_models = mock.AsyncMock()
+mock_modelengine_provider.get_model_engine_raw_url = lambda x: x
+mock_modelengine_provider.MODEL_ENGINE_NORTH_PREFIX = "open/router/v1"
 
 # Provide concrete attributes required by the module under test
 sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
@@ -184,12 +208,14 @@ sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
 # CRITICAL: This import MUST come after all sys.modules mocks are set up
 # to prevent the import chain from triggering MinioClient initialization.
 # ============================================================================
+
 from backend.services.model_provider_service import (
     SiliconModelProvider,
     prepare_model_dict,
     merge_existing_model_tokens,
     get_provider_models,
 )
+
 
 # ============================================================================
 # Test-cases for SiliconModelProvider.get_models
