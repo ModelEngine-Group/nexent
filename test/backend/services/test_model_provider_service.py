@@ -17,9 +17,9 @@ from backend.services.model_provider_service import (
     merge_existing_model_tokens,
     get_provider_models,
 )
+import pytest
 import sys
 from unittest import mock
-import pytest
 
 # ============================================================================
 # CRITICAL: Set up mocks BEFORE any imports to prevent side effects
@@ -27,6 +27,9 @@ import pytest
 # to avoid triggering MinioClient initialization during test collection.
 # The mock for database.client MUST be set up BEFORE any import that might
 # trigger the import chain leading to database.client.MiniClient() being called.
+#
+# NOTE: Mock setup MUST come before imports because Python executes the file
+# from top to bottom, and the import on line ~50 triggers the MinioClient.
 # ============================================================================
 
 # First, mock the SDK modules that have side effects at import time
@@ -63,7 +66,7 @@ class MockMinioStorageClient(mock.MagicMock):
 
 
 # Set the mock class in the module BEFORE any imports that might trigger
-# database.client.MiniClient() instantiation
+# database.client.MinioClient() instantiation
 sys.modules["nexent.storage.minio"].MinioStorageClient = MockMinioStorageClient
 
 # Also mock the storage client factory function BEFORE import
@@ -95,6 +98,7 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
 
 class MockMinioClientClass(mock.MagicMock):
     """Mock MinioClient class that returns itself to prevent real client instantiation."""
+
     def __new__(cls, *args, **kwargs):
         # Return the mock instance itself, not a new instance of the class
         # This prevents the real MinIO client from being created
@@ -253,6 +257,7 @@ sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
 # CRITICAL: This import MUST come after all sys.modules mocks are set up
 # to prevent the import chain from triggering MinioClient initialization.
 # ============================================================================
+
 
 # ============================================================================
 # Test-cases for SiliconModelProvider.get_models
