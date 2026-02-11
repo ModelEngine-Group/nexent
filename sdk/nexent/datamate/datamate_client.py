@@ -30,7 +30,7 @@ class DataMateClient:
 
         Args:
             base_url: Base URL of DataMate server (e.g., "http://jasonwang.site:30000")
-            timeout: Request timeout in seconds (default: 30.0)
+            timeout: Request timeout in seconds (default: 5.0)
             verify_ssl: Whether to verify SSL certificates (default: True)
         """
         self.base_url = base_url.rstrip("/")

@@ -506,7 +506,7 @@ class TestClientInitialization:
 
     def test_default_timeout(self):
         client = DataMateClient(base_url="http://test.com")
-        assert client.timeout == 30.0
+        assert client.timeout == 5.0
 
     def test_custom_timeout(self):
         client = DataMateClient(base_url="http://test.com", timeout=5.0)

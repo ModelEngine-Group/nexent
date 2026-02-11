@@ -170,7 +170,7 @@ def test_ssl_verification_parameter(mock_client_cls):
     # Test default SSL verification (should be True)
     core_default = datamate_core.DataMateCore(base_url="http://example")
     mock_client_cls.assert_called_with(
-        base_url="http://example", timeout=30.0, verify_ssl=True
+        base_url="http://example", timeout=5.0, verify_ssl=True
     )
 
     # Reset mock
@@ -181,7 +181,7 @@ def test_ssl_verification_parameter(mock_client_cls):
         base_url="http://example", verify_ssl=True
     )
     mock_client_cls.assert_called_with(
-        base_url="http://example", timeout=30.0, verify_ssl=True
+        base_url="http://example", timeout=5.0, verify_ssl=True
     )
 
     # Reset mock
@@ -192,7 +192,7 @@ def test_ssl_verification_parameter(mock_client_cls):
         base_url="http://example", verify_ssl=False
     )
     mock_client_cls.assert_called_with(
-        base_url="http://example", timeout=30.0, verify_ssl=False
+        base_url="http://example", timeout=5.0, verify_ssl=False
     )
 
     # Reset mock
