@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
+import log from "@/lib/logger";
+
 import { Button, Input, Select } from "antd";
 import {
   SyncOutlined,
@@ -130,7 +132,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Edit modal states
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingKnowledge, setEditingKnowledge] = useState<KnowledgeBase | null>(null);
+  const [editingKnowledge, setEditingKnowledge] =
+    useState<KnowledgeBase | null>(null);
 
   // Open edit modal
   const openEditModal = (kb: KnowledgeBase) => {
@@ -227,16 +230,25 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Filter knowledge bases based on search and filters
   const filteredKnowledgeBases = useMemo(() => {
-    return sortedKnowledgeBases.filter((kb) => {
+    log.log("Filtering knowledge bases:", {
+      totalCount: knowledgeBases.length,
+      searchKeyword: effectiveSearchKeyword,
+      sourceFilter: effectiveSelectedSources,
+      modelFilter: effectiveSelectedModels,
+    });
+
+    const result = sortedKnowledgeBases.filter((kb) => {
       // Keyword search: match name, description, or nickname
       const keyword = effectiveSearchKeyword || "";
+      const kbName = kb.name || "";
+      const kbDescription = kb.description || "";
+      const kbNickname = kb.nickname || "";
+
       const matchesSearch =
         !keyword ||
-        kb.name.toLowerCase().includes(keyword.toLowerCase()) ||
-        (kb.description &&
-          kb.description.toLowerCase().includes(keyword.toLowerCase())) ||
-        (kb.nickname &&
-          kb.nickname.toLowerCase().includes(keyword.toLowerCase()));
+        kbName.toLowerCase().includes(keyword.toLowerCase()) ||
+        kbDescription.toLowerCase().includes(keyword.toLowerCase()) ||
+        kbNickname.toLowerCase().includes(keyword.toLowerCase());
 
       // Source filter
       const matchesSource =
@@ -248,8 +260,24 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         effectiveSelectedModels.length === 0 ||
         effectiveSelectedModels.includes(kb.embeddingModel);
 
-      return matchesSearch && matchesSource && matchesModel;
+      const matches = matchesSearch && matchesSource && matchesModel;
+
+      if (!matches) {
+        log.log("KB filtered out:", {
+          name: kb.name,
+          source: kb.source,
+          embeddingModel: kb.embeddingModel,
+          matchesSearch,
+          matchesSource,
+          matchesModel,
+        });
+      }
+
+      return matches;
     });
+
+    log.log("Filtered result:", result.length, "items");
+    return result;
   }, [
     sortedKnowledgeBases,
     effectiveSearchKeyword,

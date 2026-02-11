@@ -1,7 +1,13 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useLayoutEffect,
+  useCallback,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { App, Modal, Row, Col, theme, Button, Input, Form } from "antd";
@@ -532,12 +538,14 @@ function DataConfig({ isActive }: DataConfigProps) {
       // Use unified success message
       message.success(t("knowledgeBase.message.syncSuccess"));
     } catch (error) {
-      // Use unified error message
-      message.error(
-        t("knowledgeBase.message.syncError", {
-          error: (error as Error)?.message || t("common.unknownError"),
-        })
-      );
+      // Check if it's a DataMate sync error
+      if (error instanceof Error && error.name === "DataMateSyncError") {
+        // Show DataMate-specific friendly error message
+        message.error(t("knowledgeBase.message.syncDataMateError"));
+      } else {
+        // Use unified error message
+        message.error(t("knowledgeBase.message.syncError"));
+      }
     } finally {
       // Clear sync loading state
       kbDispatch({
@@ -550,11 +558,46 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Handle DataMate configuration
   const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
   const [dataMateUrl, setDataMateUrl] = useState("");
+  const [dataMateUrlError, setDataMateUrlError] = useState<string | null>(null);
   const configStore = ConfigStore.getInstance();
 
-  // Monitor DataMate URL changes
+  /**
+   * Validate DataMate URL format
+   * @param url URL to validate
+   * @returns Error message if invalid, null if valid
+   */
+  const validateDataMateUrl = useCallback(
+    (url: string): string | null => {
+      if (!url || url.trim() === "") {
+        return null; // Empty URL is valid (optional field)
+      }
+
+      // Check if URL has http:// or https:// protocol
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        return t("knowledgeBase.error.invalidUrlProtocol");
+      }
+
+      // Check if URL is a valid format (has hostname)
+      try {
+        const urlObj = new URL(url);
+        if (!urlObj.hostname || urlObj.hostname.trim() === "") {
+          return t("knowledgeBase.error.invalidUrlFormat");
+        }
+      } catch {
+        return t("knowledgeBase.error.invalidUrlFormat");
+      }
+
+      return null; // Valid URL
+    },
+    [t]
+  );
+
+  // Monitor DataMate URL changes and validate
   useEffect(() => {
-    console.log("DataMate URL changed to:", dataMateUrl);
+    // Clear error when URL changes
+    if (dataMateUrlError) {
+      setDataMateUrlError(null);
+    }
   }, [dataMateUrl]);
 
   const handleDataMateConfig = () => {
@@ -562,6 +605,38 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   const handleDataMateConfigSave = async () => {
+    // Validate URL format before saving
+    const urlError = validateDataMateUrl(dataMateUrl);
+    if (urlError) {
+      setDataMateUrlError(urlError);
+      return;
+    }
+
+    // Test connection and sync if URL is provided (non-empty)
+    if (dataMateUrl.trim() !== "") {
+      setDataMateUrlError(t("knowledgeBase.message.testingConnection"));
+      try {
+        // First test basic connection
+        const connectionResult =
+          await knowledgeBaseService.testDataMateConnection(dataMateUrl);
+        if (!connectionResult.success) {
+          setDataMateUrlError(t("knowledgeBase.error.connectionFailed"));
+          return;
+        }
+
+        // Then test the actual sync endpoint (sync_datamate_knowledge)
+        // This is the actual operation that will be used when syncing knowledge bases
+        setDataMateUrlError(t("knowledgeBase.message.testingSync"));
+        await knowledgeBaseService.syncDataMateAndCreateRecords(dataMateUrl);
+      } catch (error) {
+        setDataMateUrlError(t("knowledgeBase.error.syncFailed"));
+        return;
+      }
+    }
+
+    // Clear any previous error and proceed with saving
+    setDataMateUrlError(null);
+
     try {
       console.log("Saving DataMate URL:", dataMateUrl);
 
@@ -1030,6 +1105,8 @@ function DataConfig({ isActive }: DataConfigProps) {
         onOk={handleDataMateConfigSave}
         onCancel={() => {
           setShowDataMateConfigModal(false);
+          // Clear error state
+          setDataMateUrlError(null);
           // Reload config to ensure we have the latest values
           loadDataMateConfig();
         }}
@@ -1044,10 +1121,19 @@ function DataConfig({ isActive }: DataConfigProps) {
             {t("knowledgeBase.modal.dataMateConfig.description")}
           </div>
           <Form layout="vertical">
-            <Form.Item label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}>
+            <Form.Item
+              label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}
+              help={dataMateUrlError}
+              validateStatus={dataMateUrlError ? "error" : undefined}
+            >
               <Input
                 value={dataMateUrl}
                 onChange={(e) => setDataMateUrl(e.target.value)}
+                onBlur={() => {
+                  // Validate on blur
+                  const error = validateDataMateUrl(dataMateUrl);
+                  setDataMateUrlError(error);
+                }}
                 placeholder={t(
                   "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
                 )}

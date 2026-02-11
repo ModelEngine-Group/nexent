@@ -5,7 +5,7 @@ Handles API calls to DataMate to fetch knowledge bases and their files.
 This service layer uses the DataMate SDK client to interact with DataMate APIs.
 """
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import asyncio
 
 from consts.const import DATAMATE_URL
@@ -75,17 +75,26 @@ async def _create_datamate_knowledge_records(knowledge_base_ids: List[str],
     return created_records
 
 
-def _get_datamate_core(tenant_id: str) -> DataMateCore:
-    """Get DataMate core instance."""
-    datamate_url = tenant_config_manager.get_app_config(
+def _get_datamate_core(tenant_id: str, datamate_url: Optional[str] = None) -> DataMateCore:
+    """
+    Get DataMate core instance.
+
+    Args:
+        tenant_id: Tenant ID for configuration lookup
+        datamate_url: Optional DataMate server URL (for dynamic configuration)
+
+    Returns:
+        DataMateCore instance
+    """
+    datamate_server_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
         DATAMATE_URL, tenant_id=tenant_id)
-    if not datamate_url:
+    if not datamate_server_url:
         raise ValueError(f"DataMate URL not configured for tenant {tenant_id}")
 
     # For HTTPS URLs with self-signed certificates, disable SSL verification
-    verify_ssl = not datamate_url.startswith("https://")
+    verify_ssl = not datamate_server_url.startswith("https://")
 
-    return DataMateCore(base_url=datamate_url, verify_ssl=verify_ssl)
+    return DataMateCore(base_url=datamate_server_url, verify_ssl=verify_ssl)
 
 
 async def fetch_datamate_knowledge_base_file_list(knowledge_base_id: str, tenant_id: str) -> Dict[str, Any]:
@@ -121,32 +130,27 @@ async def fetch_datamate_knowledge_base_file_list(knowledge_base_id: str, tenant
             f"Failed to fetch file list for knowledge base {knowledge_base_id}: {str(e)}")
 
 
-async def sync_datamate_knowledge_bases_and_create_records(tenant_id: str, user_id: str) -> Dict[str, Any]:
+async def sync_datamate_knowledge_bases_and_create_records(
+    tenant_id: str,
+    user_id: str,
+    datamate_url: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Sync all DataMate knowledge bases and create knowledge records in local database.
 
     Args:
         tenant_id: Tenant ID for creating knowledge records
         user_id: User ID for creating knowledge records
+        datamate_url: Optional DataMate server URL from request (for dynamic configuration)
 
     Returns:
         Dictionary containing knowledge bases list and created records.
     """
-    # Check if ModelEngine is enabled
-    if str(MODEL_ENGINE_ENABLED).lower() != "true":
-        logger.info(
-            f"ModelEngine is disabled (MODEL_ENGINE_ENABLED={MODEL_ENGINE_ENABLED}), skipping DataMate sync")
-        return {
-            "indices": [],
-            "count": 0,
-            "indices_info": [],
-            "created_records": []
-        }
-
-    # Verify DataMate URL is configured before proceeding
-    datamate_url = tenant_config_manager.get_app_config(
+    # Use provided datamate_url from request, fallback to tenant config
+    effective_datamate_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
         DATAMATE_URL, tenant_id=tenant_id)
-    if not datamate_url:
+
+    if not effective_datamate_url:
         logger.warning(
             f"DataMate URL not configured for tenant {tenant_id}, skipping sync")
         return {
@@ -157,13 +161,20 @@ async def sync_datamate_knowledge_bases_and_create_records(tenant_id: str, user_
         }
 
     logger.info(
-        f"Starting DataMate sync for tenant {tenant_id} using URL: {datamate_url}")
+        f"Starting DataMate sync for tenant {tenant_id} using URL: {effective_datamate_url}")
 
     try:
-        core = _get_datamate_core(tenant_id)
+        core = _get_datamate_core(tenant_id, effective_datamate_url)
 
-        # Step 1: Get knowledge base id
-        knowledge_base_ids = core.get_user_indices()
+        # Run synchronous SDK calls in executor to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+
+        # Step 1: Get knowledge base ids
+        knowledge_base_ids = await loop.run_in_executor(
+            None,
+            core.get_user_indices
+        )
+
         if not knowledge_base_ids:
             return {
                 "indices": [],
@@ -171,8 +182,10 @@ async def sync_datamate_knowledge_bases_and_create_records(tenant_id: str, user_
             }
 
         # Step 2: Get detailed information for all knowledge bases
-        details, knowledge_base_names = core.get_indices_detail(
-            knowledge_base_ids)
+        details, knowledge_base_names = await loop.run_in_executor(
+            None,
+            lambda: core.get_indices_detail(knowledge_base_ids)
+        )
 
         response = {
             "indices": knowledge_base_names,
@@ -246,3 +259,67 @@ async def sync_datamate_knowledge_bases_and_create_records(tenant_id: str, user_
             "indices": [],
             "count": 0,
         }
+
+
+async def check_datamate_connection(
+    tenant_id: str,
+    datamate_url: Optional[str] = None
+) -> tuple:
+    """
+    Test connection to DataMate server.
+
+    Args:
+        tenant_id: Tenant ID for configuration lookup.
+        datamate_url: Optional DataMate server URL from request (for dynamic configuration).
+
+    Returns:
+        Tuple of (is_connected: bool, error_message: str).
+        is_connected is True if connection successful, False otherwise.
+        error_message contains error details if connection failed, empty string if successful.
+    """
+    # Check if ModelEngine is enabled
+    if str(MODEL_ENGINE_ENABLED).lower() != "true":
+        logger.info(
+            f"ModelEngine is disabled (MODEL_ENGINE_ENABLED={MODEL_ENGINE_ENABLED}), skipping DataMate connection test")
+        return (False, "ModelEngine is disabled")
+
+    # Use provided datamate_url from request, fallback to tenant config
+    effective_datamate_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
+        DATAMATE_URL, tenant_id=tenant_id)
+
+    if not effective_datamate_url:
+        logger.warning(
+            f"DataMate URL not configured for tenant {tenant_id}")
+        return (False, "DataMate URL not configured")
+
+    logger.info(
+        f"Testing DataMate connection for tenant {tenant_id} using URL: {effective_datamate_url}")
+
+    try:
+        core = _get_datamate_core(tenant_id, effective_datamate_url)
+
+        # Run synchronous SDK call in executor to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+
+        # Test connection by fetching user indices
+        await loop.run_in_executor(
+            None,
+            core.get_user_indices
+        )
+
+        logger.info(
+            f"DataMate connection test successful for tenant {tenant_id}")
+        return (True, "")
+
+    except ValueError as e:
+        # Configuration error (e.g., missing DataMate URL)
+        error_msg = str(e)
+        logger.error(
+            f"DataMate connection test failed (configuration error) for tenant {tenant_id}: {error_msg}")
+        return (False, error_msg)
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(
+            f"DataMate connection test failed for tenant {tenant_id}: {error_msg}")
+        return (False, error_msg)

@@ -35,7 +35,7 @@ class DifySearchTool(Tool):
 
     def __init__(
         self,
-        server_url: str = Field(description="Dify API base URL"),
+        server_url: str = Field(description="Dify API base URL. (e.g., 'https://api.dify.ai/v1')"),
         api_key: str = Field(description="Dify API key with Bearer token"),
         dataset_ids: str = Field(
             description="JSON string array of Dify dataset IDs"),

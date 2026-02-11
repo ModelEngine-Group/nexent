@@ -28,6 +28,8 @@ import {
   useKnowledgeBasesForToolConfig,
   useSyncKnowledgeBases,
 } from "@/hooks/useKnowledgeBaseSelector";
+import { API_ENDPOINTS } from "@/services/api";
+import log from "@/lib/logger";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -76,6 +78,8 @@ export default function ToolConfigModal({
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
+  // Track if user has attempted to submit the form
+  const [hasSubmitted, setHasSubmitted] = useState(false);
 
   // Dify configuration state
   const [difyConfig, setDifyConfig] = useState<{
@@ -85,6 +89,54 @@ export default function ToolConfigModal({
     serverUrl: "",
     apiKey: "",
   });
+
+  // DataMate URL from knowledge base configuration
+  const [knowledgeBaseDataMateUrl, setKnowledgeBaseDataMateUrl] =
+    useState<string>("");
+  // Track if user has manually modified the datamate URL field
+  const [hasUserModifiedDatamateUrl, setHasUserModifiedDatamateUrl] =
+    useState(false);
+
+  // Helper function to get authorization headers
+  const getAuthHeaders = () => {
+    const session =
+      typeof window !== "undefined" ? localStorage.getItem("session") : null;
+    const sessionObj = session ? JSON.parse(session) : null;
+    return {
+      "Content-Type": "application/json",
+      "User-Agent": "AgentFrontEnd/1.0",
+      ...(sessionObj?.access_token && {
+        Authorization: `Bearer ${sessionObj.access_token}`,
+      }),
+    };
+  };
+
+  // Load DataMate URL from knowledge base configuration
+  const loadKnowledgeBaseDataMateUrl = useCallback(async () => {
+    try {
+      const response = await fetch(API_ENDPOINTS.config.load, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const config = result.config;
+        if (
+          config &&
+          config.app &&
+          typeof config.app.datamateUrl === "string"
+        ) {
+          setKnowledgeBaseDataMateUrl(config.app.datamateUrl);
+        }
+      }
+    } catch (error) {
+      log.error(
+        "Failed to load DataMate URL from knowledge base config:",
+        error
+      );
+    }
+  }, []);
 
   // Check if current tool requires knowledge base selection (must be declared before toolKbType)
   const toolRequiresKbSelection = useMemo(() => {
@@ -127,13 +179,26 @@ export default function ToolConfigModal({
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
 
   // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
+  // For datamate_search, use the server_url from the form as config
+  const datamateServerUrl = useMemo(() => {
+    if (toolKbType === "datamate_search") {
+      const serverUrlParam = currentParams.find((p) => p.name === "server_url");
+      return serverUrlParam?.value || "";
+    }
+    return "";
+  }, [toolKbType, currentParams]);
+
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
     refetch: refetchKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(
     toolKbType,
-    toolKbType === "dify_search" ? difyConfig : undefined
+    toolKbType === "dify_search"
+      ? difyConfig
+      : toolKbType === "datamate_search"
+        ? { serverUrl: datamateServerUrl }
+        : undefined
   );
 
   // Sync knowledge bases hook
@@ -181,8 +246,203 @@ export default function ToolConfigModal({
     [currentEmbeddingModel]
   );
 
+  // Track whether this is the first time opening the modal (reset when modal closes)
+  const [modalOpened, setModalOpened] = useState(false);
+
+  // Reset modal state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setModalOpened(false);
+      setKnowledgeBaseDataMateUrl("");
+    }
+  }, [isOpen]);
+
   // Initialize with provided params and sync display names when knowledgeBases is ready
   useEffect(() => {
+    // Load DataMate URL from knowledge base configuration
+    // This should run every time the modal opens for datamate_search tool
+    if (tool?.name === "datamate_search" && isOpen && !modalOpened) {
+      loadKnowledgeBaseDataMateUrl().then(() => {
+        // After loading, check if we need to apply the URL
+        // The other useEffect will handle the application
+      });
+    }
+  }, [tool?.name, isOpen, modalOpened]);
+
+  // Apply DataMate URL default value for datamate_search tool
+  // This should only run ONCE when modal first opens
+  useEffect(() => {
+    if (!isOpen || !tool || tool.name !== "datamate_search") {
+      return;
+    }
+
+    // Mark modal as opened
+    if (!modalOpened) {
+      setModalOpened(true);
+    }
+
+    // Only apply default URL if:
+    // 1. server_url has NO saved value (empty)
+    // 2. knowledgeBaseDataMateUrl IS available
+    // 3. This is the first time opening (modalOpened is false)
+    const serverUrlParam = initialParams.find((p) => p.name === "server_url");
+
+    // If server_url already has a saved value, use it
+    if (serverUrlParam?.value) {
+      // Initialize form with saved values (including server_url)
+      setCurrentParams(initialParams);
+      const formValues: Record<string, any> = {};
+      initialParams.forEach((param, index) => {
+        formValues[`param_${index}`] = param.value;
+      });
+      form.setFieldsValue(formValues);
+
+      // Parse initial index_names/dataset_ids value for knowledge base selection
+      const kbParam = initialParams.find(
+        (p) => p.name === "index_names" || p.name === "dataset_ids"
+      );
+      if (kbParam?.value) {
+        let ids: string[] = [];
+        if (Array.isArray(kbParam.value)) {
+          ids = kbParam.value.map(String);
+        } else if (typeof kbParam.value === "string") {
+          try {
+            const parsed = JSON.parse(kbParam.value);
+            if (Array.isArray(parsed)) {
+              ids = parsed.map(String);
+            }
+          } catch {
+            ids = kbParam.value.split(",").filter(Boolean);
+          }
+        }
+        if (ids.length > 0) {
+          setSelectedKbIds(ids);
+        }
+      }
+      return;
+    }
+
+    // If we reach here, server_url has no saved value
+    // Apply default from knowledgeBaseDataMateUrl if available
+    // Only apply if user has NOT manually modified the URL field
+    if (knowledgeBaseDataMateUrl && !hasUserModifiedDatamateUrl) {
+      const updatedParams = initialParams.map((param) => {
+        if (param.name === "server_url") {
+          return { ...param, value: knowledgeBaseDataMateUrl };
+        }
+        return param;
+      });
+
+      setCurrentParams(updatedParams);
+
+      const formValues: Record<string, any> = {};
+      updatedParams.forEach((param, index) => {
+        formValues[`param_${index}`] = param.value;
+      });
+      form.setFieldsValue(formValues);
+    } else {
+      // Either no default available OR user has modified the URL, initialize with initialParams
+      setCurrentParams(initialParams);
+      const formValues: Record<string, any> = {};
+      initialParams.forEach((param, index) => {
+        formValues[`param_${index}`] = param.value;
+      });
+      form.setFieldsValue(formValues);
+    }
+
+    // Parse initial index_names/dataset_ids value for knowledge base selection
+    const kbParam = initialParams.find(
+      (p) => p.name === "index_names" || p.name === "dataset_ids"
+    );
+    if (kbParam?.value) {
+      let ids: string[] = [];
+      if (Array.isArray(kbParam.value)) {
+        ids = kbParam.value.map(String);
+      } else if (typeof kbParam.value === "string") {
+        try {
+          const parsed = JSON.parse(kbParam.value);
+          if (Array.isArray(parsed)) {
+            ids = parsed.map(String);
+          }
+        } catch {
+          ids = kbParam.value.split(",").filter(Boolean);
+        }
+      }
+      if (ids.length > 0) {
+        setSelectedKbIds(ids);
+      }
+    }
+  }, [
+    isOpen,
+    tool,
+    initialParams,
+    knowledgeBaseDataMateUrl,
+    form,
+    modalOpened,
+  ]);
+
+  // When knowledgeBaseDataMateUrl is loaded, check if we need to apply it to the form
+  // This handles the case where the URL was loaded after the initial form setup
+  useEffect(() => {
+    // Only run for datamate_search tool when modal is open
+    if (!isOpen || !tool || tool.name !== "datamate_search") {
+      return;
+    }
+
+    // Skip if server_url already has a saved value
+    const serverUrlParam = initialParams.find((p) => p.name === "server_url");
+    if (serverUrlParam?.value) {
+      return;
+    }
+
+    // Skip if no knowledgeBaseDataMateUrl available
+    if (!knowledgeBaseDataMateUrl) {
+      return;
+    }
+
+    // Skip if user has manually modified the URL field
+    if (hasUserModifiedDatamateUrl) {
+      return;
+    }
+
+    // Skip if form is already initialized with this URL
+    const existingUrlParam = currentParams.find((p) => p.name === "server_url");
+    if (existingUrlParam?.value === knowledgeBaseDataMateUrl) {
+      return;
+    }
+
+    // Apply the loaded URL to the form
+    const updatedParams = initialParams.map((param) => {
+      if (param.name === "server_url") {
+        return { ...param, value: knowledgeBaseDataMateUrl };
+      }
+      return param;
+    });
+
+    setCurrentParams(updatedParams);
+
+    const formValues: Record<string, any> = {};
+    updatedParams.forEach((param, index) => {
+      formValues[`param_${index}`] = param.value;
+    });
+    form.setFieldsValue(formValues);
+  }, [
+    isOpen,
+    tool,
+    initialParams,
+    knowledgeBaseDataMateUrl,
+    form,
+    currentParams,
+    hasUserModifiedDatamateUrl,
+  ]);
+
+  // Initialize form values for non-datamate tools
+  useEffect(() => {
+    // Skip if it's datamate_search tool (handled by other useEffects above)
+    if (tool?.name === "datamate_search") {
+      return;
+    }
+
     // Initialize form values
     setCurrentParams(initialParams);
     const formValues: Record<string, any> = {};
@@ -226,7 +486,7 @@ export default function ToolConfigModal({
         }
       }
     }
-  }, [initialParams, toolRequiresKbSelection]);
+  }, [initialParams, toolRequiresKbSelection, tool?.name, form]);
 
   // Sync selectedKbDisplayNames when knowledgeBases or selectedKbIds changes
   useEffect(() => {
@@ -275,6 +535,9 @@ export default function ToolConfigModal({
   }, [formValues]);
 
   const handleSave = async () => {
+    // Mark that user has attempted to submit the form
+    setHasSubmitted(true);
+
     try {
       // Force sync form values to currentParams before validation
       const latestFormValues = form.getFieldsValue();
@@ -290,6 +553,19 @@ export default function ToolConfigModal({
       }
 
       await form.validateFields();
+
+      // Check if knowledge base selector has valid selection (for index_names/dataset_ids fields)
+      // Since these fields use custom UI without form control, we need manual validation
+      if (toolRequiresKbSelection && selectedKbIds.length === 0) {
+        const kbParam = currentParams.find(
+          (p) =>
+            p.required && (p.name === "index_names" || p.name === "dataset_ids")
+        );
+        if (kbParam) {
+          message.error(t("toolConfig.validation.selectKb"));
+          return;
+        }
+      }
 
       // Use selectedTool if available, otherwise use tool
       const toolToSave = selectedTool || tool;
@@ -376,14 +652,15 @@ export default function ToolConfigModal({
       if (onSave) {
         onSave(currentParams);
       }
-    } catch (error) {
+    } catch {
       // Form validation failed, error will be shown by antd Form
-      message.error("Form validation failed");
     }
   };
 
   const handleClose = () => {
     setTestPanelVisible(false);
+    // Reset user modification tracking state for datamate URL
+    setHasUserModifiedDatamateUrl(false);
     onCancel();
   };
 
@@ -413,6 +690,8 @@ export default function ToolConfigModal({
 
     setSelectedKbIds(ids);
     setSelectedKbDisplayNames(displayNames);
+    // Reset submit state when user makes a selection
+    setHasSubmitted(false);
 
     // Update form value
     if (currentKbParamIndex !== null) {
@@ -445,6 +724,8 @@ export default function ToolConfigModal({
 
     setSelectedKbIds(newIds);
     setSelectedKbDisplayNames(newDisplayNames);
+    // Reset submit state when user modifies selection
+    setHasSubmitted(false);
 
     // Update form value
     const formFieldName = `param_${paramIndex}`;
@@ -518,57 +799,85 @@ export default function ToolConfigModal({
         }
       );
 
+      // Check if this field has validation error
+      // Only show error after user has attempted to submit the form
+      const hasError =
+        hasSubmitted && param.required && selectedKbIds.length === 0;
+
       return (
-        <div
-          className="cursor-pointer bg-white border border-gray-300 rounded px-3 py-2 hover:border-blue-400 transition-colors"
-          onClick={() => openKbSelector(index)}
-          style={{
-            width: "100%",
-            minHeight: "32px",
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: "4px",
-          }}
-          title={namesToRender.join(", ")}
-        >
-          {kbLoading && knowledgeBases.length === 0 ? (
-            // Show skeleton loading when fetching knowledge bases
-            <div className="flex items-center gap-2 w-full">
-              <Skeleton.Input active size="small" style={{ width: "60%" }} />
+        <div>
+          <div
+            className={`cursor-pointer bg-white border rounded px-3 py-2 transition-colors ${
+              hasError
+                ? "border-red-500 hover:border-red-500"
+                : "border-gray-300 hover:border-blue-400"
+            }`}
+            onClick={() => openKbSelector(index)}
+            style={{
+              width: "100%",
+              minHeight: "32px",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "4px",
+            }}
+            title={namesToRender.join(", ")}
+          >
+            {kbLoading && knowledgeBases.length === 0 ? (
+              // Show skeleton loading when fetching knowledge bases
+              <div className="flex items-center gap-2 w-full">
+                <Skeleton.Input active size="small" style={{ width: "60%" }} />
+              </div>
+            ) : namesToRender.length > 0 ? (
+              namesToRender.map((name, i) => (
+                <Tag
+                  key={tagsToRender[i]}
+                  closeIcon={
+                    <span className="ant-tag-close-icon">
+                      <CloseOutlined style={{ fontSize: "10px" }} />
+                    </span>
+                  }
+                  onClose={(e) => {
+                    e.stopPropagation();
+                    removeKbFromSelection(i, index);
+                  }}
+                  style={{
+                    marginRight: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    lineHeight: "20px",
+                    padding: "0 8px",
+                    fontSize: "13px",
+                  }}
+                >
+                  {name}
+                </Tag>
+              ))
+            ) : (
+              <span className="text-gray-400 text-sm">{placeholder}</span>
+            )}
+          </div>
+          {/* Show error message when validation fails */}
+          {hasError && (
+            <div
+              className="ant-form-item-explain-error"
+              style={{ marginTop: "4px" }}
+            >
+              {t("toolConfig.validation.selectKb")}
             </div>
-          ) : namesToRender.length > 0 ? (
-            namesToRender.map((name, i) => (
-              <Tag
-                key={tagsToRender[i]}
-                closeIcon={
-                  <span className="ant-tag-close-icon">
-                    <CloseOutlined style={{ fontSize: "10px" }} />
-                  </span>
-                }
-                onClose={(e) => {
-                  e.stopPropagation();
-                  removeKbFromSelection(i, index);
-                }}
-                style={{
-                  marginRight: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  lineHeight: "20px",
-                  padding: "0 8px",
-                  fontSize: "13px",
-                }}
-              >
-                {name}
-              </Tag>
-            ))
-          ) : (
-            <span className="text-gray-400 text-sm">{placeholder}</span>
           )}
         </div>
       );
     },
-    [form, knowledgeBases, selectedKbIds, selectedKbDisplayNames, kbLoading, t]
+    [
+      form,
+      knowledgeBases,
+      selectedKbIds,
+      selectedKbDisplayNames,
+      kbLoading,
+      hasSubmitted,
+      t,
+    ]
   );
 
   const renderParamInput = (param: ToolParam, index: number) => {
@@ -723,6 +1032,24 @@ export default function ToolConfigModal({
               labelAlign="left"
               labelCol={{ span: 6 }}
               wrapperCol={{ span: 18 }}
+              onValuesChange={(changedValues, allValues) => {
+                // Track if user has modified the datamate server_url field
+                if (
+                  tool?.name === "datamate_search" &&
+                  knowledgeBaseDataMateUrl &&
+                  !hasUserModifiedDatamateUrl
+                ) {
+                  const serverUrlFieldIndex = currentParams.findIndex(
+                    (p) => p.name === "server_url"
+                  );
+                  if (serverUrlFieldIndex >= 0) {
+                    const fieldName = `param_${serverUrlFieldIndex}`;
+                    if (changedValues[fieldName] !== undefined) {
+                      setHasUserModifiedDatamateUrl(true);
+                    }
+                  }
+                }
+              }}
             >
               <div className="pr-2 mt-3">
                 {currentParams.map((param, index) => {
@@ -733,9 +1060,58 @@ export default function ToolConfigModal({
                   if (param.required) {
                     rules.push({
                       required: true,
-                      message: t("toolConfig.validation.required", {
-                        name: param.name,
-                      }),
+                      message: t("toolConfig.validation.required"),
+                    });
+                  }
+
+                  // Add URL validation for server_url parameter
+                  if (param.name === "server_url") {
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (!value) return Promise.resolve();
+                        try {
+                          // Check if value is a valid URL
+                          let url: URL;
+                          try {
+                            url = new URL(value);
+                          } catch {
+                            return Promise.reject(
+                              t("knowledgeBase.error.invalidUrlFormat")
+                            );
+                          }
+                          // Check if protocol is http or https
+                          if (url.protocol !== "http:" && url.protocol !== "https:") {
+                            return Promise.reject(
+                              t("knowledgeBase.error.invalidUrlProtocol")
+                            );
+                          }
+                          return Promise.resolve();
+                        } catch {
+                          return Promise.reject(
+                            t("knowledgeBase.error.invalidUrlFormat")
+                          );
+                        }
+                      },
+                    });
+                  }
+
+                  // Add custom validator for knowledge base selector fields (index_names/dataset_ids)
+                  // Since these fields use custom display without form control, we need custom validation
+                  if (
+                    toolRequiresKbSelection &&
+                    (param.name === "index_names" ||
+                      param.name === "dataset_ids")
+                  ) {
+                    rules.push({
+                      validator: async () => {
+                        // Check if any knowledge base has been selected
+                        if (selectedKbIds.length === 0) {
+                          return Promise.reject(
+                            t("toolConfig.validation.selectKb")
+                          );
+                        }
+                        return Promise.resolve();
+                      },
                     });
                   }
 
@@ -853,11 +1229,26 @@ export default function ToolConfigModal({
         knowledgeBases={knowledgeBases}
         isLoading={kbLoading}
         showCheckbox={true}
-        onSync={(toolType) => syncKnowledgeBases(toolType, difyConfig)}
+        onSync={(toolType) =>
+          syncKnowledgeBases(
+            toolType,
+            toolType === "datamate_search"
+              ? { serverUrl: datamateServerUrl }
+              : toolType === "dify_search"
+                ? difyConfig
+                : undefined
+          )
+        }
         syncLoading={isSyncing === getToolType()}
         isSelectable={canSelectKnowledgeBase}
         currentEmbeddingModel={currentEmbeddingModel}
-        difyConfig={toolKbType === "dify_search" ? difyConfig : undefined}
+        difyConfig={
+          toolKbType === "dify_search"
+            ? difyConfig
+            : toolKbType === "datamate_search"
+              ? { serverUrl: datamateServerUrl }
+              : undefined
+        }
       />
     </>
   );

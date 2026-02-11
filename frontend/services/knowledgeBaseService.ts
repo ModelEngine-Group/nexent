@@ -10,8 +10,11 @@ import {
   Document,
   KnowledgeBase,
   KnowledgeBaseCreateParams,
+  KnowledgeBasesWithDataMateStatus,
+  DataMateSyncError,
 } from "@/types/knowledgeBase";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
+import { configStore } from "@/lib/config";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -130,18 +133,23 @@ class KnowledgeBaseService {
   }
 
   // Sync DataMate knowledge bases and create local records
-  async syncDataMateAndCreateRecords(): Promise<{
+  async syncDataMateAndCreateRecords(datamateUrl?: string): Promise<{
     indices: string[];
     count: number;
     indices_info: any[];
     created_records: any[];
   }> {
     try {
+      const body = datamateUrl
+        ? JSON.stringify({ datamate_url: datamateUrl })
+        : undefined;
+
       const response = await fetch(
         API_ENDPOINTS.datamate.syncDatamateKnowledges,
         {
           method: "POST",
           headers: getAuthHeaders(),
+          ...(body && { body }),
         }
       );
 
@@ -161,6 +169,44 @@ class KnowledgeBaseService {
         error
       );
       throw error;
+    }
+  }
+
+  /**
+   * Test connection to DataMate server
+   * @param datamateUrl Optional DataMate URL to test (uses configured URL if not provided)
+   * @returns Promise<{success: boolean, error?: string}>
+   */
+  async testDataMateConnection(
+    datamateUrl?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const body = datamateUrl
+        ? JSON.stringify({ datamate_url: datamateUrl })
+        : undefined;
+
+      const response = await fetch(API_ENDPOINTS.datamate.testConnection, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        ...(body && { body }),
+      });
+
+      if (response.ok) {
+        return { success: true };
+      }
+
+      const errorData = await response.json();
+      return {
+        success: false,
+        error: errorData.detail || "Connection failed",
+      };
+    } catch (error) {
+      log.error("Failed to test DataMate connection:", error);
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Connection test failed",
+      };
     }
   }
 
@@ -241,9 +287,10 @@ class KnowledgeBaseService {
     skipHealthCheck = false,
     includeDataMateSync = true,
     tenantId: string | null = null
-  ): Promise<KnowledgeBase[]> {
+  ): Promise<KnowledgeBasesWithDataMateStatus> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
+      let dataMateSyncError: string | undefined;
 
       // Get knowledge bases from Elasticsearch
       try {
@@ -266,7 +313,14 @@ class KnowledgeBaseService {
             });
             const data = await response.json();
 
+            log.log("Elasticsearch indices response:", data);
+
             if (data.indices && data.indices_info) {
+              log.log(
+                "Processing indices_info:",
+                data.indices_info.length,
+                "items"
+              );
               // Convert Elasticsearch indices to knowledge base format
               const esKnowledgeBases = data.indices_info.map(
                 (indexInfo: any) => {
@@ -311,7 +365,20 @@ class KnowledgeBaseService {
                   };
                 }
               );
+              log.log("Converted knowledge bases:", esKnowledgeBases);
               knowledgeBases.push(...esKnowledgeBases);
+            } else {
+              log.log(
+                "Skipping indices processing:",
+                "indices exists:",
+                !!data.indices,
+                "indices_info exists:",
+                !!data.indices_info,
+                "indices length:",
+                data.indices?.length,
+                "indices_info length:",
+                data.indices_info?.length
+              );
             }
           }
         }
@@ -319,52 +386,71 @@ class KnowledgeBaseService {
         log.error("Failed to get Elasticsearch indices:", error);
       }
 
-      // Sync DataMate knowledge bases and get the synced data (only if enabled)
+      // Sync DataMate knowledge bases and get the synced data (only if enabled and URL is configured)
       if (includeDataMateSync) {
-        try {
-          const syncResult = await this.syncDataMateAndCreateRecords();
-          if (syncResult.indices_info) {
-            // Convert synced DataMate indices to knowledge base format
-            const datamateKnowledgeBases: KnowledgeBase[] =
-              syncResult.indices_info.map((indexInfo: any) => {
-                const stats = indexInfo.stats?.base_info || {};
-                const kbId = indexInfo.name;
-                const kbName = indexInfo.display_name || indexInfo.name;
+        // Check if DataMate URL is configured before attempting sync
+        const config = configStore.getConfig();
+        const currentDataMateUrl = config.app?.datamateUrl;
 
-                return {
-                  id: kbId,
-                  name: kbName,
-                  display_name: indexInfo.display_name || indexInfo.name,
-                  description: "DataMate knowledge base",
-                  documentCount: stats.doc_count || 0,
-                  chunkCount: stats.chunk_count || 0,
-                  createdAt: stats.creation_date || null,
-                  updatedAt: stats.update_date || stats.creation_date || null,
-                  embeddingModel: stats.embedding_model || "unknown",
-                  knowledge_sources: indexInfo.knowledge_sources || "datamate",
-                  ingroup_permission: indexInfo.ingroup_permission || "",
-                  group_ids: indexInfo.group_ids || [],
-                  store_size: stats.store_size || "",
-                  process_source: stats.process_source || "",
-                  avatar: "",
-                  chunkNum: 0,
-                  language: "",
-                  nickname: "",
-                  parserId: "",
-                  permission: indexInfo.permission || "",
-                  tokenNum: 0,
-                  source: "datamate",
-                  tenant_id: indexInfo.tenant_id,
-                };
-              });
-            knowledgeBases.push(...datamateKnowledgeBases);
+        if (!currentDataMateUrl || currentDataMateUrl.trim() === "") {
+          // Skip DataMate sync if URL is not configured
+          log.info(
+            "DataMate URL not configured, skipping DataMate knowledge base sync"
+          );
+        } else {
+          try {
+            const syncResult = await this.syncDataMateAndCreateRecords();
+            if (syncResult.indices_info) {
+              // Convert synced DataMate indices to knowledge base format
+              const datamateKnowledgeBases: KnowledgeBase[] =
+                syncResult.indices_info.map((indexInfo: any) => {
+                  const stats = indexInfo.stats?.base_info || {};
+                  const kbId = indexInfo.name;
+                  const kbName = indexInfo.display_name || indexInfo.name;
+
+                  return {
+                    id: kbId,
+                    name: kbName,
+                    display_name: indexInfo.display_name || indexInfo.name,
+                    description: "DataMate knowledge base",
+                    documentCount: stats.doc_count || 0,
+                    chunkCount: stats.chunk_count || 0,
+                    createdAt: stats.creation_date || null,
+                    updatedAt: stats.update_date || stats.creation_date || null,
+                    embeddingModel: stats.embedding_model || "unknown",
+                    knowledge_sources:
+                      indexInfo.knowledge_sources || "datamate",
+                    ingroup_permission: indexInfo.ingroup_permission || "",
+                    group_ids: indexInfo.group_ids || [],
+                    store_size: stats.store_size || "",
+                    process_source: stats.process_source || "",
+                    avatar: "",
+                    chunkNum: 0,
+                    language: "",
+                    nickname: "",
+                    parserId: "",
+                    permission: indexInfo.permission || "",
+                    tokenNum: 0,
+                    source: "datamate",
+                    tenant_id: indexInfo.tenant_id,
+                  };
+                });
+              knowledgeBases.push(...datamateKnowledgeBases);
+            }
+          } catch (error) {
+            // Store the error message for DataMate sync failure
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            dataMateSyncError = errorMessage;
+            log.error("Failed to sync DataMate knowledge bases:", error);
           }
-        } catch (error) {
-          log.error("Failed to sync DataMate knowledge bases:", error);
         }
       }
 
-      return knowledgeBases;
+      return {
+        knowledgeBases,
+        dataMateSyncError,
+      };
     } catch (error) {
       log.error("Failed to get knowledge base list:", error);
       throw error;

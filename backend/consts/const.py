@@ -192,7 +192,8 @@ INVITE_CODE = os.getenv("INVITE_CODE")
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 # User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
-USER_INFO_QUERY_SOURCE = os.getenv('USER_INFO_QUERY_SOURCE', 'supabase').lower()
+USER_INFO_QUERY_SOURCE = os.getenv(
+    'USER_INFO_QUERY_SOURCE', 'supabase').lower()
 
 # Memory Search Status Messages (for i18n placeholders)
 MEMORY_SEARCH_START_MSG = "<MEM_START>"

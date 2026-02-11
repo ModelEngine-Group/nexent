@@ -182,6 +182,7 @@ export const API_ENDPOINTS = {
   },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
+    testConnection: `${API_BASE_URL}/datamate/test_connection`,
     files: (knowledgeBaseId: string) =>
       `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
   },

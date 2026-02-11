@@ -3,7 +3,7 @@
 // Document status constants
 export const DOCUMENT_STATUS = {
   WAIT_FOR_PROCESSING: "WAIT_FOR_PROCESSING",
-  WAIT_FOR_FORWARDING: "WAIT_FOR_FORWARDING", 
+  WAIT_FOR_FORWARDING: "WAIT_FOR_FORWARDING",
   PROCESSING: "PROCESSING",
   FORWARDING: "FORWARDING",
   COMPLETED: "COMPLETED",
@@ -13,16 +13,16 @@ export const DOCUMENT_STATUS = {
 
 // Non-terminal statuses (still processing)
 export const NON_TERMINAL_STATUSES: string[] = [
-  DOCUMENT_STATUS.WAIT_FOR_PROCESSING, 
-  DOCUMENT_STATUS.PROCESSING, 
-  DOCUMENT_STATUS.WAIT_FOR_FORWARDING, 
-  DOCUMENT_STATUS.FORWARDING
+  DOCUMENT_STATUS.WAIT_FOR_PROCESSING,
+  DOCUMENT_STATUS.PROCESSING,
+  DOCUMENT_STATUS.WAIT_FOR_FORWARDING,
+  DOCUMENT_STATUS.FORWARDING,
 ];
 
 // Document action type constants
 export const DOCUMENT_ACTION_TYPES = {
   FETCH_SUCCESS: "FETCH_SUCCESS",
-  SELECT_DOCUMENT: "SELECT_DOCUMENT", 
+  SELECT_DOCUMENT: "SELECT_DOCUMENT",
   SELECT_DOCUMENTS: "SELECT_DOCUMENTS",
   SELECT_ALL: "SELECT_ALL",
   SET_UPLOAD_FILES: "SET_UPLOAD_FILES",
@@ -31,7 +31,7 @@ export const DOCUMENT_ACTION_TYPES = {
   DELETE_DOCUMENT: "DELETE_DOCUMENT",
   SET_LOADING_KB_ID: "SET_LOADING_KB_ID",
   CLEAR_DOCUMENTS: "CLEAR_DOCUMENTS",
-  ERROR: "ERROR"
+  ERROR: "ERROR",
 } as const;
 
 // Knowledge base action type constants
@@ -44,7 +44,8 @@ export const KNOWLEDGE_BASE_ACTION_TYPES = {
   ADD_KNOWLEDGE_BASE: "ADD_KNOWLEDGE_BASE",
   LOADING: "LOADING",
   SET_SYNC_LOADING: "SET_SYNC_LOADING",
-  ERROR: "ERROR"
+  SET_DATA_MATE_SYNC_ERROR: "SET_DATA_MATE_SYNC_ERROR",
+  ERROR: "ERROR",
 } as const;
 
 // UI layout configuration, internally manages height ratios of each section
@@ -99,7 +100,7 @@ export const UI_ACTION_TYPES = {
   TOGGLE_CREATE_MODAL: "TOGGLE_CREATE_MODAL",
   TOGGLE_DOC_MODAL: "TOGGLE_DOC_MODAL",
   ADD_NOTIFICATION: "ADD_NOTIFICATION",
-  REMOVE_NOTIFICATION: "REMOVE_NOTIFICATION"
+  REMOVE_NOTIFICATION: "REMOVE_NOTIFICATION",
 } as const;
 
 // Notification type constants
@@ -107,31 +108,31 @@ export const NOTIFICATION_TYPES = {
   SUCCESS: "success",
   ERROR: "error",
   INFO: "info",
-  WARNING: "warning"
+  WARNING: "warning",
 } as const;
 
 // File extension constants
 export const FILE_EXTENSIONS = {
-  PDF: 'pdf',
-  DOC: 'doc',
-  DOCX: 'docx',
-  XLS: 'xls',
-  XLSX: 'xlsx',
-  PPT: 'ppt',
-  PPTX: 'pptx',
-  TXT: 'txt',
-  MD: 'md'
+  PDF: "pdf",
+  DOC: "doc",
+  DOCX: "docx",
+  XLS: "xls",
+  XLSX: "xlsx",
+  PPT: "ppt",
+  PPTX: "pptx",
+  TXT: "txt",
+  MD: "md",
 } as const;
 
 // File type constants
 export const FILE_TYPES = {
-  PDF: 'PDF',
-  WORD: 'Word',
-  EXCEL: 'Excel',
-  POWERPOINT: 'PowerPoint',
-  TEXT: 'Text',
-  MARKDOWN: 'Markdown',
-  UNKNOWN: 'Unknown'
+  PDF: "PDF",
+  WORD: "Word",
+  EXCEL: "Excel",
+  POWERPOINT: "PowerPoint",
+  TEXT: "Text",
+  MARKDOWN: "Markdown",
+  UNKNOWN: "Unknown",
 } as const;
 
 // File extension to type mapping
@@ -144,5 +145,5 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.PPT]: FILE_TYPES.POWERPOINT,
   [FILE_EXTENSIONS.PPTX]: FILE_TYPES.POWERPOINT,
   [FILE_EXTENSIONS.TXT]: FILE_TYPES.TEXT,
-  [FILE_EXTENSIONS.MD]: FILE_TYPES.MARKDOWN
+  [FILE_EXTENSIONS.MD]: FILE_TYPES.MARKDOWN,
 } as const;

@@ -27,7 +27,7 @@ class MemoryPreparationException(Exception):
     """Raised when memory preprocessing or retrieval fails prior to agent run."""
     pass
 
-  
+
 class MCPConnectionError(Exception):
     """Raised when MCP connection fails."""
     pass
@@ -106,4 +106,9 @@ class MCPContainerError(Exception):
 
 class DuplicateError(Exception):
     """Raised when a duplicate resource already exists."""
+    pass
+
+
+class DataMateConnectionError(Exception):
+    """Raised when DataMate connection fails or URL is not configured."""
     pass

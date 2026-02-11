@@ -111,6 +111,7 @@ export interface KnowledgeBaseState {
   isLoading: boolean;
   syncLoading: boolean;
   error: string | null;
+  dataMateSyncError?: string;
 }
 
 // Knowledge base action type
@@ -143,6 +144,10 @@ export type KnowledgeBaseAction =
   | {
       type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_SYNC_LOADING;
       payload: boolean;
+    }
+  | {
+      type: typeof KNOWLEDGE_BASE_ACTION_TYPES.SET_DATA_MATE_SYNC_ERROR;
+      payload: string | undefined;
     }
   | { type: typeof KNOWLEDGE_BASE_ACTION_TYPES.ERROR; payload: string };
 
@@ -183,4 +188,18 @@ export type UIAction =
 // Abortable error type for upload operations
 export interface AbortableError extends Error {
   name: string;
+}
+
+// Custom error type for DataMate sync failures
+export class DataMateSyncError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DataMateSyncError";
+  }
+}
+
+// Result type for knowledge base fetch with DataMate sync status
+export interface KnowledgeBasesWithDataMateStatus {
+  knowledgeBases: KnowledgeBase[];
+  dataMateSyncError?: string;
 }
