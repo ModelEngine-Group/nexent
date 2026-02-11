@@ -26,8 +26,30 @@ class KnowledgeBaseSearchTool(Tool):
         "domain expertise, personal notes, or any information that has been indexed in the knowledge base. "
         "Suitable for queries requiring access to stored knowledge that may not be publicly available."
     )
+
+    description_zh = "基于你的查询词在本地知识库中进行搜索，返回最相关的搜索结果。适用于检索本地知识库中存储的领域专业知识、文档和信息。当用户询问与专业知识、技术文档、领域专长、个人笔记或任何已在知识库中建立索引的信息相关的问题时，请使用此工具。适合需要访问非公开存储知识的查询。"
+
     inputs = {
-        "query": {"type": "string", "description": "The search query to perform."},
+        "query": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        },
+    }
+
+    init_param_descriptions = {
+        "top_k": {
+            "description": "Maximum number of search results",
+            "description_zh": "返回搜索结果的最大数量"
+        },
+        "index_names": {
+            "description": "The list of index names to search",
+            "description_zh": "要搜索的索引名称列表"
+        },
+        "search_mode": {
+            "description": "The search mode, optional values: hybrid, accurate, semantic",
+            "description_zh": "搜索模式，可选值：hybrid（混合）、accurate（精确）、semantic（语义）"
+        }
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value

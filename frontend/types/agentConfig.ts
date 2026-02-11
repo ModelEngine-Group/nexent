@@ -73,7 +73,8 @@ export interface Tool {
   name: string;
   origin_name?: string;
   description: string;
-  source: "local" | "mcp" | "langchain";
+  description_zh?: string;
+  source?: string;
   initParams: ToolParam[];
   is_available?: boolean;
   create_time?: string;
@@ -88,6 +89,7 @@ export interface ToolParam {
   required: boolean;
   value?: any;
   description?: string;
+  description_zh?: string;
 }
 
 // ========== Data Interfaces ==========

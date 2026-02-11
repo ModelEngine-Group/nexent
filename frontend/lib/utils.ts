@@ -4,10 +4,56 @@ import { CircleCheck, XCircle, LoaderCircle } from "lucide-react"
 import { DOCUMENT_STATUS } from "@/const/knowledgeBase"
 import React from 'react'
 import log from "@/lib/logger";
+import i18n from "@/app/i18n";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
+
+/**
+ * Check if current language is Chinese
+ * @returns true if current language is Chinese (zh or zh-CN)
+ */
+export const isZhLocale = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false; // Default to English on server side
+  }
+  // Use i18next language setting, fallback to navigator.language
+  const lang = i18n.language || navigator.language || (window.navigator as any).language;
+  return lang === 'zh' || lang === 'zh-CN' || lang.startsWith('zh');
+};
+
+/**
+ * Get localized description - returns Chinese description if available and locale is Chinese
+ * @param description English description
+ * @param description_zh Chinese description (optional)
+ * @returns The appropriate description based on current locale
+ */
+export const getLocalizedDescription = (
+  description: string | undefined,
+  description_zh: string | undefined
+): string => {
+  if (isZhLocale() && description_zh) {
+    return description_zh;
+  }
+  return description || '';
+};
+
+/**
+ * Get bilingual description object for UI components
+ * @param description English description
+ * @param description_zh Chinese description (optional)
+ * @returns Object with both descriptions
+ */
+export const getBilingualDescription = (
+  description: string | undefined,
+  description_zh: string | undefined
+): { description: string; description_zh?: string } => {
+  return {
+    description: description || '',
+    ...(description_zh && { description_zh }),
+  };
+};
 
 // Get status priority
 function getStatusPriority(status: string): number {

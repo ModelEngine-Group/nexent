@@ -13,16 +13,70 @@ from ..utils.tools_common_message import ToolCategory
 logger = logging.getLogger("send_email_tool")
 class SendEmailTool(Tool):
     name = "send_email"
-    description = "Send email to specified recipients. Supports only HTML formatted email content, and can add multiple recipients, CC, and BCC."
+    description = "Send email to specified recipients. Supports only HTML formatted formatted email content, and can add multiple recipients, CC, and BCC."
+
+    description_zh = "向指定收件人发送 HTML 格式邮件，支持添加多个收件人、抄送和密送。"
 
     inputs = {
-        "to": {"type": "string", "description": "Recipient email address, multiple recipients separated by commas"},
-        "subject": {"type": "string", "description": "Email subject"},
-        "content": {"type": "string", "description": "Email content, supports HTML format"},
-        "cc": {"type": "string", "description": "CC email address, multiple CCs separated by commas, optional",
-               "nullable": True},
-        "bcc": {"type": "string", "description": "BCC email address, multiple BCCs separated by commas, optional",
-                "nullable": True}}
+        "to": {
+            "type": "string",
+            "description": "Recipient email address, multiple recipients separated by commas",
+            "description_zh": "收件人邮箱地址，多个收件人用逗号分隔"
+        },
+        "subject": {
+            "type": "string",
+            "description": "Email subject",
+            "description_zh": "邮件主题"
+        },
+        "content": {
+            "type": "string",
+            "description": "Email content, supports HTML format",
+            "description_zh": "邮件内容，支持 HTML 格式"
+        },
+        "cc": {
+            "type": "string",
+            "description": "CC email address, multiple CCs separated by commas, optional",
+            "description_zh": "抄送邮箱地址，多个抄送用逗号分隔，可选",
+            "nullable": True
+        },
+        "bcc": {
+            "type": "string",
+            "description": "BCC email address, multiple BCCs separated by commas, optional",
+            "description_zh": "密送邮箱地址，多个密送用逗号分隔，可选",
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "smtp_server": {
+            "description": "SMTP Server Address",
+            "description_zh": "SMTP 服务器地址"
+        },
+        "smtp_port": {
+            "description": "SMTP server port",
+            "description_zh": "SMTP 服务器端口"
+        },
+        "username": {
+            "description": "SMTP server username",
+            "description_zh": "SMTP 服务器用户名"
+        },
+        "password": {
+            "description": "SMTP server password",
+            "description_zh": "SMTP 服务器密码"
+        },
+        "use_ssl": {
+            "description": "Use SSL",
+            "description_zh": "使用 SSL"
+        },
+        "sender_name": {
+            "description": "Sender name",
+            "description_zh": "发件人名称"
+        },
+        "timeout": {
+            "description": "Timeout",
+            "description_zh": "连接超时时间（秒）"
+        }
+    }
     output_type = "string"
     category = ToolCategory.EMAIL.value
 

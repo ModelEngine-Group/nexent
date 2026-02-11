@@ -18,9 +18,17 @@ class ExaSearchTool(Tool):
     name = "exa_search"
     description = "Performs a internet search based on your query (think a Google search) then returns the top search results. " \
                   "A tool for retrieving publicly available information, news, general knowledge, or non-proprietary data from the internet. " \
-                  "Use this for real-time open-domain updates, broad topics, or or general knowledge queries" \
+                  "Use this for real-time open-domain updates, broad topics, or or general knowledge queries"
 
-    inputs = {"query": {"type": "string", "description": "The search query to perform."}}
+    description_zh = "基于你的查询词进行互联网搜索，返回最相关的搜索结果。适用于获取公开信息、新闻、通用知识或互联网上的非专有数据。特别适合实时信息更新、广泛话题或通用知识查询。"
+
+    inputs = {
+        "query": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        }
+    }
     output_type = "string"
     category = ToolCategory.SEARCH.value
     tool_sign = ToolSign.EXA_SEARCH.value  # Used to distinguish different index sources in summary

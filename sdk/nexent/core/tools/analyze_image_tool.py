@@ -33,14 +33,34 @@ class AnalyzeImageTool(Tool):
         "HTTP, and HTTPS URLs.\n"
         "Use this tool when you want to retrieve information contained in an image and provide the image's URL and your query."
     )
+
+    description_zh = "使用视觉语言模型，根据你的提示词来理解图像，并返回图像的描述。可用于理解和分析多张图片，支持 S3 URLs（s3://bucket/key 或 /bucket/key）、HTTP 和 HTTPS URL。"
+
     inputs = {
         "image_urls_list": {
             "type": "array",
             "description": "List of image URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
+            "description_zh": "列表形式输入图片 URL（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。"
         },
         "query": {
             "type": "string",
-            "description": "User's question to guide the analysis"
+            "description": "User's question to guide the analysis",
+            "description_zh": "用户的问题，用于指导分析"
+        }
+    }
+
+    init_param_descriptions = {
+        "observer": {
+            "description": "Message observer",
+            "description_zh": "消息观察者"
+        },
+        "vlm_model": {
+            "description": "The VLM model to use",
+            "description_zh": "要使用的 VLM 模型"
+        },
+        "storage_client": {
+            "description": "Storage client for downloading files",
+            "description_zh": "存储客户端，用于下载文件"
         }
     }
     output_type = "array"

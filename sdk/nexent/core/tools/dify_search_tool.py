@@ -26,8 +26,38 @@ class DifySearchTool(Tool):
         "domain expertise, or any information that has been indexed in Dify knowledge bases. "
         "Suitable for queries requiring access to stored knowledge that may not be publicly available."
     )
+
+    description_zh = "基于你的查询词在 Dify 知识库中进行搜索，返回最相关的搜索结果。适用于检索 Dify 知识库中存储的领域专业知识、文档和信息。当用户询问与专业知识、技术文档、领域专长或任何已在 Dify 知识库中建立索引的信息相关的问题时，请使用此工具。"
+
     inputs = {
-        "query": {"type": "string", "description": "The search query to perform."},
+        "query": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        }
+    }
+
+    init_param_descriptions = {
+        "server_url": {
+            "description": "Dify API base URL",
+            "description_zh": "Dify API 基础 URL"
+        },
+        "api_key": {
+            "description": "Dify API key with bearer token",
+            "description_zh": "Dify API 密钥（带 bearer token）"
+        },
+        "dataset_ids": {
+            "description": "JSON string array of Dify dataset IDs",
+            "description_zh": "Dify 数据集 ID 的 JSON 字符串数组"
+        },
+        "top_k": {
+            "description": "Maximum number of search results per dataset",
+            "description_zh": "每个数据集返回的搜索结果最大数量"
+        },
+        "search_method": {
+            "description": "Search method: keyword_search, semantic_search, full_text_search, hybrid_search",
+            "description_zh": "搜索方法：keyword_search（关键词搜索）、semantic_search（语义搜索）、full_text_search（全文搜索）、hybrid_search（混合搜索）"
+        }
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value

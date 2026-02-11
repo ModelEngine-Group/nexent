@@ -21,8 +21,21 @@ class DeleteDirectoryTool(Tool):
                   "This operation is irreversible and will delete the directory and all its contents. " \
                   "Use with caution as deleted directories cannot be recovered."
 
+    description_zh = "删除指定路径的目录，路径需为工作区相对路径（例如，'documents/subfolder'），出于安全考虑，不支持绝对路径。该操作不可逆，会删除目标目录及其中所有内容，删除后无法恢复，使用时请谨慎操作。"
+
     inputs = {
-        "directory_path": {"type": "string", "description": "Relative path of the directory to delete (e.g., 'documents/subfolder')"}
+        "directory_path": {
+            "type": "string",
+            "description": "Relative path of the directory to delete (e.g., 'documents/subfolder')",
+            "description_zh": "要删除的目录的相对路径（例如，'documents/subfolder'）"
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value

@@ -18,11 +18,30 @@ class CreateDirectoryTool(Tool):
                   "Path should be relative to the workspace (e.g., 'documents/subfolder'). " \
                   "Absolute paths are not allowed for security reasons. " \
                   "Will create parent directories if they don't exist. " \
-                  "If directory already exists, operation will succeed without error."
+                  "If the target directory already exists, the operation will still succeed without error."
+
+    description_zh = "在指定路径创建目录，路径需为工作区相对路径（例如，'documents/subfolder'），出于安全考虑，不支持绝对路径，父目录不存在时将自动创建。若目标目录已存在，操作仍将完成且不会报错。"
 
     inputs = {
-        "directory_path": {"type": "string", "description": "Relative path where the directory should be created (e.g., 'documents/subfolder')"},
-        "permissions": {"type": "string", "description": "Directory permissions in octal format (e.g., '755')", "default": "755", "nullable": True}
+        "directory_path": {
+            "type": "string",
+            "description": "Relative path where the directory should be created (e.g., 'documents/subfolder')",
+            "description_zh": "要创建的目录的相对路径（例如，'documents/subfolder'）"
+        },
+        "permissions": {
+            "type": "string",
+            "description": "Directory permissions in octal format (e.g., '755')",
+            "description_zh": "目录权限，八进制格式（例如，'755'）",
+            "default": "755",
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value
