@@ -29,7 +29,7 @@ import {
   Upload as UploadIcon,
   Unplug,
   Edit,
-  CircleCheck,
+  CheckCircle,
   CircleX,
   AlertCircle,
 } from "lucide-react";
@@ -365,7 +365,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             {healthCheckLoading[key] ? (
               <LoaderCircle className="w-3 h-3 animate-spin mr-1" />
             ) : isAvailable ? (
-              <CircleCheck className="w-3 h-3 mr-1" />
+              <CheckCircle className="w-3 h-3 mr-1" />
             ) : (
               <CircleX className="w-3 h-3 mr-1" />
             )}
@@ -467,7 +467,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "15%",
       render: (status: string) => {
         const statusConfig: Record<string, { color: string; icon: React.ReactNode }> = {
-          running: { color: "#229954", icon: <CircleCheck className="w-3 h-3" /> },
+          running: { color: "#229954", icon: <CheckCircle className="w-3 h-3" /> },
           exited: { color: "#E74C3C", icon: <CircleX className="w-3 h-3" /> },
           created: { color: "#2E4053", icon: <LoaderCircle className="w-3 h-3 animate-spin" /> },
           paused: { color: "#AEB6BF", icon: <AlertCircle className="w-3 h-3" /> },

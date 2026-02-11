@@ -19,7 +19,7 @@ import {
 import {
   Trash2,
   Maximize2,
-  CircleCheck,
+  CheckCircle,
   CircleSlash,
   Clock,
   Eye,
@@ -284,8 +284,8 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         const versions = agentVersions.get(agentId) || [];
         const isLoading = loadingVersions.get(agentId) || false;
         // Default to 0 (current version) if not selected
-        const selectedVersionNo = selectedVersions.has(agentId) 
-          ? selectedVersions.get(agentId)! 
+        const selectedVersionNo = selectedVersions.has(agentId)
+          ? selectedVersions.get(agentId)!
           : 0;
 
         // Build options: current version (0) first, then other versions
@@ -321,7 +321,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       width: "10%",
       render: (_: unknown, record: AgentListRow) => {
         const isPublished = record.is_published === true;
-        
+
         // If not published, only show unpublished status
         if (!isPublished) {
           return (
@@ -353,7 +353,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                 className="inline-flex items-center"
                 variant="solid"
               >
-                <CircleCheck className="w-3 h-3 mr-1" />
+                <CheckCircle className="w-3 h-3 mr-1" />
                 {t("mcpConfig.status.available")}
               </Tag>
             ) : (
