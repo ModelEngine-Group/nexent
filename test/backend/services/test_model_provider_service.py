@@ -11,12 +11,6 @@ This test module thoroughly tests:
 
 Coverage: 100% for model_provider_service.py and related provider modules.
 """
-from backend.services.model_provider_service import (
-    SiliconModelProvider,
-    prepare_model_dict,
-    merge_existing_model_tokens,
-    get_provider_models,
-)
 import sys
 from unittest import mock
 import pytest
@@ -196,6 +190,13 @@ sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
 # to prevent the import chain from triggering MinioClient initialization.
 # ============================================================================
 
+from backend.services.model_provider_service import (
+    SiliconModelProvider,
+    prepare_model_dict,
+    merge_existing_model_tokens,
+    get_provider_models,
+)
+
 
 # ============================================================================
 # Test-cases for SiliconModelProvider.get_models
@@ -223,8 +224,7 @@ async def test_get_models_llm_success():
         mock_response = mock.Mock()
         mock_response.status_code = 200
         mock_response._json_data = {"data": [{"id": "gpt-4"}]}
-        mock_response.json = mock.Mock(
-            side_effect=lambda: mock_response._json_data)
+        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
         mock_response.raise_for_status = mock.Mock()
         mock_client_instance.get.return_value = mock_response
 
@@ -266,8 +266,7 @@ async def test_get_models_embedding_success():
         mock_response._json_data = {
             "data": [{"id": "text-embedding-ada-002"}]
         }
-        mock_response.json = mock.Mock(
-            side_effect=lambda: mock_response._json_data)
+        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
         mock_response.raise_for_status = mock.Mock()
         mock_client_instance.get.return_value = mock_response
 
@@ -304,8 +303,7 @@ async def test_get_models_unknown_type():
         mock_response = mock.Mock()
         mock_response.status_code = 200
         mock_response._json_data = {"data": [{"id": "model-x"}]}
-        mock_response.json = mock.Mock(
-            side_effect=lambda: mock_response._json_data)
+        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
         mock_response.raise_for_status = mock.Mock()
         mock_client_instance.get.return_value = mock_response
 
@@ -1539,8 +1537,7 @@ async def test_silicon_get_models_empty_list():
         mock_response = mock.Mock()
         mock_response.status_code = 200
         mock_response._json_data = {"data": []}  # Empty model list
-        mock_response.json = mock.Mock(
-            side_effect=lambda: mock_response._json_data)
+        mock_response.json = mock.Mock(side_effect=lambda: mock_response._json_data)
         mock_response.raise_for_status = mock.Mock()
         mock_client_instance.get.return_value = mock_response
 
