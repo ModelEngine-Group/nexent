@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
 from consts.const import MOCK_USER, MOCK_SESSION
+from consts.exceptions import UnauthorizedError
 from consts.model import UserSignInRequest, UserSignUpRequest
+from services.user_management_service import get_user_info
 
 logger = logging.getLogger("mock_user_management_app")
 router = APIRouter(prefix="/user", tags=["user"])
@@ -21,7 +23,7 @@ async def service_health():
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Auth service is available"})
     except Exception as e:
         logger.error(f"Service health check failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="Service health check failed")
 
 
@@ -39,7 +41,7 @@ async def signup(request: UserSignUpRequest):
             success_message = "🎉 Admin account registered successfully! You now have system management permissions."
         else:
             success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
-        
+
         user_data = {
             "user": {
                 "id": MOCK_USER["id"],
@@ -54,12 +56,12 @@ async def signup(request: UserSignUpRequest):
             },
             "registration_type": "admin" if request.is_admin else "user"
         }
-        
+
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": success_message, "data": user_data})
     except Exception as e:
         logger.error(f"User signup failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="User registration failed")
 
 
@@ -88,11 +90,11 @@ async def signin(request: UserSignInRequest):
                 }
             }
         }
-        
+
         return JSONResponse(status_code=HTTPStatus.OK, content=signin_content)
     except Exception as e:
         logger.error(f"User signin failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="User login failed")
 
 
@@ -106,7 +108,7 @@ async def user_refresh_token(request: Request):
 
         # In speed/mock mode, extend for a very long time (10 years)
         new_expires_at = int((datetime.now() + timedelta(days=3650)).timestamp())
-        
+
         session_info = {
             "access_token": f"mock_access_token_{new_expires_at}",
             "refresh_token": f"mock_refresh_token_{new_expires_at}",
@@ -118,7 +120,7 @@ async def user_refresh_token(request: Request):
                             content={"message": "Token refresh successful", "data": {"session": session_info}})
     except Exception as e:
         logger.error(f"Token refresh failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="Token refresh failed")
 
 
@@ -134,7 +136,7 @@ async def logout(request: Request):
                             content={"message": "Logout successful"})
     except Exception as e:
         logger.error(f"User logout failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="User logout failed")
 
 
@@ -152,13 +154,13 @@ async def get_session(request: Request):
                 "role": MOCK_USER["role"]
             }
         }
-        
+
         return JSONResponse(status_code=HTTPStatus.OK,
                          content={"message": "Session is valid",
                                   "data": data})
     except Exception as e:
         logger.error(f"Session validation failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="Session validation failed")
 
 
@@ -174,5 +176,29 @@ async def get_user_id(request: Request):
                                      "data": {"user_id": MOCK_USER["id"]}})
     except Exception as e:
         logger.error(f"Get user ID failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, 
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                           detail="Failed to get user ID")
+
+
+@router.get("/current_user_info")
+async def get_user_information(request: Request):
+    """Get current user information including user ID, group IDs, tenant ID, and role"""
+    try:
+        # In mock mode, always get user ID by MOCK_USER
+        user_id = MOCK_USER["id"]
+        # Get user information
+        user_info = await get_user_info(user_id)
+        if not user_info:
+            raise UnauthorizedError("User information not found")
+
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Success",
+                                     "data": user_info})
+    except UnauthorizedError as e:
+        logging.error(f"Get user information unauthorized: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
+                            detail="User not logged in or session invalid")
+    except Exception as e:
+        logging.error(f"Get user information failed: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="Get user information failed")

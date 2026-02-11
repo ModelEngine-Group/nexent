@@ -19,7 +19,7 @@ from database.invitation_db import (
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
-from consts.exceptions import NotFoundException, UnauthorizedError
+from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from services.group_service import get_tenant_default_group_id
 from utils.str_utils import convert_string_to_list
 
@@ -92,6 +92,10 @@ def create_invitation_code(
     else:
         # Change to upper case by default
         invitation_code = invitation_code.upper()
+
+    # Check if invitation code already exists
+    if query_invitation_by_code(invitation_code):
+        raise DuplicateError(f"Invitation code '{invitation_code}' already exists")
 
     # Create invitation (status will be set automatically)
     invitation_id = add_invitation(

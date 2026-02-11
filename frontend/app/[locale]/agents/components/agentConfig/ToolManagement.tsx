@@ -4,9 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
-import { Tabs, Collapse } from "antd";
+import { Tabs, Collapse, message } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
+import { updateToolConfig } from "@/services/agentConfigService";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Settings } from "lucide-react";
 
@@ -14,6 +17,22 @@ interface ToolManagementProps {
   toolGroups: ToolGroup[];
   isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
+}
+
+// Tool types that require knowledge base selection
+const TOOLS_REQUIRING_KB_SELECTION = [
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+];
+
+function getToolKbType(
+  toolName: string
+): "knowledge_base_search" | "dify_search" | "datamate_search" | null {
+  if (!TOOLS_REQUIRING_KB_SELECTION.includes(toolName)) return null;
+  if (toolName === "dify_search") return "dify_search";
+  if (toolName === "datamate_search") return "datamate_search";
+  return "knowledge_base_search";
 }
 
 /**
@@ -26,6 +45,7 @@ export default function ToolManagement({
   currentAgentId,
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
 
   const editable = currentAgentId || isCreatingMode;
 
@@ -41,6 +61,9 @@ export default function ToolManagement({
 
   // Use tool list hook for data management
   const { availableTools } = useToolList();
+
+  // Prefetch knowledge bases for KB tools
+  const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
 
   const [activeTabKey, setActiveTabKey] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
@@ -96,6 +119,12 @@ export default function ToolManagement({
   }, [toolGroups, activeTabKey]);
 
   const handleToolSettingsClick = async (tool: Tool) => {
+    // Prefetch knowledge bases for KB tools
+    const kbType = getToolKbType(tool.name);
+    if (kbType) {
+      prefetchKnowledgeBases(kbType);
+    }
+
     // Get latest tools directly from store to avoid stale closure issues
     const currentTools = useAgentConfigStore.getState().editedAgent.tools;
     const configuredTool = currentTools.find(
@@ -123,6 +152,12 @@ export default function ToolManagement({
     const tool = availableTools.find((t) => parseInt(t.id) === numericId);
 
     if (!tool) return;
+
+    // Prefetch knowledge bases for KB tools
+    const kbType = getToolKbType(tool.name);
+    if (kbType) {
+      prefetchKnowledgeBases(kbType);
+    }
 
     // Get latest tools directly from store to avoid stale closure issues
     const currentSelectdTools =
@@ -178,6 +213,42 @@ export default function ToolManagement({
           },
         ];
         updateTools(newSelectedTools);
+
+        // In non-creating mode, immediately save tool config to backend
+        if (!isCreatingMode && currentAgentId) {
+          try {
+            // Convert params to backend format
+            const paramsObj = mergedParams.reduce(
+              (acc, param) => {
+                acc[param.name] = param.value;
+                return acc;
+              },
+              {} as Record<string, any>
+            );
+
+            const isEnabled = true; // New tool is enabled by default
+            const result = await updateToolConfig(
+              numericId,
+              currentAgentId,
+              paramsObj,
+              isEnabled
+            );
+
+            if (result.success) {
+              // Invalidate queries to refresh tool info
+              queryClient.invalidateQueries({
+                queryKey: ["toolInfo", numericId, currentAgentId],
+              });
+            } else {
+              message.error(
+                result.message || t("toolConfig.message.saveError")
+              );
+            }
+          } catch (error) {
+            console.error("Failed to save tool config:", error);
+            message.error(t("toolConfig.message.saveError"));
+          }
+        }
       }
     }
   };

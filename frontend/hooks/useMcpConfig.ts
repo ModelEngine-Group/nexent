@@ -21,6 +21,7 @@ import { useMcpContainerList } from "@/hooks/mcp/useMcpContainerList";
 
 export interface UseMcpConfigOptions {
   enabled?: boolean;
+  tenantId?: string | null;
   onServerAdded?: () => void;
   onServerDeleted?: () => void;
   onServerUpdated?: () => void;
@@ -61,14 +62,14 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     isLoading: loadingServers,
     refetch: refetchMcpServers,
     invalidate: invalidateMcpServers,
-  } = useMcpServerList({ enabled: options.enabled ?? true, staleTime: 60_000 });
+  } = useMcpServerList({ enabled: options.enabled ?? true, staleTime: 60_000, tenantId: options.tenantId });
 
   const {
     containerList,
     isLoading: loadingContainers,
     refetch: refetchMcpContainers,
     invalidate: invalidateMcpContainers,
-  } = useMcpContainerList({ enabled: options.enabled ?? true, staleTime: 60_000 });
+  } = useMcpContainerList({ enabled: options.enabled ?? true, staleTime: 60_000, tenantId: options.tenantId });
 
   const loading = loadingServers || loadingContainers;
 
@@ -117,7 +118,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
   // Add MCP server
   const handleAddServer = useCallback(async (url: string, name: string) => {
     try {
-      const result = await addMcpServer(url, name);
+      const result = await addMcpServer(url, name, options.tenantId);
       if (result.success) {
         invalidateMcpServers();
         await refreshToolsAndAgents();
@@ -135,7 +136,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
   // Delete MCP server
   const handleDeleteServer = useCallback(async (server: McpServer) => {
     try {
-      const result = await deleteMcpServer(server.mcp_url, server.service_name);
+      const result = await deleteMcpServer(server.mcp_url, server.service_name, options.tenantId);
       if (result.success) {
         invalidateMcpServers();
         refreshToolsAndAgents().catch(e => log.error("Refresh failed:", e));
@@ -170,7 +171,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     const key = `${server.service_name}__${server.mcp_url}`;
     setHealthCheckLoading(prev => ({ ...prev, [key]: true }));
     try {
-      const result = await checkMcpServerHealth(server.mcp_url, server.service_name);
+      const result = await checkMcpServerHealth(server.mcp_url, server.service_name, options.tenantId);
       invalidateMcpServers();
       invalidateMcpContainers();
       await refreshToolsAndAgents();
@@ -188,7 +189,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     } finally {
       setHealthCheckLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [invalidateMcpServers, invalidateMcpContainers, refreshToolsAndAgents]);
+  }, [invalidateMcpServers, invalidateMcpContainers, refreshToolsAndAgents, options.tenantId]);
 
   // Update MCP server
   const handleUpdateServer = useCallback(async (
@@ -198,10 +199,10 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     newUrl: string
   ) => {
     try {
-      const result = await updateMcpServer(oldName, oldUrl, newName, newUrl);
+      const result = await updateMcpServer(oldName, oldUrl, newName, newUrl, options.tenantId);
       if (result.success) {
         // Best-effort optimistic status update for UI responsiveness
-        queryClient.setQueryData(MCP_SERVERS_QUERY_KEY, (prev: any) => {
+        queryClient.setQueryData([...MCP_SERVERS_QUERY_KEY, options.tenantId], (prev: any) => {
           if (!prev?.data) return prev;
           return {
             ...prev,
@@ -221,7 +222,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       log.error("Failed to update server:", error);
       return { success: false, message: "Failed to update server", messageKey: "mcpService.message.updateServerFailed" };
     }
-  }, [invalidateMcpServers, refreshToolsAndAgents, queryClient, options, MCP_SERVERS_QUERY_KEY]);
+  }, [invalidateMcpServers, refreshToolsAndAgents, queryClient, options]);
 
   // Add container
   const handleAddContainer = useCallback(async (config: any, port: number) => {
@@ -244,7 +245,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     }, 3000);
 
     try {
-      const result = await addMcpFromConfig(configWithPorts as any);
+      const result = await addMcpFromConfig(configWithPorts as any, options.tenantId);
       if (result.success) {
         invalidateMcpContainers();
         invalidateMcpServers();
@@ -267,7 +268,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     serviceName?: string
   ) => {
     try {
-      const result = await uploadMcpImage(file, port, serviceName);
+      const result = await uploadMcpImage(file, port, serviceName, undefined, options.tenantId);
       if (result.success) {
         invalidateMcpContainers();
         invalidateMcpServers();
@@ -280,12 +281,12 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       log.error("Failed to upload image:", error);
       return { success: false, message: "Failed to upload image", messageKey: "mcpConfig.message.uploadImageFailed" };
     }
-  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents]);
+  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options.tenantId]);
 
   // Delete container
   const handleDeleteContainer = useCallback(async (container: McpContainer) => {
     try {
-      const result = await deleteMcpContainer(container.container_id);
+      const result = await deleteMcpContainer(container.container_id, options.tenantId);
       if (result.success) {
         invalidateMcpContainers();
         invalidateMcpServers();
@@ -304,7 +305,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
   // View container logs
   const handleViewLogs = useCallback(async (containerId: string, maxLines: number = 500) => {
     try {
-      const result = await getMcpContainerLogs(containerId, maxLines);
+      const result = await getMcpContainerLogs(containerId, maxLines, options.tenantId);
       if (result.success) {
         return { success: true, data: result.data };
       } else {
@@ -314,7 +315,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       log.error("Failed to get logs:", error);
       return { success: false, data: "Failed to get logs", messageKey: "mcpConfig.message.getContainerLogsFailed" };
     }
-  }, []);
+  }, [options.tenantId]);
 
   return {
     // State

@@ -24,9 +24,12 @@ const getAuthHeaders = () => {
 /**
  * Get MCP server list
  */
-export const getMcpServerList = async () => {
+export const getMcpServerList = async (tenantId?: string | null) => {
   try {
-    const response = await fetch(API_ENDPOINTS.mcp.list, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.mcp.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
 
@@ -39,7 +42,8 @@ export const getMcpServerList = async () => {
         return {
           service_name: server.remote_mcp_server_name,
           mcp_url: server.remote_mcp_server,
-          status: server.status || false
+          status: server.status || false,
+          permission: server.permission,
         };
       });
 
@@ -83,10 +87,17 @@ export const getMcpServerList = async () => {
 /**
  * Add MCP server
  */
-export const addMcpServer = async (mcpUrl: string, serviceName: string) => {
+export const addMcpServer = async (mcpUrl: string, serviceName: string, tenantId?: string | null) => {
   try {
+    const params = new URLSearchParams({
+      mcp_url: mcpUrl,
+      service_name: serviceName,
+    });
+    if (tenantId) {
+      params.append('tenant_id', tenantId);
+    }
     const response = await fetch(
-      `${API_ENDPOINTS.mcp.add}?mcp_url=${encodeURIComponent(mcpUrl)}&service_name=${encodeURIComponent(serviceName)}`,
+      `${API_ENDPOINTS.mcp.add}?${params.toString()}`,
       {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -136,10 +147,14 @@ export const updateMcpServer = async (
   currentServiceName: string,
   currentMcpUrl: string,
   newServiceName: string,
-  newMcpUrl: string
+  newMcpUrl: string,
+  tenantId?: string | null
 ) => {
   try {
-    const response = await fetch(API_ENDPOINTS.mcp.update, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.mcp.update}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.update;
+    const response = await fetch(url, {
       method: "PUT",
       headers: getAuthHeaders(),
       body: JSON.stringify({
@@ -190,10 +205,17 @@ export const updateMcpServer = async (
 /**
  * Delete MCP server
  */
-export const deleteMcpServer = async (mcpUrl: string, serviceName: string) => {
+export const deleteMcpServer = async (mcpUrl: string, serviceName: string, tenantId?: string | null) => {
   try {
+    const params = new URLSearchParams({
+      mcp_url: mcpUrl,
+      service_name: serviceName,
+    });
+    if (tenantId) {
+      params.append('tenant_id', tenantId);
+    }
     const response = await fetch(
-      `${API_ENDPOINTS.mcp.delete}?mcp_url=${encodeURIComponent(mcpUrl)}&service_name=${encodeURIComponent(serviceName)}`,
+      `${API_ENDPOINTS.mcp.delete}?${params.toString()}`,
       {
         method: 'DELETE',
         headers: getAuthHeaders(),
@@ -339,10 +361,17 @@ export const updateToolList = async () => {
 /**
  * checkMcpServerHealth
  */
-export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string) => {
+export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string, tenantId?: string | null) => {
   try {
+    const params = new URLSearchParams({
+      mcp_url: mcpUrl,
+      service_name: serviceName,
+    });
+    if (tenantId) {
+      params.append('tenant_id', tenantId);
+    }
     const response = await fetch(
-      `${API_ENDPOINTS.mcp.healthcheck}?mcp_url=${encodeURIComponent(mcpUrl)}&service_name=${encodeURIComponent(serviceName)}`,
+      `${API_ENDPOINTS.mcp.healthcheck}?${params.toString()}`,
       {
         headers: getAuthHeaders(),
       }
@@ -380,9 +409,12 @@ export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string) 
 /**
  * Add MCP server from container configuration
  */
-export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> }) => {
+export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> }, tenantId?: string | null) => {
   try {
-    const response = await fetch(API_ENDPOINTS.mcp.addFromConfig, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.mcp.addFromConfig}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.addFromConfig;
+    const response = await fetch(url, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(mcpConfig),
@@ -424,9 +456,12 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
 /**
  * Get MCP container list
  */
-export const getMcpContainers = async () => {
+export const getMcpContainers = async (tenantId?: string | null) => {
   try {
-    const response = await fetch(API_ENDPOINTS.mcp.containers, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.mcp.containers}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.containers;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
 
@@ -464,10 +499,16 @@ export const getMcpContainers = async () => {
 /**
  * Get MCP container logs
  */
-export const getMcpContainerLogs = async (containerId: string, tail: number = 100) => {
+export const getMcpContainerLogs = async (containerId: string, tail: number = 100, tenantId?: string | null) => {
   try {
+    const params = new URLSearchParams({
+      tail: tail.toString(),
+    });
+    if (tenantId) {
+      params.append('tenant_id', tenantId);
+    }
     const response = await fetch(
-      `${API_ENDPOINTS.mcp.containerLogs(containerId)}?tail=${tail}`,
+      `${API_ENDPOINTS.mcp.containerLogs(containerId)}?${params.toString()}`,
       {
         headers: getAuthHeaders(),
       }
@@ -509,7 +550,7 @@ export const getMcpContainerLogs = async (containerId: string, tail: number = 10
 /**
  * Upload MCP image and start container
  */
-export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string) => {
+export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -519,6 +560,9 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
     }
     if (envVars) {
       formData.append('env_vars', envVars);
+    }
+    if (tenantId) {
+      formData.append('tenant_id', tenantId);
     }
 
     const authHeaders = getAuthHeaders();
@@ -572,9 +616,12 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
 /**
  * Delete MCP container
  */
-export const deleteMcpContainer = async (containerId: string) => {
+export const deleteMcpContainer = async (containerId: string, tenantId?: string | null) => {
   try {
-    const response = await fetch(API_ENDPOINTS.mcp.deleteContainer(containerId), {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.mcp.deleteContainer(containerId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.deleteContainer(containerId);
+    const response = await fetch(url, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });

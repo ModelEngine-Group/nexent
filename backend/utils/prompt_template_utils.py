@@ -20,7 +20,6 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             - 'knowledge_summary': Knowledge summary template
             - 'analyze_file': File analysis template
             - 'generate_title': Title generation template
-            - 'file_processing_messages': File processing messages template
             - 'document_summary': Document summary template (Map stage)
             - 'cluster_summary_reduce': Cluster summary reduce template (Reduce stage)
             - 'cluster_summary_agent': Cluster summary agent template (legacy)
@@ -36,13 +35,13 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
     # Define template path mapping
     template_paths = {
         'prompt_generate': {
-            LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_generate.yaml',
+            LANGUAGE["ZH"]: 'backend/prompts/utils/prompt_generate_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/utils/prompt_generate_en.yaml'
         },
         'agent': {
             LANGUAGE["ZH"]: {
-                'manager': 'backend/prompts/manager_system_prompt_template.yaml',
-                'managed': 'backend/prompts/managed_system_prompt_template.yaml'
+                'manager': 'backend/prompts/manager_system_prompt_template_zh.yaml',
+                'managed': 'backend/prompts/managed_system_prompt_template_zh.yaml'
             },
             LANGUAGE["EN"]: {
                 'manager': 'backend/prompts/manager_system_prompt_template_en.yaml',
@@ -50,32 +49,28 @@ def get_prompt_template(template_type: str, language: str = LANGUAGE["ZH"], **kw
             }
         },
         'knowledge_summary': {
-            LANGUAGE["ZH"]: 'backend/prompts/knowledge_summary_agent.yaml',
+            LANGUAGE["ZH"]: 'backend/prompts/knowledge_summary_agent_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/knowledge_summary_agent_en.yaml'
         },
         'analyze_file': {
-            LANGUAGE["ZH"]: 'backend/prompts/analyze_file.yaml',
+            LANGUAGE["ZH"]: 'backend/prompts/analyze_file_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/analyze_file_en.yaml'
         },
         'generate_title': {
-            LANGUAGE["ZH"]: 'backend/prompts/utils/generate_title.yaml',
+            LANGUAGE["ZH"]: 'backend/prompts/utils/generate_title_zh.yaml',
             LANGUAGE["EN"]: 'backend/prompts/utils/generate_title_en.yaml'
-        },
-        'file_processing_messages': {
-            LANGUAGE["ZH"]: 'backend/prompts/utils/file_processing_messages.yaml',
-            LANGUAGE["EN"]: 'backend/prompts/utils/file_processing_messages_en.yaml'
         },
         'document_summary': {
             LANGUAGE["ZH"]: 'backend/prompts/document_summary_agent_zh.yaml',
-            LANGUAGE["EN"]: 'backend/prompts/document_summary_agent.yaml'
+            LANGUAGE["EN"]: 'backend/prompts/document_summary_agent_en.yaml'
         },
         'cluster_summary_reduce': {
             LANGUAGE["ZH"]: 'backend/prompts/cluster_summary_reduce_zh.yaml',
-            LANGUAGE["EN"]: 'backend/prompts/cluster_summary_reduce.yaml'
+            LANGUAGE["EN"]: 'backend/prompts/cluster_summary_reduce_en.yaml'
         },
         'cluster_summary_agent': {
-            LANGUAGE["ZH"]: 'backend/prompts/cluster_summary_agent.yaml',
-            LANGUAGE["EN"]: 'backend/prompts/cluster_summary_agent.yaml'
+            LANGUAGE["ZH"]: 'backend/prompts/cluster_summary_agent_zh.yaml',
+            LANGUAGE["EN"]: 'backend/prompts/cluster_summary_agent_en.yaml'
         }
     }
 
@@ -166,19 +161,6 @@ def get_generate_title_prompt_template(language: str = 'zh') -> Dict[str, Any]:
         dict: Loaded prompt template configuration
     """
     return get_prompt_template('generate_title', language)
-
-
-def get_file_processing_messages_template(language: str = 'zh') -> Dict[str, Any]:
-    """
-    Get file processing messages template
-
-    Args:
-        language: Language code ('zh' or 'en')
-
-    Returns:
-        dict: Loaded file processing messages configuration
-    """
-    return get_prompt_template('file_processing_messages', language)
 
 
 def get_document_summary_prompt_template(language: str = LANGUAGE["ZH"]) -> Dict[str, Any]:

@@ -152,3 +152,30 @@ export async function deleteInvitation(invitationCode: string): Promise<void> {
     throw new ApiError(500, "Failed to delete invitation");
   }
 }
+
+/**
+ * Check if invitation code already exists
+ */
+export async function checkInvitationCodeExists(invitationCode: string): Promise<boolean> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.invitations.check(invitationCode), {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      // If 404, code doesn't exist
+      if (response.status === 404) {
+        return false;
+      }
+      throw new ApiError(response.status, "Failed to check invitation code");
+    }
+
+    const result = await response.json();
+    return result.data?.exists ?? false;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to check invitation code");
+  }
+}

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Optional, Union
+from typing import List
 
 from pydantic import Field
 from smolagents.tools import Tool
@@ -40,9 +40,7 @@ class KnowledgeBaseSearchTool(Tool):
         top_k: int = Field(
             description="Maximum number of search results", default=3),
         index_names: List[str] = Field(
-            description="The list of index names to search", default=None, exclude=True),
-        name_resolver: Optional[Dict[str, str]] = Field(
-            description="Mapping from knowledge_name to index_name", default=None, exclude=True),
+            description="The list of index names to search"),
         search_mode: str = Field(
             description="the search mode, optional values: hybrid, accurate, semantic",
             default="hybrid",
@@ -68,7 +66,6 @@ class KnowledgeBaseSearchTool(Tool):
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
-        self.name_resolver: Dict[str, str] = name_resolver or {}
         self.search_mode = search_mode
         self.embedding_model = embedding_model
 
@@ -76,27 +73,6 @@ class KnowledgeBaseSearchTool(Tool):
         self.running_prompt_zh = "知识库检索中..."
         self.running_prompt_en = "Searching the knowledge base..."
 
-    def update_name_resolver(self, new_mapping: Dict[str, str]) -> None:
-        """Update the mapping from knowledge_name to index_name at runtime."""
-        self.name_resolver = new_mapping or {}
-
-    def _resolve_names(self, names: List[str]) -> List[str]:
-        """Resolve user-facing knowledge names to internal index names."""
-        if not names:
-            return []
-        if not self.name_resolver:
-            logger.warning(
-                "No name resolver provided, returning original names")
-            return names
-        return [self.name_resolver.get(name, name) for name in names]
-
-    def _normalize_index_names(self, index_names: Optional[Union[str, List[str]]]) -> List[str]:
-        """Normalize index_names to list; accept single string and keep None as empty list."""
-        if index_names is None:
-            return []
-        if isinstance(index_names, str):
-            return [index_names]
-        return list(index_names)
 
     def forward(self, query: str) -> str:
         # Send tool run message
@@ -108,13 +84,8 @@ class KnowledgeBaseSearchTool(Tool):
                 card_content, ensure_ascii=False))
 
         # Use the instance index_names and search_mode
-        index_names = self.index_names
+        search_index_names = self.index_names
         search_mode = self.search_mode
-
-        # Use provided index_names if available, otherwise use default
-        search_index_names = self._normalize_index_names(
-            index_names if index_names is not None else self.index_names)
-        search_index_names = self._resolve_names(search_index_names)
 
         # Log the index_names being used for this search
         logger.info(

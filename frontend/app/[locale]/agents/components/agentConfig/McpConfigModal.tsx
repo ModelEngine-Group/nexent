@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -100,6 +100,37 @@ export default function McpConfigModal({
   const [uploadServiceName, setUploadServiceName] = useState("");
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
+  const noMcpEditPermissionTitle = t("mcpConfig.permission.noEdit");
+
+  const renderPermissionControlledButton = (props: {
+    isReadOnly: boolean;
+    button: Omit<ComponentProps<typeof Button>, "disabled" | "onClick"> & {
+      disabled?: boolean;
+      onClick?: (() => void) | undefined;
+    };
+  }) => {
+    const { isReadOnly, button } = props;
+    const { onClick, disabled, ...rest } = button;
+
+    const finalDisabled = Boolean(disabled) || isReadOnly;
+    const finalOnClick = finalDisabled ? undefined : onClick;
+
+    const element = (
+      <Button
+        {...rest}
+        onClick={finalOnClick}
+        disabled={finalDisabled}
+      />
+    );
+
+    if (!isReadOnly) return element;
+
+    return (
+      <Tooltip title={noMcpEditPermissionTitle}>
+        <span style={{ display: "inline-flex" }}>{element}</span>
+      </Tooltip>
+    );
+  };
 
   // Data loading is handled by React Query (enabled: visible)
 
@@ -393,6 +424,7 @@ export default function McpConfigModal({
       width: "35%",
       render: (_: any, record: any) => {
         const key = `${record.service_name}__${record.mcp_url}`;
+        const isReadOnly = record.permission === "READ_ONLY";
         return (
           <Space size="small">
             <Button
@@ -425,30 +457,36 @@ export default function McpConfigModal({
                 title={t("mcpConfig.serverList.button.viewToolsDisabledHint")}
                 placement="top"
               >
-                <Button type="link" icon={<Eye size={16} />} size="small" disabled>
-                  {t("mcpConfig.serverList.button.viewTools")}
-                </Button>
+                  <span style={{ display: "inline-flex" }}>
+                    <Button type="link" icon={<Eye size={16} />} size="small" disabled>
+                      {t("mcpConfig.serverList.button.viewTools")}
+                    </Button>
+                  </span>
               </Tooltip>
             )}
-            <Button
-              type="link"
-              icon={<Settings size={16} />}
-              onClick={() => onEditServer(record)}
-              size="small"
-              disabled={actionsLocked}
-            >
-              {t("mcpConfig.serverList.button.edit")}
-            </Button>
-            <Button
-              type="link"
-              danger
-              icon={<Trash size={16} />}
-              onClick={() => onDeleteServer(record)}
-              size="small"
-              disabled={actionsLocked}
-            >
-              {t("mcpConfig.serverList.button.delete")}
-            </Button>
+            {renderPermissionControlledButton({
+              isReadOnly,
+              button: {
+                type: "link",
+                icon: <Settings size={16} />,
+                onClick: () => onEditServer(record),
+                size: "small",
+                disabled: actionsLocked,
+                children: t("mcpConfig.serverList.button.edit"),
+              },
+            })}
+            {renderPermissionControlledButton({
+              isReadOnly,
+              button: {
+                type: "link",
+                danger: true,
+                icon: <Trash size={16} />,
+                onClick: () => onDeleteServer(record),
+                size: "small",
+                disabled: actionsLocked,
+                children: t("mcpConfig.serverList.button.delete"),
+              },
+            })}
           </Space>
         );
       },
@@ -500,29 +538,34 @@ export default function McpConfigModal({
       title: t("mcpConfig.containerList.column.action"),
       key: "action",
       width: "25%",
-      render: (_: any, record: any) => (
-        <Space size="small">
-          <Button
-            type="link"
-            icon={<FileText className="size-4" />}
-            onClick={() => onViewLogs(record.container_id)}
-            size="small"
-            disabled={updatingTools}
-          >
-            {t("mcpConfig.containerList.button.viewLogs")}
-          </Button>
-          <Button
-            type="link"
-            danger
-            icon={<Trash className="size-4" />}
-            onClick={() => onDeleteContainer(record)}
-            size="small"
-            disabled={actionsLocked}
-          >
-            {t("mcpConfig.containerList.button.delete")}
-          </Button>
-        </Space>
-      ),
+      render: (_: any, record: any) => {
+        const isReadOnly = record.permission === "READ_ONLY";
+        return (
+          <Space size="small">
+            <Button
+              type="link"
+              icon={<FileText className="size-4" />}
+              onClick={() => onViewLogs(record.container_id)}
+              size="small"
+              disabled={updatingTools}
+            >
+              {t("mcpConfig.containerList.button.viewLogs")}
+            </Button>
+            {renderPermissionControlledButton({
+              isReadOnly,
+              button: {
+                type: "link",
+                danger: true,
+                icon: <Trash className="size-4" />,
+                onClick: () => onDeleteContainer(record),
+                size: "small",
+                disabled: actionsLocked,
+                children: t("mcpConfig.containerList.button.delete"),
+              },
+            })}
+          </Space>
+        );
+      },
     },
   ];
 

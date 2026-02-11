@@ -1,12 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, Typography, Space } from "antd";
 import { UserRound, LockKeyhole } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 
-import { useAuth } from "@/hooks/useAuth";
-import { useAuthForm } from "@/hooks/useAuthForm";
-import { EVENTS } from "@/const/auth";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import { getEffectiveRoutePath } from "@/lib/auth";
+import log from "@/lib/logger";
 
 const { Text } = Typography;
 
@@ -19,27 +22,44 @@ export function LoginModal() {
   // Authentication state and methods from useAuth hook
   const {
     isLoginModalOpen,
+    isAuthenticated,
     closeLoginModal,
     openRegisterModal,
     login,
-    isFromSessionExpired,
-    setIsFromSessionExpired,
     authServiceUnavailable,
-  } = useAuth();
+  } = useAuthenticationContext();
+  const { isSpeedMode } = useDeployment();
 
-  // Form state and validation methods from useAuthForm hook
-  const {
-    form,
-    isLoading,
-    setIsLoading,
-    emailError,
-    passwordError,
-    setEmailError,
-    setPasswordError,
-    handleEmailChange,
-    handlePasswordChange,
-    resetForm,
-  } = useAuthForm();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [form] = Form.useForm();
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
+
+  const resetForm = () => {
+    setEmailError("");
+    setPasswordError(false);
+    form.resetFields();
+  };
+
+  const handleEmailChange = () => {
+    if (emailError) {
+      setEmailError("");
+      form.setFields([
+        {
+          name: "email",
+          errors: [],
+        },
+      ]);
+    }
+  };
+
+  const handlePasswordChange = () => {
+    if (passwordError) {
+      setPasswordError(false);
+    }
+  };
 
   // Internationalization hook for multi-language support
   const { t } = useTranslation("common");
@@ -58,15 +78,12 @@ export function LoginModal() {
       // Attempt to login with provided credentials
       await login(values.email, values.password);
 
-      // Reset session expired flag after successful login
-      setIsFromSessionExpired(false);
-
-      // Reset modal control state to prevent session expired modal from triggering again
-      // Small delay ensures proper state synchronization
       setTimeout(() => {
-        document.dispatchEvent(new CustomEvent("modalClosed"));
+        // Close the login modal after successful login
+        closeLoginModal();
       }, 200);
     } catch (error: any) {
+      log.error("Login failed", error);
       // Clear email error and set password error flag
       setEmailError("");
       setPasswordError(true);
@@ -137,113 +154,108 @@ export function LoginModal() {
     resetForm();
     closeLoginModal();
 
-    // If login modal was opened due to session expiration,
-    // reset modal state and re-trigger the session expired event
-    if (isFromSessionExpired) {
-      // Reset modal state so session expired modal can be shown again
-      document.dispatchEvent(new CustomEvent("modalClosed"));
-      setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent(EVENTS.SESSION_EXPIRED, {
-            detail: { message: t("auth.sessionExpired") },
-          })
-        );
-      }, 100);
+    // If user manually cancels login from a protected page,
+    // redirect back to home instead of keeping them on the restricted page
+    if (!isAuthenticated && !isSpeedMode) {
+      const effectivePath = pathname ? getEffectiveRoutePath(pathname) : "/";
+      if (effectivePath !== "/") {
+        router.push("/");
+      }
     }
   };
 
   return (
     <Modal
       title={
-        <div className="text-center text-xl font-bold">
+        <div className="text-center text-xl font-bold mt-3">
           {t("auth.loginTitle")}
         </div>
       }
       open={isLoginModalOpen}
       onCancel={handleCancel}
       footer={null}
-      width={400}
+      width={420}
       centered
       forceRender
-      // Prevent modal from being closed by clicking mask when session is expired
-      // But allow close button to be visible so user can return to session expired prompt
-      maskClosable={!isFromSessionExpired}
+      maskClosable={false}
       closable={true}
     >
-      <Form
-        id="login-form"
-        form={form}
-        layout="vertical"
-        onFinish={handleSubmit}
-        className="mt-6"
-        autoComplete="off"
-      >
-        {/* Email input field */}
-        <Form.Item
-          name="email"
-          label={t("auth.emailLabel")}
-          validateStatus={emailError ? "error" : ""}
-          help={emailError}
-          rules={[{ required: true, message: t("auth.emailRequired") }]}
+      <div className="relative bg-white p-4 rounded-2xl">
+        <Form
+          id="login-form"
+          form={form}
+          layout="vertical"
+          onFinish={handleSubmit}
+          className="mt-6"
+          autoComplete="off"
         >
-          <Input
-            prefix={<UserRound className="text-gray-400" size={16} />}
-            placeholder={t("auth.emailPlaceholder")}
-            onChange={handleEmailChange}
-            size="large"
-          />
-        </Form.Item>
-
-        {/* Password input field */}
-        <Form.Item
-          name="password"
-          label={t("auth.passwordLabel")}
-          validateStatus={passwordError ? "error" : ""}
-          help={
-            passwordError || authServiceUnavailable
-              ? authServiceUnavailable
-                ? t("auth.authServiceUnavailable")
-                : t("auth.invalidCredentials")
-              : ""
-          }
-          rules={[{ required: true, message: t("auth.passwordRequired") }]}
-        >
-          <Input.Password
-            prefix={<LockKeyhole className="text-gray-400" size={16} />}
-            placeholder={t("auth.passwordRequired")}
-            onChange={handlePasswordChange}
-            size="large"
-            status={passwordError ? "error" : ""}
-          />
-        </Form.Item>
-
-        {/* Submit button */}
-        <Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={isLoading}
-            block
-            size="large"
-            className="mt-2"
-            disabled={authServiceUnavailable}
+          {/* Email input field */}
+          <Form.Item
+            name="email"
+            label={t("auth.emailLabel")}
+            validateStatus={emailError ? "error" : ""}
+            help={emailError}
+            rules={[{ required: true, message: t("auth.emailRequired") }]}
           >
-            {isLoading ? t("auth.loggingIn") : t("auth.login")}
-          </Button>
-        </Form.Item>
+            <Input
+              prefix={<UserRound className="text-gray-400" size={16} />}
+              placeholder={t("auth.emailPlaceholder")}
+              onChange={handleEmailChange}
+              size="large"
+            />
+          </Form.Item>
 
-        {/* Registration link section (hidden when opened from session expired flow) */}
-        {!isFromSessionExpired && (
-          <div className="text-center">
-            <Space>
-              <Text type="secondary">{t("auth.noAccount")}</Text>
-              <Button type="link" onClick={handleRegisterClick} className="p-0">
-                {t("auth.registerNow")}
-              </Button>
-            </Space>
-          </div>
-        )}
-      </Form>
+          {/* Password input field */}
+          <Form.Item
+            name="password"
+            label={t("auth.passwordLabel")}
+            validateStatus={passwordError ? "error" : ""}
+            help={
+              passwordError || authServiceUnavailable
+                ? authServiceUnavailable
+                  ? t("auth.authServiceUnavailable")
+                  : t("auth.invalidCredentials")
+                : ""
+            }
+            rules={[{ required: true, message: t("auth.passwordRequired") }]}
+          >
+            <Input.Password
+              prefix={<LockKeyhole className="text-gray-400" size={16} />}
+              placeholder={t("auth.passwordRequired")}
+              onChange={handlePasswordChange}
+              size="large"
+              status={passwordError ? "error" : ""}
+            />
+          </Form.Item>
+
+          {/* Submit button */}
+          <Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={isLoading}
+              block
+              size="large"
+              className="mt-2"
+              disabled={authServiceUnavailable}
+            >
+              {isLoading ? t("auth.loggingIn") : t("auth.login")}
+            </Button>
+          </Form.Item>
+
+          {/* Registration link section (hidden when opened from session expired flow) */}
+          
+            <div className="text-center">
+              <Space>
+                <Text type="secondary">{t("auth.noAccount")}</Text>
+                <Button type="link" onClick={handleRegisterClick} className="p-0">
+                  {t("auth.registerNow")}
+                </Button>
+              </Space>
+            </div>
+
+        </Form>
+      </div>
     </Modal>
   );
 }

@@ -4,21 +4,19 @@ Analyze Text File Tool
 Extracts content from text files (excluding images) and analyzes it using a large language model.
 Supports files from S3, HTTP, and HTTPS URLs.
 """
-import json
 import logging
-from typing import List, Optional, Union
+from typing import List, Optional
 
-import httpx
 from jinja2 import Template, StrictUndefined
 from pydantic import Field
 from smolagents.tools import Tool
 
-from nexent.core import MessageObserver
-from nexent.core.utils.observer import ProcessType
-from nexent.core.utils.prompt_template_utils import get_prompt_template
-from nexent.core.utils.tools_common_message import ToolCategory, ToolSign
-from nexent.storage import MinIOStorageClient
-from nexent.multi_modal.load_save_object import LoadSaveObjectManager
+from ...core.utils.observer import MessageObserver, ProcessType
+from ...core.utils.prompt_template_utils import get_prompt_template
+from ...core.utils.tools_common_message import ToolCategory, ToolSign
+from ...storage import MinIOStorageClient
+from ...multi_modal.load_save_object import LoadSaveObjectManager
+from ...utils.http_client_manager import http_client_manager
 
 
 logger = logging.getLogger("analyze_text_file_tool")
@@ -80,7 +78,8 @@ class AnalyzeTextFileTool(Tool):
         self.running_prompt_zh = "正在分析文件..."
         self.running_prompt_en = "Analyzing file..."
         # Dynamically apply the load_object decorator to forward method
-        self.forward = self.mm.load_object(input_names=["file_url_list"])(self._forward_impl)
+        self.forward = self.mm.load_object(
+            input_names=["file_url_list"])(self._forward_impl)
 
     def _forward_impl(
         self,
@@ -116,7 +115,8 @@ class AnalyzeTextFileTool(Tool):
             analysis_results: List[str] = []
 
             for index, single_file in enumerate(file_url_list, start=1):
-                logger.info(f"Extracting text content from file #{index}, query: {query}")
+                logger.info(
+                    f"Extracting text content from file #{index}, query: {query}")
                 filename = f"file_{index}.txt"
 
                 # Step 1: Get file content
@@ -127,14 +127,16 @@ class AnalyzeTextFileTool(Tool):
                     logger.error(error_msg)
                     raise Exception(error_msg)
 
-                logger.info(f"Analyzing text content with LLM for file #{index}, query: {query}")
+                logger.info(
+                    f"Analyzing text content with LLM for file #{index}, query: {query}")
 
                 # Step 2: Analyze file content
                 try:
                     text, _ = self.analyze_file(query, raw_text)
                     analysis_results.append(text)
                 except Exception as analysis_error:
-                    logger.error(f"Failed to analyze file #{index}: {analysis_error}")
+                    logger.error(
+                        f"Failed to analyze file #{index}: {analysis_error}")
                     analysis_results.append(str(analysis_error))
 
             return analysis_results
@@ -143,7 +145,6 @@ class AnalyzeTextFileTool(Tool):
             logger.error(f"Error analyzing text file: {str(e)}", exc_info=True)
             error_msg = f"Error analyzing text file: {str(e)}"
             raise Exception(error_msg)
-
 
     def process_text_file(self, filename: str, file_content: bytes,) -> str:
         """
@@ -163,8 +164,13 @@ class AnalyzeTextFileTool(Tool):
                 'chunking_strategy': 'basic',
                 'timeout': self.time_out,
             }
-            with httpx.Client(timeout=self.time_out) as client:
-                response = client.post(api_url, files=files, data=data)
+            # Use shared HttpClientManager for connection pooling
+            client = http_client_manager.get_sync_client(
+                base_url=self.data_process_service_url,
+                timeout=float(self.time_out),
+                verify_ssl=True
+            )
+            response = client.post(api_url, files=files, data=data)
 
             if response.status_code == 200:
                 result = response.json()
@@ -179,7 +185,8 @@ class AnalyzeTextFileTool(Tool):
                 raise Exception(error_detail)
 
         except Exception as e:
-            logger.error(f"Failed to process text file {filename}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Failed to process text file {filename}: {str(e)}", exc_info=True)
             raise
 
         return raw_text
@@ -188,10 +195,14 @@ class AnalyzeTextFileTool(Tool):
         """
         Process text file, convert to text using external API
         """
-        language = getattr(self.observer, "lang", "en") if self.observer else "en"
-        prompts = get_prompt_template(template_type='analyze_file', language=language)
-        system_prompt_template = Template(prompts['system_prompt'], undefined=StrictUndefined)
-        user_prompt_template = Template(prompts['user_prompt'], undefined=StrictUndefined)
+        language = getattr(self.observer, "lang",
+                           "en") if self.observer else "en"
+        prompts = get_prompt_template(
+            template_type='analyze_file', language=language)
+        system_prompt_template = Template(
+            prompts['system_prompt'], undefined=StrictUndefined)
+        user_prompt_template = Template(
+            prompts['user_prompt'], undefined=StrictUndefined)
 
         system_prompt = system_prompt_template.render({'query': query})
         user_prompt = user_prompt_template.render({})

@@ -939,7 +939,9 @@ class ElasticSearchCore(VectorDatabaseCore):
         }
 
         # Execute the search across multiple indices
-        return self.exec_query(index_pattern, search_query)
+        raw_results = self.exec_query(index_pattern, search_query)
+
+        return raw_results
 
     def exec_query(self, index_pattern, search_query):
         response = self.client.search(index=index_pattern, body=search_query)
@@ -989,7 +991,9 @@ class ElasticSearchCore(VectorDatabaseCore):
         }
 
         # Execute the search across multiple indices
-        return self.exec_query(index_pattern, search_query)
+        raw_results = self.exec_query(index_pattern, search_query)
+
+        return raw_results
 
     def hybrid_search(
         self,
@@ -1055,6 +1059,79 @@ class ElasticSearchCore(VectorDatabaseCore):
                     f"Warning: Missing required field in semantic result: {e}")
                 continue
 
+        # FIX: For chunks that are in accurate results but not in semantic results,
+        # generate embeddings and store them in ES, then re-execute semantic search
+        # This handles chunks that were manually added without going through normal embedding pipeline
+        accurate_doc_ids = set(r.get("document", {}).get("id") for r in accurate_results)
+        semantic_doc_ids = set(r.get("document", {}).get("id") for r in semantic_results)
+        missing_embedding_doc_ids = accurate_doc_ids - semantic_doc_ids
+
+        if missing_embedding_doc_ids:
+            logger.info(
+                f"Found {len(missing_embedding_doc_ids)} chunks without stored embeddings, "
+                f"generating and storing embeddings in ES: {missing_embedding_doc_ids}")
+
+            # Process each chunk with missing embedding
+            for doc_id in missing_embedding_doc_ids:
+                if doc_id in combined_results:
+                    chunk_doc = combined_results[doc_id]
+                    chunk_content = chunk_doc["document"].get("content", "")
+                    index_name = chunk_doc.get("index", "")
+
+                    if chunk_content and index_name:
+                        # Generate embedding for chunk content
+                        chunk_embedding = embedding_model.get_embeddings(chunk_content)
+                        if chunk_embedding and len(chunk_embedding) > 0:
+                            # Update the document in ES with the embedding
+                            update_doc = chunk_doc["document"].copy()
+                            update_doc["embedding"] = chunk_embedding[0]
+                            if "embedding_model_name" not in update_doc:
+                                update_doc["embedding_model_name"] = embedding_model.embedding_model_name
+
+                            try:
+                                # Use create_chunk to store the chunk with embedding
+                                self.client.index(
+                                    index=index_name,
+                                    id=doc_id,
+                                    document=update_doc,
+                                    refresh="wait_for"
+                                )
+                                logger.debug(
+                                    f"Stored embedding for chunk {doc_id} in index {index_name}")
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to store embedding for chunk {doc_id}: {e}")
+                                continue
+
+            # Re-execute semantic search now that ES has the new embeddings
+            logger.debug("Re-executing semantic search with updated embeddings")
+            semantic_results = self.semantic_search(
+                index_names, query_text, embedding_model=embedding_model, top_k=top_k)
+
+            # Clear and re-process semantic results with the new embeddings
+            # Remove old entries that came from accurate results
+            for doc_id in list(combined_results.keys()):
+                if doc_id in accurate_doc_ids:
+                    combined_results[doc_id]["semantic_score"] = 0
+
+            # Process updated semantic results
+            for result in semantic_results:
+                try:
+                    doc_id = result["document"]["id"]
+                    if doc_id in combined_results:
+                        combined_results[doc_id]["semantic_score"] = result.get("score", 0)
+                    else:
+                        combined_results[doc_id] = {
+                            "document": result["document"],
+                            "accurate_score": 0,
+                            "semantic_score": result.get("score", 0),
+                            "index": result["index"],
+                        }
+                except KeyError as e:
+                    logger.warning(
+                        f"Warning: Missing required field in semantic result: {e}")
+                    continue
+
         # Calculate maximum scores
         max_accurate = max([r.get("score", 0)
                            for r in accurate_results]) if accurate_results else 1
@@ -1093,7 +1170,9 @@ class ElasticSearchCore(VectorDatabaseCore):
 
         # Sort by combined score and return top k results
         results.sort(key=lambda x: x["score"], reverse=True)
-        return results[:top_k]
+        final_results = results[:top_k]
+
+        return final_results
 
     # ---- STATISTICS AND MONITORING ----
     def get_documents_detail(self, index_name: str) -> List[Dict[str, Any]]:

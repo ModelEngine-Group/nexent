@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { ShoppingBag, Search, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
@@ -27,6 +28,7 @@ import "./MarketContent.css";
  * Browse and download pre-built agents from the marketplace
  */
 export default function MarketContent() {
+  const router = useRouter();
   const { t, i18n } = useTranslation("common");
   const { message } = App.useApp();
   const isZh = i18n.language === "zh" || i18n.language === "zh-CN";
@@ -250,15 +252,28 @@ export default function MarketContent() {
   };
 
   /**
-   * Handle install complete
+   * Handle install complete - Shows success message with navigation to agent space
    */
   const handleInstallComplete = () => {
     setInstallModalVisible(false);
     setInstallAgent(null);
-    // Optionally reload agents or show success message
-    message.success(
-      t("market.install.success", "Agent installed successfully!")
-    );
+    
+    // Show success message with clickable link to agent space
+    message.success({
+      content: (
+        <span>
+          {t("market.install.success.viewSpace.prefix")}
+          <button
+            onClick={() => router.push("/space")}
+            className="text-blue-600 dark:text-blue-400 font-bold hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer transition-colors"
+          >
+            {t("market.install.success.viewSpace.link")}
+          </button>
+          {t("market.install.success.viewSpace.suffix")}
+        </span>
+      ),
+      duration: 4,
+    });
   };
 
   /**
@@ -539,6 +554,8 @@ export default function MarketContent() {
                     agent_id: installAgent.agent_id,
                     agent_info: installAgent.agent_json.agent_info,
                     mcp_info: installAgent.agent_json.mcp_info,
+                    business_logic_model_id: installAgent.business_logic_model_id,
+                    business_logic_model_name: installAgent.business_logic_model_name,
                   } as ImportAgentData)
                 : null
             }

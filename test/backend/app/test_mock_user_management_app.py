@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -470,6 +470,129 @@ class TestMockDataConsistency:
             assert response.status_code == HTTPStatus.OK
             data = response.json()
             assert data["data"]["user"]["email"] == email
+
+
+class TestGetCurrentUserInfo:
+    """Test get current user info endpoint"""
+
+    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_get_user_info_success(self, mock_get_user_info):
+        """Test successful user information retrieval"""
+        # Setup mock to return valid user info
+        mock_user_info = {
+            "user": {
+                "user_id": "user_id",
+                "group_ids": [1, 2, 3],
+                "tenant_id": "tenant_id",
+                "user_email": "mock@example.com",
+                "user_role": "admin",
+                "permissions": ["agent:create", "agent:read"],
+                "accessibleRoutes": ["chat", "agents"]
+            }
+        }
+        mock_get_user_info.return_value = mock_user_info
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["message"] == "Success"
+        assert data["data"] == mock_user_info
+        assert data["data"]["user"]["user_id"] == "user_id"
+        assert data["data"]["user"]["group_ids"] == [1, 2, 3]
+        assert data["data"]["user"]["tenant_id"] == "tenant_id"
+        mock_get_user_info.assert_called_once_with("user_id")
+
+    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_get_user_info_not_found(self, mock_get_user_info):
+        """Test user information not found (returns None)"""
+        # Setup mock to return None (user not found)
+        mock_get_user_info.return_value = None
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        data = response.json()
+        assert "User not logged in or session invalid" in data["detail"]
+        mock_get_user_info.assert_called_once_with("user_id")
+
+    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_get_user_info_unauthorized_error(self, mock_get_user_info):
+        """Test UnauthorizedError exception handling"""
+        from consts.exceptions import UnauthorizedError
+        
+        # Setup mock to raise UnauthorizedError
+        mock_get_user_info.side_effect = UnauthorizedError("User information not found")
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        data = response.json()
+        assert "User not logged in or session invalid" in data["detail"]
+        mock_get_user_info.assert_called_once_with("user_id")
+
+    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_get_user_info_general_exception(self, mock_get_user_info):
+        """Test general exception handling"""
+        # Setup mock to raise a general exception
+        mock_get_user_info.side_effect = Exception("Database connection error")
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Get user information failed" in data["detail"]
+        mock_get_user_info.assert_called_once_with("user_id")
+
+    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    def test_get_user_info_response_structure(self, mock_get_user_info):
+        """Test complete response structure"""
+        mock_user_info = {
+            "user": {
+                "user_id": "user_id",
+                "group_ids": [],
+                "tenant_id": "tenant_id",
+                "user_email": "test@example.com",
+                "user_role": "user",
+                "permissions": [],
+                "accessibleRoutes": []
+            }
+        }
+        mock_get_user_info.return_value = mock_user_info
+
+        response = client.get(
+            "/user/current_user_info",
+            headers={"Authorization": "Bearer token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        
+        # Verify complete structure
+        assert "message" in data
+        assert "data" in data
+        assert data["message"] == "Success"
+        
+        user_data = data["data"]["user"]
+        assert "user_id" in user_data
+        assert "group_ids" in user_data
+        assert "tenant_id" in user_data
+        assert "user_email" in user_data
+        assert "user_role" in user_data
+        assert "permissions" in user_data
+        assert "accessibleRoutes" in user_data
 
 
 if __name__ == "__main__":

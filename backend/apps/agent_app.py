@@ -2,9 +2,11 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Header, HTTPException, Request, Query
+from fastapi.encoders import jsonable_encoder
+from starlette.responses import JSONResponse
 
-from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest
+from consts.model import AgentRequest, AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionRollbackRequest, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest
 from services.agent_service import (
     get_agent_info_impl,
     get_creating_sub_agent_info_impl,
@@ -19,6 +21,18 @@ from services.agent_service import (
     stop_agent_tasks,
     get_agent_call_relationship_impl,
     clear_agent_new_mark_impl
+)
+from services.agent_version_service import (
+    publish_version_impl,
+    get_version_list_impl,
+    get_version_impl,
+    get_version_detail_impl,
+    rollback_version_impl,
+    update_version_status_impl,
+    delete_version_impl,
+    get_current_version_impl,
+    compare_versions_impl,
+    list_published_agents_impl,
 )
 from utils.auth_utils import get_current_user_info, get_current_user_id
 
@@ -63,13 +77,22 @@ async def agent_stop_api(conversation_id: int, authorization: Optional[str] = He
 
 
 @agent_config_router.post("/search_info")
-async def search_agent_info_api(agent_id: int = Body(...), authorization: Optional[str] = Header(None)):
+async def search_agent_info_api(
+    agent_id: int = Body(...),
+    version_no: int = Body(0),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None)
+):
     """
-    Search agent info by agent_id
+    Search agent info by agent_id and version_no
+    version_no defaults to 0 (current/draft version)
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
-        return await get_agent_info_impl(agent_id, tenant_id)
+        _, auth_tenant_id = get_current_user_id(authorization)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        return await get_agent_info_impl(agent_id, effective_tenant_id, version_no)
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(
@@ -104,12 +127,21 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
 
 
 @agent_config_router.delete("")
-async def delete_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
+async def delete_agent_api(
+    request: AgentIDRequest,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
     """
     Delete an agent
     """
     try:
-        await delete_agent_impl(request.agent_id, authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
         return {}
     except Exception as e:
         logger.error(f"Agent delete error: {str(e)}")
@@ -195,13 +227,20 @@ async def regenerate_agent_name_batch_api(request: AgentNameBatchRegenerateReque
 
 
 @agent_config_router.get("/list")
-async def list_all_agent_info_api(authorization: Optional[str] = Header(None), request: Request = None):
+async def list_all_agent_info_api(
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    request: Request = None
+):
     """
     list all agent info
     """
     try:
-        _, tenant_id, _ = get_current_user_info(authorization, request)
-        return await list_all_agent_info_impl(tenant_id=tenant_id)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        return await list_all_agent_info_impl(tenant_id=effective_tenant_id, user_id=user_id)
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
@@ -220,3 +259,251 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
         logger.error(f"Agent call relationship error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Failed to get agent call relationship.")
+
+
+# Agent Version Management APIs
+# ---------------------------------------------------------------------------
+
+
+@agent_config_router.post("/{agent_id}/publish")
+async def publish_version_api(
+    agent_id: int,
+    request: VersionPublishRequest,
+    authorization: str = Header(None),
+):
+    """
+    Publish a new version
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = publish_version_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_name=request.version_name,
+            release_note=request.release_note,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Publish version error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Publish version error.")
+
+
+@agent_config_router.post("/{agent_id}/versions/compare")
+async def compare_versions_api(
+    agent_id: int,
+    request: VersionCompareRequest,
+    authorization: str = Header(None),
+):
+    """
+    Compare two versions and return their differences
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = compare_versions_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no_a=request.version_no_a,
+            version_no_b=request.version_no_b,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Compare versions error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Compare versions error.")
+
+
+@agent_config_router.get("/{agent_id}/versions", response_model=VersionListResponse)
+async def get_version_list_api(
+    agent_id: int,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    request: Request = None
+):
+    """
+    Get version list for an agent
+    """
+    try:
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        logger.info(f"Get version list for agent_id: {agent_id}, tenant_id: {effective_tenant_id}")
+        result = get_version_list_impl(
+            agent_id=agent_id,
+            tenant_id=effective_tenant_id,
+        )
+        logger.info(f"Version list: {result}")
+        return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except Exception as e:
+        logger.error(f"Get version list error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version list error.")
+
+
+@agent_config_router.get("/{agent_id}/versions/{version_no}", response_model=VersionDetailResponse)
+async def get_version_api(
+    agent_id: int,
+    version_no: int,
+    authorization: str = Header(None),
+):
+    """
+    Get version
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_version_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Get version detail error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version detail error.")
+
+@agent_config_router.get("/{agent_id}/versions/{version_no}/detail", response_model=VersionDetailResponse)
+async def get_version_detail_api(
+    agent_id: int,
+    version_no: int,
+    authorization: str = Header(None),
+):
+    """
+    Get version detail including snapshot data
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_version_detail_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Get version detail error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get version detail error.")
+
+
+@agent_config_router.post("/{agent_id}/versions/{version_no}/rollback")
+async def rollback_version_api(
+    agent_id: int,
+    version_no: int,
+    authorization: str = Header(None),
+):
+    """
+    Rollback to a specific version by updating current_version_no only.
+    This does NOT create a new version - the draft will point to the target version.
+    Use the publish endpoint to create an actual new version after rollback.
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = rollback_version_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            target_version_no=version_no,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Rollback version error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Rollback version error.")
+
+
+@agent_config_router.patch("/{agent_id}/versions/{version_no}/status")
+async def update_version_status_api(
+    agent_id: int,
+    version_no: int,
+    request: VersionStatusRequest,
+    authorization: str = Header(None),
+):
+    """
+    Update version status (DISABLED / ARCHIVED)
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = update_version_status_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=version_no,
+            status=request.status,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Update version status error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Update version status error.")
+
+
+@agent_config_router.delete("/{agent_id}/versions/{version_no}")
+async def delete_version_api(
+    agent_id: int,
+    version_no: int,
+    authorization: str = Header(None),
+):
+    """
+    Delete a version (soft delete by setting delete_flag='Y')
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        result = delete_version_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=version_no,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Delete version error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Delete version error.")
+
+
+@agent_config_router.get("/{agent_id}/current_version", response_model=CurrentVersionResponse)
+async def get_current_version_api(
+    agent_id: int,
+    authorization: str = Header(None),
+):
+    """
+    Get current published version
+    """
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_current_version_impl(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=jsonable_encoder(result))
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Get current version error: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Get current version error.")
+
+
+@agent_config_router.get("/published_list")
+async def list_published_agents_api(
+    authorization: Optional[str] = Header(None),
+    request: Request = None,
+):
+    """
+    List all published agents with their current published version information.
+    """
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, request)
+        return await list_published_agents_impl(tenant_id=tenant_id, user_id=user_id)
+    except Exception as e:
+        logger.error(f"Published agents list error: {str(e)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Published agents list error."
+        )
+

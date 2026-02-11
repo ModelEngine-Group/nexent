@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Table,
   Button,
@@ -33,6 +34,7 @@ import { type User } from "@/services/userService";
 
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+  const queryClient = useQueryClient();
   const { data, isLoading, refetch } = useGroupList(tenantId);
   const { data: userData, refetch: refetchUsers } = useUserList(
     tenantId,
@@ -48,6 +50,11 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     useState<Group | null>(null);
   const [groupUsers, setGroupUsers] = useState<User[]>([]);
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [editFormInitialValues, setEditFormInitialValues] = useState<{
+    name: string;
+    description: string;
+    members: string[];
+  } | null>(null);
 
   const [form] = Form.useForm();
   const [editGroupForm] = Form.useForm();
@@ -59,31 +66,34 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   };
 
   const openEdit = async (g: Group) => {
-    setEditingGroup(g);
-    // Load current group members first
     try {
       const members = await getGroupMembers(g.group_id);
       setGroupUsers(members);
-      // Available users are all users minus current members
       const memberIds = new Set(members.map((u) => u.id));
       setAvailableUsers(allUsers.filter((u) => !memberIds.has(u.id)));
 
-      // Set form values after loading members
-      editGroupForm.setFieldsValue({
-        name: g.group_name,
-        description: g.group_description || "",
+      const formValues = {
+        name: g.group_name || "",
+        description: (g.group_description || "").toString(),
         members: members.map((u) => u.id),
-      });
+      };
+      setEditFormInitialValues(formValues);
+      setEditingGroup(g);
+      editGroupForm.resetFields();
+      editGroupForm.setFieldsValue(formValues);
     } catch (error) {
       message.error("Failed to load group members");
       setGroupUsers([]);
       setAvailableUsers(allUsers);
-      // Set form values even if member loading fails
-      editGroupForm.setFieldsValue({
-        name: g.group_name,
-        description: g.group_description || "",
+      const formValues = {
+        name: g.group_name || "",
+        description: (g.group_description || "").toString(),
         members: [],
-      });
+      };
+      setEditFormInitialValues(formValues);
+      setEditingGroup(g);
+      editGroupForm.resetFields();
+      editGroupForm.setFieldsValue(formValues);
     }
 
     setModalVisible(true);
@@ -105,7 +115,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     try {
       await deleteGroup(id);
       message.success("Group deleted");
-      refetch();
+      // Invalidate all group queries to ensure all components get updated data
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       if (err.response?.data?.message) {
         message.error(err.response.data.message);
@@ -123,6 +134,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       if (editingGroup) {
         const updateData: UpdateGroupRequest = {
           group_name: values.name,
+          group_description: values.description,
         };
         await updateGroup(editingGroup.group_id, updateData);
         message.success("Group updated");
@@ -135,9 +147,16 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         message.success("Group created");
       }
       setModalVisible(false);
-      refetch();
+      // Invalidate all group queries to ensure all components get updated data
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
-      if (err.response?.data?.message) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
+                                errorMessage.match(/Group name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        message.error(t("tenantResources.groups.duplicateName"));
+      } else if (err.response?.data?.message) {
         message.error(err.response.data.message);
       }
     }
@@ -145,29 +164,35 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
 
   const handleEditGroupSubmit = async () => {
     try {
-      const values = await editGroupForm.validateFields();
       if (!editingGroup) return;
 
-      // Update group info
+      await editGroupForm.validateFields();
+      const values = editGroupForm.getFieldsValue(true);
+
       const updateData: UpdateGroupRequest = {
         group_name: values.name,
         group_description: values.description,
       };
       await updateGroup(editingGroup.group_id, updateData);
 
-      // Update group members using batch API
       const newMemberIds = (values.members as string[]) || [];
       await updateGroupMembers(editingGroup.group_id, newMemberIds);
 
       message.success(t("tenantResources.groups.updated"));
       setModalVisible(false);
 
-      // Force refresh group list to update user counts
-      await refetch();
+      // Invalidate all group queries to ensure all components get updated data
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
       // Refresh user list in case user roles/status changed
       await refetchUsers();
     } catch (err: any) {
-      if (err.response?.data?.message) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Group with name '(.*)' already exists/i) ||
+                                errorMessage.match(/Group name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        message.error(t("tenantResources.groups.duplicateName"));
+      } else if (err.response?.data?.message) {
         message.error(err.response.data.message);
       } else {
         message.error("Failed to update group");
@@ -218,6 +243,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 name: record.group_name,
               })}
               onConfirm={() => handleDelete(record.group_id)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.groups.deleteGroup")}>
                 <Button
@@ -236,8 +263,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate}>
@@ -252,6 +279,8 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         rowKey={(r) => String(r.group_id)}
         loading={isLoading}
         pagination={{ pageSize: 10 }}
+        scroll={{ x: true }}
+        className="flex-1"
       />
 
       {/* Create/Edit Group Modal */}
@@ -263,11 +292,21 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         }
         open={modalVisible}
         onOk={editingGroup ? handleEditGroupSubmit : handleSubmit}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => {
+          setModalVisible(false);
+          editGroupForm.resetFields();
+        }}
+        destroyOnClose
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}
       >
         {editingGroup ? (
-          <Form layout="vertical" form={editGroupForm}>
+          <Form
+            key={editingGroup.group_id}
+            layout="vertical"
+            form={editGroupForm}
+          >
             <Form.Item
               name="name"
               label={t("tenantResources.tenants.name")}

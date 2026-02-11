@@ -4,10 +4,13 @@ import React, { useEffect } from "react";
 import { motion } from "framer-motion";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { configService } from "@/services/configService";
 import { configStore } from "@/lib/config";
-import { USER_ROLES } from "@/const/modelConfig";
+import { USER_ROLES } from "@/const/auth";
 import log from "@/lib/logger";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
 
@@ -16,16 +19,15 @@ import DataConfig from "./KnowledgeBaseConfiguration";
  * Can be used in setup flow or as standalone page
  */
 export default function KnowledgesContent() {
+  // Get user and deployment state from respective hooks
+  const { user } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
+
   // Use custom hook for common setup flow logic
   const {
-    user,
-    isSpeedMode,
     pageVariants,
     pageTransition,
-    canAccessProtectedData,
-  } = useSetupFlow({
-    requireAdmin: false, // Knowledge base accessible to all users
-  });
+  } = useSetupFlow();
 
   // Knowledge base specific initialization
   useEffect(() => {
@@ -35,6 +37,15 @@ export default function KnowledgesContent() {
         detail: { forceRefresh: true },
       })
     );
+
+    // Load knowledge base list from API
+    const loadKnowledgeBaseList = async () => {
+      try {
+        await knowledgeBaseService.getKnowledgeBases(true);
+      } catch (error) {
+        log.error("Failed to load knowledge base list:", error);
+      }
+    };
 
     // Load config for normal user
     const loadConfigForNormalUser = async () => {
@@ -48,26 +59,25 @@ export default function KnowledgesContent() {
       }
     };
 
+    loadKnowledgeBaseList();
     loadConfigForNormalUser();
-  }, []);
+  }, [isSpeedMode, user]);
 
   return (
     <>
       <div className="w-full h-full p-8">
-        {canAccessProtectedData ? (
-          <motion.div
-            initial="initial"
-            animate="in"
-            exit="out"
-            variants={pageVariants}
-            transition={pageTransition}
-            style={{ width: "100%", height: "100%" }}
-          >
-            <div className="w-full h-full flex items-center justify-center">
-              <DataConfig isActive={true} />
-            </div>
-          </motion.div>
-        ) : null}
+        <motion.div
+          initial="initial"
+          animate="in"
+          exit="out"
+          variants={pageVariants}
+          transition={pageTransition}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            <DataConfig isActive={true} />
+          </div>
+        </motion.div>
       </div>
     </>
   );

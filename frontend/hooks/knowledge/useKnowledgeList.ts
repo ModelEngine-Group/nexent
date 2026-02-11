@@ -7,9 +7,9 @@ export function useKnowledgeList(tenantId: string | null) {
   return useQuery({
     queryKey: ["knowledgeBases", tenantId],
     queryFn: async () => {
-      const data = await knowledgeBaseService.getKnowledgeBasesInfo(false, true, tenantId ?? undefined);
+      const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, true, tenantId ?? undefined);
       // Sort by updatedAt descending
-      return data.sort((a, b) => {
+      return result.knowledgeBases.sort((a, b) => {
         const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
         const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
         return dateB - dateA;

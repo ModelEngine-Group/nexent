@@ -198,23 +198,6 @@ def generate_and_save_system_prompt_impl(agent_id: int,
     else:
         logger.info(
             "Updating agent with business_description and prompt segments")
-
-        agent_info = AgentInfoRequest(
-            agent_id=agent_id,
-            business_description=task_description,
-            duty_prompt=final_results["duty"],
-            constraint_prompt=final_results["constraint"],
-            few_shots_prompt=final_results["few_shots"],
-            name=final_results["agent_var_name"],
-            display_name=final_results["agent_display_name"],
-            description=final_results["agent_description"]
-        )
-        update_agent(
-            agent_id=agent_id,
-            agent_info=agent_info,
-            tenant_id=tenant_id,
-            user_id=user_id
-        )
         logger.info("Prompt generation and agent update completed successfully")
 
 

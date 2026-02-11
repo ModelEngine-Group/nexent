@@ -11,6 +11,8 @@ import {
   App,
   Flex,
   Alert,
+  Tag,
+  Tooltip,
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -25,8 +27,11 @@ import {
   AlertTriangle,
   ChevronRight,
 } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
 import { USER_ROLES } from "@/const/modelConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { useMemo } from "react";
 
 const { Text, Paragraph } = Typography;
 
@@ -43,7 +48,31 @@ const { Text, Paragraph } = Typography;
 export default function UserProfileComp() {
   const { t } = useTranslation("common");
   const { message: antdMessage } = App.useApp();
-  const { user, logout, revoke, isLoading } = useAuth();
+  const { logout, revoke, isLoading } = useAuthenticationContext()
+  const { user, groupIds } = useAuthorizationContext()
+
+  // Fetch groups for group name mapping
+  const { data: groupData } = useGroupList(user?.tenantId || null, 1, 100);
+  const groups = groupData?.groups || [];
+
+  // Create group name mapping from group_id to group_name
+  const groupNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    groups.forEach((group) => {
+      map.set(group.group_id, group.group_name);
+    });
+    return map;
+  }, [groups]);
+
+  // Get user's group names
+  const userGroupNames = useMemo(() => {
+    if (!groupIds || groupIds.length === 0) return [];
+    return groupIds.map((id) => ({
+      id,
+      name: groupNameMap.get(id) || t("common.unknown"),
+      description: groups.find((g) => g.group_id === id)?.group_description || "",
+    }));
+  }, [groupIds, groupNameMap, groups, t]);
 
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -57,8 +86,16 @@ export default function UserProfileComp() {
   // Get role display name
   const getRoleDisplayName = (role: string) => {
     switch (role) {
+      case USER_ROLES.SPEED:
+        return t("auth.speed");
+      case USER_ROLES.SU:
+        return t("auth.su");
       case USER_ROLES.ADMIN:
         return t("auth.admin");
+      case USER_ROLES.DEV:
+        return t("auth.dev");
+      case USER_ROLES.USER:
+        return t("auth.user");
       default:
         return t("auth.user");
     }
@@ -166,6 +203,32 @@ export default function UserProfileComp() {
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
                     {getRoleDisplayName(user?.role || "user")}
                   </span>
+                </div>
+                <div className="px-6 py-3 flex items-center justify-between">
+                  <span className="text-gray-500 dark:text-gray-400 text-sm">
+                    {t("agent.userGroup") || "User Group"}
+                  </span>
+                  <div className="flex flex-wrap gap-1 justify-end max-w-[50%]">
+                    {userGroupNames.length > 0 ? (
+                      userGroupNames.map((group) => (
+                        <Tooltip
+                            key={group.id}
+                            title={group.description || t("tenantResources.groups.noDescription")}
+                          >
+                          <Tag
+                            color="blue"
+                            className="cursor-pointer hover:opacity-80 transition-opacity"
+                          >
+                            <span className="font-medium">{group.name}</span>
+                          </Tag>
+                        </Tooltip>
+                      ))
+                    ) : (
+                      <span className="text-gray-400 text-sm">
+                        {t("agent.userGroup.empty")}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

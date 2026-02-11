@@ -27,6 +27,11 @@ sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
 
+# Mock for memory_service import used in delete_user_and_cleanup
+nexent_memory_service = MagicMock()
+sys.modules['nexent.memory'] = MagicMock()
+sys.modules['nexent.memory.memory_service'] = nexent_memory_service
+
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -217,12 +222,14 @@ class TestDeleteUserEndpoint:
     """Test delete_user_endpoint (DELETE /users/{user_id})"""
 
     def test_delete_user_success(self):
-        """Test successful user deletion"""
+        """Test successful user deletion with complete cleanup"""
         with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.delete_user') as mock_delete_user:
+             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_tenant, \
+             patch('apps.user_app.delete_user_and_cleanup') as mock_cleanup:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_delete_user.return_value = True
+            mock_get_tenant.return_value = {"tenant_id": "tenant1", "user_id": "user1", "user_email": "user1@example.com"}
+            mock_cleanup.return_value = None
 
             response = client.delete(
                 "/users/user1",
@@ -233,15 +240,16 @@ class TestDeleteUserEndpoint:
             data = response.json()
             assert data["message"] == "User deleted successfully"
             mock_get_user_id.assert_called_once_with("Bearer token123")
-            mock_delete_user.assert_called_once_with("user1", "deleter123")
+            mock_get_tenant.assert_called_once_with("user1")
+            mock_cleanup.assert_called_once_with("user1", "tenant1")
 
     def test_delete_user_validation_error(self):
-        """Test user deletion with validation error"""
+        """Test user deletion with user not found"""
         with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.delete_user') as mock_delete_user:
+             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_tenant:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_delete_user.side_effect = ValueError("User not found in any tenant")
+            mock_get_tenant.return_value = None  # User not found
 
             response = client.delete(
                 "/users/user1",
@@ -250,15 +258,17 @@ class TestDeleteUserEndpoint:
 
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
-            assert data["detail"] == "User not found in any tenant"
+            assert "User user1 not found" in data["detail"]
 
     def test_delete_user_unexpected_error(self):
         """Test user deletion with unexpected error"""
         with patch('apps.user_app.get_current_user_id') as mock_get_user_id, \
-             patch('apps.user_app.delete_user') as mock_delete_user:
+             patch('apps.user_app.get_user_tenant_by_user_id') as mock_get_tenant, \
+             patch('apps.user_app.delete_user_and_cleanup') as mock_cleanup:
 
             mock_get_user_id.return_value = ("deleter123", "tenant1")
-            mock_delete_user.side_effect = Exception("Database connection failed")
+            mock_get_tenant.return_value = {"tenant_id": "tenant1", "user_id": "user1", "user_email": "user1@example.com"}
+            mock_cleanup.side_effect = Exception("Database connection failed")
 
             response = client.delete(
                 "/users/user1",

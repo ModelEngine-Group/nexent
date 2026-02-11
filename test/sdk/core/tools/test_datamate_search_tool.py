@@ -5,10 +5,8 @@ from unittest.mock import ANY, MagicMock, call
 import pytest
 from pytest_mock import MockFixture
 
-from sdk.nexent.core.tools.datamate_search_tool import DataMateSearchTool, _normalize_index_names
+from sdk.nexent.core.tools.datamate_search_tool import DataMateSearchTool
 from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
-from sdk.nexent.datamate.datamate_client import DataMateClient
-
 
 @pytest.fixture
 def mock_observer() -> MessageObserver:
@@ -151,22 +149,6 @@ class TestHelperMethods:
         assert datamate_tool._extract_dataset_id(path) == expected
 
 
-class TestNormalizeIndexNames:
-    @pytest.mark.parametrize(
-        "input_names, expected",
-        [
-            (None, []),
-            ("single_kb", ["single_kb"]),
-            (["kb1", "kb2"], ["kb1", "kb2"]),
-            ([], []),
-            ("", [""]),  # Edge case: empty string becomes list with empty string
-        ],
-    )
-    def test_normalize_index_names(self, input_names, expected):
-        result = _normalize_index_names(input_names)
-        assert result == expected
-
-
 class TestForward:
     def test_forward_success_with_observer_en(self, datamate_tool: DataMateSearchTool, mocker: MockFixture):
         # Mock the hybrid_search method to return search results
@@ -222,10 +204,7 @@ class TestForward:
 
     def test_forward_no_observer(self, mocker: MockFixture):
         tool = DataMateSearchTool(
-            server_url="http://127.0.0.1:8080",
-            observer=None,
-            index_names=["kb1"]
-        )
+            server_url="http://127.0.0.1:8080", observer=None, index_names=["kb1"])
 
         # Mock the hybrid_search method to return search results
         mock_hybrid_search = mocker.patch.object(

@@ -73,28 +73,19 @@ class NexentAgent:
                 # These parameters have exclude=True and cannot be passed to __init__
                 # due to smolagents.tools.Tool wrapper restrictions
                 filtered_params = {k: v for k, v in params.items()
-                                   if k not in ["index_names", "vdb_core", "embedding_model", "observer"]}
+                                   if k not in ["vdb_core", "embedding_model", "observer"]}
                 # Create instance with only non-excluded parameters
                 tools_obj = tool_class(**filtered_params)
                 # Set excluded parameters directly as attributes after instantiation
                 # This bypasses smolagents wrapper restrictions
                 tools_obj.observer = self.observer
-                index_names = tool_config.metadata.get(
-                    "index_names", None) if tool_config.metadata else None
-                tools_obj.index_names = [] if index_names is None else index_names
                 tools_obj.vdb_core = tool_config.metadata.get(
                     "vdb_core", None) if tool_config.metadata else None
                 tools_obj.embedding_model = tool_config.metadata.get(
                     "embedding_model", None) if tool_config.metadata else None
-                name_resolver = tool_config.metadata.get(
-                    "name_resolver", None) if tool_config.metadata else None
-                tools_obj.name_resolver = {} if name_resolver is None else name_resolver
             elif class_name == "DataMateSearchTool":
                 tools_obj = tool_class(**params)
                 tools_obj.observer = self.observer
-                index_names = tool_config.metadata.get(
-                    "index_names", None) if tool_config.metadata else None
-                tools_obj.index_names = [] if index_names is None else index_names
             elif class_name == "AnalyzeTextFileTool":
                 tools_obj = tool_class(observer=self.observer,
                                        llm_model=tool_config.metadata.get("llm_model", []),

@@ -15,6 +15,8 @@ import { Button } from "antd";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 /**
  * Homepage main content component
@@ -22,11 +24,35 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 export default function Homepage() {
   const { t } = useTranslation("common");
   const { isSpeedMode } = useDeployment();
+  const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
+  const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();
 
-  const onChatNavigate = () => router.push("/chat");
-  const onSetupNavigate = () => router.push("/setup");
-  const onSpaceNavigate = () => router.push("/space");
+  /**
+ * Navigate to a route with permission pre-check
+ * Returns true if navigation is allowed, false if permission is denied
+ */
+  const navigateWithPermissionCheck = (route: string): boolean => {
+    // Check authentication first
+    if (!isAuthenticated && !isSpeedMode) {
+      openAuthPromptModal();
+      return false;
+    }
+
+    // Check authorization - if user is authenticated but doesn't have route access
+    if (isAuthenticated && !canAccessRoute(route)) {
+      openAuthzPromptModal();
+      return false;
+    }
+
+    // User has permission, navigate
+    router.push(route);
+    return true;
+  };
+
+  const navigateToChat = () => navigateWithPermissionCheck("/chat");
+  const navigateToSetup = () => navigateWithPermissionCheck("/setup");
+  const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center">
@@ -63,7 +89,7 @@ export default function Homepage() {
         >
           
           <Button
-            onClick={onChatNavigate}
+            onClick={navigateToChat}
             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
           >
             <Bot className="mr-2 h-5 w-5 group-hover:animate-pulse" />
@@ -71,7 +97,7 @@ export default function Homepage() {
           </Button>
 
           <Button
-            onClick={onSetupNavigate}
+            onClick={navigateToSetup}
             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
           >
             <Zap className="mr-2 h-5 w-5 group-hover:animate-pulse" />
@@ -79,7 +105,7 @@ export default function Homepage() {
           </Button>
 
           <Button
-            onClick={onSpaceNavigate}
+            onClick={navigateToSpace}
             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
           >
             <Globe className="mr-2 h-5 w-5 group-hover:animate-pulse" />

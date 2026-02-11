@@ -9,6 +9,8 @@ CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
 DEPLOY_SCRIPT="$SCRIPT_DIR/deploy.sh"
 SQL_DIR="$SCRIPT_DIR/sql"
 ENV_FILE="$SCRIPT_DIR/.env"
+V180_SCRIPT="$SCRIPT_DIR/scripts/v180_sync_user_metadata.sh"
+V180_VERSION="1.8.0"
 
 declare -A DEPLOY_OPTIONS
 UPGRADE_SQL_FILES=()
@@ -64,12 +66,12 @@ prompt_option_value() {
     read -rp "${prompt_msg}: " input
 
     input="$(trim_quotes "$input")"
-    
+
     # Handle yes/no type inputs
     if [[ "$input_type" == "boolean" ]]; then
       # Convert to uppercase for consistency
       input=$(echo "$input" | tr '[:lower:]' '[:upper:]')
-      
+
       # Validate input
       if [[ "$input" =~ ^[YN]$ ]]; then
         DEPLOY_OPTIONS[$key]="$input"
@@ -233,6 +235,47 @@ update_option_value() {
   fi
 }
 
+# Check if the upgrade version span includes v1.8.0
+# Returns 0 (success) if span includes v1.8.0, 1 otherwise
+check_version_spans_v180() {
+  local cmp_with_v180
+  local cmp_current
+
+  # Check if current version is less than v1.8.0
+  cmp_current="$(compare_versions "$CURRENT_APP_VERSION" "$V180_VERSION")"
+  if [ "$cmp_current" -ge 0 ]; then
+    # Current version is >= v1.8.0, no need to run v180 sync
+    return 1
+  fi
+
+  # Check if target version is >= v1.8.0
+  cmp_with_v180="$(compare_versions "$NEW_APP_VERSION" "$V180_VERSION")"
+  if [ "$cmp_with_v180" -lt 0 ]; then
+    # Target version is < v1.8.0, no need to run v180 sync
+    return 1
+  fi
+
+  # Version span includes v1.8.0
+  return 0
+}
+
+# Execute the v1.8.0 user metadata sync script
+run_v180_sync_script() {
+  if [ ! -f "$V180_SCRIPT" ]; then
+    log "WARN" "⚠️  v180_sync_user_metadata.sh not found, skipping v1.8.0 metadata sync."
+    return
+  fi
+
+  log "INFO" "🗄️  Detected version span includes v1.8.0, executing user metadata sync script..."
+
+  if ! bash "$V180_SCRIPT"; then
+    log "ERROR" "❌ Failed to execute v180_sync_user_metadata.sh, please verify the script."
+    exit 1
+  fi
+
+  log "INFO" "✅ v1.8.0 user metadata sync completed successfully."
+}
+
 
 prompt_deploy_options() {
   # Only prompt for options that already exist in DEPLOY_OPTIONS
@@ -275,7 +318,7 @@ _get_option_description() {
 _get_option_value_description() {
   local key="$1"
   local value="$2"
-  
+
   case "$key" in
     "MODE_CHOICE")
       case "$value" in
@@ -299,7 +342,7 @@ _get_option_value_description() {
 main() {
   ensure_docker
   load_options
-  
+
   # Ensure required options are present
   require_option "APP_VERSION" "APP_VERSION not detected, please enter the current deployed version"
   require_option "ROOT_DIR" "ROOT_DIR not detected, please enter the absolute deployment directory path"
@@ -332,12 +375,12 @@ main() {
         max_desc_width=$desc_length
       fi
     done
-    
+
     # Ensure minimum width for better readability
     if (( max_desc_width < 20 )); then
       max_desc_width=20
     fi
-    
+
     # Display current deployment options in a readable format
     log "INFO" "📋 Current deployment options:"
     echo ""
@@ -348,7 +391,7 @@ main() {
       printf "   • %-${max_desc_width}s : %s\n" "$desc" "$value_desc"
     done
     echo ""
-    
+
     read -rp "🔄 Do you want to inherit previous deployment options? [Y/N] (default: Y): " inherit_choice
     inherit_choice="${inherit_choice:-Y}"
     inherit_choice="$(trim_quotes "$inherit_choice")"
@@ -361,6 +404,12 @@ main() {
 
   build_deploy_args
   run_deploy
+
+  # Check if version span includes v1.8.0 and run sync script if needed
+  if check_version_spans_v180; then
+    run_v180_sync_script
+  fi
+
   collect_upgrade_sqls
   run_sql_scripts
 

@@ -62,6 +62,7 @@ interface DocumentListProps {
   onNameChange?: (name: string) => void;
   hasDocuments?: boolean;
   isNewlyCreatedAndWaiting?: boolean; // New prop to track newly created KB waiting for documents
+  onChunkCountChange?: () => void; // Callback when chunk count changes
 
   // Upload related props
   isDragging?: boolean;
@@ -94,6 +95,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onNameChange,
       hasDocuments = false,
       isNewlyCreatedAndWaiting = false, // New prop
+      onChunkCountChange,
 
       // Upload related props
       isDragging = false,
@@ -464,6 +466,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 getFileIcon={getFileIcon}
                 currentEmbeddingModel={currentModel}
                 knowledgeBaseEmbeddingModel={knowledgeBaseModel}
+                onChunkCountChange={onChunkCountChange}
               />
             </div>
           ) : showDetail ? (

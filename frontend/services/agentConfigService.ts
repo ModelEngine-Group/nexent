@@ -98,11 +98,15 @@ export const fetchTools = async () => {
 
 /**
  * get agent list from backend (basic info only)
+ * @param tenantId optional tenant ID for filtering
  * @returns list of agents with basic info (id, name, description, is_available)
  */
-export const fetchAgentList = async () => {
+export const fetchAgentList = async (tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.list, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.list}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.list;
+    const response = await fetch(url, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -124,6 +128,9 @@ export const fetchAgentList = async () => {
       unavailable_reasons: agent.unavailable_reasons || [],
       group_ids: agent.group_ids || [],
       is_new: agent.is_new || false,
+      permission: agent.permission,
+      is_published: agent.is_published,
+      current_version_no: agent.current_version_no,
     }));
 
     return {
@@ -137,6 +144,55 @@ export const fetchAgentList = async () => {
       success: false,
       data: [],
       message: "agentConfig.agents.listFetchFailed",
+    };
+  }
+};
+
+/**
+ * Fetch published agent list - gets agents with their current published version info
+ * First queries all agents with version_no=0, then retrieves the published version snapshot
+ * for each agent that has current_version_no > 0
+ * @returns list of published agents with version information
+ */
+export const fetchPublishedAgentList = async () => {
+  try {
+    const response = await fetch(API_ENDPOINTS.agent.publishedList, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+
+    // Convert backend data to frontend format
+    const formattedAgents = data.map((agent: any) => ({
+      id: String(agent.agent_id),
+      name: agent.name,
+      display_name: agent.display_name || agent.name,
+      description: agent.description,
+      author: agent.author,
+      model_id: agent.model_id,
+      model_name: agent.model_name,
+      model_display_name: agent.model_display_name,
+      is_available: agent.is_available,
+      unavailable_reasons: agent.unavailable_reasons || [],
+      group_ids: agent.group_ids || [],
+      is_new: agent.is_new || false,
+      permission: agent.permission,
+      published_version_no: agent.published_version_no,
+    }));
+
+    return {
+      success: true,
+      data: formattedAgents,
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to fetch published agent list:", error);
+    return {
+      success: false,
+      data: [],
+      message: "agentConfig.agents.publishedListFetchFailed",
     };
   }
 };
@@ -368,11 +424,15 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
 /**
  * Delete Agent
  * @param agentId agent id
+ * @param tenantId optional tenant ID for filtering (uses auth if not provided)
  * @returns delete result
  */
-export const deleteAgent = async (agentId: number) => {
+export const deleteAgent = async (agentId: number, tenantId?: string) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.delete, {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agent.delete}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.delete;
+    const response = await fetch(url, {
       method: "DELETE",
       headers: getAuthHeaders(),
       body: JSON.stringify({ agent_id: agentId }),
@@ -583,14 +643,22 @@ export const regenerateAgentNameBatch = async (payload: {
 /**
  * search agent info by agent id
  * @param agentId agent id
+ * @param tenantId optional tenant ID for filtering
+ * @param versionNo optional version number (default 0 for current/draft version)
  * @returns agent detail info
  */
-export const searchAgentInfo = async (agentId: number) => {
+export const searchAgentInfo = async (agentId: number, tenantId?: string, versionNo?: number) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.searchInfo, {
+    const url = tenantId 
+      ? `${API_ENDPOINTS.agent.searchInfo}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agent.searchInfo;
+    const response = await fetch(url, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify(agentId),
+      body: JSON.stringify({
+        agent_id: agentId,
+        version_no: versionNo ?? 0,
+      }),
     });
 
     if (!response.ok) {
@@ -647,6 +715,7 @@ export const searchAgentInfo = async (agentId: number) => {
             };
           })
         : [],
+      current_version_no: data.current_version_no
     };
 
     return {

@@ -52,22 +52,13 @@ export interface AgentStep {
   parsingContent?: string
 }
 
-// Agent related types
-export interface Agent {
-  agent_id: number;
-  name: string;
-  display_name: string;
-  description: string;
-  is_available: boolean;
-  is_new?: boolean;
-}
+// Agent related types - imported from agentConfig
 
 export interface ChatAgentSelectorProps {
-  selectedAgentId: number | null;
-  onAgentSelect: (agentId: number | null) => void;
+  selectedAgentId: string | null;
+  onAgentSelect: (agentId: string | null) => void;
   disabled?: boolean;
   isInitialMode?: boolean;
-  agents?: Agent[]; // Optional pre-loaded agents to avoid repeated API calls
 }
 
 // Search result type
@@ -174,11 +165,10 @@ export interface ChatStreamMainProps {
   onOpinionChange?: (messageId: number, opinion: "Y" | "N" | null) => void;
   currentConversationId?: number;
   shouldScrollToBottom?: boolean;
-  selectedAgentId?: number | null;
-  onAgentSelect?: (agentId: number | null) => void;
+  selectedAgentId?: string | null;
+  onAgentSelect?: (agentId: string | null) => void;
   onCitationHover?: () => void;
   onScroll?: () => void;
-  cachedAgents?: Agent[]; // Optional cached agents to avoid repeated API calls
 }
 
 // Card item type for task window

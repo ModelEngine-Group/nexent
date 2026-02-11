@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Row,
   Col,
@@ -16,7 +16,6 @@ import {
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { Users, Plus, Edit, Trash2, Building2 } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
@@ -32,7 +31,9 @@ import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { USER_ROLES } from "@/const/modelConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
+import { Can } from "@/components/permission/Can";
 
 // Removed mockTenants - now using real data from API
 
@@ -102,8 +103,20 @@ function TenantList({
         message.success(t("tenantResources.tenants.created"));
       }
       setModalVisible(false);
-    } catch (err) {
-      message.error(t("tenantResources.tenantOperationFailed"));
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Tenant with name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        // Extract the duplicate name and show translated error
+        message.error(t("tenantResources.tenants.nameExists", { name: nameConflictMatch[1] }));
+      } else if (errorMessage.includes("Tenant name cannot be empty")) {
+        // Handle empty name error
+        message.error(t("tenantResources.tenants.nameRequired"));
+      } else {
+        // Show generic error for other cases
+        message.error(t("tenantResources.tenantOperationFailed"));
+      }
     }
   };
 
@@ -160,12 +173,14 @@ function TenantList({
                     title={t("tenantResources.tenants.confirmDelete", {
                       name: tenant.tenant_name,
                     })}
-                    description="This action cannot be undone."
+                    description={t("common.cannotBeUndone")}
                     onConfirm={(e) => {
                       e?.stopPropagation();
                       handleDelete(tenant.tenant_id);
                     }}
                     onCancel={(e) => e?.stopPropagation()}
+                    okText={t("common.confirm")}
+                    cancelText={t("common.cancel")}
                   >
                     <Button
                       type="text"
@@ -192,6 +207,8 @@ function TenantList({
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
       >
         <Form layout="vertical" form={form}>
           <Form.Item
@@ -215,11 +232,11 @@ function TenantList({
 export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
-  const { user } = useAuth()
 
   // Check if user is super admin (speed mode or admin role)
-  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
+  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
 
   // Get real tenant data from API
   const {
@@ -232,8 +249,13 @@ export default function UserManageComp() {
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
-  // For non-super admins, use their current tenant (from user metadata or default)
-  const [tenantId, setTenantId] = useState<string | null>(tenants[0]?.tenant_id || null);
+  // For non-super admins, automatically select their own tenant based on user.tenantId
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSuperAdmin && user?.tenantId && !tenantId) {
+      setTenantId(user.tenantId);
+    }
+  }, [isSuperAdmin, tenantId, user?.tenantId]);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
@@ -266,28 +288,30 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-      <Row className="h-full">
-        <Col className="h-full" style={{ width: 300 }}>
-          <div className="h-full pr-6">
-            <div className="sticky top-6">
-              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                <TenantList
-                  selected={tenantId}
-                  onSelect={(id) => setTenantId(id)}
-                  tenants={tenants}
-                  onTenantsChange={setTenantsState}
-                  onTenantsRefetch={refetchTenants}
-                  loading={tenantsLoading}
-                  t={t}
-                />
+      <Row className="flex-1 min-h-0 h-full" align="stretch">
+        <Can permission="tenant.list:read">
+          <Col className="flex flex-col h-full" style={{ width: 300 }}>
+            <div className="h-full pr-6">
+              <div className="sticky top-6">
+                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                  <TenantList
+                    selected={tenantId}
+                    onSelect={(id) => setTenantId(id)}
+                    tenants={tenants}
+                    onTenantsChange={setTenantsState}
+                    onTenantsRefetch={refetchTenants}
+                    loading={tenantsLoading}
+                    t={t}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </Col>
-        <Col className="flex-1 p-6">
-          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+          </Col>
+        </Can>
+        <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
             {/* Tenant name header */}
-            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 {currentTenantName}
               </h2>
@@ -296,6 +320,7 @@ export default function UserManageComp() {
             {tenantId ? (
               <Tabs
                 defaultActiveKey="users"
+                className="h-full flex flex-col"
                 items={[
                   {
                     key: "users",

@@ -967,6 +967,48 @@ async def test_create_chunk_success(vdb_core_mock, auth_data):
         assert response.json() == expected_response
         mock_create.assert_called_once()
 
+        # Verify that tenant_id was passed to the service
+        call_kwargs = mock_create.call_args[1]
+        assert "tenant_id" in call_kwargs
+        assert call_kwargs["tenant_id"] == auth_data["tenant_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_chunk_passes_tenant_id_to_service(vdb_core_mock, auth_data):
+    """
+    Test that create_chunk endpoint passes tenant_id to the service method.
+    This is critical for the service to fetch the correct embedding model.
+    """
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_chunk") as mock_create:
+
+        mock_create.return_value = {"status": "success", "chunk_id": "chunk-1"}
+
+        payload = {
+            "content": "Test content for embedding",
+            "path_or_url": "doc-123",
+            "title": "Test Title"
+        }
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/chunk",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+
+        # Verify tenant_id was passed
+        mock_create.assert_called_once()
+        call_args = mock_create.call_args
+        # Check both args and kwargs for tenant_id
+        assert ("tenant_id" in call_args.kwargs and call_args.kwargs["tenant_id"] == auth_data["tenant_id"]) or \
+               (len(call_args[0]) >= 4 and call_args[0][3] == auth_data["tenant_id"]), \
+            "tenant_id should be passed to the service method"
+
 
 @pytest.mark.asyncio
 async def test_create_chunk_error(vdb_core_mock, auth_data):

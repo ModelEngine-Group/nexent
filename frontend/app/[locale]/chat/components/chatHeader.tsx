@@ -9,8 +9,9 @@ import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
 import { configStore } from "@/lib/config";
 import log from "@/lib/logger";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/hooks/useAuth";
-import { USER_ROLES } from "@/const/modelConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import { USER_ROLES } from "@/const/auth";
 import { saveView } from "@/lib/viewPersistence";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 
@@ -27,7 +28,8 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const { t, i18n } = useTranslation("common");
-  const { user, isSpeedMode } = useAuth();
+  const { user } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const { confirm } = useConfirmModal();
   const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 

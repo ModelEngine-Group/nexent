@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Input, Badge } from "antd";
+import { Modal, Input, Badge, Button } from "antd";
 
 export interface ExpandEditModalProps {
   open: boolean;
@@ -8,6 +8,7 @@ export interface ExpandEditModalProps {
   content: string;
   onClose: () => void;
   onSave: (content: string) => void;
+  readOnly?: boolean;
 }
 
 export default function ExpandEditModal({
@@ -16,6 +17,7 @@ export default function ExpandEditModal({
   content,
   onClose,
   onSave,
+  readOnly = false,
 }:ExpandEditModalProps) {
   const { t } = useTranslation("common");
   const [editContent, setEditContent] = useState(content);
@@ -26,7 +28,9 @@ export default function ExpandEditModal({
   }, [content]);
 
   const handleSave = () => {
-    onSave(editContent);
+    if (!readOnly) {
+      onSave(editContent);
+    }
     onClose();
   };
 
@@ -47,13 +51,19 @@ export default function ExpandEditModal({
       open={open}
       onCancel={handleClose}
       footer={
-        <button
-        onClick={handleSave}
-        className="px-4 py-1.5 rounded-md text-sm bg-blue-500 text-white hover:bg-blue-600"
-        style={{ border: "none" }}
-      >
-        {t("common.confirm")}
-      </button>
+        readOnly ? (
+          <Button onClick={handleClose}>
+            {t("common.cancel")}
+          </Button>
+        ) : (
+          <button
+            onClick={handleSave}
+            className="px-4 py-1.5 rounded-md text-sm bg-blue-500 text-white hover:bg-blue-600"
+            style={{ border: "none" }}
+          >
+            {t("common.confirm")}
+          </button>
+        )
       }
       width={1000}
       styles={{
@@ -66,7 +76,9 @@ export default function ExpandEditModal({
           <Input.TextArea
             value={editContent}
             onChange={(e) => {
-              setEditContent(e.target.value);
+              if (!readOnly) {
+                setEditContent(e.target.value);
+              }
             }}
             style={{
               width: "100%",
@@ -74,6 +86,7 @@ export default function ExpandEditModal({
               resize: "vertical"
             }}
             bordered={true}
+            readOnly={readOnly}
           />
         </div>
       </div>

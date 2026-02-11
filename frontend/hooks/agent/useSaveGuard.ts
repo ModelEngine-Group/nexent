@@ -6,6 +6,7 @@ import { useConfirmModal } from "../useConfirmModal";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { updateAgentInfo, updateToolConfig } from "@/services/agentConfigService";
 import { Agent } from "@/types/agentConfig";
+import log from "@/lib/logger";
 
 /**
  * Hook for handling agent save guard logic
@@ -43,12 +44,17 @@ export const useSaveGuard = () => {
         .map((id: any) => Number(id))
         .filter((id: number) => Number.isFinite(id));
 
+      const groupIds = (currentEditedAgent.group_ids || [])
+        .map((id: any) => Number(id))
+        .filter((id: number) => Number.isFinite(id));
+
       const result = await updateAgentInfo({
         agent_id: currentAgentId ?? undefined, // undefined=create, number=update
         name: currentEditedAgent.name,
         display_name: currentEditedAgent.display_name,
         description: currentEditedAgent.description,
         author: currentEditedAgent.author,
+        group_ids: groupIds,
         model_name: currentEditedAgent.model,
         model_id: currentEditedAgent.model_id ?? undefined,
         max_steps: currentEditedAgent.max_step,
@@ -65,7 +71,7 @@ export const useSaveGuard = () => {
       });
 
       if (result.success) {
-        useAgentConfigStore.getState().markAsSaved(); // 标记为已保存
+        useAgentConfigStore.getState().markAsSaved(); // Mark as saved
         message.success(
             t("businessLogic.config.message.agentSaveSuccess")
         );
@@ -92,7 +98,7 @@ export const useSaveGuard = () => {
               try {
                 await updateToolConfig(toolId, agentIdNumber, params, isEnabled);
               } catch (error) {
-                console.error(`Failed to save tool config for tool ${toolId}:`, error);
+                log.error(`Failed to save tool config for tool ${toolId}:`, error);
                 // Continue with other tools even if one fails
               }
             }
@@ -108,7 +114,7 @@ export const useSaveGuard = () => {
         });
         // Get the updated agent data from the refreshed cache
         let updatedAgent = queryClient.getQueryData(["agentInfo", finalAgentId]) as Agent;
-        
+
         // For new agents, the cache might not be populated yet
         // Construct a minimal Agent object from the edited data
         if (!updatedAgent && finalAgentId) {
@@ -130,9 +136,10 @@ export const useSaveGuard = () => {
             business_logic_model_name: currentEditedAgent.business_logic_model_name,
             business_logic_model_id: currentEditedAgent.business_logic_model_id,
             sub_agent_id_list: currentEditedAgent.sub_agent_id_list,
+            group_ids: currentEditedAgent.group_ids || [],
           };
         }
-        
+
         if (updatedAgent) {
           useAgentConfigStore.getState().setCurrentAgent(updatedAgent);
         }

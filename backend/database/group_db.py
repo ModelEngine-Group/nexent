@@ -149,7 +149,7 @@ def modify_group(group_id: int, updates: Dict[str, Any], updated_by: Optional[st
 
 def remove_group(group_id: int, updated_by: Optional[str] = None) -> bool:
     """
-    Remove group (soft delete)
+    Remove group (soft delete) and all its user relationships
 
     Args:
         group_id (int): Group ID
@@ -163,9 +163,16 @@ def remove_group(group_id: int, updated_by: Optional[str] = None) -> bool:
         if updated_by:
             update_data["updated_by"] = updated_by
 
+        # Soft delete the group
         result = session.query(TenantGroupInfo).filter(
             TenantGroupInfo.group_id == group_id,
             TenantGroupInfo.delete_flag == "N"
+        ).update(update_data, synchronize_session=False)
+
+        # Soft delete all user-group relationships for this group
+        session.query(TenantGroupUser).filter(
+            TenantGroupUser.group_id == group_id,
+            TenantGroupUser.delete_flag == "N"
         ).update(update_data, synchronize_session=False)
 
         return result > 0
@@ -322,6 +329,30 @@ def count_group_users(group_id: int) -> int:
         return result
 
 
+def remove_group_users(group_id: int, removed_by: Optional[str] = None) -> int:
+    """
+    Remove all users from a group (soft delete all group-user relationships)
+
+    Args:
+        group_id (int): Group ID
+        removed_by (Optional[str]): User who performed the removal
+
+    Returns:
+        int: Number of group memberships removed
+    """
+    with get_db_session() as session:
+        update_data: Dict[str, Any] = {"delete_flag": "Y"}
+        if removed_by:
+            update_data["updated_by"] = removed_by
+
+        result = session.query(TenantGroupUser).filter(
+            TenantGroupUser.group_id == group_id,
+            TenantGroupUser.delete_flag == "N"
+        ).update(update_data, synchronize_session=False)
+
+        return result
+
+
 def remove_user_from_all_groups(user_id: str, removed_by: str) -> int:
     """
     Remove user from all groups (soft delete)
@@ -344,3 +375,30 @@ def remove_user_from_all_groups(user_id: str, removed_by: str) -> int:
         })
 
         return result
+
+
+def check_group_name_exists(tenant_id: str, group_name: str, exclude_group_id: Optional[int] = None) -> bool:
+    """
+    Check if a group with the given name already exists in the tenant
+
+    Args:
+        tenant_id (str): Tenant ID
+        group_name (str): Group name to check
+        exclude_group_id (Optional[int]): Group ID to exclude (for update operations)
+
+    Returns:
+        bool: True if group name exists, False otherwise
+    """
+    with get_db_session() as session:
+        query = session.query(TenantGroupInfo).filter(
+            TenantGroupInfo.tenant_id == tenant_id,
+            TenantGroupInfo.group_name == group_name,
+            TenantGroupInfo.delete_flag == "N"
+        )
+
+        # Exclude specific group ID for update operations
+        if exclude_group_id is not None:
+            query = query.filter(TenantGroupInfo.group_id != exclude_group_id)
+
+        result = query.first()
+        return result is not None

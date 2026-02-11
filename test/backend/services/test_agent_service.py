@@ -325,7 +325,66 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "unavailable_reasons": []
     }
     assert result == expected_result
-    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
+    mock_search_tools.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant")
+    mock_query_sub_agents_id.assert_called_once_with(
+        main_agent_id=123, tenant_id="test_tenant")
+    mock_check_availability.assert_called_once()
+
+
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+    """
+    Test get_agent_info_impl with explicit version_no parameter.
+
+    This test verifies that:
+    1. The function correctly passes version_no to search_agent_info_by_agent_id
+    2. It works correctly when version_no is explicitly provided
+    """
+    # Setup
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent"
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+
+    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_search_tools.return_value = mock_tools
+
+    mock_sub_agent_ids = [456, 789]
+    mock_query_sub_agents_id.return_value = mock_sub_agent_ids
+
+    # Mock get_model_by_model_id - return None for model_id=None
+    mock_get_model_by_model_id.return_value = None
+
+    # Mock check_agent_availability - agent is available
+    mock_check_availability.return_value = (True, [])
+
+    # Execute with explicit version_no
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant", version_no=5)
+
+    # Assert
+    expected_result = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+        "tools": mock_tools,
+        "sub_agent_id_list": mock_sub_agent_ids,
+        "model_name": None,
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
+    }
+    assert result == expected_result
+    # Verify version_no is passed correctly
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 5)
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
@@ -431,30 +490,25 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
 
     # Assert
     mock_update_agent.assert_called_once_with(
-        123, request, "test_tenant", "test_user")
+        123, request, "test_user")
 
 
 @patch('backend.services.agent_service.delete_tools_by_agent_id')
 @patch('backend.services.agent_service.delete_agent_relationship')
 @patch('backend.services.agent_service.delete_agent_by_id')
-@patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_success(mock_get_current_user_info, mock_delete_agent, mock_delete_related,
+async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
                                          mock_delete_tools):
     """
     Test successful deletion of an agent.
 
     This test verifies that:
-    1. The function correctly gets the current user and tenant IDs
-    2. It calls the delete_agent_by_id function with the correct parameters
-    3. It also deletes all related agent relationships
+    1. It calls the delete_agent_by_id function with the correct parameters
+    2. It also deletes all related agent relationships
+    3. It deletes all tools associated with the agent
     """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-
     # Execute
-    await delete_agent_impl(123, authorization="Bearer token")
+    await delete_agent_impl(123, "test_tenant", "test_user")
 
     # Assert
     mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
@@ -481,6 +535,8 @@ async def test_get_agent_info_impl_exception_handling(mock_search_agent_info):
         await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 
     assert "Failed to get agent info" in str(context.value)
+    # Verify version_no parameter is passed (default value 0)
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
 @patch('backend.services.agent_service.update_agent')
@@ -515,46 +571,35 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_agent')
 @patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_enabled_tool_ids(
     mock_get_current_user_info,
     mock_update_agent,
-    mock_query_all_tools,
-    mock_query_tool_instances_by_id,
+    mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool
 ):
     """
     Test update_agent_info_impl with enabled_tool_ids parameter.
 
     This test verifies that:
-    1. When enabled_tool_ids is provided, tools are updated correctly
-    2. Existing tool params are preserved
-    3. Tools are enabled/disabled based on the provided list
+    1. When enabled_tool_ids is provided, existing tools are disabled if not selected
+    2. Selected tools are enabled (create or update)
+    3. Existing tool params are preserved
     """
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
 
-    # Mock all tools in tenant
-    mock_query_all_tools.return_value = [
-        {"tool_id": 1, "name": "Tool 1"},
-        {"tool_id": 2, "name": "Tool 2"},
-        {"tool_id": 3, "name": "Tool 3"},
-    ]
-
-    # Mock existing tool instance with params
-    mock_query_tool_instances_by_id.side_effect = [
+    # Mock existing tool instances for this agent
+    mock_query_tool_instances_by_agent_id.return_value = [
         {"tool_id": 1, "params": {"key1": "value1"}},  # Existing tool with params
-        None,  # Tool 2 doesn't exist yet
-        None,  # Tool 3 doesn't exist yet
     ]
 
     request = MagicMock()
     request.agent_id = 123
-    request.enabled_tool_ids = [1, 2]  # Enable tools 1 and 2, disable 3
+    request.enabled_tool_ids = [1, 2]  # Enable tools 1 and 2
     request.related_agent_ids = None
 
     # Execute
@@ -564,8 +609,8 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert result["agent_id"] == 123
     mock_update_agent.assert_called_once()
 
-    # Verify tools were updated: tool 1 and 2 enabled, tool 3 disabled
-    assert mock_create_or_update_tool.call_count == 3
+    # Verify tools were updated: tool 1 and 2 enabled
+    assert mock_create_or_update_tool.call_count == 2
 
     # Check tool 1: enabled with existing params
     call_args = mock_create_or_update_tool.call_args_list[0]
@@ -574,18 +619,116 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert tool_info.enabled is True
     assert tool_info.params == {"key1": "value1"}
 
-    # Check tool 2: enabled with empty params
+    # Check tool 2: enabled with empty params (new tool)
     call_args = mock_create_or_update_tool.call_args_list[1]
     tool_info = call_args.kwargs['tool_info']
     assert tool_info.tool_id == 2
     assert tool_info.enabled is True
     assert tool_info.params == {}
 
-    # Check tool 3: disabled
-    call_args = mock_create_or_update_tool.call_args_list[2]
+
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
+@patch('backend.services.agent_service.update_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null_tool_id(
+    mock_get_current_user_info,
+    mock_update_agent,
+    mock_query_tool_instances_by_agent_id,
+    mock_create_or_update_tool
+):
+    """
+    Test update_agent_info_impl when existing tool instance has null tool_id.
+
+    This test verifies that:
+    1. Instances with null tool_id are skipped (not causing errors)
+    2. Only valid tool instances are processed for enabling/disabling
+    """
+    # Setup
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+
+    # Mock existing tool instances: one with valid tool_id, one with null tool_id
+    mock_query_tool_instances_by_agent_id.return_value = [
+        {"tool_id": 1, "params": {"key1": "value1"}},  # Valid instance
+        {"tool_id": None, "params": {}},               # Instance with null tool_id - should be skipped
+    ]
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = [1]  # Enable only tool 1
+    request.related_agent_ids = None
+
+    # Execute
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    # Assert
+    assert result["agent_id"] == 123
+    mock_update_agent.assert_called_once()
+
+    # Verify only tool 1 was enabled; tool with null tool_id was skipped
+    assert mock_create_or_update_tool.call_count == 1
+    call_args = mock_create_or_update_tool.call_args
     tool_info = call_args.kwargs['tool_info']
-    assert tool_info.tool_id == 3
+    assert tool_info.tool_id == 1
+    assert tool_info.enabled is True
+
+
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
+@patch('backend.services.agent_service.update_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_with_enabled_tool_ids_disabled_existing_tool(
+    mock_get_current_user_info,
+    mock_update_agent,
+    mock_query_tool_instances_by_agent_id,
+    mock_create_or_update_tool
+):
+    """
+    Test that existing tools not in enabled_tool_ids are disabled.
+
+    This test verifies that:
+    1. When enabled_tool_ids is provided, existing tools NOT in the list are disabled
+    2. create_or_update_tool_by_tool_info is called with enabled=False for disabled tools
+    """
+    # Setup
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+
+    # Mock existing tool instances: tool 1 exists, tool 2 is new
+    mock_query_tool_instances_by_agent_id.return_value = [
+        {"tool_id": 1, "params": {"key1": "value1"}},  # Existing tool 1
+    ]
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = [2]  # Only enable tool 2 (new tool)
+    # Tool 1 exists but is NOT in enabled_tool_ids, so it should be disabled
+    request.related_agent_ids = None
+
+    # Execute
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    # Assert
+    assert result["agent_id"] == 123
+    mock_update_agent.assert_called_once()
+
+    # Verify: tool 1 was disabled, tool 2 was enabled
+    assert mock_create_or_update_tool.call_count == 2
+
+    # Check tool 1: disabled (exists but not in enabled_tool_ids)
+    call_args = mock_create_or_update_tool.call_args_list[0]
+    tool_info = call_args.kwargs['tool_info']
+    assert tool_info.tool_id == 1
     assert tool_info.enabled is False
+    assert tool_info.params == {"key1": "value1"}
+
+    # Check tool 2: enabled (new tool)
+    call_args = mock_create_or_update_tool.call_args_list[1]
+    tool_info = call_args.kwargs['tool_info']
+    assert tool_info.tool_id == 2
+    assert tool_info.enabled is True
+    assert tool_info.params == {}
 
 
 @patch('backend.services.agent_service.update_related_agents')
@@ -668,8 +811,7 @@ async def test_update_agent_info_impl_circular_dependency_detection(
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_related_agents')
 @patch('backend.services.agent_service.query_sub_agents_id_list')
 @patch('backend.services.agent_service.update_agent')
@@ -680,8 +822,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_update_agent,
     mock_query_sub_agents_id_list,
     mock_update_related_agents,
-    mock_query_all_tools,
-    mock_query_tool_instances_by_id,
+    mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool
 ):
     """
@@ -693,8 +834,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     """
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
-    mock_query_all_tools.return_value = [{"tool_id": 1}]
-    mock_query_tool_instances_by_id.return_value = None
+    mock_query_tool_instances_by_agent_id.return_value = []  # No existing instances
     mock_query_sub_agents_id_list.return_value = []
 
     request = MagicMock()
@@ -718,16 +858,14 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
 
 
 @patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
 @patch('backend.services.agent_service.update_agent')
 @patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_tool_update_exception(
     mock_get_current_user_info,
     mock_update_agent,
-    mock_query_all_tools,
-    mock_query_tool_instances_by_id,
+    mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool
 ):
     """
@@ -738,8 +876,7 @@ async def test_update_agent_info_impl_tool_update_exception(
     """
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
-    mock_query_all_tools.return_value = [{"tool_id": 1}]
-    mock_query_tool_instances_by_id.return_value = None
+    mock_query_tool_instances_by_agent_id.return_value = []
     mock_create_or_update_tool.side_effect = Exception("Tool update failed")
 
     request = MagicMock()
@@ -858,9 +995,8 @@ def test_resolve_user_tenant_language_partial_override(mock_get_current_user_inf
 
 
 @patch('backend.services.agent_service.delete_agent_by_id')
-@patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, mock_delete_agent):
+async def test_delete_agent_impl_exception_handling(mock_delete_agent):
     """
     Test exception handling in delete_agent_impl function.
 
@@ -869,13 +1005,11 @@ async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, 
     2. The function raises a ValueError with an appropriate message
     """
     # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
     mock_delete_agent.side_effect = Exception("Delete failed")
 
     # Execute & Assert
     with pytest.raises(ValueError) as context:
-        await delete_agent_impl(123, authorization="Bearer token")
+        await delete_agent_impl(123, "test_tenant", "test_user")
 
     assert "Failed to delete agent" in str(context.value)
 
@@ -1227,7 +1361,7 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
         assert result["model_name"] is None
         assert result["is_available"] == True
         assert result["unavailable_reasons"] == []
-        mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+        mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
 @patch('backend.services.agent_service.check_agent_availability')
@@ -1271,7 +1405,7 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
     assert result["model_name"] is None
     assert result["is_available"] == True
     assert result["unavailable_reasons"] == []
-    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
@@ -1704,15 +1838,28 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     mock_get_model_by_model_id.assert_any_call(789)
 
 
-async def test_list_all_agent_info_impl_success():
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_success(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
     """
-    Test successful retrieval of all agent information.
+    Test successful retrieval of all agent information for admin user.
 
     This test verifies that:
     1. The function correctly queries all agents for a tenant
-    2. It retrieves tool information for each agent
-    3. It checks tool availability
-    4. It returns a properly formatted list of agent information
+    2. It checks agent availability
+    3. It returns a properly formatted list of agent information with permissions
     """
     # Setup mock agents
     mock_agents = [
@@ -1722,7 +1869,10 @@ async def test_list_all_agent_info_impl_success():
             "display_name": "Display Agent 1",
             "description": "First test agent",
             "enabled": True,
-            "group_ids": ""
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+            "current_version_no": None,  # Not published
         },
         {
             "agent_id": 2,
@@ -1730,61 +1880,148 @@ async def test_list_all_agent_info_impl_success():
             "display_name": "Display Agent 2",
             "description": "Second test agent",
             "enabled": True,
-            "group_ids": "1,2,3"
+            "group_ids": "1,2,3",
+            "created_by": "user2",
+            "create_time": 2,
+            "current_version_no": 1,  # Published
         }
     ]
 
-    # Setup mock tools
-    mock_tools = [
-        {"tool_id": 101, "name": "Tool 1"},
-        {"tool_id": 102, "name": "Tool 2"}
-    ]
+    # Configure mocks
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
 
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents, \
-            patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
-            patch('backend.services.agent_service.check_tool_is_available') as mock_check_tools:
-        # Configure mocks
-        mock_query_agents.return_value = mock_agents
-        mock_search_tools.return_value = mock_tools
-        mock_check_tools.return_value = [True, True]  # All tools are available
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        # Execute
-        result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    # Assert
+    assert len(result) == 2
+    assert result[0]["agent_id"] == 1
+    assert result[0]["name"] == "Agent 1"
+    assert result[0]["display_name"] == "Display Agent 1"
+    assert result[0]["is_available"] == True
+    assert result[0]["unavailable_reasons"] == []
+    assert result[0]["group_ids"] == []
+    assert result[0]["permission"] == "EDIT"  # Admin can edit all
+    assert result[0]["is_published"] == False  # current_version_no is None
+    assert result[1]["agent_id"] == 2
+    assert result[1]["name"] == "Agent 2"
+    assert result[1]["display_name"] == "Display Agent 2"
+    assert result[1]["is_available"] == True
+    assert result[1]["unavailable_reasons"] == []
+    assert result[1]["group_ids"] == [1, 2, 3]
+    assert result[1]["permission"] == "EDIT"  # Admin can edit all
+    assert result[1]["is_published"] == True  # current_version_no is not None
 
-        # Assert
-        assert len(result) == 2
-        assert result[0]["agent_id"] == 1
-        assert result[0]["name"] == "Agent 1"
-        assert result[0]["display_name"] == "Display Agent 1"
-        assert result[0]["is_available"] == True
-        assert result[0]["unavailable_reasons"] == []
-        assert result[0]["group_ids"] == []
-        assert result[1]["agent_id"] == 2
-        assert result[1]["name"] == "Agent 2"
-        assert result[1]["display_name"] == "Display Agent 2"
-        assert result[1]["is_available"] == True
-        assert result[1]["unavailable_reasons"] == []
-        assert result[1]["group_ids"] == [1, 2, 3]
-
-        # Verify mock calls
-        mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
-        assert mock_search_tools.call_count == 2
-        mock_search_tools.assert_has_calls([
-            call(agent_id=1, tenant_id="test_tenant"),
-            call(agent_id=2, tenant_id="test_tenant")
-        ])
-        mock_check_tools.assert_has_calls([
-            call([101, 102]),
-            call([101, 102])
-        ])
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
+    mock_get_user_tenant.assert_called_once_with("admin_user")
 
 
 @pytest.mark.asyncio
 @patch("backend.services.agent_service.get_model_by_model_id")
 @patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_is_published_field(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """
+    Test that is_published field is correctly set based on current_version_no.
+
+    This test verifies that:
+    1. is_published is False when current_version_no is None
+    2. is_published is False when current_version_no field is missing
+    3. is_published is True when current_version_no is not None
+    """
+    # Setup mock agents with different current_version_no values
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Unpublished agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+            "current_version_no": None,  # Not published
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Published agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user2",
+            "create_time": 2,
+            "current_version_no": 1,  # Published
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent without current_version_no field",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user3",
+            "create_time": 3,
+            # current_version_no field is missing
+        }
+    ]
+
+    # Configure mocks
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
+
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Assert
+    assert len(result) == 3
+    # Agent 1: current_version_no is None -> is_published should be False
+    assert result[0]["agent_id"] == 1
+    assert result[0]["is_published"] == False
+    # Agent 2: current_version_no is 1 -> is_published should be True
+    assert result[1]["agent_id"] == 2
+    assert result[1]["is_published"] == True
+    # Agent 3: current_version_no field is missing -> is_published should be False
+    assert result[2]["agent_id"] == 3
+    assert result[2]["is_published"] == False
+
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
+    mock_get_user_tenant.assert_called_once_with("admin_user")
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
 @patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
     mock_query_all,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
     mock_check_availability,
     mock_get_model,
 ):
@@ -1798,15 +2035,19 @@ async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
             "enabled": True,
             "model_id": 99,
             "group_ids": "",
+            "created_by": "user1",
             "create_time": 1,
         }
     ]
 
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
     # Do not mutate model_cache here so that the "model_id not in model_cache" branch runs.
     mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
     mock_get_model.return_value = {"model_name": "m", "display_name": "M"}
 
-    result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
     assert len(result) == 1
     assert result[0]["model_id"] == 99
@@ -1815,7 +2056,21 @@ async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
     mock_get_model.assert_called_once_with(99, "test_tenant")
 
 
-async def test_list_all_agent_info_impl_with_unavailable_tools():
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_with_unavailable_tools(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
     """
     Test retrieval of agent information with some unavailable tools.
 
@@ -1831,7 +2086,9 @@ async def test_list_all_agent_info_impl_with_unavailable_tools():
             "display_name": "Display Agent 1",
             "description": "Agent with available tools",
             "enabled": True,
-            "group_ids": ""
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
         },
         {
             "agent_id": 2,
@@ -1839,44 +2096,46 @@ async def test_list_all_agent_info_impl_with_unavailable_tools():
             "display_name": "Display Agent 2",
             "description": "Agent with unavailable tools",
             "enabled": True,
-            "group_ids": "5,6"
+            "group_ids": "5,6",
+            "created_by": "user2",
+            "create_time": 2,
         }
     ]
 
-    # Setup mock tools
-    mock_tools = [
-        {"tool_id": 101, "name": "Tool 1"},
-        {"tool_id": 102, "name": "Tool 2"}
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    # First agent has available tools, second agent has unavailable tools
+    mock_check_availability.side_effect = [
+        (True, []),  # Agent 1: available
+        (False, ["tool_unavailable"])  # Agent 2: unavailable
     ]
+    mock_get_model.return_value = None
 
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents, \
-            patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
-            patch('backend.services.agent_service.check_tool_is_available') as mock_check_tools:
-        # Configure mocks
-        mock_query_agents.return_value = mock_agents
-        mock_search_tools.return_value = mock_tools
-        # First agent has available tools, second agent has unavailable tools
-        mock_check_tools.side_effect = [[True, True], [False, True]]
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        # Execute
-        result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    # Assert
+    assert len(result) == 2
+    assert result[0]["is_available"] == True
+    assert result[0]["unavailable_reasons"] == []
+    assert result[0]["group_ids"] == []
+    assert result[1]["is_available"] == False
+    assert result[1]["unavailable_reasons"] == ["tool_unavailable"]
+    assert result[1]["group_ids"] == [5, 6]
 
-        # Assert
-        assert len(result) == 2
-        assert result[0]["is_available"] == True
-        assert result[0]["unavailable_reasons"] == []
-        assert result[0]["group_ids"] == []
-        assert result[1]["is_available"] == False
-        assert result[1]["unavailable_reasons"] == ["tool_unavailable"]
-        assert result[1]["group_ids"] == [5, 6]
-
-        # Verify mock calls
-        mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
-        assert mock_search_tools.call_count == 2
-        assert mock_check_tools.call_count == 2
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
 
 
-async def test_list_all_agent_info_impl_query_error():
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_query_error(
+    mock_query_agents,
+    mock_get_user_tenant,
+):
     """
     Test error handling when querying agent information fails.
 
@@ -1884,19 +2143,33 @@ async def test_list_all_agent_info_impl_query_error():
     1. When an error occurs during agent query
     2. The function raises a ValueError with an appropriate message
     """
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
-        # Configure mock to raise exception
-        mock_query_agents.side_effect = Exception("Database error")
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    # Configure mock to raise exception
+    mock_query_agents.side_effect = Exception("Database error")
 
-        # Execute & Assert
-        with pytest.raises(ValueError) as context:
-            await list_all_agent_info_impl(tenant_id="test_tenant")
+    # Execute & Assert
+    with pytest.raises(ValueError) as context:
+        await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        assert "Failed to query all agent info" in str(context.value)
-        mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
+    assert "Failed to query all agent info" in str(context.value)
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
 
 
-async def test_list_all_agent_info_impl_model_unavailable():
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_model_unavailable(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
     mock_agents = [
         {
             "agent_id": 1,
@@ -1905,69 +2178,402 @@ async def test_list_all_agent_info_impl_model_unavailable():
             "description": "Agent with unavailable model",
             "enabled": True,
             "model_id": 101,
-            "group_ids": "7,8,9"
+            "group_ids": "7,8,9",
+            "created_by": "user1",
+            "create_time": 1,
+            "current_version_no": None,
         }
     ]
 
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents, \
-            patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
-            patch('backend.services.agent_service.get_model_by_model_id') as mock_get_model:
-        mock_query_agents.return_value = mock_agents
-        mock_search_tools.return_value = []
-        mock_get_model.return_value = {
-            "connect_status": agent_service.ModelConnectStatusEnum.UNAVAILABLE.value
-        }
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (False, ["model_unavailable"])
+    mock_get_model.return_value = None
 
-        result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        assert len(result) == 1
-        assert result[0]["is_available"] is False
-        assert result[0]["unavailable_reasons"] == ["model_unavailable"]
-        assert result[0]["group_ids"] == [7, 8, 9]
+    assert len(result) == 1
+    assert result[0]["is_available"] is False
+    assert result[0]["unavailable_reasons"] == ["model_unavailable"]
+    assert result[0]["group_ids"] == [7, 8, 9]
+    assert result[0]["is_published"] == False  # current_version_no is None
 
 
-async def test_list_all_agent_info_impl_duplicate_names():
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_duplicate_names(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
     mock_agents = [
         {
             "agent_id": 1,
             "name": "Duplicated",
-            "create_time": "2024-01-01T00:00:00",
+            "create_time": 1,
             "display_name": "Agent Display 1",
             "description": "First agent",
             "enabled": True,
-            "group_ids": "10"
+            "group_ids": "10",
+            "created_by": "user1",
         },
         {
             "agent_id": 2,
             "name": "Duplicated",
-            "create_time": "2024-02-01T00:00:00",
+            "create_time": 2,
             "display_name": "Agent Display 2",
             "description": "Second agent",
             "enabled": True,
-            "group_ids": "10,11"
+            "group_ids": "10,11",
+            "created_by": "user2",
         }
     ]
 
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents, \
-            patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools:
-        mock_query_agents.return_value = mock_agents
-        mock_search_tools.return_value = []
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
 
-        result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        assert len(result) == 2
+    assert len(result) == 2
 
-        # The earliest created agent (agent_id=1) should remain available
-        agent1 = next(a for a in result if a["agent_id"] == 1)
-        assert agent1["is_available"] is True
-        assert "duplicate_name" not in agent1["unavailable_reasons"]
-        assert agent1["group_ids"] == [10]
+    # The earliest created agent (agent_id=1) should remain available
+    agent1 = next(a for a in result if a["agent_id"] == 1)
+    assert agent1["is_available"] is True
+    assert "duplicate_name" not in agent1["unavailable_reasons"]
+    assert agent1["group_ids"] == [10]
+    assert agent1["is_published"] == False  # current_version_no is missing/None
 
-        # The later created agent (agent_id=2) should be unavailable due to duplication
-        agent2 = next(a for a in result if a["agent_id"] == 2)
-        assert agent2["is_available"] is False
-        assert "duplicate_name" in agent2["unavailable_reasons"]
-        assert agent2["group_ids"] == [10, 11]
+    # The later created agent (agent_id=2) should be unavailable due to duplication
+    agent2 = next(a for a in result if a["agent_id"] == 2)
+    assert agent2["is_available"] is False
+    assert "duplicate_name" in agent2["unavailable_reasons"]
+    assert agent2["group_ids"] == [10, 11]
+    assert agent2["is_published"] == False  # current_version_no is missing/None
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_user_permission_read_only(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that regular users get READ_ONLY permission for agents they didn't create."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent created by user1",
+            "enabled": True,
+            "group_ids": "1",  # Agent in group 1
+            "created_by": "user1",
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Agent created by current_user",
+            "enabled": True,
+            "group_ids": "1",  # Agent in group 1
+            "created_by": "current_user",
+            "create_time": 2,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user, not admin
+    mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
+
+    # Mock convert_string_to_list to handle both empty strings and comma-separated values
+    # This should match the actual implementation in utils.str_utils
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        # Handle comma-separated string like "1" or "1,2"
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    assert len(result) == 2
+    # Agent created by user1 - current_user should have READ_ONLY
+    agent1 = next(a for a in result if a["agent_id"] == 1)
+    assert agent1["permission"] == "READ_ONLY"
+    # Agent created by current_user - should have EDIT
+    agent2 = next(a for a in result if a["agent_id"] == 2)
+    assert agent2["permission"] == "EDIT"
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_group_filtering(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that regular users only see agents whose group_ids overlap with their groups."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent in group 1",
+            "enabled": True,
+            "group_ids": "1,2",
+            "created_by": "user1",
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Agent in group 3",
+            "enabled": True,
+            "group_ids": "3,4",
+            "created_by": "user2",
+            "create_time": 2,
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent in group 1 (same as user)",
+            "enabled": True,
+            "group_ids": "1",  # Agent in group 1, which overlaps with user's groups
+            "created_by": "user3",
+            "create_time": 3,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user
+    mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
+
+    # Mock convert_string_to_list to handle both empty strings and comma-separated values
+    # This should match the actual implementation in utils.str_utils
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        # Handle comma-separated string like "1" or "1,2"
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="regular_user")
+
+    # Should only see Agent 1 (overlaps with user's groups 1,2) and Agent 3 (overlaps with group 1)
+    # Agent 2 should be filtered out (groups 3,4 don't overlap with user's groups 1,2)
+    assert len(result) == 2
+    agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids
+    assert 3 in agent_ids
+    assert 2 not in agent_ids
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_disabled_agents_filtered(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that disabled agents are filtered out."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Enabled agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Disabled agent",
+            "enabled": False,
+            "group_ids": "",
+            "created_by": "user2",
+            "create_time": 2,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    # For admin users, query_group_ids_by_user is not called, but we still need to mock it
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Should only see enabled agent (disabled agents are filtered out)
+    assert len(result) == 1
+    assert result[0]["agent_id"] == 1
+    assert result[0]["name"] == "Agent 1"
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_group_query_error_handled(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that group query errors are handled gracefully - admin users are not affected."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    # Use ADMIN user - group query errors don't affect admin users since they bypass group filtering
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    # For admin users, query_group_ids_by_user is not called (can_edit_all is True)
+    # But if it were called and failed, it should be handled gracefully
+    mock_query_groups.side_effect = Exception("Database error")  # Simulate error
+    mock_convert_list.return_value = []
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    # Should not raise exception, but should handle gracefully
+    # Admin users bypass group filtering, so they should see all agents
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Admin users should still see agents even if group query fails
+    assert len(result) == 1
+    assert result[0]["agent_id"] == 1
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_group_query_error_for_user_role(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that group query errors are handled gracefully for USER/DEV roles - covers lines 1274-1278."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Test agent",
+            "enabled": True,
+            "group_ids": "1,2",
+            "created_by": "user1",
+            "create_time": 1,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    # Use USER role - group query errors should be handled gracefully
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    # Simulate exception when querying group IDs - this should trigger lines 1274-1278
+    mock_query_groups.side_effect = Exception("Database connection error")
+    mock_convert_list.return_value = []
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    # Should not raise exception, but should handle gracefully
+    # When group query fails, user_group_ids is set to empty set, so no agents match
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="user1")
+
+    # Since user_group_ids is empty set (due to exception), no agents should match group filter
+    # So result should be empty
+    assert len(result) == 0
+    # Verify that query_group_ids_by_user was called (to trigger the exception)
+    mock_query_groups.assert_called_once_with("user1")
 
 
 @patch('backend.services.agent_service.query_sub_agents_id_list')
@@ -3879,7 +4485,21 @@ async def test_generate_stream_with_memory_fallback_on_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_all_agent_info_impl_with_disabled_agents():
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_with_disabled_agents(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
     """
     Test list_all_agent_info_impl with disabled agents.
 
@@ -3895,7 +4515,9 @@ async def test_list_all_agent_info_impl_with_disabled_agents():
             "display_name": "Display Enabled Agent 1",
             "description": "First enabled agent",
             "enabled": True,
-            "group_ids": "12"
+            "group_ids": "12",
+            "created_by": "user1",
+            "create_time": 1,
         },
         {
             "agent_id": 2,
@@ -3903,7 +4525,9 @@ async def test_list_all_agent_info_impl_with_disabled_agents():
             "display_name": "Display Disabled Agent",
             "description": "Disabled agent that should be skipped",
             "enabled": False,
-            "group_ids": "13"
+            "group_ids": "13",
+            "created_by": "user2",
+            "create_time": 2,
         },
         {
             "agent_id": 3,
@@ -3911,61 +4535,61 @@ async def test_list_all_agent_info_impl_with_disabled_agents():
             "display_name": "Display Enabled Agent 2",
             "description": "Second enabled agent",
             "enabled": True,
-            "group_ids": "12,14"
+            "group_ids": "12,14",
+            "created_by": "user3",
+            "create_time": 3,
         }
     ]
 
-    # Setup mock tools
-    mock_tools = [
-        {"tool_id": 101, "name": "Tool 1"},
-        {"tool_id": 102, "name": "Tool 2"}
-    ]
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
 
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents, \
-            patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
-            patch('backend.services.agent_service.check_tool_is_available') as mock_check_tools:
-        # Configure mocks
-        mock_query_agents.return_value = mock_agents
-        mock_search_tools.return_value = mock_tools
-        mock_check_tools.return_value = [True, True]  # All tools are available
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        # Execute
-        result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    # Assert - only enabled agents should be in the result
+    assert len(result) == 2
+    assert result[0]["agent_id"] == 1
+    assert result[0]["name"] == "Enabled Agent 1"
+    assert result[0]["display_name"] == "Display Enabled Agent 1"
+    assert result[0]["is_available"] == True
+    assert result[0]["group_ids"] == [12]
 
-        # Assert - only enabled agents should be in the result
-        assert len(result) == 2
-        assert result[0]["agent_id"] == 1
-        assert result[0]["name"] == "Enabled Agent 1"
-        assert result[0]["display_name"] == "Display Enabled Agent 1"
-        assert result[0]["is_available"] == True
-        assert result[0]["group_ids"] == [12]
+    assert result[1]["agent_id"] == 3
+    assert result[1]["name"] == "Enabled Agent 2"
+    assert result[1]["display_name"] == "Display Enabled Agent 2"
+    assert result[1]["is_available"] == True
+    assert result[1]["group_ids"] == [12, 14]
 
-        assert result[1]["agent_id"] == 3
-        assert result[1]["name"] == "Enabled Agent 2"
-        assert result[1]["display_name"] == "Display Enabled Agent 2"
-        assert result[1]["is_available"] == True
-        assert result[1]["group_ids"] == [12, 14]
-
-        # Verify mock calls
-        mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
-        # search_tools_for_sub_agent should only be called for enabled agents (2 calls, not 3)
-        assert mock_search_tools.call_count == 2
-        mock_search_tools.assert_has_calls([
-            call(agent_id=1, tenant_id="test_tenant"),
-            call(agent_id=3, tenant_id="test_tenant")
-        ])
-        # check_tool_is_available should only be called for enabled agents (2 calls, not 3)
-        assert mock_check_tools.call_count == 2
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
 
 
 @pytest.mark.asyncio
-async def test_list_all_agent_info_impl_all_disabled_agents():
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_all_disabled_agents(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
     """
     Test list_all_agent_info_impl with all agents disabled.
 
     This test verifies that:
     1. When all agents are disabled, an empty list is returned
-    2. No tool queries are made since no agents are processed
+    2. No availability checks are made since no agents are processed
     """
     # Setup mock agents - all disabled
     mock_agents = [
@@ -3975,7 +4599,9 @@ async def test_list_all_agent_info_impl_all_disabled_agents():
             "display_name": "Display Disabled Agent 1",
             "description": "First disabled agent",
             "enabled": False,
-            "group_ids": "15"
+            "group_ids": "15",
+            "created_by": "user1",
+            "create_time": 1,
         },
         {
             "agent_id": 2,
@@ -3983,28 +4609,30 @@ async def test_list_all_agent_info_impl_all_disabled_agents():
             "display_name": "Display Disabled Agent 2",
             "description": "Second disabled agent",
             "enabled": False,
-            "group_ids": "16,17"
+            "group_ids": "16,17",
+            "created_by": "user2",
+            "create_time": 2,
         }
     ]
 
-    with patch('backend.services.agent_service.query_all_agent_info_by_tenant_id') as mock_query_agents, \
-            patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
-            patch('backend.services.agent_service.check_tool_is_available') as mock_check_tools:
-        # Configure mocks
-        mock_query_agents.return_value = mock_agents
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.return_value = []
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
 
-        # Execute
-        result = await list_all_agent_info_impl(tenant_id="test_tenant")
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
-        # Assert - no agents should be in the result
-        assert len(result) == 0
-        assert result == []
+    # Assert - no agents should be in the result
+    assert len(result) == 0
+    assert result == []
 
-        # Verify mock calls
-        mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
-        # No tool queries should be made since no agents are enabled
-        mock_search_tools.assert_not_called()
-        mock_check_tools.assert_not_called()
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
+    # No availability checks should be made since no agents are enabled
+    mock_check_availability.assert_not_called()
 
 
 def test_apply_duplicate_name_availability_rules_handles_missing_fields():

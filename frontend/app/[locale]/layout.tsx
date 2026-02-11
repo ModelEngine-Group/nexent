@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { ReactNode } from "react";
+import React, { ReactNode } from "react";
 import { RootProvider } from "@/components/providers/rootProvider";
 import { DeploymentProvider } from "@/components/providers/deploymentProvider";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
