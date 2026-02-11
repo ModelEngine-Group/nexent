@@ -11,28 +11,16 @@ This test module thoroughly tests:
 
 Coverage: 100% for model_provider_service.py and related provider modules.
 """
-from backend.services.model_provider_service import (
-    SiliconModelProvider,
-    prepare_model_dict,
-    merge_existing_model_tokens,
-    get_provider_models,
-)
-import pytest
 import sys
 from unittest import mock
+import pytest
 
 # ============================================================================
-# CRITICAL: Set up mocks BEFORE importing the module under test
+# CRITICAL: Set up mocks BEFORE any imports to prevent side effects
 # This must be done before importing backend.services.model_provider_service
 # to avoid triggering MinioClient initialization during test collection.
-#
-# The import chain is:
-# backend.services.model_provider_service
-#   -> database.model_management_db
-#     -> database.client
-#       -> MinioClient() which tries to connect to MinIO
-#
-# We must mock the SDK and database modules BEFORE the first import.
+# The mock for database.client MUST be set up BEFORE any import that might
+# trigger the import chain leading to database.client.MiniClient() being called.
 # ============================================================================
 
 # First, mock the SDK modules that have side effects at import time
@@ -47,9 +35,9 @@ sdk_modules_to_mock = [
 for module_path in sdk_modules_to_mock:
     sys.modules.setdefault(module_path, mock.MagicMock())
 
-# Create a mock MinioStorageClient class that prevents __init__ side effects
+# Create a mock MinioStorageClient class that returns itself when instantiated
 # This is CRITICAL to prevent _ensure_bucket_exists from being called
-# during import of database.client.MinioClient
+# during import of database.client.MiniClient
 
 
 class MockMinioStorageClient(mock.MagicMock):
@@ -69,7 +57,7 @@ class MockMinioStorageClient(mock.MagicMock):
 
 
 # Set the mock class in the module BEFORE any imports that might trigger
-# database.client.MinioClient() instantiation
+# database.client.MiniClient() instantiation
 sys.modules["nexent.storage.minio"].MinioStorageClient = MockMinioStorageClient
 
 # Also mock the storage client factory function BEFORE import
@@ -84,11 +72,16 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
 )
 
 # ============================================================================
-# Mock database.client module BEFORE importing backend.services.model_provider_service
+# CRITICAL: Mock database.client module BEFORE any import that might trigger it
 # The problem is that when database.client is imported, it immediately runs
 # `minio_client = MinioClient()` which tries to connect to MinIO.
 #
-# We mock the entire database.client module and its dependencies.
+# To fix this, we need to:
+# 1. Create a mock MinioClient class that returns itself when instantiated
+# 2. Replace MinioClient in the database.client module namespace
+# 3. Replace minio_client instance with a mock
+#
+# This must happen BEFORE database.client is imported by any module.
 # ============================================================================
 
 # Create mock MinioClient class that returns itself to prevent singleton instantiation
@@ -96,9 +89,9 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
 
 class MockMinioClientClass(mock.MagicMock):
     """Mock MinioClient class that returns itself to prevent real client instantiation."""
-
     def __new__(cls, *args, **kwargs):
         # Return the mock instance itself, not a new instance of the class
+        # This prevents the real MinIO client from being created
         mock_instance = mock.MagicMock()
         mock_instance._storage_client = mock.MagicMock()
         mock_instance.default_bucket = "test-bucket"
@@ -131,62 +124,8 @@ sys.modules["database"] = mock_database_module
 sys.modules["database.model_management_db"] = mock.MagicMock()
 sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = mock.MagicMock()
 
-# ============================================================================
-# Create a proper mock package structure for 'services.providers'
-# This allows Python to import submodules like 'services.providers.silicon_provider'
-# ============================================================================
-
-
-class MockPackage:
-    """Mock package that allows importing submodules."""
-
-    def __init__(self, module_name: str):
-        self.__name__ = module_name
-        self.__path__ = [f"/mock/{module_name}"]
-        self.__file__ = f"/mock/{module_name}/__init__.py"
-
-    def __getattr__(self, name: str):
-        """Return a submodule when accessed."""
-        full_name = f"{self.__name__}.{name}"
-        if full_name not in sys.modules:
-            # Create a new mock module for this submodule
-            mock_module = mock.MagicMock()
-            mock_module.__name__ = full_name
-            mock_module.__file__ = f"/mock/{full_name}.py"
-            sys.modules[full_name] = mock_module
-        return sys.modules[full_name]
-
-
-# Create and register the mock packages
-mock_services = MockPackage("services")
-sys.modules["services"] = mock_services
-
-mock_services_providers = MockPackage("services.providers")
-sys.modules["services.providers"] = mock_services_providers
-# Make services.providers accessible from services
-mock_services.providers = mock_services_providers
-
-# Mock services.providers.base with AbstractModelProvider
-mock_services_providers_base = mock.MagicMock()
-mock_services_providers_base.AbstractModelProvider = mock.MagicMock
-sys.modules["services.providers.base"] = mock_services_providers_base
-
-# Create mock modules for silicon_provider and modelengine_provider
-mock_silicon_provider = mock.MagicMock()
-mock_silicon_provider.__name__ = "services.providers.silicon_provider"
-sys.modules["services.providers.silicon_provider"] = mock_silicon_provider
-
-mock_modelengine_provider = mock.MagicMock()
-mock_modelengine_provider.__name__ = "services.providers.modelengine_provider"
-mock_modelengine_provider.get_model_engine_raw_url = mock.MagicMock()
-sys.modules["services.providers.modelengine_provider"] = mock_modelengine_provider
-
-# ============================================================================
 # Mock other project dependencies
-# ============================================================================
-
 for module_path in [
-    "services.model_health_service",
     "consts",
     "consts.provider",
     "consts.model",
@@ -194,6 +133,8 @@ for module_path in [
     "consts.exceptions",
     "utils",
     "utils.model_name_utils",
+    "services",
+    "services.model_health_service",
 ]:
     sys.modules.setdefault(module_path, mock.MagicMock())
 
@@ -243,7 +184,12 @@ sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
 # CRITICAL: This import MUST come after all sys.modules mocks are set up
 # to prevent the import chain from triggering MinioClient initialization.
 # ============================================================================
-
+from backend.services.model_provider_service import (
+    SiliconModelProvider,
+    prepare_model_dict,
+    merge_existing_model_tokens,
+    get_provider_models,
+)
 
 # ============================================================================
 # Test-cases for SiliconModelProvider.get_models
@@ -255,28 +201,28 @@ async def test_get_models_llm_success():
     """Silicon provider should append chat tag/type for LLM models."""
     provider_config = {"model_type": "llm", "api_key": "test-key"}
 
-    # Patch SiliconModelProvider class - the HTTP client mock is not needed
-    # when we mock the entire provider class
+    # Patch HTTP client & constant inside the provider module
     with mock.patch(
-        "backend.services.providers.silicon_provider.SiliconModelProvider"
-    ) as mock_provider_class:
+        "backend.services.providers.silicon_provider.httpx.AsyncClient"
+    ) as mock_client, mock.patch(
+        "backend.services.providers.silicon_provider.SILICON_GET_URL",
+        "https://silicon.com",
+    ):
 
-        # Create a mock provider instance with async get_models
-        mock_provider_instance = mock.AsyncMock()
-        mock_provider_instance.get_models.return_value = [
-            {
-                "id": "gpt-4",
-                "model_tag": "chat",
-                "model_type": "llm",
-                "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
-            }
-        ]
-        mock_provider_class.return_value = mock_provider_instance
+        # Prepare mocked http client / response behaviour
+        mock_client_instance = mock.AsyncMock()
+        mock_client.return_value.__aenter__.return_value = mock_client_instance
 
-        # Execute - use the mock instance
-        result = await mock_provider_instance.get_models(provider_config)
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [{"id": "gpt-4"}]}
+        mock_response.raise_for_status = mock.Mock()
+        mock_client_instance.get.return_value = mock_response
 
-        # Assert returned value
+        # Execute
+        result = await SiliconModelProvider().get_models(provider_config)
+
+        # Assert returned value & correct HTTP call
         assert result == [
             {
                 "id": "gpt-4",
@@ -285,9 +231,10 @@ async def test_get_models_llm_success():
                 "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
             }
         ]
-        # Verify the mock was called with the correct config
-        mock_provider_instance.get_models.assert_called_once_with(
-            provider_config)
+        mock_client_instance.get.assert_called_once_with(
+            "https://silicon.com?sub_type=chat",
+            headers={"Authorization": "Bearer test-key"},
+        )
 
 
 @pytest.mark.asyncio
@@ -297,7 +244,10 @@ async def test_get_models_embedding_success():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client:
+    ) as mock_client, mock.patch(
+        "backend.services.providers.silicon_provider.SILICON_GET_URL",
+        "https://silicon.com",
+    ):
 
         mock_client_instance = mock.AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_client_instance
@@ -319,9 +269,8 @@ async def test_get_models_embedding_success():
                 "model_type": "embedding",
             }
         ]
-        # Verify the actual URL is used with sub_type query param
         mock_client_instance.get.assert_called_once_with(
-            "https://api.siliconflow.cn/v1/models?sub_type=embedding",
+            "https://silicon.com?sub_type=embedding",
             headers={"Authorization": "Bearer test-key"},
         )
 
@@ -333,7 +282,10 @@ async def test_get_models_unknown_type():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client:
+    ) as mock_client, mock.patch(
+        "backend.services.providers.silicon_provider.SILICON_GET_URL",
+        "https://silicon.com",
+    ):
 
         mock_client_instance = mock.AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_client_instance
@@ -348,9 +300,8 @@ async def test_get_models_unknown_type():
 
         # No additional keys should be injected for unknown type
         assert result == [{"id": "model-x"}]
-        # Verify the base URL is used without query params for unknown types
         mock_client_instance.get.assert_called_once_with(
-            "https://api.siliconflow.cn/v1/models",
+            "https://silicon.com",
             headers={"Authorization": "Bearer test-key"},
         )
 
@@ -362,7 +313,10 @@ async def test_get_models_exception():
 
     with mock.patch(
         "backend.services.providers.silicon_provider.httpx.AsyncClient"
-    ) as mock_client:
+    ) as mock_client, mock.patch(
+        "backend.services.providers.silicon_provider.SILICON_GET_URL",
+        "https://silicon.com",
+    ):
 
         mock_client_instance = mock.AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_client_instance
@@ -592,6 +546,7 @@ async def test_prepare_model_dict_embedding_with_explicit_chunk_sizes():
             "api_key": "test-key",
             "max_tokens": 1024,
             "display_name": "openai/text-embedding-3-small",
+            # ensure the dump does not contain chunk sizes pre-filled
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
         mock_model_request.return_value = mock_model_req_instance
