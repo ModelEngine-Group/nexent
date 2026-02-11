@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload } from "lucide-react";
+import { Paperclip, Mic, MicOff, Square, X, AlertCircle, Upload, BookOpen } from "lucide-react";
 import {
   FileImageFilled,
   FilePdfFilled,
@@ -26,6 +26,7 @@ import { chatConfig } from "@/const/chatConfig";
 import { FilePreview, Agent } from "@/types/chat";
 
 import { ChatAgentSelector } from "./chatAgentSelector";
+import PromptTemplateManager from "./promptTemplateManager";
 
 // Image viewer component
 function ImageViewer({
@@ -342,6 +343,7 @@ export function ChatInput({
   const dropAreaRef = useRef<HTMLDivElement>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showStopTooltip, setShowStopTooltip] = useState(false);
+  const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
   const { t } = useTranslation("common");
 
   // Use the configuration hook to get the application avatar
@@ -1028,6 +1030,19 @@ export function ChatInput({
         </div>
 
         <div className="absolute right-3 top-[40%] -translate-y-1/2 flex items-center space-x-1">
+          {/* Prompt template button */}
+          <Tooltip title={t("promptTemplate.openManager")}>
+            <Button
+              type="default"
+              shape="circle"
+              size="middle"
+              className="h-10 w-10 text-slate-700 flex items-center justify-center rounded-full border border-slate-300 hover:bg-slate-200 transition-colors"
+              onClick={() => setTemplateManagerOpen(true)}
+              disabled={isLoading || isStreaming}
+            >
+              <BookOpen className="h-5 w-5" />
+            </Button>
+          </Tooltip>
           {/* Voice to text button */}
           <Tooltip
             title={
@@ -1286,6 +1301,11 @@ export function ChatInput({
           {t("chatInterface.aiGeneratedContentWarning")}
         </div>
       </div>
+      <PromptTemplateManager
+        open={templateManagerOpen}
+        onClose={() => setTemplateManagerOpen(false)}
+        onApplyTemplate={(promptText) => onInputChange(promptText)}
+      />
     </>
   );
 }
