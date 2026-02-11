@@ -25,6 +25,7 @@ from consts.model import (
     ManageTenantModelDeleteRequest,
     ManageTenantModelHealthcheckRequest,
     ManageBatchCreateModelsRequest,
+    ManageProviderModelListRequest,
 )
 
 from fastapi import APIRouter, Header, Query, HTTPException
@@ -578,5 +579,41 @@ async def manage_list_models(
         })
     except Exception as e:
         logging.error(f"Failed to list models for tenant: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail=str(e))
+
+
+@router.post("/manage/provider/list")
+async def manage_list_provider_models(
+    request: ManageProviderModelListRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """List provider models for a specified tenant (admin/manage operation).
+
+    This endpoint fetches available models from a provider for any tenant,
+    typically used by super admins when bulk importing models.
+
+    Args:
+        request: Query request with target tenant_id, provider, model_type, and optional api_key/base_url.
+        authorization: Bearer token header used to derive `user_id`.
+
+    Returns:
+        List of available provider models for the specified tenant.
+    """
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        logger.debug(
+            f"Start to list provider models for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
+            f"provider: {request.provider}, model_type: {request.model_type}")
+
+        model_list = await list_provider_models_for_tenant(
+            request.tenant_id, request.provider, request.model_type, request.api_key, request.base_url
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved provider model list",
+            "data": jsonable_encoder(model_list)
+        })
+    except Exception as e:
+        logging.error(f"Failed to list provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail=str(e))
