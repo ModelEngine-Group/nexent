@@ -1033,6 +1033,10 @@ function DataConfig({ isActive }: DataConfigProps) {
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 hasDocuments={viewingDocuments.length > 0}
                 isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
+                onChunkCountChange={() => {
+                  // Trigger knowledge base list update to refresh chunk count
+                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
+                }}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}
