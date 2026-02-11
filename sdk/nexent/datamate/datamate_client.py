@@ -24,7 +24,7 @@ class DataMateClient:
     and port conflicts on Windows systems.
     """
 
-    def __init__(self, base_url: str, timeout: float = 30.0, verify_ssl: bool = True):
+    def __init__(self, base_url: str, timeout: float = 5.0, verify_ssl: bool = True):
         """
         Initialize DataMate client.
 

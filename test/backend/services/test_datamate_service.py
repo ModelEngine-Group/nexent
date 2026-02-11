@@ -822,41 +822,6 @@ async def test_sync_datamate_knowledge_bases_with_https_datamate_url(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_sync_datamate_knowledge_bases_model_engine_disabled(monkeypatch):
-    """Test sync_datamate_knowledge_bases_and_create_records when MODEL_ENGINE_ENABLED is false."""
-    # Mock MODEL_ENGINE_ENABLED to be false
-    monkeypatch.setattr(
-        "backend.services.datamate_service.MODEL_ENGINE_ENABLED", "false"
-    )
-
-    # Mock logger to capture info message
-    mock_logger = MagicMock()
-    monkeypatch.setattr(
-        "backend.services.datamate_service.logger", mock_logger
-    )
-
-    # Call the function - should return early without syncing
-    result = await sync_datamate_knowledge_bases_and_create_records(
-        "tenant1", "user1", datamate_url="http://custom.example.com"
-    )
-
-    # Verify the early return result
-    expected_result = {
-        "indices": [],
-        "count": 0,
-        "indices_info": [],
-        "created_records": []
-    }
-    assert result == expected_result
-
-    # Verify logger was called with the skip message
-    mock_logger.info.assert_called_once()
-    call_args = mock_logger.info.call_args[0][0]
-    assert "ModelEngine is disabled" in call_args
-    assert "skipping DataMate sync" in call_args
-
-
-@pytest.mark.asyncio
 async def test_check_datamate_connection_success(monkeypatch):
     """Test check_datamate_connection function with successful connection."""
     # Mock MODEL_ENGINE_ENABLED to be true

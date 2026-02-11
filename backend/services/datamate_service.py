@@ -146,17 +146,6 @@ async def sync_datamate_knowledge_bases_and_create_records(
     Returns:
         Dictionary containing knowledge bases list and created records.
     """
-    # Check if ModelEngine is enabled
-    if str(MODEL_ENGINE_ENABLED).lower() != "true":
-        logger.info(
-            f"ModelEngine is disabled (MODEL_ENGINE_ENABLED={MODEL_ENGINE_ENABLED}), skipping DataMate sync")
-        return {
-            "indices": [],
-            "count": 0,
-            "indices_info": [],
-            "created_records": []
-        }
-
     # Use provided datamate_url from request, fallback to tenant config
     effective_datamate_url = datamate_url if datamate_url else tenant_config_manager.get_app_config(
         DATAMATE_URL, tenant_id=tenant_id)
