@@ -22,14 +22,17 @@ import sys
 from unittest import mock
 
 # ============================================================================
-# CRITICAL: Set up mocks BEFORE any imports to prevent side effects
+# CRITICAL: Set up mocks BEFORE importing the module under test
 # This must be done before importing backend.services.model_provider_service
 # to avoid triggering MinioClient initialization during test collection.
-# The mock for database.client MUST be set up BEFORE any import that might
-# trigger the import chain leading to database.client.MiniClient() being called.
 #
-# NOTE: Mock setup MUST come before imports because Python executes the file
-# from top to bottom, and the import on line ~50 triggers the MinioClient.
+# The import chain is:
+# backend.services.model_provider_service
+#   -> database.model_management_db
+#     -> database.client
+#       -> MinioClient() which tries to connect to MinIO
+#
+# We must mock the SDK and database modules BEFORE the first import.
 # ============================================================================
 
 # First, mock the SDK modules that have side effects at import time
@@ -44,9 +47,9 @@ sdk_modules_to_mock = [
 for module_path in sdk_modules_to_mock:
     sys.modules.setdefault(module_path, mock.MagicMock())
 
-# Create a mock MinioStorageClient class that returns itself when instantiated
+# Create a mock MinioStorageClient class that prevents __init__ side effects
 # This is CRITICAL to prevent _ensure_bucket_exists from being called
-# during import of database.client.MiniClient
+# during import of database.client.MinioClient
 
 
 class MockMinioStorageClient(mock.MagicMock):
@@ -81,16 +84,11 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
 )
 
 # ============================================================================
-# CRITICAL: Mock database.client module BEFORE any import that might trigger it
+# Mock database.client module BEFORE importing backend.services.model_provider_service
 # The problem is that when database.client is imported, it immediately runs
 # `minio_client = MinioClient()` which tries to connect to MinIO.
 #
-# To fix this, we need to:
-# 1. Create a mock MinioClient class that returns itself when instantiated
-# 2. Replace MinioClient in the database.client module namespace
-# 3. Replace minio_client instance with a mock
-#
-# This must happen BEFORE database.client is imported by any module.
+# We mock the entire database.client module and its dependencies.
 # ============================================================================
 
 # Create mock MinioClient class that returns itself to prevent singleton instantiation
@@ -101,7 +99,6 @@ class MockMinioClientClass(mock.MagicMock):
 
     def __new__(cls, *args, **kwargs):
         # Return the mock instance itself, not a new instance of the class
-        # This prevents the real MinIO client from being created
         mock_instance = mock.MagicMock()
         mock_instance._storage_client = mock.MagicMock()
         mock_instance.default_bucket = "test-bucket"
@@ -134,7 +131,6 @@ sys.modules["database"] = mock_database_module
 sys.modules["database.model_management_db"] = mock.MagicMock()
 sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = mock.MagicMock()
 
-# Mock other project dependencies
 # ============================================================================
 # Create a proper mock package structure for 'services.providers'
 # This allows Python to import submodules like 'services.providers.silicon_provider'
@@ -176,7 +172,6 @@ mock_services_providers_base.AbstractModelProvider = mock.MagicMock
 sys.modules["services.providers.base"] = mock_services_providers_base
 
 # Create mock modules for silicon_provider and modelengine_provider
-# These will contain the actual classes that will be imported
 mock_silicon_provider = mock.MagicMock()
 mock_silicon_provider.__name__ = "services.providers.silicon_provider"
 sys.modules["services.providers.silicon_provider"] = mock_silicon_provider
@@ -186,21 +181,12 @@ mock_modelengine_provider.__name__ = "services.providers.modelengine_provider"
 mock_modelengine_provider.get_model_engine_raw_url = mock.MagicMock()
 sys.modules["services.providers.modelengine_provider"] = mock_modelengine_provider
 
-# Also mock other dependencies
+# ============================================================================
+# Mock other project dependencies
+# ============================================================================
+
 for module_path in [
     "services.model_health_service",
-    "consts",
-    "consts.provider",
-    "consts.model",
-    "consts.const",
-    "consts.exceptions",
-    "utils",
-    "utils.model_name_utils",
-]:
-    sys.modules.setdefault(module_path, mock.MagicMock())
-
-# Also mock other dependencies
-for module_path in [
     "consts",
     "consts.provider",
     "consts.model",
@@ -606,7 +592,6 @@ async def test_prepare_model_dict_embedding_with_explicit_chunk_sizes():
             "api_key": "test-key",
             "max_tokens": 1024,
             "display_name": "openai/text-embedding-3-small",
-            # ensure the dump does not contain chunk sizes pre-filled
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
         mock_model_request.return_value = mock_model_req_instance
