@@ -440,7 +440,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               placement="top"
                             >
                               <div className="ml-3 flex-shrink-0 cursor-pointer">
-                                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 hover:bg-gray-200 transition-all duration-200 hover:shadow-sm">
+                                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 hover:bg-gray-300 transition-all duration-200 hover:shadow-sm">
                                   {getPermissionIcon(kb.ingroup_permission || "")}
                                 </div>
                               </div>
@@ -448,7 +448,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           </Can>
                         </div>
                           <div className="flex items-center ml-2">
-                            <Can permission="kb.edit">
+                          <Can permission="kb:update">
                               {/* Edit button */}
                               <Tooltip title={t("common.edit")}>
                                 <Button
@@ -462,7 +462,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 />
                               </Tooltip>
                             </Can>
-                            <Can permission="kb.delete">
+                          <Can permission="kb:delete">
                               {/* Delete button */}
                               <Tooltip title={t("common.delete")}>
                                 <Button

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Tabs,
@@ -12,7 +12,6 @@ import {
   Tag,
   Form,
   Modal,
-  Tooltip as AntdTooltip,
   Pagination,
   Input,
 } from "antd";
@@ -60,6 +59,7 @@ interface DocumentChunkProps {
   getFileIcon: (type: string) => string;
   currentEmbeddingModel?: string | null;
   knowledgeBaseEmbeddingModel?: string;
+  onChunkCountChange?: () => void; // Callback when chunk count changes (for updating KnowledgeBaseList)
 }
 
 const PAGE_SIZE = 10;
@@ -75,6 +75,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   getFileIcon,
   currentEmbeddingModel = null,
   knowledgeBaseEmbeddingModel = "",
+  onChunkCountChange,
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -106,6 +107,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   const [editingChunk, setEditingChunk] = useState<Chunk | null>(null);
   const [chunkForm] = Form.useForm<ChunkFormValues>();
   const [tooltipResetKey, setTooltipResetKey] = useState(0);
+  // Ref for scrolling to bottom after creating new chunk
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false);
 
   const resetChunkSearch = React.useCallback(() => {
     setChunkSearchResult(null);
@@ -122,7 +126,19 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     setTooltipResetKey((prev) => prev + 1);
   }, []);
 
-  // Determine if in read-only mode
+  // Determine if embedding models mismatch (specific condition for tooltip)
+  const isEmbeddingModelMismatch = React.useMemo(() => {
+    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
+      return false;
+    }
+    if (knowledgeBaseEmbeddingModel === "unknown") {
+      return false;
+    }
+    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
+  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
+
+  // Determine if in read-only mode (embedding model mismatch OR other read-only reasons)
+  // Note: isReadOnlyMode is broader, includes model mismatch and other conditions
   const isReadOnlyMode = React.useMemo(() => {
     if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
       return false;
@@ -132,6 +148,17 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
     return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
   }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
+
+  // Disabled tooltip message when embedding model mismatch
+  const disabledTooltipMessage = React.useMemo(() => {
+    if (isEmbeddingModelMismatch && currentEmbeddingModel && knowledgeBaseEmbeddingModel && knowledgeBaseEmbeddingModel !== "unknown") {
+      return t("document.chunk.tooltip.disabledDueToModelMismatch", {
+        currentModel: currentEmbeddingModel,
+        knowledgeBaseModel: knowledgeBaseEmbeddingModel
+      });
+    }
+    return "";
+  }, [isEmbeddingModelMismatch, currentEmbeddingModel, knowledgeBaseEmbeddingModel, t]);
 
   // Set active document when documents change
   useEffect(() => {
@@ -169,12 +196,25 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         activeDocumentKey
       );
 
-      setChunks(result.chunks || []);
+      const loadedChunks = result.chunks || [];
       setTotal(result.total || 0);
       setDocumentChunkCounts((prev) => ({
         ...prev,
         [activeDocumentKey]: result.total || 0,
       }));
+
+      setChunks(loadedChunks);
+
+      // Scroll to bottom after loading if requested (e.g., after creating new chunk)
+      if (scrollToBottomAfterLoad) {
+        setScrollToBottomAfterLoad(false);
+        // Use setTimeout to ensure DOM is updated
+        setTimeout(() => {
+          if (contentScrollRef.current) {
+            contentScrollRef.current.scrollTop = contentScrollRef.current.scrollHeight;
+          }
+        }, 100);
+      }
     } catch (error) {
       log.error("Failed to load chunks:", error);
       message.error(t("document.chunk.error.loadFailed"));
@@ -186,6 +226,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     activeDocumentKey,
     pagination.page,
     pagination.pageSize,
+    scrollToBottomAfterLoad,
     message,
     t,
   ]);
@@ -262,6 +303,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
+    // Check embedding model consistency before searching
+    if (isEmbeddingModelMismatch && currentEmbeddingModel && knowledgeBaseEmbeddingModel && knowledgeBaseEmbeddingModel !== "unknown") {
+      message.error(t("document.chunk.error.searchFailed", {
+        currentModel: currentEmbeddingModel,
+        knowledgeBaseModel: knowledgeBaseEmbeddingModel
+      }));
+      return;
+    }
+
     if (!knowledgeBaseName) {
       message.error(t("document.chunk.error.searchFailed"));
       return;
@@ -306,11 +356,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
   }, [
     knowledgeBaseName,
+    knowledgeBaseId,
     message,
     pagination.pageSize,
     resetChunkSearch,
     searchValue,
     t,
+    isEmbeddingModelMismatch,
+    currentEmbeddingModel,
+    knowledgeBaseEmbeddingModel,
   ]);
 
   const refreshChunks = React.useCallback(async () => {
@@ -390,6 +444,20 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       return;
     }
 
+    // Check embedding model consistency before creating chunk
+    if (chunkModalMode === "create") {
+      if (knowledgeBaseEmbeddingModel &&
+        knowledgeBaseEmbeddingModel !== "unknown" &&
+        currentEmbeddingModel &&
+        currentEmbeddingModel !== knowledgeBaseEmbeddingModel) {
+        message.error(t("document.chunk.error.createFailed", {
+          currentModel: currentEmbeddingModel,
+          knowledgeBaseModel: knowledgeBaseEmbeddingModel
+        }));
+        return;
+      }
+    }
+
     try {
       const values = await chunkForm.validateFields();
       setChunkSubmitting(true);
@@ -401,6 +469,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         });
         message.success(t("document.chunk.success.create"));
         resetChunkSearch();
+
+        // Navigate to the last page to show the new chunk at the bottom
+        const lastPage = Math.ceil((total + 1) / pagination.pageSize);
+        setPagination((prev) => ({ ...prev, page: lastPage }));
+        // Trigger scroll to bottom after data loads
+        setScrollToBottomAfterLoad(true);
+        // Notify parent to update knowledge base list (chunk count)
+        onChunkCountChange?.();
       } else {
         if (!editingChunk?.id) {
           message.error(t("document.chunk.error.missingChunkId"));
@@ -463,6 +539,17 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
           await knowledgeBaseService.deleteChunk(knowledgeBaseName, chunk.id);
           message.success(t("document.chunk.success.delete"));
           forceCloseTooltips();
+          // Update chunk count immediately for better UX
+          setTotal((prevTotal) => Math.max(0, prevTotal - 1));
+          setDocumentChunkCounts((prev) => ({
+            ...prev,
+            [chunk.path_or_url || activeDocumentKey]: Math.max(
+              0,
+              (prev[chunk.path_or_url || activeDocumentKey] || 1) - 1
+            ),
+          }));
+          // Notify parent to update knowledge base list (chunk count)
+          onChunkCountChange?.();
           await refreshChunks();
         } catch (error) {
           log.error("Failed to delete chunk:", error);
@@ -483,7 +570,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     const displayName = getDisplayName(doc.name || "");
 
     return (
-      <AntdTooltip title={displayName} placement="top" arrow>
+      <Tooltip title={displayName} placement="top">
         <div className="flex w-full items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <span>{getFileIcon(doc.type)}</span>
@@ -498,7 +585,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
             className="flex-shrink-0 chunk-count-badge"
           />
         </div>
-      </AntdTooltip>
+      </Tooltip>
     );
   };
 
@@ -547,7 +634,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       label: renderDocumentLabel(doc, chunkCount),
       children: (
         <div className="flex h-full flex-col min-h-0 overflow-hidden">
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-8">
+          <div ref={contentScrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 pb-8">
             {showLoadingState ? (
               <div className="flex h-52 items-center justify-center">
                 <Spin size="large" />
@@ -698,47 +785,69 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         {/* Search and Add Button Bar */}
         <div className="flex items-center justify-end gap-2 px-2 py-3 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
-            <Input
-              placeholder={t("document.chunk.search.placeholder")}
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              onPressEnter={() => {
-                void handleSearch();
-              }}
-              style={{ width: 320 }}
-              suffix={
-                <div className="flex items-center gap-1">
-                  {searchValue && (
-                    <Button
-                      type="text"
-                      icon={<X size={16} />}
-                      onClick={handleClearSearch}
-                      size="small"
-                      className="text-gray-500 hover:text-gray-700"
-                    />
-                  )}
-                  <Button
-                    type="text"
-                    icon={<Search size={16} />}
-                    onClick={() => {
+            {/* Wrap search input with tooltip when model mismatch */}
+            {isEmbeddingModelMismatch ? (
+              <Tooltip title={disabledTooltipMessage}>
+                <span className="inline-block">
+                  <Input
+                    placeholder={t("document.chunk.search.placeholder")}
+                    value={searchValue}
+                    onChange={(e) => setSearchValue(e.target.value)}
+                    onPressEnter={() => {
                       void handleSearch();
                     }}
-                    size="small"
-                    loading={chunkSearchLoading}
+                    style={{ width: 320 }}
+                    disabled={true}
                   />
-                </div>
-              }
-            />
+                </span>
+              </Tooltip>
+            ) : (
+                <Input
+                  placeholder={t("document.chunk.search.placeholder")}
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  onPressEnter={() => {
+                    void handleSearch();
+                  }}
+                  style={{ width: 320 }}
+                  disabled={isReadOnlyMode}
+                  suffix={
+                    <div className="flex items-center gap-1">
+                      {searchValue && (
+                        <Button
+                          type="text"
+                          icon={<X size={16} />}
+                          onClick={handleClearSearch}
+                          size="small"
+                          className="text-gray-500 hover:text-gray-700"
+                        />
+                      )}
+                      <Button
+                        type="text"
+                        icon={<Search size={16} />}
+                        onClick={() => {
+                          void handleSearch();
+                        }}
+                        size="small"
+                        loading={chunkSearchLoading}
+                        disabled={isReadOnlyMode}
+                      />
+                    </div>
+                  }
+                />
+            )}
           </div>
-          {!isReadOnlyMode && (
-            <Tooltip title={t("document.chunk.tooltip.create")}>
+          {/* Show Create Chunk button with tooltip only when model mismatch; hide in other read-only scenarios */}
+          {!isReadOnlyMode || isEmbeddingModelMismatch ? (
+            <Tooltip title={isEmbeddingModelMismatch ? disabledTooltipMessage : undefined}>
               <Button
                 type="text"
                 icon={<FilePlus2 size={16} />}
                 onClick={openCreateChunkModal}
+                disabled={isEmbeddingModelMismatch}
               ></Button>
             </Tooltip>
-          )}
+          ) : null}
         </div>
 
         <Tabs
