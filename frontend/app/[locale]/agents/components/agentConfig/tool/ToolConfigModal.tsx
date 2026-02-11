@@ -1064,6 +1064,37 @@ export default function ToolConfigModal({
                     });
                   }
 
+                  // Add URL validation for server_url parameter
+                  if (param.name === "server_url") {
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (!value) return Promise.resolve();
+                        try {
+                          // Check if value is a valid URL
+                          let url: URL;
+                          try {
+                            url = new URL(value);
+                          } catch {
+                            return Promise.reject(
+                              t("knowledgeBase.error.invalidUrlFormat")
+                            );
+                          }
+                          // Check if protocol is http or https
+                          if (url.protocol !== "http:" && url.protocol !== "https:") {
+                            return Promise.reject(
+                              t("knowledgeBase.error.invalidUrlProtocol")
+                            );
+                          }
+                          return Promise.resolve();
+                        } catch {
+                          return Promise.reject(
+                            t("knowledgeBase.error.invalidUrlFormat")
+                          );
+                        }
+                      },
+                    });
+                  }
+
                   // Add custom validator for knowledge base selector fields (index_names/dataset_ids)
                   // Since these fields use custom display without form control, we need custom validation
                   if (
