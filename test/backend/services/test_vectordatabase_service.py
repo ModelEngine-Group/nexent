@@ -297,7 +297,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         # Verify that create_knowledge_record was called with group permissions
         mock_create_knowledge.assert_called_once()
-        call_kwargs = mock_create_knowledge.call_args[1]
+        # Parameters are passed as positional argument (knowledge_data dict), not keyword args
+        call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertEqual(call_kwargs["ingroup_permission"], "EDIT")
         self.assertEqual(call_kwargs["group_ids"], [1, 2, 3])
 
@@ -327,7 +328,8 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         mock_create_knowledge.assert_called_once()
-        call_kwargs = mock_create_knowledge.call_args[1]
+        # Parameters are passed as positional argument (knowledge_data dict), not keyword args
+        call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertEqual(call_kwargs["ingroup_permission"], "READ_ONLY")
         # group_ids should not be in the call if not provided
         self.assertNotIn("group_ids", call_kwargs)
@@ -358,7 +360,8 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         mock_create_knowledge.assert_called_once()
-        call_kwargs = mock_create_knowledge.call_args[1]
+        # Parameters are passed as positional argument (knowledge_data dict), not keyword args
+        call_kwargs = mock_create_knowledge.call_args[0][0]
         self.assertEqual(call_kwargs["ingroup_permission"], "PRIVATE")
         self.assertEqual(call_kwargs["group_ids"], [])
 

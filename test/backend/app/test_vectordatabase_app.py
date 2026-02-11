@@ -162,11 +162,12 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         assert response.json() == expected_response
         # vdb_core is constructed inside router; accept ANY for instance
         mock_create.assert_called_once()
-        called_args = mock_create.call_args[0]
-        assert called_args[0] == auth_data["index_name"]
-        assert called_args[1] == 768
-        assert called_args[3] == auth_data["user_id"]
-        assert called_args[4] == auth_data["tenant_id"]
+        # Function is called with keyword arguments, so use call_args[1]
+        called_kwargs = mock_create.call_args[1]
+        assert called_kwargs["knowledge_name"] == auth_data["index_name"]
+        assert called_kwargs["embedding_dim"] == 768
+        assert called_kwargs["user_id"] == auth_data["user_id"]
+        assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
 
 
 @pytest.mark.asyncio
@@ -196,13 +197,13 @@ async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data)
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_create.assert_called_once()
-        called_args = mock_create.call_args[0]
-        assert called_args[0] == auth_data["index_name"]
-        assert called_args[1] == 768
-        assert called_args[3] == auth_data["user_id"]
-        assert called_args[4] == auth_data["tenant_id"]
-        # Verify group permissions were passed
+        # Function is called with keyword arguments, so use call_args[1]
         called_kwargs = mock_create.call_args[1]
+        assert called_kwargs["knowledge_name"] == auth_data["index_name"]
+        assert called_kwargs["embedding_dim"] == 768
+        assert called_kwargs["user_id"] == auth_data["user_id"]
+        assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+        # Verify group permissions were passed
         assert called_kwargs["ingroup_permission"] == "EDIT"
         assert called_kwargs["group_ids"] == [1, 2, 3]
 
