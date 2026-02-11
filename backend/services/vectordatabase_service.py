@@ -39,6 +39,7 @@ from database.knowledge_db import (
 from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
+from database.model_management_db import get_model_records
 from services.redis_service import get_redis_service
 from services.group_service import get_tenant_default_group_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -185,8 +186,7 @@ def get_embedding_model(tenant_id: str, model_name: Optional[str] = None):
     # If model_name is provided, try to find it in the tenant's models
     if model_name:
         try:
-            from database.model_management_db import get_models
-            models = get_models({"model_type": "embedding"}, tenant_id)
+            models = get_model_records({"model_type": "embedding"}, tenant_id)
             for model in models:
                 model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
                 if model_display_name == model_name:

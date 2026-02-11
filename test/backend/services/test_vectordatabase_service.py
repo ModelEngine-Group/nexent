@@ -3577,6 +3577,237 @@ class TestElasticSearchService(unittest.TestCase):
             # Restart the mock for other tests
             self.get_embedding_model_patcher.start()
 
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_found(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name parameter when the model is found.
+
+        This test verifies that:
+        1. When model_name is provided and found in tenant's models, OpenAICompatibleEmbedding is returned
+        2. The correct parameters are passed to the embedding model
+        3. The function uses model_repo/model_name format for matching
+        """
+        # Setup - mock get_models to return a model that matches
+        mock_get_models.return_value = [
+            {
+                "model_repo": "openai",
+                "model_name": "text-embedding-ada-002",
+                "api_key": "test_api_key",
+                "base_url": "https://test.api.com",
+                "max_tokens": 1024,
+                "ssl_verify": True
+            }
+        ]
+
+        # Mock tenant config for fallback behavior (should NOT be called when model is found)
+        mock_tenant_config_manager.get_model_config.return_value = {
+            "model_type": "embedding",
+            "api_key": "fallback_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "text-embedding-ada-002"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="openai/text-embedding-ada-002")
+
+                # Assert
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="test_api_key",
+                    base_url="https://test.api.com",
+                    model_name="text-embedding-ada-002",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
+                # Tenant config should NOT be called when model is found
+                mock_tenant_config_manager.get_model_config.assert_not_called()
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_found_without_repo(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name when model is found without model_repo.
+
+        This test verifies that:
+        1. When model_name is provided and found (without model_repo), OpenAICompatibleEmbedding is returned
+        2. The function handles models without model_repo correctly using just model_name
+        """
+        # Setup - mock get_models to return a model without model_repo
+        mock_get_models.return_value = [
+            {
+                "model_name": "simple-model",
+                "api_key": "test_api_key",
+                "base_url": "https://test.api.com",
+                "max_tokens": 2048,
+                "ssl_verify": False
+            }
+        ]
+
+        # Mock tenant config for fallback behavior (should NOT be called when model is found)
+        mock_tenant_config_manager.get_model_config.return_value = {
+            "model_type": "embedding",
+            "api_key": "fallback_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "simple-model"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="simple-model")
+
+                # Assert
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="test_api_key",
+                    base_url="https://test.api.com",
+                    model_name="simple-model",
+                    embedding_dim=2048,
+                    ssl_verify=False
+                )
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_not_found(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name when the model is not found.
+
+        This test verifies that:
+        1. When model_name is provided but not found in tenant's models, fallback to default config
+        2. The function falls back to default embedding model behavior
+        """
+        # Setup - mock get_models to return empty list (model not found)
+        mock_get_models.return_value = []
+
+        # Mock tenant config for fallback behavior
+        mock_config = {
+            "model_type": "embedding",
+            "api_key": "fallback_api_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+        mock_tenant_config_manager.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "fallback-model"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="nonexistent-model")
+
+                # Assert
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                # Should fall back to default config
+                mock_tenant_config_manager.get_model_config.assert_called_once_with(
+                    key="EMBEDDING_ID", tenant_id="test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="fallback_api_key",
+                    base_url="https://fallback.api.com",
+                    model_name="fallback-model",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_exception(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name when database query throws exception.
+
+        This test verifies that:
+        1. When get_models throws an exception, the function logs a warning and falls back to default config
+        2. The function handles exceptions gracefully
+        """
+        # Setup - mock get_models to throw an exception
+        mock_get_models.side_effect = Exception("Database connection failed")
+
+        # Mock tenant config for fallback behavior
+        mock_config = {
+            "model_type": "embedding",
+            "api_key": "fallback_api_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+        mock_tenant_config_manager.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "fallback-model"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="test-model")
+
+                # Assert - should fall back to default config
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                mock_tenant_config_manager.get_model_config.assert_called_once_with(
+                    key="EMBEDDING_ID", tenant_id="test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="fallback_api_key",
+                    base_url="https://fallback.api.com",
+                    model_name="fallback-model",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
     @patch('backend.services.vectordatabase_service.get_redis_service')
     def test_update_progress_success(self, mock_get_redis):
         """Ensure _update_progress updates Redis progress when not cancelled."""
