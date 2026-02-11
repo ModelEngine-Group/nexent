@@ -3,7 +3,7 @@ from typing import Dict, List
 
 from consts.const import DEFAULT_LLM_MAX_TOKENS
 from consts.provider import SILICON_GET_URL
-from backend.services.providers.base import AbstractModelProvider, _classify_provider_error
+from services.providers.base import AbstractModelProvider, _classify_provider_error
 
 
 class SiliconModelProvider(AbstractModelProvider):
