@@ -228,6 +228,8 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
+  const [newKbIngroupPermission, setNewKbIngroupPermission] = useState<string>("READ_ONLY");
+  const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -691,6 +693,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Generate default knowledge base name
     const defaultName = generateUniqueKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
+    setNewKbIngroupPermission("READ_ONLY");
+    setNewKbGroupIds([]);
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
     setUploadFiles([]); // Reset upload files array, clear all pending upload files
@@ -751,7 +755,9 @@ function DataConfig({ isActive }: DataConfigProps) {
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
           t("knowledgeBase.description.default"),
-          "elasticsearch"
+          "elasticsearch",
+          newKbIngroupPermission,
+          newKbGroupIds
         );
 
         if (!newKB) {
@@ -1000,6 +1006,11 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onNameChange={handleNameChange}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 hasDocuments={hasClickedUpload || docState.isUploading}
+                // Group permission and user groups for create mode
+                ingroupPermission={newKbIngroupPermission}
+                onIngroupPermissionChange={setNewKbIngroupPermission}
+                selectedGroupIds={newKbGroupIds}
+                onSelectedGroupIdsChange={setNewKbGroupIds}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}

@@ -536,16 +536,33 @@ class KnowledgeBaseService {
         );
       }
 
+      // Build request body with optional group permission and user groups
+      const requestBody: {
+        name: string;
+        description: string;
+        embeddingModel?: string;
+        ingroup_permission?: string;
+        group_ids?: number[];
+      } = {
+        name: params.name,
+        description: params.description || "",
+        embeddingModel: params.embeddingModel || "",
+      };
+
+      // Include group permission and user groups if provided
+      if (params.ingroup_permission) {
+        requestBody.ingroup_permission = params.ingroup_permission;
+      }
+      if (params.group_ids && params.group_ids.length > 0) {
+        requestBody.group_ids = params.group_ids;
+      }
+
       const response = await fetch(
         API_ENDPOINTS.knowledgeBase.indexDetail(params.name),
         {
           method: "POST",
           headers: getAuthHeaders(), // Add user authentication information to obtain the user id
-          body: JSON.stringify({
-            name: params.name,
-            description: params.description || "",
-            embeddingModel: params.embeddingModel || "",
-          }),
+          body: JSON.stringify(requestBody),
         }
       );
 

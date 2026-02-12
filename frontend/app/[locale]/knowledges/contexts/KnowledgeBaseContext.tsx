@@ -107,7 +107,9 @@ export const KnowledgeBaseContext = createContext<{
   createKnowledgeBase: (
     name: string,
     description: string,
-    source?: string
+    source?: string,
+    ingroup_permission?: string,
+    group_ids?: number[]
   ) => Promise<KnowledgeBase | null>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
@@ -309,7 +311,9 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     async (
       name: string,
       description: string,
-      source: string = "elasticsearch"
+      source: string = "elasticsearch",
+      ingroup_permission?: string,
+      group_ids?: number[]
     ) => {
       try {
         const newKB = await knowledgeBaseService.createKnowledgeBase({
@@ -318,6 +322,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           source,
           embeddingModel:
             state.currentEmbeddingModel || "text-embedding-3-small",
+          ingroup_permission,
+          group_ids,
         });
         return newKB;
       } catch (error) {

@@ -477,7 +477,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         </div>
                           <div className="flex items-center ml-2">
                           <Can permission="kb:update">
-                              {/* Edit button */}
+                            {/* Edit button - only show for Nexent (local) sources */}
+                            {(!kb.source || kb.source === "nexent" || kb.source === "elasticsearch") && (
                               <Tooltip title={t("common.edit")}>
                                 <Button
                                   type="text"
@@ -489,6 +490,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                   size="small"
                                 />
                               </Tooltip>
+                            )}
                             </Can>
                           <Can permission="kb:delete">
                               {/* Delete button */}
@@ -576,7 +578,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 </span>
                               )}
 
-                            {/* User group tags - show after model tag */}
+                            {/* User group tags */}
                             <Can permission="group:read">
                               {getGroupNames(kb.group_ids).map((groupName, idx) => (
                                 <span
