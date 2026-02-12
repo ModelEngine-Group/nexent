@@ -101,21 +101,21 @@ def query_sub_agents_id_list(main_agent_id: int, tenant_id: str, version_no: int
 def clear_agent_new_mark(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):
     """
     Clear the NEW mark for an agent.
-    Default version_no=0 updates the draft version.
+    This clears the NEW mark for ALL versions of the agent, regardless of version_no parameter.
 
     Args:
         agent_id (int): Agent ID
         tenant_id (str): Tenant ID
         user_id (str): User ID (for audit purposes)
-        version_no: Version number to filter. Default 0 = draft/editing state
+        version_no: Version number (kept for API compatibility, but always clears all versions)
     """
     with get_db_session() as session:
+        # Clear NEW mark for ALL versions of this agent
         result = session.execute(
             update(AgentInfo)
             .where(
                 AgentInfo.agent_id == agent_id,
                 AgentInfo.tenant_id == tenant_id,
-                AgentInfo.version_no == version_no,
                 AgentInfo.delete_flag == 'N'
             )
             .values(is_new=False, updated_by=user_id)
@@ -127,13 +127,13 @@ def clear_agent_new_mark(agent_id: int, tenant_id: str, user_id: str, version_no
 def mark_agents_as_new(agent_ids: list[int], tenant_id: str, user_id: str, version_no: int = 0):
     """
     Mark a list of agents as new.
-    Default version_no=0 updates the draft version.
+    This marks ALL versions of the specified agents as new, regardless of version_no parameter.
 
     Args:
         agent_ids: List of Agent IDs
         tenant_id: Tenant ID
         user_id: User ID
-        version_no: Version number to filter. Default 0 = draft/editing state
+        version_no: Version number (kept for API compatibility, but always marks all versions)
     """
     if not agent_ids:
         return
@@ -143,7 +143,6 @@ def mark_agents_as_new(agent_ids: list[int], tenant_id: str, user_id: str, versi
             .where(
                 AgentInfo.agent_id.in_(agent_ids),
                 AgentInfo.tenant_id == tenant_id,
-                AgentInfo.version_no == version_no,
                 AgentInfo.delete_flag == 'N'
             )
             .values(is_new=True, updated_by=user_id)
