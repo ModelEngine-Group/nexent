@@ -293,6 +293,12 @@ export default function AgentGenerateDetail({
     const selectedModel = availableLlmModels.find(
       (m) => m.name === modelName || m.displayName === modelName
     );
+    // Update local state so the Select component reflects the change
+    setBusinessInfo((prev) => ({
+      ...prev,
+      businessLogicModelName: modelName,
+      businessLogicModelId: selectedModel?.id || 0,
+    }));
     onUpdateBusinessInfo({
       business_description: businessInfo.businessDescription || "",
       business_logic_model_id: selectedModel?.id || 0,
