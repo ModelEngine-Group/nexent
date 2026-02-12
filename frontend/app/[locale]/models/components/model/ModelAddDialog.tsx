@@ -260,6 +260,7 @@ export const ModelAddDialog = ({
     setSelectedModelIds,
     setShowModelList,
     setLoadingModelList,
+    tenantId,
   });
 
   // Reset form to default state

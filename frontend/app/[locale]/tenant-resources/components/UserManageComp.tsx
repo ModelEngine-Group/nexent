@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Row,
   Col,
@@ -15,13 +15,12 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Users, Plus, Edit, Trash2, Building2 } from "lucide-react";
+import { Users, Plus, Edit, Edit2, Building2 } from "lucide-react";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
   createTenant,
   updateTenant,
-  deleteTenant,
 } from "@/services/tenantService";
 import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
@@ -70,6 +69,8 @@ function TenantList({
     setModalVisible(true);
   };
 
+  // Tenant deletion not yet implemented
+  /*
   const handleDelete = async (tenantId: string) => {
     try {
       await deleteTenant(tenantId);
@@ -84,6 +85,7 @@ function TenantList({
       message.error(t("tenantResources.tenantDeleteFailed"));
     }
   };
+  */
 
   const handleSubmit = async () => {
     try {
@@ -169,6 +171,8 @@ function TenantList({
                     }}
                     className="p-1 hover:bg-gray-200 rounded"
                   />
+                  {/* Delete button hidden - tenant deletion not yet implemented */}
+                  {/*
                   <Popconfirm
                     title={t("tenantResources.tenants.confirmDelete", {
                       name: tenant.tenant_name,
@@ -190,6 +194,7 @@ function TenantList({
                       className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
                     />
                   </Popconfirm>
+                  */}
                 </div>
               </div>
             </div>
@@ -261,6 +266,59 @@ export default function UserManageComp() {
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
   const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
 
+  // Tenant name editing states
+  const [isEditingTenantName, setIsEditingTenantName] = useState(false);
+  const [editingTenantName, setEditingTenantName] = useState("");
+  const tenantNameInputRef = useRef<any>(null);
+
+  // Start editing tenant name
+  const startEditingTenantName = () => {
+    if (!tenantId) return;
+    setEditingTenantName(currentTenantName);
+    setIsEditingTenantName(true);
+    // Focus input after render
+    setTimeout(() => {
+      tenantNameInputRef.current?.focus();
+    }, 0);
+  };
+
+  // Save tenant name
+  const saveTenantName = async () => {
+    if (!tenantId) return;
+    const trimmedName = editingTenantName.trim();
+    if (!trimmedName) {
+      message.error(t("tenantResources.tenants.nameRequired"));
+      return;
+    }
+    if (trimmedName === currentTenantName) {
+      setIsEditingTenantName(false);
+      return;
+    }
+    try {
+      await updateTenant(tenantId, { tenant_name: trimmedName });
+      await refetchTenants();
+      message.success(t("tenantResources.tenants.updated"));
+      setIsEditingTenantName(false);
+    } catch (error) {
+      message.error(t("tenantResources.tenantOperationFailed"));
+    }
+  };
+
+  // Cancel editing tenant name
+  const cancelEditingTenantName = () => {
+    setEditingTenantName("");
+    setIsEditingTenantName(false);
+  };
+
+  // Handle input key events
+  const handleTenantNameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      saveTenantName();
+    } else if (e.key === "Escape") {
+      cancelEditingTenantName();
+    }
+  };
+
   return (
     <div className="w-full h-full">
       {/* Page header: grouped header without dividing line */}
@@ -312,9 +370,27 @@ export default function UserManageComp() {
           <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
             {/* Tenant name header */}
             <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {currentTenantName}
-              </h2>
+              {isEditingTenantName ? (
+                <Input
+                  ref={tenantNameInputRef}
+                  value={editingTenantName}
+                  onChange={(e) => setEditingTenantName(e.target.value)}
+                  onBlur={saveTenantName}
+                  onKeyDown={handleTenantNameKeyDown}
+                  className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  placeholder={t("tenantResources.tenants.name")}
+                />
+              ) : (
+                <div
+                  className="flex items-center gap-2 group cursor-pointer"
+                  onClick={startEditingTenantName}
+                >
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {currentTenantName}
+                  </h2>
+                  <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              )}
             </div>
 
             {tenantId ? (

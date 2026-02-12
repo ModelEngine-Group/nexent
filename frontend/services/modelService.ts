@@ -237,6 +237,49 @@ export const modelService = {
     }
   },
 
+  // List provider models for a specific tenant (admin/manage operation)
+  getManageProviderModelList: async (params: {
+    tenantId: string;
+    provider: string;
+    modelType: string;
+    apiKey?: string;
+    baseUrl?: string;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.manageProviderModelList,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            model_type: params.modelType,
+            ...(params.apiKey ? { api_key: params.apiKey } : {}),
+            ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+          }),
+        }
+      );
+      log.log("getManageProviderModelList response", response);
+      const result = await response.json();
+      log.log("getManageProviderModelList result", result);
+      if (response.status !== 200) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to get provider model list",
+          response.status
+        );
+      }
+      return result.data || [];
+    } catch (error) {
+      log.log("getManageProviderModelList error", error);
+      if (error instanceof ModelError) throw error;
+      throw new ModelError("Failed to get provider model list", 500);
+    }
+  },
+
   updateSingleModel: async (model: {
     currentDisplayName: string;
     displayName?: string;
@@ -757,6 +800,74 @@ export const modelService = {
       if (error instanceof ModelError) throw error;
       log.warn("Failed to batch create manage tenant models:", error);
       throw new ModelError("Failed to batch create models for tenant", 500);
+    }
+  },
+
+  // Create/fetch provider models for a specific tenant (admin/manage operation)
+  addManageProviderModel: async (params: {
+    tenantId: string;
+    provider: string;
+    type: ModelType;
+    apiKey: string;
+    baseUrl?: string;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageProviderModelCreate, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          provider: params.provider,
+          model_type: params.type,
+          api_key: params.apiKey,
+          ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(result.detail || result.message || "Failed to create provider models for tenant", response.status);
+      }
+      return result.data || [];
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to create manage provider models:", error);
+      throw new ModelError("Failed to create provider models for tenant", 500);
+    }
+  },
+
+  // Get provider selected modal list for a specific tenant (admin/manage operation)
+  getManageProviderSelectedModalList: async (params: {
+    tenantId: string;
+    provider: string;
+    type: ModelType;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageProviderModelList, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          provider: params.provider,
+          model_type: params.type,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(result.detail || result.message || "Failed to get provider selected list for tenant", response.status);
+      }
+      return result.data || [];
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to get manage provider selected list:", error);
+      throw new ModelError("Failed to get provider selected list for tenant", 500);
     }
   },
 };

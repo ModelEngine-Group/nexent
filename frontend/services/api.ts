@@ -144,6 +144,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/model/manage/update?display_name=${encodeURIComponent(displayName)}`,
     manageModelDelete: (displayName: string) =>
       `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
+    manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
+    manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
   },
   knowledgeBase: {
     // Elasticsearch service
