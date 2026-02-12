@@ -212,6 +212,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
             title={t("tenantResources.models.confirmDelete")}
             description={t("common.cannotBeUndone")}
             onConfirm={() => handleDelete(record.displayName, record.source)}
+            okText={t("common.confirm")}
+            cancelText={t("common.cancel")}
           >
             <Tooltip title={t("tenantResources.models.deleteModel")}>
               <Button

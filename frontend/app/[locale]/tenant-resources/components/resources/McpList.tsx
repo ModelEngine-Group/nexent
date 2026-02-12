@@ -416,7 +416,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               title={t("mcpConfig.delete.confirmTitle")}
               description={t("mcpConfig.delete.confirmContent", { name: record.service_name })}
               onConfirm={() => onDeleteServer(record)}
-              okText={t("common.delete")}
+              okText={t("common.confirm")}
               cancelText={t("common.cancel")}
             >
               <Tooltip title={t("mcpConfig.serverList.button.delete")}>
@@ -501,7 +501,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             title={t("mcpConfig.deleteContainer.confirmTitle")}
             description={t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id })}
             onConfirm={() => onDeleteContainer(record)}
-            okText={t("common.delete")}
+            okText={t("common.confirm")}
             cancelText={t("common.cancel")}
           >
             <Tooltip title={t("mcpConfig.containerList.button.delete")}>

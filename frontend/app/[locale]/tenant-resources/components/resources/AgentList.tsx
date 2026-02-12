@@ -393,7 +393,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             title={t("businessLogic.config.modal.deleteTitle")}
             description={t("businessLogic.config.modal.deleteContent", { name: record.display_name })}
             onConfirm={() => handleDelete(record)}
-            okText={t("common.delete")}
+            okText={t("common.confirm")}
             cancelText={t("common.cancel")}
           >
             <Tooltip title={t("common.delete")}>

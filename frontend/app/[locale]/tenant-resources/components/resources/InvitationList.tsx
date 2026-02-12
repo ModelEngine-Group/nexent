@@ -322,6 +322,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               title={t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code })}
               description={t("common.cannotBeUndone")}
               onConfirm={() => handleDelete(record.invitation_code)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
                 <Button
@@ -503,6 +505,10 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               format="YYYY-MM-DD"
               placeholder={t("tenantResources.invitation.expiryDate")}
               style={{ width: "100%" }}
+              disabledDate={(current) => {
+                if (!current) return false;
+                return current < dayjs().startOf('day');
+              }}
             />
           </Form.Item>
         </Form>
