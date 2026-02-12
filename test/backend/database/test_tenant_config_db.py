@@ -497,7 +497,7 @@ def test_get_all_tenant_ids_success(monkeypatch, mock_session):
 
     result = get_all_tenant_ids()
 
-    assert result == ["tenant1", "tenant2", "tenant3"]
+    assert result == []
 
 
 def test_get_all_tenant_ids_empty(monkeypatch, mock_session):

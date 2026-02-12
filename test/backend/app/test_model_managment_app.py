@@ -1196,3 +1196,118 @@ async def test_manage_healthcheck_exception(client, auth_header, user_credential
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# Tests for /model/manage/provider/list endpoint
+@pytest.mark.asyncio
+async def test_manage_list_provider_models_success(client, auth_header, user_credentials, mocker):
+    """Test successful provider model list retrieval for a specified tenant."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider_models(*args, **kwargs):
+        return [
+            {
+                "id": "silicon/llama-3-1-8b-instruct",
+                "object": "model",
+                "created": 1699900000,
+                "owned_by": "silicon",
+                "max_tokens": 4096
+            },
+            {
+                "id": "silicon/llama-3-1-70b-instruct",
+                "object": "model",
+                "created": 1699900001,
+                "owned_by": "silicon",
+                "max_tokens": 8192
+            }
+        ]
+
+    mock_list = mocker.patch(
+        'apps.model_managment_app.list_provider_models_for_tenant',
+        side_effect=mock_list_provider_models
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "llm",
+        "api_key": "test_api_key",
+        "base_url": ""
+    }
+    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully retrieved provider model list" in data["message"]
+    assert len(data["data"]) == 2
+    assert data["data"][0]["id"] == "silicon/llama-3-1-8b-instruct"
+    assert data["data"][1]["id"] == "silicon/llama-3-1-70b-instruct"
+    mock_list.assert_called_once_with(
+        "target_tenant",
+        "silicon",
+        "llm",
+        "test_api_key",
+        ""
+    )
+
+
+@pytest.mark.asyncio
+async def test_manage_list_provider_models_empty(client, auth_header, user_credentials, mocker):
+    """Test provider model list retrieval with empty result."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider_models(*args, **kwargs):
+        return []
+
+    mock_list = mocker.patch(
+        'apps.model_managment_app.list_provider_models_for_tenant',
+        side_effect=mock_list_provider_models
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "modelengine",
+        "model_type": "embedding",
+        "api_key": "",
+        "base_url": "https://api.modelengine.com"
+    }
+    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully retrieved provider model list" in data["message"]
+    assert len(data["data"]) == 0
+    mock_list.assert_called_once_with(
+        "target_tenant",
+        "modelengine",
+        "embedding",
+        "",
+        "https://api.modelengine.com"
+    )
+
+
+@pytest.mark.asyncio
+async def test_manage_list_provider_models_exception(client, auth_header, user_credentials, mocker):
+    """Test provider model list retrieval with exception."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider_models(*args, **kwargs):
+        raise Exception("Provider API connection error")
+
+    mocker.patch(
+        'apps.model_managment_app.list_provider_models_for_tenant',
+        side_effect=mock_list_provider_models
+    )
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "llm",
+        "api_key": "test_api_key",
+        "base_url": ""
+    }
+    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    data = response.json()
+    assert "Provider API connection error" in data.get("detail", "")

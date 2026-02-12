@@ -237,6 +237,49 @@ export const modelService = {
     }
   },
 
+  // List provider models for a specific tenant (admin/manage operation)
+  getManageProviderModelList: async (params: {
+    tenantId: string;
+    provider: string;
+    modelType: string;
+    apiKey?: string;
+    baseUrl?: string;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.manageProviderModelList,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            model_type: params.modelType,
+            ...(params.apiKey ? { api_key: params.apiKey } : {}),
+            ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+          }),
+        }
+      );
+      log.log("getManageProviderModelList response", response);
+      const result = await response.json();
+      log.log("getManageProviderModelList result", result);
+      if (response.status !== 200) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to get provider model list",
+          response.status
+        );
+      }
+      return result.data || [];
+    } catch (error) {
+      log.log("getManageProviderModelList error", error);
+      if (error instanceof ModelError) throw error;
+      throw new ModelError("Failed to get provider model list", 500);
+    }
+  },
+
   updateSingleModel: async (model: {
     currentDisplayName: string;
     displayName?: string;

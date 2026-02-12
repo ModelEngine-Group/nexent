@@ -31,6 +31,9 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Tenant information
     """
+    if not tenant_id:
+        return {}
+
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
     if not name_config:
