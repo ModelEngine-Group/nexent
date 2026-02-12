@@ -367,8 +367,8 @@ async def test_get_sources_failure(conversation_mocks):
 async def test_generate_title_success(conversation_mocks):
     mock_auth_header = "Bearer test-token"
     conversation_id = 1
-    history = ["Hello"]
-    dummy_title = "Chat title"
+    question = "How to use Python effectively?"
+    dummy_title = "Python Tips"
 
     # get_current_user_info returns (user_id, tenant_id, language)
     conversation_mocks['get_user_info'].return_value = (
@@ -377,7 +377,7 @@ async def test_generate_title_success(conversation_mocks):
 
     request_obj = MagicMock()
     request_obj.conversation_id = conversation_id
-    request_obj.history = history
+    request_obj.question = question
 
     http_request = MagicMock()
 
@@ -385,7 +385,7 @@ async def test_generate_title_success(conversation_mocks):
 
     assert result.code == 0 and result.data == dummy_title
     conversation_mocks['generate_title_service'].assert_called_once_with(
-        conversation_id, history, "user_id", tenant_id="tenant_id", language="en")
+        conversation_id, question, "user_id", tenant_id="tenant_id", language="en")
 
 
 @pytest.mark.asyncio
@@ -393,7 +393,7 @@ async def test_generate_title_failure(conversation_mocks):
     mock_auth_header = "Bearer test-token"
     request_obj = MagicMock()
     request_obj.conversation_id = 1
-    request_obj.history = []
+    request_obj.question = "Test question"
     http_request = MagicMock()
 
     conversation_mocks['get_user_info'].side_effect = Exception("auth fail")

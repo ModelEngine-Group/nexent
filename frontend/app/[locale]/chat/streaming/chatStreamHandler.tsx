@@ -65,6 +65,46 @@ export const handleStreamResponse = async (
     output: { content: "", expanded: true },
   };
 
+  // Generate conversation title immediately when stream starts (for new conversations)
+  // This runs in parallel with the streaming response
+  if (isNewConversation) {
+    // Use setTimeout to ensure the user message has been added to state
+    setTimeout(async () => {
+      try {
+        // Get the current messages to find the user's question
+        setMessages((prevMessages) => {
+          const firstUserMessage = prevMessages.find(
+            (msg) => msg.role === MESSAGE_ROLES.USER
+          );
+          if (firstUserMessage?.content) {
+            // Call the generate title from question interface
+            conversationService
+              .generateTitle({
+                conversation_id: currentConversationId,
+                question: firstUserMessage.content,
+              })
+              .then((title: string) => {
+                if (title) {
+                  setConversationTitle(title);
+                }
+                // Update the conversation list
+                fetchConversationList();
+              })
+              .catch((error: Error) => {
+                log.error(
+                  t("chatStreamHandler.generateTitleFailed"),
+                  error
+                );
+              });
+          }
+          return prevMessages;
+        });
+      } catch (error) {
+        log.error(t("chatStreamHandler.generateTitleFailed"), error);
+      }
+    }, 0);
+  }
+
   let lastContentType:
     | typeof chatConfig.contentTypes.MODEL_OUTPUT
     | typeof chatConfig.contentTypes.MODEL_OUTPUT_CODE
@@ -892,37 +932,6 @@ export const handleStreamResponse = async (
 
           // Update to the deduplicated step list
           lastMsg.steps = uniqueSteps;
-        }
-
-        // If it is the first answer of a new conversation, generate a title
-        if (isNewConversation && newMessages.length >= 2) {
-          // Use setTimeout to ensure the state has been updated
-          setTimeout(async () => {
-            try {
-              // Prepare conversation history
-              const history = newMessages.map((msg) => ({
-                role: msg.role,
-                content:
-                  msg.role === MESSAGE_ROLES.ASSISTANT
-                    ? msg.finalAnswer || msg.content || ""
-                    : msg.content || "",
-              }));
-
-              // Call the generate title interface
-              const title = await conversationService.generateTitle({
-                conversation_id: currentConversationId,
-                history,
-              });
-              // Update the title above the conversation
-              if (title) {
-                setConversationTitle(title);
-              }
-              // Update the list
-              await fetchConversationList();
-            } catch (error) {
-              log.error(t("chatStreamHandler.generateTitleFailed"), error);
-            }
-          }, 100); // Add a delay to ensure the state has been updated
         }
       }
 

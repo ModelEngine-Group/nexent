@@ -129,22 +129,9 @@ sys.modules["database.client"] = db_client_stub
 
 # Stub utils.prompt_template_utils to avoid requiring PyYAML
 prompt_mod = types.ModuleType("utils.prompt_template_utils")
-prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{content}}", "SYSTEM_PROMPT":"SYS"}
+prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
 sys.modules["utils.prompt_template_utils"] = prompt_mod
 
-
-
-def test_call_llm_for_title_flattening(monkeypatch):
-    # Patch tenant_config_manager.get_model_config and prompt template
-
-    monkeypatch.setattr("backend.services.conversation_management_service.tenant_config_manager", types.SimpleNamespace(get_model_config=lambda *a, **k: {"base_url":"u","api_key":"k","model_factory":"modelengine","model_name":"m"}))
-    monkeypatch.setattr("backend.services.conversation_management_service.get_generate_title_prompt_template", lambda language="zh": {"USER_PROMPT":"{{content}}", "SYSTEM_PROMPT":"SYS"})
-    # Stub get_model_name_from_config to avoid dependency on config utils
-    monkeypatch.setattr("backend.services.conversation_management_service.get_model_name_from_config", lambda cfg: cfg.get("model_name", "") if cfg else "")
-
-    # Call with some content; expect OpenAIModel.generate to receive flattened messages
-    title = call_llm_for_title("some conversation content", tenant_id="t", language="zh")
-    assert title == "The Title"
 
 from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
 import unittest
@@ -161,7 +148,6 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         save_message,
         save_conversation_user,
         save_conversation_assistant,
-        extract_user_messages,
         call_llm_for_title,
         update_conversation_title,
         create_new_conversation,
@@ -208,21 +194,6 @@ class TestConversationManagementService(unittest.TestCase):
         result = get_sources_service(None, None, user_id=self.user_id)
         self.assertEqual(result['code'], 400)
         self.assertEqual(result['message'], "Must provide conversation_id or message_id parameter")
-
-    @patch('backend.services.conversation_management_service.extract_user_messages')
-    @patch('backend.services.conversation_management_service.call_llm_for_title')
-    @patch('backend.services.conversation_management_service.update_conversation_title')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
-    def test_generate_conversation_title_service_no_title(
-        self, mock_get_config, mock_update, mock_call_llm, mock_extract
-    ):
-        mock_get_config.return_value = {"model_name": "gpt-4", "api_key": "fake"}
-        mock_extract.return_value = "content"
-        mock_call_llm.return_value = None
-        result = asyncio.run(generate_conversation_title_service(
-            123, [], self.user_id, self.tenant_id))
-        self.assertIsNone(result)
-        mock_update.assert_called_once_with(123, None, self.user_id)
 
     @patch('backend.services.conversation_management_service.create_conversation_message')
     @patch('backend.services.conversation_management_service.create_source_search')
@@ -444,22 +415,6 @@ class TestConversationManagementService(unittest.TestCase):
         unit_content = getattr(first_unit, "content", None) or (first_unit.get("content") if isinstance(first_unit, dict) else None)
         self.assertEqual(unit_content, "Machine learning is a field of AI")
 
-    def test_extract_user_messages(self):
-        # Setup
-        history = [
-            {"role": "user", "content": "What is AI?"},
-            {"role": "assistant", "content": "AI stands for Artificial Intelligence."},
-            {"role": "user", "content": "Give me examples of AI applications"}
-        ]
-
-        # Execute
-        result = extract_user_messages(history)
-
-        # Assert
-        self.assertIn("What is AI?", result)
-        self.assertIn("Give me examples of AI applications", result)
-        self.assertIn("AI stands for Artificial Intelligence.", result)
-
     @patch('backend.services.conversation_management_service.OpenAIModel')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
@@ -474,7 +429,7 @@ class TestConversationManagementService(unittest.TestCase):
 
         mock_prompt_template = {
             "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "Generate a title for: {{content}}"
+            "USER_PROMPT": "Generate a title for: {{question}}"
         }
         mock_get_prompt_template.return_value = mock_prompt_template
 
@@ -492,70 +447,6 @@ class TestConversationManagementService(unittest.TestCase):
         mock_openai.assert_called_once()
         mock_llm_instance.generate.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
-
-    @patch('backend.services.conversation_management_service.OpenAIModel')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
-    def test_call_llm_for_title_response_none_zh(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
-        """Test call_llm_for_title returns default ZH title when response is None."""
-        # Setup
-        mock_get_model_config.return_value = {
-            "model_name": "gpt-4",
-            "model_repo": "openai",
-            "base_url": "http://example.com",
-            "api_key": "fake-key"
-        }
-
-        mock_prompt_template = {
-            "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "Generate a title for: {{content}}"
-        }
-        mock_get_prompt_template.return_value = mock_prompt_template
-
-        mock_llm_instance = mock_openai.return_value
-        mock_llm_instance.generate.return_value = None
-
-        # Execute
-        result = call_llm_for_title(
-            "What is AI?", tenant_id=self.tenant_id, language="zh")
-
-        # Assert
-        self.assertEqual(result, "新对话")
-        mock_openai.assert_called_once()
-        mock_llm_instance.generate.assert_called_once()
-        mock_get_prompt_template.assert_called_once_with(language='zh')
-
-    @patch('backend.services.conversation_management_service.OpenAIModel')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
-    def test_call_llm_for_title_response_none_en(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
-        """Test call_llm_for_title returns default EN title when response is None."""
-        # Setup
-        mock_get_model_config.return_value = {
-            "model_name": "gpt-4",
-            "model_repo": "openai",
-            "base_url": "http://example.com",
-            "api_key": "fake-key"
-        }
-
-        mock_prompt_template = {
-            "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "Generate a title for: {{content}}"
-        }
-        mock_get_prompt_template.return_value = mock_prompt_template
-
-        mock_llm_instance = mock_openai.return_value
-        mock_llm_instance.generate.return_value = None
-
-        # Execute
-        result = call_llm_for_title(
-            "What is AI?", tenant_id=self.tenant_id, language="en")
-
-        # Assert
-        self.assertEqual(result, "New Conversation")
-        mock_openai.assert_called_once()
-        mock_llm_instance.generate.assert_called_once()
-        mock_get_prompt_template.assert_called_once_with(language='en')
 
     @patch('backend.services.conversation_management_service.rename_conversation')
     def test_update_conversation_title(self, mock_rename_conversation):
@@ -725,40 +616,6 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["data"]["images"][0],
                          "https://example.com/image.jpg")
 
-    @patch('backend.services.conversation_management_service.extract_user_messages')
-    @patch('backend.services.conversation_management_service.call_llm_for_title')
-    @patch('backend.services.conversation_management_service.update_conversation_title')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
-    def test_generate_conversation_title_service(self, mock_get_model_config, mock_update_title, mock_call_llm, mock_extract_messages):
-        # Setup
-        mock_get_model_config.return_value = {
-            "model_name": "gpt-4",
-            "model_repo": "openai",
-            "base_url": "http://example.com",
-            "api_key": "fake-key"
-        }
-
-        mock_extract_messages.return_value = "What is AI? AI stands for Artificial Intelligence."
-        mock_call_llm.return_value = "AI Discussion"
-        mock_update_title.return_value = True
-
-        history = [
-            {"role": "user", "content": "What is AI?"},
-            {"role": "assistant", "content": "AI stands for Artificial Intelligence."}
-        ]
-
-        # Execute
-        import asyncio
-        result = asyncio.run(generate_conversation_title_service(
-            123, history, self.user_id, self.tenant_id, "en"))
-
-        # Assert
-        self.assertEqual(result, "AI Discussion")
-        mock_extract_messages.assert_called_once_with(history)
-        mock_call_llm.assert_called_once()
-        mock_update_title.assert_called_once_with(
-            123, "AI Discussion", self.user_id)
-
     @patch('backend.services.conversation_management_service.update_message_opinion')
     def test_update_message_opinion_service(self, mock_update_opinion):
         # Setup
@@ -800,6 +657,27 @@ class TestConversationManagementService(unittest.TestCase):
             asyncio.run(get_message_id_by_index_impl(123, 2))
         self.assertIn("Message not found", str(ctx.exception))
         mock_get_message.assert_called_once_with(123, 2)
+
+    # Tests for generate_conversation_title_service
+    @patch('backend.services.conversation_management_service.call_llm_for_title')
+    @patch('backend.services.conversation_management_service.update_conversation_title')
+    def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm):
+        """Test generate_conversation_title_service generates title from question."""
+        # Setup
+        mock_call_llm.return_value = "Python Tips"
+        mock_update_title.return_value = True
+
+        # Execute
+        import asyncio
+        result = asyncio.run(generate_conversation_title_service(
+            123, "How to use Python effectively?", self.user_id, self.tenant_id, "en"))
+
+        # Assert
+        self.assertEqual(result, "Python Tips")
+        mock_call_llm.assert_called_once_with(
+            "How to use Python effectively?", self.tenant_id, "en")
+        mock_update_title.assert_called_once_with(
+            123, "Python Tips", self.user_id)
 
 
 if __name__ == '__main__':

@@ -226,31 +226,12 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
     save_message(conversation_req, user_id=user_id, tenant_id=tenant_id)
 
 
-def extract_user_messages(history: List[Dict[str, str]]) -> str:
+def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
     """
-    Extract user message content from conversation history
+    Call LLM to generate a title from a user question
 
     Args:
-        history: List of conversation history records
-
-    Returns:
-        str: Concatenated user message content
-    """
-    content = ""
-    for message in history:
-        if message.get("role") == MESSAGE_ROLE["USER"] and message.get("content"):
-            content += f"\n### User Question：\n{message['content']}\n"
-        if message.get("role") == MESSAGE_ROLE["ASSISTANT"] and message.get("content"):
-            content += f"\n### Response Content：\n{message['content']}\n"
-    return content
-
-
-def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
-    """
-    Call LLM to generate a title
-
-    Args:
-        content: Conversation content
+        question: User's question content
         tenant_id: Tenant ID
         language: Language code ('zh' for Chinese, 'en' for English)
 
@@ -273,16 +254,16 @@ def call_llm_for_title(content: str, tenant_id: str, language: str = LANGUAGE["Z
         ssl_verify=model_config.get("ssl_verify", True)
     )
 
-    # Build messages
+    # Build messages - use new template variable 'question' instead of 'content'
     user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({
-        "content": content
+        "question": question
     })
     messages = [{"role": MESSAGE_ROLE["SYSTEM"],
                  "content": prompt_template["SYSTEM_PROMPT"]},
                 {"role": MESSAGE_ROLE["USER"],
                  "content": user_prompt}]
 
-    # ModelEngine 只接受 role/content 的简单结构，确保提前扁平化
+    # ModelEngine accepts role/content in a simple structure, ensure flattening before passing
     if model_config.get("model_factory", "").lower() == "modelengine":
         messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
 
@@ -649,13 +630,16 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
         }
 
 
-async def generate_conversation_title_service(conversation_id: int, history: List[Dict[str, str]], user_id: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
+async def generate_conversation_title_service(conversation_id: int, question: str, user_id: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
     """
-    Generate conversation title
+    Generate conversation title from user question
+
+    This function is called immediately after user sends a message,
+    generating title from the question instead of waiting for full conversation.
 
     Args:
         conversation_id: Conversation ID
-        history: Conversation history list
+        question: User's question content
         user_id: User ID
         tenant_id: Tenant ID
         language: Language code ('zh' for Chinese, 'en' for English)
@@ -664,11 +648,8 @@ async def generate_conversation_title_service(conversation_id: int, history: Lis
         str: Generated title
     """
     try:
-        # Extract user messages
-        content = extract_user_messages(history)
-
-        # Call LLM to generate title in a separate thread to avoid blocking
-        title = await asyncio.to_thread(call_llm_for_title, content, tenant_id, language)
+        # Call LLM to generate title from question in a separate thread to avoid blocking
+        title = await asyncio.to_thread(call_llm_for_title, question, tenant_id, language)
 
         # Update conversation title
         update_conversation_title(conversation_id, title, user_id)
