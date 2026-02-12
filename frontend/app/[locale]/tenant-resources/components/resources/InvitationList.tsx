@@ -322,6 +322,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               title={t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code })}
               description={t("common.cannotBeUndone")}
               onConfirm={() => handleDelete(record.invitation_code)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
                 <Button
