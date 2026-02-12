@@ -446,7 +446,7 @@ async def manage_update_model(
             f"Start to update model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"current_display_name: {request.current_display_name}")
 
-        model_data = request.model_dump(exclude={'tenant_id', 'current_display_name'})
+        model_data = request.model_dump(exclude={'tenant_id', 'current_display_name'}, exclude_unset=True)
         await update_single_model_for_tenant(
             user_id, request.tenant_id, request.current_display_name, model_data
         )
