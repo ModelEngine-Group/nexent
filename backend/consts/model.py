@@ -717,6 +717,13 @@ class ManageProviderModelListRequest(BaseModel):
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to query provider models for")
     provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
     model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+
+
+class ManageProviderModelCreateRequest(BaseModel):
+    """Request model for creating provider models in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create provider models for")
+    provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
     api_key: Optional[str] = Field('', description="API key for the provider")
     base_url: Optional[str] = Field('', description="Base URL for the provider API")
 

@@ -189,50 +189,15 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         raise Exception(f"Failed to batch create models: {str(e)}")
 
 
-async def list_provider_models_for_tenant(
-    tenant_id: str,
-    provider: str,
-    model_type: str,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None
-):
-    """List available models from a provider for a tenant.
-
-    If api_key and base_url are provided, fetches fresh model list from the provider.
-    Otherwise, returns persisted models for the tenant.
-
-    Args:
-        tenant_id: The tenant context.
-        provider: Model provider (e.g., 'silicon', 'modelengine').
-        model_type: Model type (e.g., 'llm', 'embedding').
-        api_key: Optional API key for the provider.
-        base_url: Optional base URL for the provider.
-
-    Returns:
-        List of models from the provider.
-    """
+async def list_provider_models_for_tenant(tenant_id: str, provider: str, model_type: str):
+    """List persisted models for a provider/type for a tenant."""
     try:
-        # If api_key is provided, fetch fresh models from provider
-        if api_key:
-            provider_request = {
-                "provider": provider,
-                "model_type": model_type,
-                "api_key": api_key,
-            }
-            if base_url:
-                provider_request["base_url"] = base_url
-            model_list = await get_provider_models(provider_request)
-            # Merge existing model's max_tokens attribute
-            model_list = merge_existing_model_tokens(
-                model_list, tenant_id, provider, model_type)
-        else:
-            # Fall back to persisted models
-            model_list = get_models_by_tenant_factory_type(
-                tenant_id, provider, model_type)
-            for model in model_list:
-                model["id"] = model["model_repo"] + "/" + model["model_name"]
+        model_list = get_models_by_tenant_factory_type(
+            tenant_id, provider, model_type)
+        for model in model_list:
+            model["id"] = model["model_repo"] + "/" + model["model_name"]
 
-        logging.debug(f"Provider model {provider} listed successfully")
+        logging.debug(f"Provider model {provider} created successfully")
         return model_list
     except Exception as e:
         logging.error(f"Failed to list provider models: {str(e)}")
