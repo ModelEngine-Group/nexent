@@ -302,7 +302,8 @@ def _calculate_current_status(invitation_data: Dict[str, Any]) -> Dict[str, Any]
             else:
                 expiry_datetime = datetime.fromisoformat(
                     str(expiry_date).replace('Z', '+00:00'))
-            if current_time > expiry_datetime:
+            # Treat same date as not expired - only expire when current date is strictly after expiry date
+            if current_time.date() > expiry_datetime.date():
                 new_status = "EXPIRE"
         except (ValueError, AttributeError, TypeError):
             logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
@@ -421,7 +422,8 @@ def update_invitation_code_status(invitation_id: int) -> bool:
             else:
                 expiry_datetime = datetime.fromisoformat(
                     str(expiry_date).replace('Z', '+00:00'))
-            if current_time > expiry_datetime:
+            # Treat same date as not expired - only expire when current date is strictly after expiry date
+            if current_time.date() > expiry_datetime.date():
                 new_status = "EXPIRE"
         except (ValueError, AttributeError, TypeError):
             logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")

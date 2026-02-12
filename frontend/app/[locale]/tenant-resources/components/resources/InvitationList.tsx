@@ -503,6 +503,10 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               format="YYYY-MM-DD"
               placeholder={t("tenantResources.invitation.expiryDate")}
               style={{ width: "100%" }}
+              disabledDate={(current) => {
+                if (!current) return false;
+                return current < dayjs().startOf('day');
+              }}
             />
           </Form.Item>
         </Form>
