@@ -15,6 +15,7 @@ from jinja2 import Template
 from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
+from services.agent_version_service import publish_version_impl
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
 from consts.exceptions import MemoryPreparationException
@@ -1236,6 +1237,17 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
+    # Auto-publish initial version v1 for market-imported agents
+    try:
+        publish_version_impl(
+            agent_id=new_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_name="v1",
+            release_note="Initial version from Agent Market"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 
