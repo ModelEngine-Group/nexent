@@ -54,7 +54,7 @@
     "tailwindcss-animate": "^1.0.7",
     "unified": "^11.0.0",
     "unist-util-visit": "^5.0.0",
-    "uuid": "^11.1.0",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
