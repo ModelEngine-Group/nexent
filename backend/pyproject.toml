@@ -25,7 +25,7 @@ data-process = [
     "celery>=5.3.6",
     "flower>=2.0.1",
     "nest_asyncio>=1.5.6",
-    "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
+    "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.32",
     "huggingface_hub>=0.19.0,<0.21.0"
 ]
 test = [
