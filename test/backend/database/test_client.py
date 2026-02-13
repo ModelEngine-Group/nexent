@@ -346,6 +346,107 @@ class TestMinioClient:
         mock_storage_client.get_file_stream.assert_called_once_with(
             'file.txt', 'bucket')
 
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_file_exists_true(self, mock_config_class, mock_create_client):
+        """Test MinioClient.file_exists returns True when file exists"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.file_exists.return_value = True
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        result = client.file_exists('file.txt', 'bucket')
+
+        assert result is True
+        mock_storage_client.file_exists.assert_called_once_with('file.txt', 'bucket')
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_file_exists_false(self, mock_config_class, mock_create_client):
+        """Test MinioClient.file_exists returns False when file does not exist"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.file_exists.return_value = False
+        mock_create_client.return_value = mock_storage_client
+        mock_config_class.return_value = MagicMock()
+
+        client = MinioClient()
+        result = client.file_exists('file.txt', 'bucket')
+
+        assert result is False
+        mock_storage_client.file_exists.assert_called_once_with('file.txt', 'bucket')
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_copy_file_success(self, mock_config_class, mock_create_client):
+        """Test MinioClient.copy_file successfully copies file"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.copy_file.return_value = (True, 'dest/file.pdf')
+        mock_create_client.return_value = mock_storage_client
+        mock_config = MagicMock()
+        mock_config.default_bucket = 'test-bucket'
+        mock_config_class.return_value = mock_config
+
+        client = MinioClient()
+        success, result = client.copy_file('source/file.pdf', 'dest/file.pdf', 'bucket')
+
+        assert success is True
+        assert result == 'dest/file.pdf'
+        mock_storage_client.copy_file.assert_called_once_with(
+            'source/file.pdf',
+            'dest/file.pdf',
+            'bucket'
+        )
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_copy_file_with_default_bucket(self, mock_config_class, mock_create_client):
+        """Test MinioClient.copy_file uses default bucket when not specified"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.copy_file.return_value = (True, 'dest/file.pdf')
+        mock_create_client.return_value = mock_storage_client
+        mock_config = MagicMock()
+        mock_config.default_bucket = 'default-bucket'
+        mock_config_class.return_value = mock_config
+
+        client = MinioClient()
+        success, result = client.copy_file('source/file.pdf', 'dest/file.pdf')
+
+        assert success is True
+        assert result == 'dest/file.pdf'
+        mock_storage_client.copy_file.assert_called_once_with(
+            'source/file.pdf',
+            'dest/file.pdf',
+            None
+        )
+
+    @patch('backend.database.client.create_storage_client_from_config')
+    @patch('backend.database.client.MinIOStorageConfig')
+    def test_minio_client_copy_file_failure(self, mock_config_class, mock_create_client):
+        """Test MinioClient.copy_file handles errors properly"""
+        MinioClient._instance = None
+
+        mock_storage_client = MagicMock()
+        mock_storage_client.copy_file.return_value = (False, 'Copy failed')
+        mock_create_client.return_value = mock_storage_client
+        mock_config = MagicMock()
+        mock_config.default_bucket = 'test-bucket'
+        mock_config_class.return_value = mock_config
+
+        client = MinioClient()
+        success, result = client.copy_file('source/file.pdf', 'dest/file.pdf')
+
+        assert success is False
+        assert 'Copy failed' in result
+
 
 class TestGetDbSession:
     """Test cases for get_db_session context manager"""

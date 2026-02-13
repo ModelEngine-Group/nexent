@@ -11,20 +11,26 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from consts.model import ProcessParams
 from services.file_management_service import upload_to_minio, upload_files_impl, \
-    get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl
+    get_file_url_impl, get_file_stream_impl, delete_file_impl, list_files_impl, \
+    preview_file_impl
 from utils.file_management_utils import trigger_data_process
 
 logger = logging.getLogger("file_management_app")
 
 
-def build_content_disposition_header(filename: Optional[str]) -> str:
+def build_content_disposition_header(filename: Optional[str], inline: bool = False) -> str:
     """
     Build a Content-Disposition header that keeps the original filename.
+
+    Args:
+        filename: Original filename to include in header
+        inline: If True, use 'inline' disposition (for preview); otherwise 'attachment' (for download)
 
     - ASCII filenames are returned directly.
     - Non-ASCII filenames include both an ASCII fallback and RFC 5987 encoded value
       so modern browsers keep the original name.
     """
+    disposition = "inline" if inline else "attachment"
     safe_name = (filename or "download").strip() or "download"
 
     def _sanitize_ascii(value: str) -> str:
@@ -40,26 +46,26 @@ def build_content_disposition_header(filename: Optional[str]) -> str:
 
     try:
         safe_name.encode("ascii")
-        return f'attachment; filename="{_sanitize_ascii(safe_name)}"'
+        return f'{disposition}; filename="{_sanitize_ascii(safe_name)}"'
     except UnicodeEncodeError:
         try:
             encoded = quote(safe_name, safe="")
         except Exception:
             # quote failure, fallback to sanitized ASCII only
             logger.warning("Failed to encode filename '%s', using fallback", safe_name)
-            return f'attachment; filename="{_sanitize_ascii(safe_name)}"'
+            return f'{disposition}; filename="{_sanitize_ascii(safe_name)}"'
 
         fallback = _sanitize_ascii(
             safe_name.encode("ascii", "ignore").decode("ascii") or "download"
         )
-        return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'
+        return f'{disposition}; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'
     except Exception as exc:  # pragma: no cover
         logger.warning(
             "Failed to encode filename '%s': %s. Using fallback.",
             safe_name,
             exc,
         )
-        return 'attachment; filename="download"'
+        return f'{disposition}; filename="download"'
 
 # Create API router
 file_management_runtime_router = APIRouter(prefix="/file")
@@ -567,3 +573,58 @@ async def get_storage_file_batch_urls(
         "failed_count": sum(1 for r in results if not r.get("success", False)),
         "results": results
     }
+
+@file_management_config_router.get("/preview/{object_name:path}")
+async def preview_file(
+    object_name: str = PathParam(..., description="File object name to preview"),
+    filename: Optional[str] = Query(None, description="Original filename for display (optional)")
+):
+    """
+    Preview file inline in browser 
+    
+    - **object_name**: File object name in storage
+    - **filename**: Original filename for Content-Disposition header (optional)
+    
+    Returns file stream with Content-Disposition: inline for browser preview
+    """
+    try:
+        # Get file stream from preview service
+        file_stream, content_type = await preview_file_impl(object_name=object_name)
+        
+        # Use provided filename or extract from object_name
+        display_filename = filename
+        if not display_filename:
+            display_filename = object_name.split("/")[-1] if "/" in object_name else object_name
+        
+        # Build Content-Disposition header for inline display
+        content_disposition = build_content_disposition_header(display_filename, inline=True)
+
+        return StreamingResponse(
+            file_stream,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": content_disposition,
+                "Cache-Control": "public, max-age=3600",
+                "ETag": f'"{object_name}"',
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"[preview_file] Preview failed: object_name={object_name}, error={str(e)}")
+        
+        # Return appropriate HTTP status based on error type
+        if "not found" in str(e).lower() or "does not exist" in str(e).lower():
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"File not found: {object_name}"
+            )
+        elif "unsupported" in str(e).lower():
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"File format not supported for preview: {str(e)}"
+            )
+        else:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail=f"Failed to preview file: {str(e)}"
+            )

@@ -71,7 +71,7 @@ def import_module(monkeypatch):
     # Provide a full stub module for database.attachment_db to avoid importing real Minio client
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
     fake_attachment_db_mod.get_file_stream = lambda source: io.BytesIO(b"file-bytes")
-    fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
+    fake_attachment_db_mod.get_file_size = lambda path_or_url: 0
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
     # Ensure parent package 'database' exists and link submodule for proper resolution
     if "database" not in sys.modules:
@@ -310,7 +310,7 @@ def test_process_file_get_stream_none_raises(monkeypatch):
     # Override get_file_stream to return None
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
     fake_attachment_db_mod.get_file_stream = lambda source: None
-    fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
+    fake_attachme = lambda path_or_url: 0
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
     # Ensure parent 'database' exists and link attachment_db
     if "database" not in sys.modules:
@@ -433,7 +433,7 @@ def test_process_file_core_returns_none_list_variants(monkeypatch):
         # Stub attachment_db to avoid importing real Minio client
         fake_attachment_db_mod = types.ModuleType("database.attachment_db")
         fake_attachment_db_mod.get_file_stream = lambda source: io.BytesIO(b"file-bytes")
-        fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
+        fake_attachme = lambda path_or_url: 0
         monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
         # Also stub celery.result.AsyncResult and redis module
         fake_celery = types.ModuleType("celery")

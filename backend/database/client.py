@@ -213,6 +213,33 @@ class MinioClient:
         """
         return self._storage_client.get_file_stream(object_name, bucket)
 
+    def file_exists(self, object_name: str, bucket: Optional[str] = None) -> bool:
+        """
+        Check if file exists in MinIO
+
+        Args:
+            object_name: Object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            bool: True if file exists, False otherwise
+        """
+        return self._storage_client.file_exists(object_name, bucket)
+
+    def copy_file(self, source_object: str, dest_object: str, bucket: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Copy a file within the same bucket (atomic operation)
+
+        Args:
+            source_object: Source object name
+            dest_object: Destination object name
+            bucket: Bucket name, if not specified use default bucket
+
+        Returns:
+            Tuple[bool, str]: (Success status, Destination object name or error message)
+        """
+        return self._storage_client.copy_file(source_object, dest_object, bucket)
+
 
 # Create global database and MinIO client instances
 db_client = PostgresClient()

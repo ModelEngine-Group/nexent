@@ -55,6 +55,12 @@ async def _stub_preprocess_files_generator(*_: Any, **__: Any) -> AsyncGenerator
     yield "data: {\"type\": \"progress\", \"progress\": 0}\n\n"
     yield "data: {\"type\": \"complete\", \"progress\": 100}\n\n"
 
+async def _stub_preview_file_impl(object_name: str):
+    """Default stub for preview_file_impl"""
+    from io import BytesIO
+    return BytesIO(b"PDF content"), "application/pdf"
+
+sfms_stub.preview_file_impl = _stub_preview_file_impl
 sfms_stub.upload_to_minio = _stub_upload_to_minio
 sfms_stub.upload_files_impl = _stub_upload_files_impl
 sfms_stub.get_file_url_impl = _stub_get_file_url_impl
@@ -442,6 +448,40 @@ def test_build_content_disposition_header_exception_handling(monkeypatch):
     result = file_management_app.build_content_disposition_header("测试.pdf")
     assert 'attachment; filename=' in result
     assert 'filename*=UTF-8' not in result
+
+
+def test_build_content_disposition_header_inline_ascii():
+    """Test build_content_disposition_header with inline=True for ASCII filename"""
+    result = file_management_app.build_content_disposition_header("test.pdf", inline=True)
+    assert result == 'inline; filename="test.pdf"'
+    assert 'attachment' not in result
+
+
+def test_build_content_disposition_header_inline_non_ascii():
+    """Test build_content_disposition_header with inline=True for non-ASCII filename"""
+    result = file_management_app.build_content_disposition_header("测试文档.pdf", inline=True)
+    assert 'inline; filename=' in result
+    assert 'attachment' not in result
+    assert 'filename*=UTF-8' in result
+
+
+def test_build_content_disposition_header_inline_false_explicit():
+    """Test build_content_disposition_header with inline=False explicitly"""
+    result = file_management_app.build_content_disposition_header("test.pdf", inline=False)
+    assert result == 'attachment; filename="test.pdf"'
+    assert 'inline' not in result
+
+
+def test_build_content_disposition_header_inline_exception_handling(monkeypatch):
+    """Test build_content_disposition_header inline mode exception handling"""
+    def boom(_value: str, safe: str = "") -> str:
+        raise RuntimeError("quote failure")
+
+    monkeypatch.setattr("backend.apps.file_management_app.quote", boom)
+
+    result = file_management_app.build_content_disposition_header("中文.pdf", inline=True)
+    assert 'inline; filename=' in result
+    assert 'attachment' not in result
 
 
 # --- Tests for get_storage_file with filename parameter ---
@@ -870,5 +910,232 @@ def test_build_datamate_url_from_parts_empty_base_url():
     with pytest.raises(Exception) as ei:
         file_management_app._build_datamate_url_from_parts("", "123", "456")
     assert "base_url is required" in str(ei.value)
+
+
+# --- Tests for preview_file endpoint ---
+
+@pytest.mark.asyncio
+async def test_preview_file_pdf_success(monkeypatch):
+    """Test previewing a PDF file returns StreamingResponse with inline disposition"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"PDF content"), "application/pdf"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="documents/test.pdf",
+        filename="test.pdf"
+    )
+    
+    assert resp.media_type == "application/pdf"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "inline" in content_disposition
+    assert "test.pdf" in content_disposition
+    assert resp.headers.get("cache-control") == "public, max-age=3600"
+
+
+@pytest.mark.asyncio
+async def test_preview_file_image_success(monkeypatch):
+    """Test previewing an image file returns correct content type"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"PNG image data"), "image/png"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="images/photo.png",
+        filename="photo.png"
+    )
+    
+    assert resp.media_type == "image/png"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "inline" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_preview_file_text_success(monkeypatch):
+    """Test previewing a text file returns correct content type"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"Hello World"), "text/plain"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="files/readme.txt",
+        filename="readme.txt"
+    )
+    
+    assert resp.media_type == "text/plain"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "inline" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_preview_file_without_filename_extracts_from_path(monkeypatch):
+    """Test previewing without filename parameter extracts name from object_name"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"PDF content"), "application/pdf"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="folder/subfolder/document.pdf",
+        filename=None
+    )
+    
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "document.pdf" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_preview_file_chinese_filename(monkeypatch):
+    """Test previewing with Chinese filename uses UTF-8 encoding"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"PDF content"), "application/pdf"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="documents/test.pdf",
+        filename="测试文档.pdf"
+    )
+    
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "inline" in content_disposition
+    assert "filename*=UTF-8" in content_disposition or "测试文档" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_preview_file_not_found_error(monkeypatch):
+    """Test previewing a non-existent file returns 404"""
+    async def fake_preview(object_name):
+        raise Exception("File not found")
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    with pytest.raises(Exception) as ei:
+        await file_management_app.preview_file(
+            object_name="nonexistent/file.pdf",
+            filename=None
+        )
+    assert "File not found" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_preview_file_unsupported_format_error(monkeypatch):
+    """Test previewing an unsupported file format returns 400"""
+    async def fake_preview(object_name):
+        raise Exception("Unsupported file format for preview")
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    with pytest.raises(Exception) as ei:
+        await file_management_app.preview_file(
+            object_name="files/archive.zip",
+            filename=None
+        )
+    assert "not supported for preview" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_preview_file_internal_error(monkeypatch):
+    """Test previewing with internal error returns 500"""
+    async def fake_preview(object_name):
+        raise Exception("Internal server error")
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    with pytest.raises(Exception) as ei:
+        await file_management_app.preview_file(
+            object_name="files/test.pdf",
+            filename=None
+        )
+    assert "Failed to preview file" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_preview_file_office_converted_to_pdf(monkeypatch):
+    """Test previewing an Office document returns converted PDF"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        # Office documents are converted to PDF by preview_file_impl
+        return BytesIO(b"Converted PDF content"), "application/pdf"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="documents/report.docx",
+        filename="report.docx"
+    )
+    
+    # Content type should be PDF after conversion
+    assert resp.media_type == "application/pdf"
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "inline" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_preview_file_has_etag_header(monkeypatch):
+    """Test preview response includes ETag header for caching"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"PDF content"), "application/pdf"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="documents/test.pdf",
+        filename="test.pdf"
+    )
+    
+    etag = resp.headers.get("etag", "")
+    assert "documents/test.pdf" in etag
+
+
+@pytest.mark.asyncio
+async def test_preview_file_simple_object_name_without_slash(monkeypatch):
+    """Test previewing with simple object name without slash"""
+    from io import BytesIO
+    
+    async def fake_preview(object_name):
+        return BytesIO(b"PDF content"), "application/pdf"
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    resp = await file_management_app.preview_file(
+        object_name="simple.pdf",
+        filename=None
+    )
+    
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert "simple.pdf" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_preview_file_does_not_exist_error(monkeypatch):
+    """Test previewing with 'does not exist' error message returns 404"""
+    async def fake_preview(object_name):
+        raise Exception("The specified key does not exist")
+    
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+    
+    with pytest.raises(Exception) as ei:
+        await file_management_app.preview_file(
+            object_name="missing/file.pdf",
+            filename=None
+        )
+    assert "File not found" in str(ei.value)
 
 

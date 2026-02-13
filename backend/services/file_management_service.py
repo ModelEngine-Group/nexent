@@ -1,24 +1,31 @@
 import asyncio
 import logging
 import os
+import shutil
+import tempfile
+import hashlib
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import UploadFile
 
-from consts.const import UPLOAD_FOLDER, MAX_CONCURRENT_UPLOADS, MODEL_CONFIG_MAPPING
+from consts.const import UPLOAD_FOLDER, MAX_CONCURRENT_UPLOADS, MAX_CONCURRENT_CONVERSIONS, MODEL_CONFIG_MAPPING, OFFICE_MIME_TYPES
 from database.attachment_db import (
+    upload_file,
     upload_fileobj,
     get_file_url,
     get_content_type,
     get_file_stream,
+    get_file_size,
     delete_file,
-    list_files
+    list_files,
+    file_exists,
+    copy_file
 )
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.file_management_utils import save_upload_file
+from utils.file_management_utils import save_upload_file, convert_office_to_pdf
 
 from nexent import MessageObserver
 from nexent.core.models import OpenAILongContextModel
@@ -27,6 +34,12 @@ from nexent.core.models import OpenAILongContextModel
 upload_dir = Path(UPLOAD_FOLDER)
 upload_dir.mkdir(exist_ok=True)
 upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
+
+# Semaphore limits total concurrent LibreOffice processes
+conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
+# Per-file locks prevent duplicate conversions of the same file
+_conversion_locks: dict[str, asyncio.Lock] = {}
+_conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
 
@@ -196,3 +209,180 @@ def get_llm_model(tenant_id: str):
         ssl_verify=main_model_config.get("ssl_verify", True),
     )
     return long_text_to_text_model
+
+
+async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
+    """
+    Preview a file by returning its contents as a stream.
+    
+    Args:
+        object_name: File object name in storage
+        
+    Returns:
+        Tuple[BytesIO, str]: (file_stream, content_type)
+    """
+    # Get MIME type directly
+    content_type = get_content_type(object_name)
+    
+    # PDF, images, and text files - return directly
+    if content_type == 'application/pdf' or content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown']:
+        file_stream = get_file_stream(object_name)
+        if file_stream is None:
+            raise Exception("File not found or failed to read from storage")
+        return file_stream, content_type
+    
+    # Office documents - convert to PDF with caching
+    elif content_type in OFFICE_MIME_TYPES:
+        
+        # Generate deterministic PDF path for caching
+        name_without_ext = object_name.rsplit('.', 1)[0] if '.' in object_name else object_name
+        hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
+        pdf_object_name = f"converted/{name_without_ext}_{hash_suffix}.pdf"
+        temp_pdf_object_name = f"converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
+        
+        # Check if converted PDF already exists in MinIO (cache hit)
+        if file_exists(pdf_object_name):
+            file_stream = get_file_stream(pdf_object_name)
+            if file_stream is None:
+                # Cache may be corrupted, delete and re-convert
+                logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
+                delete_file(pdf_object_name)
+            else:
+                return file_stream, 'application/pdf'
+        
+        # Get or create a lock for this specific file to prevent duplicate conversions
+        async with _conversion_locks_guard:
+            if object_name not in _conversion_locks:
+                _conversion_locks[object_name] = asyncio.Lock()
+            file_lock = _conversion_locks[object_name]
+        
+        # Acquire file-specific lock 
+        async with file_lock:
+            # Double-check: another request may have completed the conversion while we waited
+            if file_exists(pdf_object_name):
+                file_stream = get_file_stream(pdf_object_name)
+                if file_stream is None:
+                    logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
+                    delete_file(pdf_object_name)
+                else:
+                    return file_stream, 'application/pdf'
+            
+            # Acquire conversion semaphore 
+            async with conversion_semaphore:
+                # Cache miss - convert Office to PDF using two-phase commit
+                temp_dir = None
+                try:
+                    # Phase 1: Convert Office to PDF locally
+                    temp_dir = tempfile.mkdtemp(prefix='office_convert_')
+                    
+                    # Download original file from MinIO
+                    original_stream = get_file_stream(object_name)
+                    if original_stream is None:
+                        raise Exception("Original file not found or failed to read from storage")
+                    original_filename = os.path.basename(object_name)
+                    input_path = os.path.join(temp_dir, original_filename)
+                    
+                    # Write to temporary file
+                    with open(input_path, 'wb') as f:
+                        while chunk := original_stream.read(8192):
+                            f.write(chunk)
+                    
+                    # Convert to PDF using LibreOffice
+                    pdf_path = await convert_office_to_pdf(input_path, temp_dir, timeout=30)
+                    
+                    # Phase 2: Upload to temporary location first
+                    result = upload_file(file_path=pdf_path, object_name=temp_pdf_object_name)
+                    if not result.get('success'):
+                        raise Exception(f"Failed to upload temp PDF: {result.get('error', 'Unknown error')}")
+                    
+                    # Phase 3: Validate uploaded PDF integrity
+                    if not _validate_uploaded_pdf(temp_pdf_object_name, pdf_path):
+                        delete_file(temp_pdf_object_name)
+                        raise Exception("Uploaded PDF validation failed - file may be corrupted")
+                    
+                    # Phase 4: Atomic move from temp to final location
+                    copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
+                    if not copy_result.get('success'):
+                        delete_file(temp_pdf_object_name)
+                        raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
+                    
+                    # Phase 5: Clean up temp file in MinIO
+                    delete_file(temp_pdf_object_name)
+                    
+                except Exception as e:
+                    # Clean up temp file on any error
+                    if file_exists(temp_pdf_object_name):
+                        delete_file(temp_pdf_object_name)
+                    logger.error(f"Office conversion failed: {str(e)}")
+                    raise Exception(f"Failed to convert Office document to PDF: {str(e)}")
+                
+                finally:
+                    # Clean up local temporary directory
+                    if temp_dir and os.path.exists(temp_dir):
+                        try:
+                            shutil.rmtree(temp_dir)
+                        except Exception as cleanup_error:
+                            logger.warning(f"Failed to cleanup temp directory: {cleanup_error}")
+        
+        # Clean up the file lock (prevents memory leak for many unique files)
+        async with _conversion_locks_guard:
+            _conversion_locks.pop(object_name, None)
+        
+        # Return converted PDF from MinIO
+        file_stream = get_file_stream(pdf_object_name)
+        if file_stream is None:
+            raise Exception("Converted PDF not found or failed to read from storage")
+        return file_stream, 'application/pdf'
+    
+    # Unsupported file type
+    else:
+        raise Exception(f"Unsupported file type for preview: {content_type}")
+
+def _validate_uploaded_pdf(temp_object_name: str, local_pdf_path: str) -> bool:
+    """
+    Validate uploaded PDF integrity by comparing size and verifying PDF header.
+    
+    Args:
+        temp_object_name: Temporary object name in MinIO
+        local_pdf_path: Local PDF file path for size comparison
+        
+    Returns:
+        bool: True if validation passes, False otherwise
+    """
+    try:
+        # 1. Check file size matches using metadata (avoid full buffering)
+        local_size = os.path.getsize(local_pdf_path)
+        remote_size = get_file_size(temp_object_name)
+        if remote_size <= 0:
+            logger.warning(f"PDF validation failed: cannot read remote size for {temp_object_name}")
+            return False
+        if local_size != remote_size:
+            logger.warning(f"PDF validation failed: size mismatch (local={local_size}, remote={remote_size})")
+            return False
+
+        # 2. Verify PDF header (magic number) by reading only first few bytes
+        remote_stream = get_file_stream(temp_object_name)
+        if remote_stream is None:
+            logger.warning(f"PDF validation failed: cannot read remote file {temp_object_name}")
+            return False
+        try:
+            header = remote_stream.read(5)
+        finally:
+            try:
+                remote_stream.close()
+            except Exception:
+                pass
+        if not header.startswith(b'%PDF-'):
+            logger.warning("PDF validation failed: invalid PDF header")
+            return False
+
+        # 3. Check minimum size (valid PDF should be >100 bytes)
+        if remote_size < 100:
+            logger.warning(f"PDF validation failed: file too small ({remote_size} bytes)")
+            return False
+
+        return True
+    except Exception as e:
+        logger.error(f"PDF validation error: {str(e)}")
+        return False
+

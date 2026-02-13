@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+import subprocess
 import traceback
 from pathlib import Path
 from typing import List
@@ -11,7 +13,7 @@ from fastapi import UploadFile
 
 from consts.const import DATA_PROCESS_SERVICE
 from consts.model import ProcessParams
-from database.attachment_db import get_file_size_from_minio
+from database.attachment_db import get_file_size
 from utils.auth_utils import get_current_user_id
 from utils.config_utils import tenant_config_manager
 
@@ -318,7 +320,7 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
     """Query the actual size(bytes) of the file."""
     try:
         if source_type == "minio":
-            return get_file_size_from_minio(path_or_url)
+            return get_file_size(path_or_url)
 
         elif source_type == "local":
             # For local files, use os.path.getsize to get file size
@@ -336,4 +338,67 @@ def get_file_size(source_type: str, path_or_url: str) -> int:
     except Exception as e:
         logging.error(f"Error getting file size for {path_or_url}: {str(e)}")
         return 0
+
+
+async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int = 30) -> str:
+    """
+    Convert Office document to PDF using LibreOffice.
+    
+    Args:
+        input_path: Path to input Office file
+        output_dir: Directory for output PDF file
+        timeout: Conversion timeout in seconds (default: 30s)
+        
+    Returns:
+        str: Path to generated PDF file
+    """
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    def _run_libreoffice_conversion():
+        """Synchronous LibreOffice conversion to run in thread executor."""
+        cmd = [
+            'libreoffice',
+            '--headless',
+            '--convert-to', 'pdf',
+            '--outdir', output_dir,
+            input_path
+        ]
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+    
+    try:
+        # Run blocking subprocess in thread executor to avoid blocking event loop
+        result = await asyncio.to_thread(_run_libreoffice_conversion)
+        
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Unknown conversion error"
+            logger.error(f"LibreOffice conversion failed: {error_msg}")
+            raise RuntimeError(f"Office to PDF conversion failed: {error_msg}")
+        
+        # Find generated PDF file
+        input_filename = os.path.basename(input_path)
+        pdf_filename = os.path.splitext(input_filename)[0] + '.pdf'
+        pdf_path = os.path.join(output_dir, pdf_filename)
+        
+        if not os.path.exists(pdf_path):
+            raise RuntimeError(f"Converted PDF not found: {pdf_path}")
+        
+        return pdf_path
+        
+    except subprocess.TimeoutExpired:
+        logger.error(f"Office to PDF conversion timeout after {timeout}s: {input_path}")
+        raise TimeoutError(f"Office to PDF conversion timeout (>{timeout}s)")
+        
+    except FileNotFoundError as e:
+        # LibreOffice executable not found in PATH
+        logger.error(f"LibreOffice not available: {str(e)}")
+        raise FileNotFoundError(
+            "LibreOffice is not installed or not available in PATH. "
+        ) from e
+
 

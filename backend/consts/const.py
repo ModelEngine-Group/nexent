@@ -35,6 +35,19 @@ MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
+# Limit concurrent Office-to-PDF conversions
+MAX_CONCURRENT_CONVERSIONS = 5 
+
+# Supported Office file MIME types for preview conversion
+OFFICE_MIME_TYPES = [
+    'application/msword',  # .doc
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
+    'application/vnd.ms-excel',  # .xls
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+    'application/vnd.ms-powerpoint',  # .ppt
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'  # .pptx
+]
+
 
 # Supabase Configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL')

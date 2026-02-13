@@ -161,12 +161,48 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
     return response
 
 
-def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> int:
+def get_file_size(object_name: str, bucket: Optional[str] = None) -> int:
     """
     Get file size by object name
     """
     bucket = bucket or minio_client.storage_config.default_bucket
     return minio_client.get_file_size(object_name, bucket)
+
+
+def file_exists(object_name: str, bucket: Optional[str] = None) -> bool:
+    """
+    Check if a file exists in the bucket.
+    
+    Args:
+        object_name: Object name in storage
+        bucket: Bucket name, if not specified will use default bucket
+        
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    try:
+        return minio_client.file_exists(object_name, bucket)
+    except Exception:
+        return False
+
+
+def copy_file(source_object: str, dest_object: str, bucket: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Copy a file within the same bucket (atomic operation in MinIO).
+    
+    Args:
+        source_object: Source object name
+        dest_object: Destination object name
+        bucket: Bucket name, if not specified will use default bucket
+        
+    Returns:
+        Dict[str, Any]: Result containing success flag and error message (if any)
+    """
+    success, result = minio_client.copy_file(source_object, dest_object, bucket)
+    if success:
+        return {"success": True, "object_name": result}
+    else:
+        return {"success": False, "error": result}
 
 
 def list_files(prefix: str = "", bucket: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -269,6 +305,7 @@ def get_content_type(file_path: str) -> str:
                   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
                   '.txt': 'text/plain',
                   '.csv': 'text/csv',
+                  '.md': 'text/markdown',
                   '.html': 'text/html',
                   '.htm': 'text/html',
                   '.json': 'application/json',
