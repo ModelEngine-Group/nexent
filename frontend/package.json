@@ -43,7 +43,7 @@
     "react-dom": "18.2.0",
     "react-hook-form": "^7.54.1",
     "react-i18next": "^15.5.3",
-    "react-markdown": "^8.0.7",
+    "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.0",
     "rehype-katex": "^6.0.3",
     "rehype-raw": "^7.0.0",
