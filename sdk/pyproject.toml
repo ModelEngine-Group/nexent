@@ -73,7 +73,7 @@ performance = [
     # OpenTelemetry Core Components
     "opentelemetry-api==1.20.0",
     "opentelemetry-sdk==1.20.0",
-    "opentelemetry-semantic-conventions==0.41b0",
+    "opentelemetry-semantic-conventions==0.60b1",
     # OpenTelemetry Instrumentation
     "opentelemetry-instrumentation==0.41b0",
     "opentelemetry-instrumentation-fastapi==0.41b0",
