@@ -48,7 +48,7 @@
     "rehype-katex": "^6.0.3",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^3.0.1",
-    "remark-math": "^5.1.1",
+    "remark-math": "^6.0.0",
     "remark-rehype": "^11.1.0",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
