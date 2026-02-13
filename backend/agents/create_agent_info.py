@@ -15,7 +15,6 @@ from services.vectordatabase_service import (
     get_vector_db_core,
     get_embedding_model,
 )
-from services.tenant_config_service import get_selected_knowledge_list, build_knowledge_name_mapping
 from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_config_service import build_memory_context
 from services.image_service import get_vlm_model
@@ -146,20 +145,16 @@ async def create_agent_config(
     try:
         for tool in tool_list:
             if "KnowledgeBaseSearchTool" == tool.class_name:
-                knowledge_info_list = get_selected_knowledge_list(
-                    tenant_id=tenant_id, user_id=user_id)
-                if knowledge_info_list:
-                    for knowledge_info in knowledge_info_list:
-                        if knowledge_info.get('knowledge_sources') != 'elasticsearch':
-                            continue
-                        knowledge_name = knowledge_info.get("index_name")
+                index_names = tool.params.get("index_names")
+                if index_names:
+                    for index_name in index_names:
                         try:
-                            message = ElasticSearchService().get_summary(index_name=knowledge_name)
+                            message = ElasticSearchService().get_summary(index_name=index_name)
                             summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{knowledge_name}**: {summary}\n\n"
+                            knowledge_base_summary += f"**{index_name}**: {summary}\n\n"
                         except Exception as e:
                             logger.warning(
-                                f"Failed to get summary for knowledge base {knowledge_name}: {e}")
+                                f"Failed to get summary for knowledge base {index_name}: {e}")
                 else:
                     # TODO: Prompt should be refactored to yaml file
                     knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
@@ -238,24 +233,9 @@ async def create_tool_config_list(agent_id, tenant_id, user_id):
 
         # special logic for knowledge base search tool
         if tool_config.class_name == "KnowledgeBaseSearchTool":
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get(
-                "index_name") for knowledge_info in knowledge_info_list if knowledge_info.get('knowledge_sources') == 'elasticsearch']
-            tool_config.metadata = {
-                "index_names": index_names,
+           tool_config.metadata = {
                 "vdb_core": get_vector_db_core(),
                 "embedding_model": get_embedding_model(tenant_id=tenant_id),
-                "name_resolver": build_knowledge_name_mapping(tenant_id=tenant_id, user_id=user_id),
-            }
-        elif tool_config.class_name == "DataMateSearchTool":
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get(
-                "index_name") for knowledge_info in knowledge_info_list if
-                knowledge_info.get('knowledge_sources') == 'datamate']
-            tool_config.metadata = {
-                "index_names": index_names,
             }
         elif tool_config.class_name == "AnalyzeTextFileTool":
             tool_config.metadata = {

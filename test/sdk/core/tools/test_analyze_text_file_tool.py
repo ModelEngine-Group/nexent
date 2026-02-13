@@ -45,13 +45,29 @@ def observer_en():
 
 
 @pytest.fixture
-def tool(observer_zh, llm_model):
-    return AnalyzeTextFileTool(
+def http_client_manager(mocker):
+    """Fixture to mock http_client_manager for tests."""
+    mock = mocker.patch(
+        "sdk.nexent.core.tools.analyze_text_file_tool.http_client_manager"
+    )
+    mock_client = MagicMock()
+    mock.get_sync_client.return_value = mock_client
+    return mock, mock_client
+
+
+@pytest.fixture
+def tool(http_client_manager, observer_zh, llm_model):
+    """Fixture to create AnalyzeTextFileTool instance with mocked HTTP client."""
+    mock_manager, mock_client = http_client_manager
+    tool_instance = AnalyzeTextFileTool(
         storage_client=MagicMock(),
         observer=observer_zh,
         data_process_service_url="http://data-process",
         llm_model=llm_model,
     )
+    # Store the mock client for tests to use
+    tool_instance._mock_http_client = mock_client
+    return tool_instance
 
 
 class TestAnalyzeTextFileTool:
@@ -95,48 +111,30 @@ class TestAnalyzeTextFileTool:
 
         assert result == ["LLM failed"]
 
-    @patch("sdk.nexent.core.tools.analyze_text_file_tool.httpx.Client")
-    def test_process_text_file_success(self, mock_client_cls, tool):
+    def test_process_text_file_success(self, tool):
         mock_response = MagicMock(status_code=200)
         mock_response.json.return_value = {"text": "converted"}
-        mock_http_client = MagicMock()
-        mock_http_client.post.return_value = mock_response
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__.return_value = mock_http_client
-        mock_ctx.__exit__.return_value = False
-        mock_client_cls.return_value = mock_ctx
+        tool._mock_http_client.post.return_value = mock_response
 
         result = tool.process_text_file("doc.txt", b"bytes")
 
         assert result == "converted"
-        mock_http_client.post.assert_called_once()
+        tool._mock_http_client.post.assert_called_once()
 
-    @patch("sdk.nexent.core.tools.analyze_text_file_tool.httpx.Client")
-    def test_process_text_file_http_error_json_detail(self, mock_client_cls, tool):
+    def test_process_text_file_http_error_json_detail(self, tool):
         mock_response = MagicMock(status_code=400)
         mock_response.headers = {"content-type": "application/json"}
         mock_response.json.return_value = {"detail": "bad request"}
-        mock_http_client = MagicMock()
-        mock_http_client.post.return_value = mock_response
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__.return_value = mock_http_client
-        mock_ctx.__exit__.return_value = False
-        mock_client_cls.return_value = mock_ctx
+        tool._mock_http_client.post.return_value = mock_response
 
         with pytest.raises(Exception, match="bad request"):
             tool.process_text_file("doc.txt", b"bytes")
 
-    @patch("sdk.nexent.core.tools.analyze_text_file_tool.httpx.Client")
-    def test_process_text_file_http_error_plain_text(self, mock_client_cls, tool):
+    def test_process_text_file_http_error_plain_text(self, tool):
         mock_response = MagicMock(status_code=500)
         mock_response.headers = {}
         mock_response.text = "server exploded"
-        mock_http_client = MagicMock()
-        mock_http_client.post.return_value = mock_response
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__.return_value = mock_http_client
-        mock_ctx.__exit__.return_value = False
-        mock_client_cls.return_value = mock_ctx
+        tool._mock_http_client.post.return_value = mock_response
 
         with pytest.raises(Exception, match="server exploded"):
             tool.process_text_file("doc.txt", b"bytes")

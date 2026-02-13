@@ -24,6 +24,7 @@ sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['services'] = MagicMock()
 sys.modules['services.invitation_service'] = MagicMock()
 sys.modules['services.group_service'] = MagicMock()
+sys.modules['services.tool_configuration_service'] = MagicMock()
 
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 
@@ -51,9 +52,9 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         signin_user,
         refresh_user_token,
         get_session_by_authorization,
-        revoke_regular_user,
         get_user_info,
-        format_role_permissions
+        format_role_permissions,
+        init_tool_list_for_tenant
     )
 
 # Functions to test
@@ -483,13 +484,15 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.user_management_service.aiohttp.ClientSession')
     async def test_health_check_general_exception(self, mock_session_cls):
         """Test health check with general exception"""
-        mock_session_cls.side_effect = Exception("General error")
+        mock_session_cls.side_effect = Exception(
+            "General Function should raise the error")
 
-        # Function should raise the original exception
+        # original exception is raised as-is
         with self.assertRaises(Exception) as context:
             await check_auth_service_health()
 
-        self.assertIn("General error", str(context.exception))
+        self.assertIn("General Function should raise the error",
+                      str(context.exception))
 
     @patch.dict(os.environ, {'SUPABASE_URL': 'http://test.supabase.co', 'SUPABASE_KEY': 'test-key'})
     async def test_health_check_empty_data_dict(self):
@@ -552,13 +555,17 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_get_client.return_value = mock_client
         mock_parse_response.return_value = {"user": "data"}
 
-        result = await signup_user("test@example.com", "password123")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user("test@example.com", "password123")
 
-        self.assertEqual(result, {"user": "data"})
-        mock_verify_code.assert_not_called()
-        mock_generate_tts.assert_not_called()
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="test@example.com")
-        mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            self.assertEqual(result, {"user": "data"})
+            mock_verify_code.assert_not_called()
+            mock_generate_tts.assert_not_called()
+            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="test@example.com")
+            mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            # Verify init_tool_list_for_tenant was called for new tenant
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.parse_supabase_response')
     @patch('backend.services.user_management_service.insert_user_tenant')
@@ -575,11 +582,15 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         mock_get_client.return_value = mock_client
         mock_parse_response.return_value = {"user": "data"}
 
-        result = await signup_user("user@example.com", "password123")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user("user@example.com", "password123")
 
-        self.assertEqual(result, {"user": "data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="user@example.com")
-        mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            self.assertEqual(result, {"user": "data"})
+            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="user@example.com")
+            mock_parse_response.assert_called_once_with(False, mock_response, "user")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.get_supabase_client')
     async def test_signup_user_no_user_returned(self, mock_get_client):
@@ -636,16 +647,20 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             {"group_id": 3, "user_id": "user-123", "already_member": False}
         ]
 
-        result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user_with_invitation("admin@example.com", "password123", invite_code="ADMIN123")
 
-        # Verify generate_tts_stt_4_admin was called for admin user
-        mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
+            # Verify generate_tts_stt_4_admin was called for admin user
+            mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
 
-        self.assertEqual(result, {"user": "admin_data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
-        mock_use_invite.assert_called_once_with("ADMIN123", "user-123")
-        mock_add_groups.assert_called_once_with("user-123", [1, 2, 3], "user-123")
-        mock_parse_response.assert_called_once_with(False, mock_response, "ADMIN")
+            self.assertEqual(result, {"user": "admin_data"})
+            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
+            mock_use_invite.assert_called_once_with("ADMIN123", "user-123")
+            mock_add_groups.assert_called_once_with("user-123", [1, 2, 3], "user-123")
+            mock_parse_response.assert_called_once_with(False, mock_response, "ADMIN")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')
@@ -686,13 +701,17 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             {"group_id": 5, "user_id": "user-456", "already_member": False}
         ]
 
-        result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
+        # Mock init_tool_list_for_tenant as async function
+        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
+            result = await signup_user_with_invitation("dev@example.com", "password123", invite_code="DEV456")
 
-        self.assertEqual(result, {"user": "dev_data"})
-        mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
-        mock_use_invite.assert_called_once_with("DEV456", "user-456")
-        mock_add_groups.assert_called_once_with("user-456", [4, 5], "user-456")
-        mock_parse_response.assert_called_once_with(False, mock_response, "DEV")
+            self.assertEqual(result, {"user": "dev_data"})
+            mock_insert_tenant.assert_called_once_with(user_id="user-456", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
+            mock_use_invite.assert_called_once_with("DEV456", "user-456")
+            mock_add_groups.assert_called_once_with("user-456", [4, 5], "user-456")
+            mock_parse_response.assert_called_once_with(False, mock_response, "DEV")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-456")
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -723,7 +742,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
              patch('backend.services.user_management_service.insert_user_tenant'), \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
-             patch('backend.services.user_management_service.use_invitation_code'):
+             patch('backend.services.user_management_service.use_invitation_code'), \
+             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
 
             mock_user = MagicMock()
             mock_user.id = "user-123"
@@ -740,6 +760,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             # Verify the code was converted to uppercase in the check
             mock_check_available.assert_called_with("LOWERCASE")
             mock_get_invite_code.assert_called_with("LOWERCASE")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -771,7 +793,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
              patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
              patch('backend.services.user_management_service.use_invitation_code'), \
-             patch('backend.services.user_management_service.generate_tts_stt_4_admin') as mock_generate_tts:
+             patch('backend.services.user_management_service.generate_tts_stt_4_admin') as mock_generate_tts, \
+             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
 
             mock_user = MagicMock()
             mock_user.id = "user-123"
@@ -788,6 +811,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="ADMIN", user_email="admin@example.com")
             mock_generate_tts.assert_called_once_with("tenant_id", "user-123")
             mock_parse.assert_called_with(False, mock_response, "ADMIN")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.get_invitation_by_code')
     @patch('backend.services.user_management_service.check_invitation_available')
@@ -805,7 +830,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
         with patch('backend.services.user_management_service.get_supabase_client') as mock_get_client, \
              patch('backend.services.user_management_service.insert_user_tenant') as mock_insert_tenant, \
              patch('backend.services.user_management_service.parse_supabase_response') as mock_parse, \
-             patch('backend.services.user_management_service.use_invitation_code'):
+             patch('backend.services.user_management_service.use_invitation_code'), \
+             patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
 
             mock_user = MagicMock()
             mock_user.id = "user-123"
@@ -821,6 +847,8 @@ class TestSignupUser(unittest.IsolatedAsyncioTestCase):
             # Verify DEV role was assigned and TTS/STT generation was NOT called
             mock_insert_tenant.assert_called_with(user_id="user-123", tenant_id="tenant_id", user_role="DEV", user_email="dev@example.com")
             mock_parse.assert_called_with(False, mock_response, "DEV")
+            # Verify init_tool_list_for_tenant was called
+            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
 
     @patch('backend.services.user_management_service.check_invitation_available')
     async def test_signup_user_with_invite_code_validation_exception_conversion(self, mock_check_available):
@@ -1117,70 +1145,6 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(context.exception), "Session is invalid or expired")
 
 
-class TestRevokeRegularUser(unittest.IsolatedAsyncioTestCase):
-    """Tests for revoke_regular_user orchestration"""
-
-    @patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_conversations_by_user')
-    @patch('backend.services.user_management_service.build_memory_config')
-    @patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock)
-    @patch('backend.services.user_management_service.get_supabase_admin_client')
-    async def test_revoke_regular_user_happy_path(self, mock_get_admin, mock_clear, mock_build, mock_soft_conv, mock_soft_cfg, mock_soft_ut):
-        mock_admin = MagicMock()
-        mock_admin.auth.admin.delete_user = MagicMock()
-        mock_get_admin.return_value = mock_admin
-
-        await revoke_regular_user("u1", "t1")
-
-        mock_soft_ut.assert_called_once_with("u1", actor="u1")
-        mock_soft_cfg.assert_called_once_with("u1", actor="u1")
-        mock_soft_conv.assert_called_once_with("u1")
-        mock_build.assert_called_once_with("t1")
-        # clear_memory called for user and user_agent
-        assert mock_clear.await_count == 2
-        mock_get_admin.assert_called_once()
-        mock_admin.auth.admin.delete_user.assert_called_once_with("u1")
-
-    @patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id', side_effect=Exception("db"))
-    @patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id', side_effect=Exception("db"))
-    @patch('backend.services.user_management_service.soft_delete_all_conversations_by_user', side_effect=Exception("db"))
-    @patch('backend.services.user_management_service.build_memory_config', side_effect=Exception("cfg"))
-    @patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock)
-    @patch('backend.services.user_management_service.get_supabase_admin_client', side_effect=Exception("admin"))
-    async def test_revoke_regular_user_best_effort(self, *_):
-        # Should not raise even if all steps fail; function swallows errors for idempotency
-        await revoke_regular_user("u1", "t1")
-
-    @patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id')
-    @patch('backend.services.user_management_service.soft_delete_all_conversations_by_user')
-    @patch('backend.services.user_management_service.build_memory_config')
-    @patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock)
-    @patch('backend.services.user_management_service.get_supabase_admin_client')
-    async def test_revoke_regular_user_admin_client_unavailable(self, mock_get_admin, *_):
-        """Cover lines 371-372: admin client None or missing .auth.admin"""
-        # Return an object without auth.admin; should trigger RuntimeError branch and be logged
-        class NoAdmin:
-            pass
-        mock_get_admin.return_value = NoAdmin()
-
-        await revoke_regular_user("u1", "t1")
-        # No exception should escape
-
-    @patch('backend.services.user_management_service.logging.info', side_effect=Exception("log_fail"))
-    async def test_revoke_regular_user_outer_exception_swallowed(self, _mock_log):
-        """Cover lines 378-381: unexpected outer exception is swallowed"""
-        # Make earlier steps no-op by patching called functions to simple stubs
-        with patch('backend.services.user_management_service.soft_delete_user_tenant_by_user_id'), \
-                patch('backend.services.user_management_service.soft_delete_all_configs_by_user_id'), \
-                patch('backend.services.user_management_service.soft_delete_all_conversations_by_user'), \
-                patch('backend.services.user_management_service.build_memory_config', return_value={}), \
-                patch('backend.services.user_management_service.clear_memory', new_callable=AsyncMock):
-            # Should not raise despite logging.info raising, ensuring outer try/except is covered
-            await revoke_regular_user("u1", "t1")
-
-
 class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
     """Test get_user_info function"""
 
@@ -1194,7 +1158,8 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
         # Setup mocks
         mock_get_user_tenant.return_value = {
             "tenant_id": "test_tenant",
-            "user_role": "ADMIN"
+            "user_role": "ADMIN",
+            "user_email": "test@example.com"
         }
         mock_query_group_ids.return_value = [1, 2, 3]
 
@@ -1229,6 +1194,7 @@ class TestGetUserInfo(unittest.IsolatedAsyncioTestCase):
         assert result["user"]["user_id"] == "test_user"
         assert result["user"]["group_ids"] == [1, 2, 3]
         assert result["user"]["tenant_id"] == "test_tenant"
+        assert result["user"]["user_email"] == "test@example.com"
         assert result["user"]["user_role"] == "ADMIN"
         assert result["user"]["permissions"] == ["agent:create"]
         assert result["user"]["accessibleRoutes"] == ["chat"]

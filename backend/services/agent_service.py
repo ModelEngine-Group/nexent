@@ -15,7 +15,9 @@ from jinja2 import Template
 from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
-from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
+from services.agent_version_service import publish_version_impl
+from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
+    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
 from consts.exceptions import MemoryPreparationException
 from consts.model import (
     AgentInfoRequest,
@@ -52,9 +54,11 @@ from database.tool_db import (
     query_all_enabled_tool_instances,
     query_all_tools,
     query_tool_instances_by_id,
+    query_tool_instances_by_agent_id,
     search_tools_for_sub_agent
 )
 from database.group_db import query_group_ids_by_user
+from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import save_conversation_assistant, save_conversation_user
 from services.memory_config_service import build_memory_context
@@ -704,9 +708,9 @@ async def get_creating_sub_agent_id_service(tenant_id: str, user_id: str = None)
         return create_agent(agent_info={"enabled": False}, tenant_id=tenant_id, user_id=user_id)["agent_id"]
 
 
-async def get_agent_info_impl(agent_id: int, tenant_id: str):
+async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0):
     try:
-        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id)
+        agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
@@ -824,7 +828,7 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             agent_id = created["agent_id"]
         else:
             # Update agent
-            update_agent(agent_id, request, tenant_id, user_id)
+            update_agent(agent_id, request, user_id)
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
@@ -833,23 +837,40 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     try:
         if request.enabled_tool_ids is not None and agent_id is not None:
             enabled_set = set(request.enabled_tool_ids)
-            # Get all tools for current tenant
-            all_tools = query_all_tools(tenant_id=tenant_id)
-            for tool in all_tools:
-                tool_id = tool.get("tool_id")
-                if tool_id is None:
-                    continue
+            # Query existing tool instances for this agent
+            existing_instances = query_tool_instances_by_agent_id(
+                agent_id, tenant_id)
+
+            # Handle unselected tool（already exist instance）→ enabled=False
+            for instance in existing_instances:
+                inst_tool_id = instance.get("tool_id")
+                if inst_tool_id is not None and inst_tool_id not in enabled_set:
+                    create_or_update_tool_by_tool_info(
+                        tool_info=ToolInstanceInfoRequest(
+                            tool_id=inst_tool_id,
+                            agent_id=agent_id,
+                            params=instance.get("params", {}),
+                            enabled=False
+                        ),
+                        tenant_id=tenant_id,
+                        user_id=user_id
+                    )
+
+            # Handle selected tool → enabled=True（create or update）
+            for tool_id in enabled_set:
                 # Keep existing params if any
-                existing_instance = query_tool_instances_by_id(
-                    agent_id, tool_id, tenant_id)
-                params = (existing_instance or {}).get(
-                    "params", {}) if existing_instance else {}
+                existing_instance = next(
+                    (inst for inst in existing_instances
+                     if inst.get("tool_id") == tool_id),
+                    None
+                )
+                params = (existing_instance or {}).get("params", {})
                 create_or_update_tool_by_tool_info(
                     tool_info=ToolInstanceInfoRequest(
                         tool_id=tool_id,
                         agent_id=agent_id,
                         params=params,
-                        enabled=(tool_id in enabled_set)
+                        enabled=True,
                     ),
                     tenant_id=tenant_id,
                     user_id=user_id
@@ -895,9 +916,15 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     return {"agent_id": agent_id}
 
 
-async def delete_agent_impl(agent_id: int, authorization: str = Header(None)):
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
+    """
+    Delete an agent and all related data.
 
+    Args:
+        agent_id: Agent ID to delete
+        tenant_id: Tenant ID
+        user_id: User ID performing the deletion
+    """
     try:
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
@@ -1210,6 +1237,17 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
+    # Auto-publish initial version v1 for market-imported agents
+    try:
+        publish_version_impl(
+            agent_id=new_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_name="v1",
+            release_note="Initial version from Agent Market"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 
@@ -1244,12 +1282,13 @@ async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str)
 
 
 
-async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
+async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
     """
     list all agent info
 
     Args:
         tenant_id (str): tenant id
+        user_id (str): user id (used for permission calculation and filtering)
 
     Raises:
         ValueError: failed to query all agent info
@@ -1258,6 +1297,22 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
         list: list of agent info
     """
     try:
+        user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
+        user_role = str(user_tenant_record.get("user_role") or "").upper()
+
+        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+
+        # For DEV/USER, restrict visible agents to those whose group_ids overlap user's groups.
+        user_group_ids: set[int] = set()
+        if not can_edit_all:
+            try:
+                user_group_ids = set(query_group_ids_by_user(user_id) or [])
+            except Exception as e:
+                logger.warning(
+                    f"Failed to query user group ids for filtering: user_id={user_id}, err={str(e)}"
+                )
+                user_group_ids = set()
+
         agent_list = query_all_agent_info_by_tenant_id(tenant_id=tenant_id)
 
         model_cache: Dict[int, Optional[dict]] = {}
@@ -1266,6 +1321,12 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
         for agent in agent_list:
             if not agent["enabled"]:
                 continue
+
+            # Apply visibility filter for DEV/USER based on group overlap
+            if not can_edit_all:
+                agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
+                if len(user_group_ids.intersection(agent_group_ids)) == 0:
+                    continue
 
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(
@@ -1297,6 +1358,8 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
                     model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
                 model_info = model_cache.get(model_id)
 
+            permission = PERMISSION_EDIT if can_edit_all or str(agent.get("created_by")) == str(user_id) else PERMISSION_READ
+
             simple_agent_list.append({
                 "agent_id": agent["agent_id"],
                 "name": agent["name"] if agent["name"] else agent["display_name"],
@@ -1309,7 +1372,9 @@ async def list_all_agent_info_impl(tenant_id: str) -> list[dict]:
                 "is_available": len(unavailable_reasons) == 0,
                 "unavailable_reasons": unavailable_reasons,
                 "is_new": agent.get("is_new", False),
-                "group_ids": convert_string_to_list(agent.get("group_ids"))
+                "group_ids": convert_string_to_list(agent.get("group_ids")),
+                "permission": permission,
+                "is_published": agent.get("current_version_no") is not None,
             })
 
         return simple_agent_list

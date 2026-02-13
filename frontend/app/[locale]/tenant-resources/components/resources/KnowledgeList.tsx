@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Popconfirm, message, Button, Modal, Form, Select, Tag, Input } from "antd";
+import { Table, Popconfirm, message, Button, Modal, Tag } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Edit, Trash2, BookOpen } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -10,6 +10,7 @@ import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { type KnowledgeBase } from "@/types/knowledgeBase";
+import { KnowledgeBaseEditModal } from "../../../knowledges/components/knowledge/KnowledgeBaseEditModal";
 
 export default function KnowledgeList({
   tenantId,
@@ -29,7 +30,6 @@ export default function KnowledgeList({
   const [summaryModalVisible, setSummaryModalVisible] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryContent, setSummaryContent] = useState<string>("");
-  const [form] = Form.useForm();
 
   // Create group name mapping
   const groupNameMap = useMemo(() => {
@@ -58,35 +58,7 @@ export default function KnowledgeList({
 
   const openEdit = (knowledge: KnowledgeBase) => {
     setEditingKnowledge(knowledge);
-    form.setFieldsValue({
-      knowledge_name: knowledge.name,
-      ingroup_permission: knowledge.ingroup_permission || "READ_ONLY",
-      group_ids: knowledge.group_ids || [],
-    });
     setModalVisible(true);
-  };
-
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-
-      if (!editingKnowledge) return;
-
-      await knowledgeBaseService.updateKnowledgeBase(editingKnowledge.id, {
-        knowledge_name: values.knowledge_name,
-        ingroup_permission: values.ingroup_permission,
-        group_ids: values.group_ids,
-      });
-
-      message.success(t("tenantResources.knowledgeBase.updated"));
-      setModalVisible(false);
-      refetch();
-    } catch (error: any) {
-      if (error.errorFields) {
-        return; // Form validation error
-      }
-      message.error(error.message || t("tenantResources.knowledgeBase.updateFailed"));
-    }
   };
 
   const openEditSummary = async (knowledge: KnowledgeBase) => {
@@ -124,6 +96,12 @@ export default function KnowledgeList({
   const formatStoreSize = (size: string | null | undefined) => {
     if (!size) return "-";
     return size;
+  };
+
+  // Check if knowledge base is from external source (not Nexent)
+  const isExternalSource = (record: KnowledgeBase) => {
+    const source = record.source || record.knowledge_sources;
+    return source && source !== "nexent" && source !== "elasticsearch";
   };
 
   const columns: ColumnsType<KnowledgeBase> = [
@@ -227,45 +205,56 @@ export default function KnowledgeList({
       key: "actions",
       width: 140,
       fixed: "right",
-      render: (_, record: KnowledgeBase) => (
-        <div className="flex items-center space-x-2">
-          <Tooltip title={t("common.edit")}>
-            <Button
-              type="text"
-              icon={<Edit className="h-4 w-4" />}
-              onClick={() => openEdit(record)}
-              size="small"
-            />
-          </Tooltip>
-          <Tooltip title={t("tenantResources.knowledgeBase.viewSummary")}>
-            <Button
-              type="text"
-              icon={<BookOpen className="h-4 w-4" />}
-              onClick={() => openEditSummary(record)}
-              size="small"
-            />
-          </Tooltip>
-          <Popconfirm
-            title={t("knowledgeBase.modal.deleteConfirm.title")}
-            description={t("common.cannotBeUndone")}
-            onConfirm={() => handleDelete(record.id)}
-          >
-            <Tooltip title={t("common.delete")}>
+      render: (_, record: KnowledgeBase) => {
+        if (isExternalSource(record)) {
+          return (
+            <span className="text-gray-400 text-sm">
+              {t("tenantResources.knowledgeBase.externalSourceDisabled")}
+            </span>
+          );
+        }
+        return (
+          <div className="flex items-center space-x-2">
+            <Tooltip title={t("common.edit")}>
               <Button
                 type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
+                icon={<Edit className="h-4 w-4" />}
+                onClick={() => openEdit(record)}
                 size="small"
               />
             </Tooltip>
-          </Popconfirm>
-        </div>
-      ),
+            <Tooltip title={t("tenantResources.knowledgeBase.viewSummary")}>
+              <Button
+                type="text"
+                icon={<BookOpen className="h-4 w-4" />}
+                onClick={() => openEditSummary(record)}
+                size="small"
+              />
+            </Tooltip>
+            <Popconfirm
+              title={t("knowledgeBase.modal.deleteConfirm.title")}
+              description={t("common.cannotBeUndone")}
+              onConfirm={() => handleDelete(record.id)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
+            >
+              <Tooltip title={t("common.delete")}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                />
+              </Tooltip>
+            </Popconfirm>
+          </div>
+        );
+      },
     },
   ];
 
   return (
-    <>
+    <div className="h-full flex flex-col overflow-hidden">
       <Table
         columns={columns}
         dataSource={knowledgeBases}
@@ -273,54 +262,17 @@ export default function KnowledgeList({
         rowKey="id"
         pagination={{ pageSize: 10 }}
         scroll={{ x: 1400 }}
+        className="flex-1"
       />
 
-      <Modal
-        title={t("tenantResources.knowledgeBase.edit")}
+      {/* Edit Knowledge Base Modal */}
+      <KnowledgeBaseEditModal
         open={modalVisible}
-        onOk={handleSubmit}
+        knowledgeBase={editingKnowledge}
+        tenantId={tenantId}
         onCancel={() => setModalVisible(false)}
-        okText={t("common.confirm")}
-        cancelText={t("common.cancel")}
-        width={500}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="knowledge_name"
-            label={t("common.name")}
-            rules={[
-              { required: true, message: t("tenantResources.knowledgeBase.nameRequired") },
-            ]}
-          >
-            <Input placeholder={t("tenantResources.knowledgeBase.enterName")} />
-          </Form.Item>
-
-          <Form.Item
-            name="ingroup_permission"
-            label={t("tenantResources.knowledgeBase.permission")}
-            rules={[
-              { required: true, message: t("tenantResources.knowledgeBase.permissionRequired") },
-            ]}
-          >
-            <Select placeholder={t("tenantResources.knowledgeBase.permission")}>
-              <Select.Option value="EDIT">{t("tenantResources.knowledgeBase.permission.EDIT")}</Select.Option>
-              <Select.Option value="READ_ONLY">{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</Select.Option>
-              <Select.Option value="PRIVATE">{t("tenantResources.knowledgeBase.permission.PRIVATE")}</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item name="group_ids" label={t("tenantResources.knowledgeBase.groupNames")}>
-            <Select
-              mode="multiple"
-              placeholder={t("tenantResources.knowledgeBase.groupNames")}
-              options={groups.map((group) => ({
-                label: group.group_name,
-                value: group.group_id,
-              }))}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onSuccess={() => refetch()}
+      />
 
       <Modal
         title={t("tenantResources.knowledgeBase.viewSummary")}
@@ -342,6 +294,6 @@ export default function KnowledgeList({
           <div className="text-gray-400 italic">{t("tenantResources.knowledgeBase.noSummary")}</div>
         )}
       </Modal>
-    </>
+    </div>
   );
 }

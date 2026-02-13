@@ -820,8 +820,11 @@ export default function AgentImportWizard({
         ),
         okText: t("market.install.warning.continue", "Continue Anyway"),
         cancelText: t("market.install.warning.goBack", "Go Back to Configure"),
+        cancelButtonProps: {
+          type: "primary",
+        },
         okButtonProps: {
-          className: "bg-blue-600 hover:bg-blue-700 border-blue-600 hover:border-blue-700 text-white",
+          type: "default",
         },
         onOk: async () => {
           await performImport();
@@ -879,6 +882,10 @@ export default function AgentImportWizard({
     // Clone agent data structure
     const agentJson = JSON.parse(JSON.stringify(initialData));
 
+    // Preserve business logic model fields from initial data (passed from market)
+    const preservedBusinessLogicModelId = initialData.business_logic_model_id;
+    const preservedBusinessLogicModelName = initialData.business_logic_model_name;
+
     // Update all agents' name/display_name if renamed
     Object.entries(agentNameConflicts).forEach(([agentKey, conflict]) => {
       if (agentJson.agent_info[agentKey]) {
@@ -897,10 +904,6 @@ export default function AgentImportWizard({
       Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
         agentInfo.model_id = selectedModelId;
         agentInfo.model_name = selectedModelName;
-
-        // Clear business logic model fields
-        agentInfo.business_logic_model_id = null;
-        agentInfo.business_logic_model_name = null;
       });
     } else {
       // Individual mode: apply models to all agents
@@ -909,13 +912,15 @@ export default function AgentImportWizard({
         if (modelSelection && modelSelection.modelId && modelSelection.modelName) {
           agentInfo.model_id = modelSelection.modelId;
           agentInfo.model_name = modelSelection.modelName;
-
-          // Clear business logic model fields
-          agentInfo.business_logic_model_id = null;
-          agentInfo.business_logic_model_name = null;
         }
       });
     }
+
+    // Apply business logic model fields to all agents
+    Object.values(agentJson.agent_info).forEach((agentInfo: any) => {
+      agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
+      agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
+    });
 
     // Update config fields for all agents (main + sub-agents)
     configFields.forEach(field => {

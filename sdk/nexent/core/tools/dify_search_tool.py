@@ -8,6 +8,7 @@ from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ...utils.http_client_manager import http_client_manager
 
 
 # Get logger instance
@@ -34,7 +35,7 @@ class DifySearchTool(Tool):
 
     def __init__(
         self,
-        server_url: str = Field(description="Dify API base URL"),
+        server_url: str = Field(description="Dify API base URL. (e.g., 'https://api.dify.ai/v1')"),
         api_key: str = Field(description="Dify API key with Bearer token"),
         dataset_ids: str = Field(
             description="JSON string array of Dify dataset IDs"),
@@ -69,25 +70,36 @@ class DifySearchTool(Tool):
             raise ValueError(
                 "api_key is required and must be a non-empty string")
 
-        # Parse and validate dataset_ids from JSON string
-        if not dataset_ids or not isinstance(dataset_ids, str):
+        # Parse and validate dataset_ids from string or list
+        if not dataset_ids:
             raise ValueError(
-                "dataset_ids is required and must be a non-empty JSON string array")
+                "dataset_ids is required and must be a non-empty JSON string array or list")
         try:
-            parsed_ids = json.loads(dataset_ids)
+            # Handle both JSON string array and plain list
+            if isinstance(dataset_ids, str):
+                parsed_ids = json.loads(dataset_ids)
+            else:
+                parsed_ids = dataset_ids
             if not isinstance(parsed_ids, list) or not parsed_ids:
                 raise ValueError(
-                    "dataset_ids must be a non-empty JSON array of strings")
+                    "dataset_ids must be a non-empty array of strings")
             self.dataset_ids = [str(item) for item in parsed_ids]
         except (json.JSONDecodeError, TypeError) as e:
             raise ValueError(
-                f"dataset_ids must be a valid JSON string array: {str(e)}")
+                f"dataset_ids must be a valid JSON string array or list: {str(e)}")
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
         self.top_k = top_k
         self.search_method = search_method
         self.observer = observer
+
+        # Cache HTTP client for reuse (uses shared HttpClientManager internally)
+        self._http_client = http_client_manager.get_sync_client(
+            base_url=self.server_url,
+            timeout=30.0,
+            verify_ssl=True
+        )
 
         self.record_ops = 1  # To record serial number
         self.running_prompt_zh = "Dify知识库检索中..."
@@ -220,12 +232,12 @@ class DifySearchTool(Tool):
         }
 
         try:
-            with httpx.Client(timeout=30) as client:
-                response = client.get(url, headers=headers)
-                response.raise_for_status()
+            # Use cached HTTP client for requests
+            response = self._http_client.get(url, headers=headers)
+            response.raise_for_status()
 
-                result = response.json()
-                return result.get("download_url", "")
+            result = response.json()
+            return result.get("download_url", "")
 
         except httpx.RequestError as e:
             logger.warning(
@@ -302,18 +314,19 @@ class DifySearchTool(Tool):
         }
 
         try:
-            with httpx.Client(timeout=30) as client:
-                response = client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
+            # Use cached HTTP client for requests
+            response = self._http_client.post(
+                url, headers=headers, json=payload)
+            response.raise_for_status()
 
-                result = response.json()
+            result = response.json()
 
-                # Validate that required keys are present
-                if "records" not in result:
-                    raise Exception(
-                        "Unexpected Dify API response format: missing 'records' key")
+            # Validate that required keys are present
+            if "records" not in result:
+                raise Exception(
+                    "Unexpected Dify API response format: missing 'records' key")
 
-                return result
+            return result
 
         except httpx.RequestError as e:
             raise Exception(f"Dify API request failed: {str(e)}")

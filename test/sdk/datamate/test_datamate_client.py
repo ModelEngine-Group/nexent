@@ -2,17 +2,28 @@ import pytest
 from unittest.mock import MagicMock
 
 import httpx
-from pytest_mock import MockFixture
+from pytest_mock import MockerFixture
 
 from sdk.nexent.datamate.datamate_client import DataMateClient
 
 
 @pytest.fixture
 def client() -> DataMateClient:
-    return DataMateClient(base_url="http://datamate.local:30000", timeout=1.0)
+    """
+    Create a DataMateClient with a mocked HTTP client.
+
+    The HTTP client is mocked at initialization to ensure tests can properly
+    mock responses without dealing with cached client references.
+    """
+    mock_http_client = MagicMock()
+    client_instance = DataMateClient(base_url="http://datamate.local:30000", timeout=1.0)
+    # Replace the cached HTTP client with a mock for testing
+    client_instance._http_client = mock_http_client
+    return client_instance
 
 
-def _mock_response(mocker: MockFixture, status: int, json_data=None, text: str = ""):
+def _create_mock_response(status: int, json_data=None, text: str = ""):
+    """Create a mock HTTP response for testing."""
     response = MagicMock()
     response.status_code = status
     response.headers = {"content-type": "application/json"} if json_data is not None else {"content-type": "text/plain"}
@@ -22,99 +33,72 @@ def _mock_response(mocker: MockFixture, status: int, json_data=None, text: str =
 
 
 class TestListKnowledgeBases:
-    def test_success(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(
-            mocker,
-            200,
-            {"data": {"content": [{"id": "kb1"}, {"id": "kb2"}]}},
-        )
+    def test_success(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"content": [{"id": "kb1"}, {"id": "kb2"}]}})
+        client._http_client.post.return_value = mock_response
 
         kbs = client.list_knowledge_bases(page=1, size=10, authorization="token")
 
         assert len(kbs) == 2
-        http_client.post.assert_called_once_with(
+        client._http_client.post.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/list",
             json={"page": 1, "size": 10},
             headers={"Authorization": "token"},
+            timeout=client.timeout,
         )
 
-    def test_non_200_json_error(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(
-            mocker,
-            500,
-            {"detail": "boom"},
-        )
+    def test_non_200_json_error(self, client: DataMateClient):
+        mock_response = _create_mock_response(500, {"detail": "boom"})
+        client._http_client.post.return_value = mock_response
 
         with pytest.raises(RuntimeError) as excinfo:
             client.list_knowledge_bases()
         assert "Failed to fetch DataMate knowledge bases" in str(excinfo.value)
 
-    def test_http_error(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.side_effect = httpx.HTTPError("network")
+    def test_http_error(self, client: DataMateClient):
+        client._http_client.post.side_effect = httpx.HTTPError("network")
 
         with pytest.raises(RuntimeError):
             client.list_knowledge_bases()
 
 
 class TestGetKnowledgeBaseFiles:
-    def test_success(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker,
-            200,
-            {"data": {"content": [{"id": "f1"}, {"id": "f2"}]}},
-        )
+    def test_success(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"content": [{"id": "f1"}, {"id": "f2"}]}})
+        client._http_client.get.return_value = mock_response
 
         files = client.get_knowledge_base_files("kb1")
 
         assert len(files) == 2
-        http_client.get.assert_called_once_with(
+        client._http_client.get.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/kb1/files",
             headers={},
+            timeout=client.timeout,
         )
 
-    def test_non_200(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker,
-            404,
-            {"detail": "not found"},
-        )
+    def test_non_200(self, client: DataMateClient):
+        mock_response = _create_mock_response(404, {"detail": "not found"})
+        client._http_client.get.return_value = mock_response
 
         with pytest.raises(RuntimeError):
             client.get_knowledge_base_files("kb1")
 
-    def test_http_error(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.side_effect = httpx.HTTPError("network")
+    def test_http_error(self, client: DataMateClient):
+        client._http_client.get.side_effect = httpx.HTTPError("network")
 
         with pytest.raises(RuntimeError):
             client.get_knowledge_base_files("kb1")
 
 
 class TestRetrieveKnowledgeBase:
-    def test_success(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(
-            mocker,
-            200,
-            {"data": [{"entity": {"id": "1"}}, {"entity": {"id": "2"}}]},
-        )
+    def test_success(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": [{"entity": {"id": "1"}}, {"entity": {"id": "2"}}]})
+        client._http_client.post.return_value = mock_response
 
         results = client.retrieve_knowledge_base("q", ["kb1"], top_k=5, threshold=0.1, authorization="auth")
 
         assert len(results) == 2
-        http_client.post.assert_called_once_with(
+        client._http_client.post.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/retrieve",
             json={
                 "query": "q",
@@ -123,24 +107,18 @@ class TestRetrieveKnowledgeBase:
                 "knowledgeBaseIds": ["kb1"],
             },
             headers={"Authorization": "auth"},
+            timeout=client.timeout * 2,
         )
 
-    def test_non_200(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(
-            mocker,
-            500,
-            {"detail": "error"},
-        )
+    def test_non_200(self, client: DataMateClient):
+        mock_response = _create_mock_response(500, {"detail": "error"})
+        client._http_client.post.return_value = mock_response
 
         with pytest.raises(RuntimeError):
             client.retrieve_knowledge_base("q", ["kb1"])
 
-    def test_http_error(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.side_effect = httpx.HTTPError("network")
+    def test_http_error(self, client: DataMateClient):
+        client._http_client.post.side_effect = httpx.HTTPError("network")
 
         with pytest.raises(RuntimeError):
             client.retrieve_knowledge_base("q", ["kb1"])
@@ -157,7 +135,7 @@ class TestBuildFileDownloadUrl:
 
 
 class TestSyncAllKnowledgeBases:
-    def test_success_and_partial_error(self, mocker: MockFixture, client: DataMateClient):
+    def test_success_and_partial_error(self, mocker: MockerFixture, client: DataMateClient):
         mocker.patch.object(client, "list_knowledge_bases", return_value=[{"id": "kb1"}, {"id": "kb2"}])
         mocker.patch.object(client, "get_knowledge_base_files", side_effect=[["f1"], RuntimeError("oops")])
 
@@ -169,7 +147,7 @@ class TestSyncAllKnowledgeBases:
         assert result["knowledge_bases"][1]["files"] == []
         assert "oops" in result["knowledge_bases"][1]["error"]
 
-    def test_sync_failure(self, mocker: MockFixture, client: DataMateClient):
+    def test_sync_failure(self, mocker: MockerFixture, client: DataMateClient):
         mocker.patch.object(client, "list_knowledge_bases", side_effect=RuntimeError("boom"))
 
         result = client.sync_all_knowledge_bases()
@@ -180,63 +158,44 @@ class TestSyncAllKnowledgeBases:
 
 
 class TestGetKnowledgeBaseInfo:
-    def test_success(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker,
-            200,
-            {"data": {"id": "kb1", "name": "KB1"}},
-        )
+    def test_success(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"id": "kb1", "name": "KB1"}})
+        client._http_client.get.return_value = mock_response
 
         kb = client.get_knowledge_base_info("kb1")
 
         assert isinstance(kb, dict)
         assert kb["id"] == "kb1"
-        http_client.get.assert_called_once_with(
+        client._http_client.get.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/kb1",
             headers={},
+            timeout=client.timeout,
         )
 
-    def test_success_with_authorization(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker,
-            200,
-            {"data": {"id": "kb1", "name": "KB1"}},
-        )
+    def test_success_with_authorization(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"id": "kb1", "name": "KB1"}})
+        client._http_client.get.return_value = mock_response
 
         kb = client.get_knowledge_base_info("kb1", authorization="Bearer token123")
 
         assert isinstance(kb, dict)
         assert kb["id"] == "kb1"
-        http_client.get.assert_called_once_with(
+        client._http_client.get.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/kb1",
             headers={"Authorization": "Bearer token123"},
+            timeout=client.timeout,
         )
 
-    def test_empty_data(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker,
-            200,
-            {"data": {}},
-        )
+    def test_empty_data(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {}})
+        client._http_client.get.return_value = mock_response
 
         kb = client.get_knowledge_base_info("kb1")
         assert kb == {}
 
-    def test_non_200_json_error(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker,
-            500,
-            {"detail": "boom"},
-            text="",
-        )
+    def test_non_200_json_error(self, client: DataMateClient):
+        mock_response = _create_mock_response(500, {"detail": "boom"}, text="")
+        client._http_client.get.return_value = mock_response
 
         with pytest.raises(RuntimeError) as excinfo:
             client.get_knowledge_base_info("kb1")
@@ -244,14 +203,12 @@ class TestGetKnowledgeBaseInfo:
         assert "Failed to fetch details for datamate knowledge base kb1" in str(excinfo.value)
         assert "Failed to get knowledge base details" in str(excinfo.value)
 
-    def test_non_200_text_error(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        # simulate plain text error response
-        resp = _mock_response(mocker, 404, None, text="not found")
-        # override headers to be text/plain
-        resp.headers = {"content-type": "text/plain"}
-        http_client.get.return_value = resp
+    def test_non_200_text_error(self, client: DataMateClient):
+        # Simulate plain text error response
+        mock_response = _create_mock_response(404, None, text="not found")
+        # Override headers to be text/plain
+        mock_response.headers = {"content-type": "text/plain"}
+        client._http_client.get.return_value = mock_response
 
         with pytest.raises(RuntimeError) as excinfo:
             client.get_knowledge_base_info("kb1")
@@ -259,10 +216,8 @@ class TestGetKnowledgeBaseInfo:
         assert "Failed to fetch details for datamate knowledge base kb1" in str(excinfo.value)
         assert "not found" in str(excinfo.value)
 
-    def test_http_error_raised(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.side_effect = httpx.HTTPError("network")
+    def test_http_error_raised(self, client: DataMateClient):
+        client._http_client.get.side_effect = httpx.HTTPError("network")
 
         with pytest.raises(RuntimeError) as excinfo:
             client.get_knowledge_base_info("kb1")
@@ -307,66 +262,31 @@ class TestBuildUrl:
 class TestMakeRequest:
     """Test the internal _make_request method."""
 
-    def test_get_request_success(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(mocker, 200, {"result": "ok"})
+    def test_get_request_success(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"result": "ok"})
+        client._http_client.get.return_value = mock_response
 
         response = client._make_request("GET", "http://test.com/api", {"X-Header": "value"})
 
         assert response.status_code == 200
-        http_client.get.assert_called_once_with("http://test.com/api", headers={"X-Header": "value"})
-        # Verify httpx.Client was called with correct SSL verification setting
-        client_cls.assert_called_once()
-        call_kwargs = client_cls.call_args[1]
-        assert call_kwargs["verify"] == client.verify_ssl
+        client._http_client.get.assert_called_once_with("http://test.com/api", headers={"X-Header": "value"}, timeout=client.timeout)
 
-    def test_post_request_success(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {"result": "ok"})
+    def test_post_request_success(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"result": "ok"})
+        client._http_client.post.return_value = mock_response
 
         response = client._make_request(
             "POST", "http://test.com/api", {"X-Header": "value"}, json={"key": "value"}
         )
 
         assert response.status_code == 200
-        http_client.post.assert_called_once_with(
-            "http://test.com/api", json={"key": "value"}, headers={"X-Header": "value"}
+        client._http_client.post.assert_called_once_with(
+            "http://test.com/api", json={"key": "value"}, headers={"X-Header": "value"}, timeout=client.timeout
         )
-        # Verify httpx.Client was called with correct SSL verification setting
-        client_cls.assert_called_once()
-        call_kwargs = client_cls.call_args[1]
-        assert call_kwargs["verify"] == client.verify_ssl
 
-    def test_custom_timeout(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(mocker, 200, {"result": "ok"})
-
-        client._make_request("GET", "http://test.com/api", {}, timeout=5.0)
-
-        # Verify timeout was passed to Client
-        client_cls.assert_called_once()
-        call_kwargs = client_cls.call_args[1]
-        assert call_kwargs["timeout"] == 5.0
-
-    def test_default_timeout(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(mocker, 200, {"result": "ok"})
-
-        client._make_request("GET", "http://test.com/api", {})
-
-        # Verify default timeout (1.0) was used
-        client_cls.assert_called_once()
-        call_kwargs = client_cls.call_args[1]
-        assert call_kwargs["timeout"] == 1.0
-
-    def test_non_200_status_code(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(mocker, 404, {"detail": "not found"})
+    def test_non_200_status_code(self, client: DataMateClient):
+        mock_response = _create_mock_response(404, {"detail": "not found"})
+        client._http_client.get.return_value = mock_response
 
         with pytest.raises(Exception) as excinfo:
             client._make_request("GET", "http://test.com/api", {}, error_message="Custom error")
@@ -426,99 +346,88 @@ class TestHandleErrorResponse:
 class TestListKnowledgeBasesEdgeCases:
     """Test edge cases for list_knowledge_bases."""
 
-    def test_empty_list(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {"data": {"content": []}})
+    def test_empty_list(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"content": []}})
+        client._http_client.post.return_value = mock_response
 
         kbs = client.list_knowledge_bases()
         assert kbs == []
 
-    def test_no_data_field(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {})
+    def test_no_data_field(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {})
+        client._http_client.post.return_value = mock_response
 
         kbs = client.list_knowledge_bases()
         assert kbs == []
 
-    def test_default_parameters(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(
-            mocker, 200, {"data": {"content": [{"id": "kb1"}]}}
-        )
+    def test_default_parameters(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"content": [{"id": "kb1"}]}})
+        client._http_client.post.return_value = mock_response
 
         client.list_knowledge_bases()
 
-        http_client.post.assert_called_once_with(
+        client._http_client.post.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/list",
             json={"page": 0, "size": 20},
             headers={},
+            timeout=client.timeout,
         )
 
 
 class TestGetKnowledgeBaseFilesEdgeCases:
     """Test edge cases for get_knowledge_base_files."""
 
-    def test_empty_file_list(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(mocker, 200, {"data": {"content": []}})
+    def test_empty_file_list(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"content": []}})
+        client._http_client.get.return_value = mock_response
 
         files = client.get_knowledge_base_files("kb1")
         assert files == []
 
-    def test_no_data_field(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(mocker, 200, {})
+    def test_no_data_field(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {})
+        client._http_client.get.return_value = mock_response
 
         files = client.get_knowledge_base_files("kb1")
         assert files == []
 
-    def test_with_authorization(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.get.return_value = _mock_response(
-            mocker, 200, {"data": {"content": [{"id": "f1"}]}}
-        )
+    def test_with_authorization(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": {"content": [{"id": "f1"}]}})
+        client._http_client.get.return_value = mock_response
 
         client.get_knowledge_base_files("kb1", authorization="Bearer token")
 
-        http_client.get.assert_called_once_with(
+        client._http_client.get.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/kb1/files",
             headers={"Authorization": "Bearer token"},
+            timeout=client.timeout,
         )
 
 
 class TestRetrieveKnowledgeBaseEdgeCases:
     """Test edge cases for retrieve_knowledge_base."""
 
-    def test_empty_results(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {"data": []})
+    def test_empty_results(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": []})
+        client._http_client.post.return_value = mock_response
 
         results = client.retrieve_knowledge_base("query", ["kb1"])
         assert results == []
 
-    def test_no_data_field(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {})
+    def test_no_data_field(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {})
+        client._http_client.post.return_value = mock_response
 
         results = client.retrieve_knowledge_base("query", ["kb1"])
         assert results == []
 
-    def test_default_parameters(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {"data": []})
+    def test_default_parameters(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": []})
+        client._http_client.post.return_value = mock_response
 
         client.retrieve_knowledge_base("query", ["kb1"])
 
-        http_client.post.assert_called_once_with(
+        client._http_client.post.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/retrieve",
             json={
                 "query": "query",
@@ -527,28 +436,16 @@ class TestRetrieveKnowledgeBaseEdgeCases:
                 "knowledgeBaseIds": ["kb1"],
             },
             headers={},
+            timeout=client.timeout * 2,
         )
 
-    def test_custom_timeout(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {"data": []})
-
-        client.retrieve_knowledge_base("query", ["kb1"])
-
-        # Verify timeout is doubled for retrieve (1.0 * 2 = 2.0)
-        client_cls.assert_called_once()
-        call_kwargs = client_cls.call_args[1]
-        assert call_kwargs["timeout"] == 2.0
-
-    def test_multiple_knowledge_base_ids(self, mocker: MockFixture, client: DataMateClient):
-        client_cls = mocker.patch("sdk.nexent.datamate.datamate_client.httpx.Client")
-        http_client = client_cls.return_value.__enter__.return_value
-        http_client.post.return_value = _mock_response(mocker, 200, {"data": []})
+    def test_multiple_knowledge_base_ids(self, client: DataMateClient):
+        mock_response = _create_mock_response(200, {"data": []})
+        client._http_client.post.return_value = mock_response
 
         client.retrieve_knowledge_base("query", ["kb1", "kb2", "kb3"], top_k=5, threshold=0.3)
 
-        http_client.post.assert_called_once_with(
+        client._http_client.post.assert_called_once_with(
             "http://datamate.local:30000/api/knowledge-base/retrieve",
             json={
                 "query": "query",
@@ -557,13 +454,14 @@ class TestRetrieveKnowledgeBaseEdgeCases:
                 "knowledgeBaseIds": ["kb1", "kb2", "kb3"],
             },
             headers={},
+            timeout=client.timeout * 2,
         )
 
 
 class TestSyncAllKnowledgeBasesEdgeCases:
     """Test edge cases for sync_all_knowledge_bases."""
 
-    def test_empty_knowledge_bases_list(self, mocker: MockFixture, client: DataMateClient):
+    def test_empty_knowledge_bases_list(self, mocker: MockerFixture, client: DataMateClient):
         mocker.patch.object(client, "list_knowledge_bases", return_value=[])
 
         result = client.sync_all_knowledge_bases()
@@ -572,7 +470,7 @@ class TestSyncAllKnowledgeBasesEdgeCases:
         assert result["total_count"] == 0
         assert result["knowledge_bases"] == []
 
-    def test_all_success(self, mocker: MockFixture, client: DataMateClient):
+    def test_all_success(self, mocker: MockerFixture, client: DataMateClient):
         mocker.patch.object(
             client, "list_knowledge_bases", return_value=[{"id": "kb1"}, {"id": "kb2"}]
         )
@@ -589,7 +487,7 @@ class TestSyncAllKnowledgeBasesEdgeCases:
         assert "error" not in result["knowledge_bases"][0]
         assert "error" not in result["knowledge_bases"][1]
 
-    def test_with_authorization(self, mocker: MockFixture, client: DataMateClient):
+    def test_with_authorization(self, mocker: MockerFixture, client: DataMateClient):
         list_mock = mocker.patch.object(
             client, "list_knowledge_bases", return_value=[{"id": "kb1"}]
         )
@@ -608,7 +506,7 @@ class TestClientInitialization:
 
     def test_default_timeout(self):
         client = DataMateClient(base_url="http://test.com")
-        assert client.timeout == 30.0
+        assert client.timeout == 5.0
 
     def test_custom_timeout(self):
         client = DataMateClient(base_url="http://test.com", timeout=5.0)

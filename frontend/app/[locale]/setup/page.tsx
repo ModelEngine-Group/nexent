@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { USER_ROLES } from "@/const/modelConfig";
 import { Steps, Button } from "antd";
 import { ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import ModelsContent from "../models/page";
 import KnowledgesContent from "../knowledges/page";
 import AgentSetupOrchestrator from "../agents/page";
@@ -12,14 +13,11 @@ import AgentSetupOrchestrator from "../agents/page";
 type SetupStep = "models" | "knowledges" | "agents";
 
 export default function SetupPage() {
-  const { t, router, canAccessProtectedData, isSpeedMode, user } = useSetupFlow(
-    {
-      requireAdmin: true,
-      nonAdminRedirect: "/setup/knowledges",
-    }
-  );
+  const { t, router } = useSetupFlow({});
 
-  const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
+  // Get auth state directly from providers
+  const { isSpeedMode } = useDeployment();
+  const { user } = useAuthorizationContext();
 
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [isSaving, setIsSaving] = useState(false);
@@ -91,10 +89,6 @@ export default function SetupPage() {
     }
   };
 
-  // 如果没有访问权限，返回 null 让 SESSION_EXPIRED 事件处理登录弹窗
-  if (!canAccessProtectedData || !isAdmin) {
-    return null;
-  }
 
   return (
     <div className="w-full h-full flex flex-col bg-slate-50 dark:bg-slate-900 font-sans overflow-hidden">

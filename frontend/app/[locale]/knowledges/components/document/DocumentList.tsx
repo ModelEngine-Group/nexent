@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { Input, Button, App, Select } from "antd";
 import { InfoCircleFilled } from "@ant-design/icons";
-import { BookText, Pilcrow } from "lucide-react";
+import { BookText, Pilcrow, PencilRuler, Eye, Glasses, CircleOff } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 
 import {
@@ -21,17 +21,20 @@ import {
 } from "@/const/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { modelService } from "@/services/modelService";
+import { getTenantDefaultGroupId } from "@/services/groupService";
 import { Document } from "@/types/knowledgeBase";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
+import { useGroupList } from "@/hooks/group/useGroupList";
 
 import DocumentStatus from "./DocumentStatus";
 import DocumentChunk from "./DocumentChunk";
 import UploadArea from "../upload/UploadArea";
 import { useKnowledgeBaseContext } from "../../contexts/KnowledgeBaseContext";
 import { useDocumentContext } from "../../contexts/DocumentContext";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const CONTAINER_HEIGHT_CLASS_MAP: Record<string, string> = {
   "83vh": "h-[83vh]",
@@ -62,6 +65,13 @@ interface DocumentListProps {
   onNameChange?: (name: string) => void;
   hasDocuments?: boolean;
   isNewlyCreatedAndWaiting?: boolean; // New prop to track newly created KB waiting for documents
+  onChunkCountChange?: () => void; // Callback when chunk count changes
+
+  // Group permission and user groups for create mode
+  ingroupPermission?: string;
+  onIngroupPermissionChange?: (value: string) => void;
+  selectedGroupIds?: number[];
+  onSelectedGroupIdsChange?: (values: number[]) => void;
 
   // Upload related props
   isDragging?: boolean;
@@ -94,6 +104,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onNameChange,
       hasDocuments = false,
       isNewlyCreatedAndWaiting = false, // New prop
+      onChunkCountChange,
+      // Group permission and user groups for create mode
+      ingroupPermission,
+      onIngroupPermissionChange,
+      selectedGroupIds,
+      onSelectedGroupIdsChange,
 
       // Upload related props
       isDragging = false,
@@ -110,6 +126,18 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const uploadAreaRef = useRef<any>(null);
     const { state: docState } = useDocumentContext();
     const { modelConfig } = useConfig();
+    const { user } = useAuthorizationContext();
+    const tenantId = user?.tenantId || null;
+
+    // Fetch groups for group selection
+    const { data: groupData } = useGroupList(tenantId, 1, 100);
+    const groups = groupData?.groups || [];
+
+    // Create group name mapping
+    const groupOptions = groups.map((group) => ({
+      label: group.group_name,
+      value: group.group_id,
+    }));
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -140,6 +168,25 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
+    // Get permission icon for dropdown options
+    const getPermissionIcon = (permission: string) => {
+      const iconProps = {
+        size: 16,
+        className: "text-gray-500",
+      };
+
+      switch (permission) {
+        case "EDIT":
+          return <PencilRuler {...iconProps} />;
+        case "READ_ONLY":
+          return <Eye {...iconProps} />;
+        case "PRIVATE":
+          return <Glasses {...iconProps} />;
+        default:
+          return <CircleOff {...iconProps} />;
+      }
+    };
+
     // Build model mismatch info
     const getMismatchInfo = (): string => {
       if (embeddingModelInfo) return embeddingModelInfo;
@@ -164,9 +211,39 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [selectedModel, setSelectedModel] = useState<number>(0);
     const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
-    const {} = useKnowledgeBaseContext();
     const { t } = useTranslation();
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
+
+    // Permission options with icons shown inside dropdown
+    const permissionOptions = [
+      {
+        value: "EDIT",
+        label: (
+          <span className="flex items-center gap-2">
+            {getPermissionIcon("EDIT")}
+            <span>{t("tenantResources.knowledgeBase.permission.EDIT")}</span>
+          </span>
+        ),
+      },
+      {
+        value: "READ_ONLY",
+        label: (
+          <span className="flex items-center gap-2">
+            {getPermissionIcon("READ_ONLY")}
+            <span>{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</span>
+          </span>
+        ),
+      },
+      {
+        value: "PRIVATE",
+        label: (
+          <span className="flex items-center gap-2">
+            {getPermissionIcon("PRIVATE")}
+            <span>{t("tenantResources.knowledgeBase.permission.PRIVATE")}</span>
+          </span>
+        ),
+      },
+    ];
 
     // Reset showDetail and showChunk state when knowledge base name changes
     React.useEffect(() => {
@@ -174,6 +251,23 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       setShowChunk(false);
       setSummary("");
     }, [knowledgeBaseName]);
+
+    // Initialize default group ID when entering create mode
+    React.useEffect(() => {
+      if (isCreatingMode && tenantId && onSelectedGroupIdsChange) {
+        const initDefaultGroup = async () => {
+          try {
+            const defaultGroupId = await getTenantDefaultGroupId(tenantId);
+            if (defaultGroupId) {
+              onSelectedGroupIdsChange([defaultGroupId]);
+            }
+          } catch (error) {
+            log.error("Failed to get tenant default group:", error);
+          }
+        };
+        initDefaultGroup();
+      }
+    }, [isCreatingMode, tenantId]);
 
     // Load available models when showing detail
     useEffect(() => {
@@ -347,39 +441,47 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         <div
           className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-center ${titleBarHeightClass}`}
         >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center">
+          <div className="flex items-center justify-between w-full" style={{ width: "100%" }}>
+            <div className="flex items-center" style={{width: "100%"}}>
               {isCreatingMode ? (
-                false ? (
-                  <div className="flex items-center">
-                    <span className="text-blue-600 mr-2">📚</span>
-                    <h3
-                      className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-gray-800`}
-                    >
-                      {knowledgeBaseName}
-                    </h3>
-                    {isUploading && (
-                      <div className="ml-3 px-2 py-0.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-md border border-blue-100">
-                        {t("document.status.creating")}
-                      </div>
-                    )}
-                  </div>
-                ) : (
+                <div className="flex items-center flex-1" style={{ width: "100%" }}>
                   <Input
                     value={knowledgeBaseName}
                     onChange={(e) =>
                       onNameChange && onNameChange(e.target.value)
                     }
                     placeholder={t("document.input.knowledgeBaseName")}
-                    className={`${LAYOUT.KB_TITLE_MARGIN} w-[320px] font-medium my-[2px]`}
+                    className={`${LAYOUT.KB_TITLE_MARGIN} w-[240px] font-medium my-[2px]`}
                     size="large"
                     prefix={<span className="text-blue-600">📚</span>}
                     autoFocus
                     disabled={
                       hasDocuments || isUploading || docState.isLoadingDocuments
-                    } // Disable editing name if there are documents or uploading
+                    }
                   />
-                )
+                  {/* Right-aligned container for dropdowns */}
+                  <div className="flex items-center ml-auto justify-end" style={{ gap: "12px", justifyContent: "flex-end", alignItems: "flex-end", width: "100%" }}>
+                    {/* User groups multi-select - first position */}
+                    <Select
+                      mode="multiple"
+                      value={selectedGroupIds}
+                      onChange={onSelectedGroupIdsChange}
+                      style={{ minWidth: 200, justifyContent: "center", alignItems: "flex-end" }}
+                      placeholder={t("knowledgeBase.create.permission.groupPlaceholder")}
+                      options={groupOptions}
+                      maxTagCount={2}
+                      allowClear
+                    />
+                    {/* Group permission dropdown - second position */}
+                    <Select
+                      value={ingroupPermission}
+                      onChange={onIngroupPermissionChange}
+                      style={{ width: 160, justifyContent: "center", alignItems: "flex-end" }}
+                      placeholder={t("knowledgeBase.ingroup.permission.DEFAULT")}
+                      options={permissionOptions}
+                    />
+                  </div>
+                </div>
               ) : (
                 <h3
                   className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center`}
@@ -464,6 +566,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 getFileIcon={getFileIcon}
                 currentEmbeddingModel={currentModel}
                 knowledgeBaseEmbeddingModel={knowledgeBaseModel}
+                onChunkCountChange={onChunkCountChange}
               />
             </div>
           ) : showDetail ? (

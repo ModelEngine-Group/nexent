@@ -475,18 +475,18 @@ select_deployment_mode() {
   MODE_CHOICE_SAVED="$mode_choice"
 
   case $mode_choice in
-      2)
+      2|"infrastructure")
           export DEPLOYMENT_MODE="infrastructure"
           export COMPOSE_FILE_SUFFIX=".yml"
           echo "✅ Selected infrastructure mode 🏗️"
           ;;
-      3)
+      3|"production")
           export DEPLOYMENT_MODE="production"
           export COMPOSE_FILE_SUFFIX=".prod.yml"
           disable_dashboard
           echo "✅ Selected production mode 🚀"
           ;;
-      *)
+      1|"development"|*)
           export DEPLOYMENT_MODE="development"
           export COMPOSE_FILE_SUFFIX=".yml"
           echo "✅ Selected development mode 🛠️"
@@ -604,6 +604,11 @@ prepare_directory_and_data() {
   chmod -R 775 $ROOT_DIR/volumes
   echo "   📁 Directory $ROOT_DIR/volumes has been created and permissions set to 775."
 
+  # Copy sync_user_supabase2pg.py to ROOT_DIR for container access
+  cp -rn scripts $ROOT_DIR
+  chmod 644 "$ROOT_DIR/scripts/sync_user_supabase2pg.py"
+  echo "   📁 update scripts copied to $ROOT_DIR"
+
   # Create nexent user workspace directory
   NEXENT_USER_DIR="$HOME/nexent"
   create_dir_with_permission "$NEXENT_USER_DIR" 775
@@ -686,11 +691,11 @@ select_deployment_version() {
   version_choice=$(sanitize_input "$version_choice")
   VERSION_CHOICE_SAVED="${version_choice}"
   case $version_choice in
-      2)
+      2|"full")
           export DEPLOYMENT_VERSION="full"
           echo "✅ Selected complete version 🎯"
           ;;
-      *)
+      1|"speed"|*)
           export DEPLOYMENT_VERSION="speed"
           echo "✅ Selected speed version ⚡️"
           ;;
@@ -754,6 +759,7 @@ wait_for_elasticsearch_healthy() {
       return 0
   fi
 }
+
 
 select_terminal_tool() {
     # Function to ask if user wants to create Terminal tool container
@@ -859,29 +865,46 @@ select_terminal_tool() {
     echo ""
 }
 
-create_default_admin_user() {
-  echo "🔧 Creating admin user..."
-  RESPONSE=$(docker exec nexent-config bash -c "curl -X POST http://kong:8000/auth/v1/signup -H \"apikey: ${SUPABASE_KEY}\" -H \"Authorization: Bearer ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"nexent@example.com\",\"password\":\"nexent@4321\",\"email_confirm\":true,\"data\":{\"role\":\"admin\"}}'" 2>/dev/null)
-
-  if [ -z "$RESPONSE" ]; then
-    echo "   ❌ No response received from Supabase."
-    return 1
-  elif echo "$RESPONSE" | grep -q '"access_token"' && echo "$RESPONSE" | grep -q '"user"'; then
-    echo "   ✅ Default admin user has been successfully created."
-    echo ""
-    echo "      Please save the following credentials carefully, which would ONLY be shown once."
-    echo "   📧 Email:    nexent@example.com"
-    echo "   🔏 Password: nexent@4321"
-  elif echo "$RESPONSE" | grep -q '"error_code":"user_already_exists"' || echo "$RESPONSE" | grep -q '"code":422'; then
-    echo "   🚧 Default admin user already exists. Skipping creation."
+generate_random_password() {
+  # Generate a URL/JSON safe random password (alphanumeric only)
+  local pwd=""
+  if command -v openssl >/dev/null 2>&1; then
+    pwd=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
   else
-    echo "   ❌ Response from Supabase does not contain 'access_token' or 'user'."
+    pwd=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+  fi
+  if [ -z "$pwd" ]; then
+    # Fallback (should be extremely rare)
+    pwd=$(date +%s%N | tr -dc '0-9' | head -c 20)
+  fi
+  echo "$pwd"
+}
+
+create_default_super_admin_user() {
+  # Call the dedicated script for creating super admin user
+  local script_path="$SCRIPT_DIR/create-su.sh"
+
+  if [ ! -f "$script_path" ]; then
+    echo "   ❌ ERROR create-su.sh not found at $script_path"
     return 1
   fi
 
-  echo ""
-  echo "--------------------------------"
-  echo ""
+  # Make sure the script is executable
+  chmod +x "$script_path"
+
+  # Export necessary environment variables for the script
+  export SUPABASE_KEY
+  export POSTGRES_USER
+  export POSTGRES_DB
+  export DEPLOYMENT_VERSION
+  export SUPABASE_POSTGRES_DB
+
+  # Execute the script with current environment variables
+  if bash "$script_path"; then
+    return 0
+  else
+    return 1
+  fi
 }
 
 choose_image_env() {
@@ -981,9 +1004,9 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  # Create default admin user
+  # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    create_default_admin_user || { echo "❌ Default admin user creation failed"; exit 1; }
+    create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
   fi
 
   persist_deploy_options

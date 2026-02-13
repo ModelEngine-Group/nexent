@@ -1,5 +1,0 @@
-FILE_CONTENT_SUCCESS: "文件 {filename} 内容: {content}"
-FILE_CONTENT_ERROR: "文件 {filename} 内容: 处理文本文件 {filename} 时出错: {error}"
-FILE_PROCESSING_ERROR: "文件处理失败 (状态码: {status_code}): {error_detail}"
-IMAGE_CONTENT_SUCCESS: "图片文件 {filename} 内容: {content}"
-IMAGE_CONTENT_ERROR: "图片文件 {filename} 内容: 处理图片文件 {filename} 时出错: {error}"

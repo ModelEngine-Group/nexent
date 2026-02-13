@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
+import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type { MarketAgentListParams } from "@/types/market";
 
@@ -12,6 +13,7 @@ export const API_ENDPOINTS = {
     logout: `${API_BASE_URL}/user/logout`,
     session: `${API_BASE_URL}/user/session`,
     currentUserId: `${API_BASE_URL}/user/current_user_id`,
+    currentUserInfo: `${API_BASE_URL}/user/current_user_info`,
     serviceHealth: `${API_BASE_URL}/user/service_health`,
     revoke: `${API_BASE_URL}/user/revoke`,
   },
@@ -32,6 +34,7 @@ export const API_ENDPOINTS = {
     run: `${API_BASE_URL}/agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
     stop: (conversationId: number) =>
@@ -43,6 +46,16 @@ export const API_ENDPOINTS = {
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
     clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
+    versions: {
+      version: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      detail: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/detail`,
+      list: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions`,
+      current: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/current_version`,
+      rollback: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
+      compare: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions/compare`,
+      delete: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+    },
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -122,6 +135,17 @@ export const API_ENDPOINTS = {
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,
+    // Manage tenant model operations
+    manageModelList: `${API_BASE_URL}/model/manage/list`,
+    manageModelCreate: `${API_BASE_URL}/model/manage/create`,
+    manageModelBatchCreate: `${API_BASE_URL}/model/manage/batch_create`,
+    manageModelHealthcheck: `${API_BASE_URL}/model/manage/healthcheck`,
+    manageModelUpdate: (displayName: string) =>
+      `${API_BASE_URL}/model/manage/update?display_name=${encodeURIComponent(displayName)}`,
+    manageModelDelete: (displayName: string) =>
+      `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
+    manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
+    manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -137,8 +161,7 @@ export const API_ENDPOINTS = {
     chunkDetail: (indexName: string, chunkId: string) =>
       `${API_BASE_URL}/indices/${indexName}/chunk/${chunkId}`,
     // Update knowledge base info
-    updateIndex: (indexName: string) =>
-      `${API_BASE_URL}/indices/${indexName}`,
+    updateIndex: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
     searchHybrid: `${API_BASE_URL}/indices/search/hybrid`,
     summary: (indexName: string) =>
       `${API_BASE_URL}/summary/${indexName}/auto_summary`,
@@ -156,8 +179,12 @@ export const API_ENDPOINTS = {
         pathOrUrl
       )}/error-info`,
   },
+  dify: {
+    datasets: `${API_BASE_URL}/dify/datasets`,
+  },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
+    testConnection: `${API_BASE_URL}/datamate/test_connection`,
     files: (knowledgeBaseId: string) =>
       `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
   },
@@ -254,13 +281,18 @@ export const API_ENDPOINTS = {
     addMember: (groupId: number) => `${API_BASE_URL}/groups/${groupId}/members`,
     removeMember: (groupId: number, userId: string) =>
       `${API_BASE_URL}/groups/${groupId}/members/${userId}`,
-    default: (tenantId: string) => `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
+    default: (tenantId: string) =>
+      `${API_BASE_URL}/groups/tenants/${tenantId}/default`,
   },
   invitations: {
     list: `${API_BASE_URL}/invitations/list`,
     create: `${API_BASE_URL}/invitations`,
-    update: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
-    delete: (invitationCode: string) => `${API_BASE_URL}/invitations/${invitationCode}`,
+    update: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
+    delete: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}`,
+    check: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
 };
 
@@ -360,36 +392,6 @@ export const fetchWithErrorHandling = async (
   }
 };
 
-// Method to handle session expiration
-function handleSessionExpired() {
-  // Prevent duplicate triggers
-  if (window.__isHandlingSessionExpired) {
-    return;
-  }
-
-  // Mark as processing
-  window.__isHandlingSessionExpired = true;
-
-  // Clear locally stored session information
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("session");
-
-    // Use custom events to notify other components in the app (such as SessionExpiredListener)
-    if (window.dispatchEvent) {
-      // Ensure using event name consistent with EVENTS.SESSION_EXPIRED constant
-      window.dispatchEvent(
-        new CustomEvent("session-expired", {
-          detail: { message: "Login expired, please login again" },
-        })
-      );
-    }
-
-    // Reset flag after 300ms to allow future triggers
-    setTimeout(() => {
-      window.__isHandlingSessionExpired = false;
-    }, 300);
-  }
-}
 
 // Add global interface extensions for TypeScript
 declare global {

@@ -8,23 +8,31 @@ import { Agent } from "@/types/agentConfig";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 interface CollaborativeAgentProps {}
 
 export default function CollaborativeAgent({}: CollaborativeAgentProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
 
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
+  const currentAgentPermission = useAgentConfigStore(
+    (state) => state.currentAgentPermission
+  );
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
   const updateSubAgentIds = useAgentConfigStore(
     (state) => state.updateSubAgentIds
   );
 
-  const { availableAgents } = useAgentList();
+  const { availableAgents } = useAgentList(user?.tenantId ?? null);
 
-  const editable = currentAgentId || isCreatingMode;
+  const editable =
+    !!isCreatingMode ||
+    ((currentAgentId != null && currentAgentId != undefined) &&
+      currentAgentPermission !== "READ_ONLY");
 
   // Get related agents - use edited agent state (which includes current agent data when editing)
   const relatedAgentIds = Array.isArray(editedAgent?.sub_agent_id_list)

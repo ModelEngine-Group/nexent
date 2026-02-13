@@ -279,6 +279,7 @@ class AgentInfoRequest(BaseModel):
     enabled_tool_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
+    version_no: int = 0
 
 
 class AgentIDRequest(BaseModel):
@@ -290,6 +291,7 @@ class ToolInstanceInfoRequest(BaseModel):
     agent_id: int
     params: Dict[str, Any]
     enabled: bool
+    version_no: int = 0
 
 
 class ToolInstanceSearchRequest(BaseModel):
@@ -633,3 +635,166 @@ class InvitationUseResponse(BaseModel):
     code_type: str = Field(..., description="Code type")
     group_ids: Optional[List[int]] = Field(
         None, description="Associated group IDs")
+
+
+# Manage Tenant Model Data Models
+# ---------------------------------------------------------------------------
+class ManageTenantModelListRequest(BaseModel):
+    """Request model for listing models in a specific tenant (manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to query models for")
+    model_type: Optional[str] = Field(
+        None, description="Filter by model type (e.g., 'llm', 'embedding')")
+    page: int = Field(1, ge=1, description="Page number for pagination")
+    page_size: int = Field(20, ge=1, le=100, description="Items per page")
+
+
+class ManageTenantModelListResponse(BaseModel):
+    """Response model for tenant model list query"""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    tenant_name: str = Field(..., description="Tenant display name")
+    models: List[Dict[str, Any]] = Field(
+        default_factory=list, description="List of models for this tenant")
+    total: int = Field(0, description="Total number of models")
+    page: int = Field(1, description="Current page number")
+    page_size: int = Field(20, description="Items per page")
+    total_pages: int = Field(0, description="Total number of pages")
+
+
+class ManageTenantModelCreateRequest(BaseModel):
+    """Request model for creating a model in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
+    model_repo: Optional[str] = Field('', description="Model repository path")
+    model_name: str = Field(..., description="Model name")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'tts', 'stt')")
+    api_key: Optional[str] = Field('', description="API key for the model")
+    base_url: Optional[str] = Field('', description="Base URL for the model API")
+    max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
+    display_name: Optional[str] = Field('', description="Display name for the model")
+    expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
+    maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
+    chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+
+
+class ManageTenantModelUpdateRequest(BaseModel):
+    """Request model for updating a model in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to update model for")
+    current_display_name: str = Field(..., description="Current display name of the model to update")
+    model_repo: Optional[str] = Field(None, description="Model repository path")
+    model_name: Optional[str] = Field(None, description="Model name")
+    model_type: Optional[str] = Field(None, description="Model type")
+    api_key: Optional[str] = Field(None, description="API key for the model")
+    base_url: Optional[str] = Field(None, description="Base URL for the model API")
+    max_tokens: Optional[int] = Field(None, description="Maximum tokens for the model")
+    display_name: Optional[str] = Field(None, description="New display name for the model")
+    expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
+    maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
+    chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
+
+
+class ManageTenantModelDeleteRequest(BaseModel):
+    """Request model for deleting a model from a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to delete model from")
+    display_name: str = Field(..., description="Display name of the model to delete")
+
+
+class ManageTenantModelHealthcheckRequest(BaseModel):
+    """Request model for checking model connectivity in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to check model connectivity")
+    display_name: str = Field(..., description="Display name of the model to check")
+
+
+class ManageBatchCreateModelsRequest(BaseModel):
+    """Request model for batch creating/updating models in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to batch create models for")
+    provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
+    type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+    api_key: str = Field('', description="API key for the models")
+    models: List[Dict[str, Any]] = Field(default_factory=list, description="List of models to create/update")
+
+
+class ManageProviderModelListRequest(BaseModel):
+    """Request model for listing provider models in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to query provider models for")
+    provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+
+
+class ManageProviderModelCreateRequest(BaseModel):
+    """Request model for creating provider models in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create provider models for")
+    provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+    api_key: Optional[str] = Field('', description="API key for the provider")
+    base_url: Optional[str] = Field('', description="Base URL for the provider API")
+
+
+# Agent Version Management Data Models
+# ---------------------------------------------------------------------------
+class VersionPublishRequest(BaseModel):
+    """Request model for publishing a new version"""
+    version_name: Optional[str] = Field(None, description="User-defined version name for display")
+    release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
+
+
+class VersionListItemResponse(BaseModel):
+    """Response model for version list item"""
+    id: int = Field(..., description="Version record ID")
+    version_no: int = Field(..., description="Version number")
+    version_name: Optional[str] = Field(None, description="User-defined version name")
+    release_note: Optional[str] = Field(None, description="Release notes")
+    source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
+    source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
+    status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
+    created_by: str = Field(..., description="User who published this version")
+    create_time: Optional[str] = Field(None, description="Publish timestamp")
+
+
+class VersionListResponse(BaseModel):
+    """Response model for version list"""
+    items: List[VersionListItemResponse] = Field(..., description="Version list items")
+    total: int = Field(..., description="Total count")
+
+
+class VersionDetailResponse(BaseModel):
+    """Response model for version detail including snapshot data"""
+    id: int = Field(..., description="Version record ID")
+    version_no: int = Field(..., description="Version number")
+    version_name: Optional[str] = Field(None, description="User-defined version name")
+    release_note: Optional[str] = Field(None, description="Release notes")
+    source_version_no: Optional[int] = Field(None, description="Source version number")
+    source_type: Optional[str] = Field(None, description="Source type")
+    status: str = Field(..., description="Version status")
+    created_by: str = Field(..., description="User who published this version")
+    create_time: Optional[str] = Field(None, description="Publish timestamp")
+    agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
+    tool_instances: List[dict] = Field(default_factory=list, description="Tool instance snapshots")
+    relations: List[dict] = Field(default_factory=list, description="Relation snapshots")
+
+
+class VersionRollbackRequest(BaseModel):
+    """Request model for rollback to a specific version"""
+    version_name: Optional[str] = Field(None, description="New version name for the rollback version")
+    release_note: Optional[str] = Field(None, description="Release notes for the rollback version")
+
+
+class VersionStatusRequest(BaseModel):
+    """Request model for updating version status"""
+    status: str = Field(..., description="New status: DISABLED / ARCHIVED")
+
+
+class VersionCompareRequest(BaseModel):
+    """Request model for comparing two versions"""
+    version_no_a: int = Field(..., description="First version number for comparison")
+    version_no_b: int = Field(..., description="Second version number for comparison")
+
+
+class CurrentVersionResponse(BaseModel):
+    """Response model for current published version"""
+    version_no: int = Field(..., description="Current published version number")
+    version_name: Optional[str] = Field(None, description="Version name")
+    status: str = Field(..., description="Version status")
+    source_type: Optional[str] = Field(None, description="Source type")
+    source_version_no: Optional[int] = Field(None, description="Source version number")
+    release_note: Optional[str] = Field(None, description="Release notes")
+    created_by: str = Field(..., description="User who published this version")
+    create_time: Optional[str] = Field(None, description="Publish timestamp")

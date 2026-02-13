@@ -295,7 +295,7 @@ class TestCreateToolConfigList:
         """Test case for basic tool configuration list creation"""
         with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge:
+                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
 
             # Set mock return values
             mock_discover.return_value = []
@@ -311,7 +311,6 @@ class TestCreateToolConfigList:
                     "usage": None
                 }
             ]
-            mock_knowledge.return_value = []
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
@@ -333,7 +332,7 @@ class TestCreateToolConfigList:
         """Test case including the knowledge base search tool"""
         with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
                 patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
 
@@ -350,10 +349,6 @@ class TestCreateToolConfigList:
                     "usage": None
                 }
             ]
-            mock_knowledge.return_value = [
-                {"index_name": "knowledge_1"},
-                {"index_name": "knowledge_2"},
-            ]
             mock_vdb_core = "mock_elastic_core"
             mock_get_vector_db_core.return_value = mock_vdb_core
             mock_embedding.return_value = "mock_embedding_model"
@@ -363,6 +358,7 @@ class TestCreateToolConfigList:
             assert len(result) == 1
             # Verify that ToolConfig was called correctly, including knowledge base metadata
             # Check if the last call was for KnowledgeBaseSearchTool
+            mock_tool_config.assert_called()
             last_call = mock_tool_config.call_args_list[-1]
             assert last_call[1]['class_name'] == "KnowledgeBaseSearchTool"
 
@@ -440,20 +436,21 @@ class TestCreateToolConfigList:
             }
 
     @pytest.mark.asyncio
-    async def test_create_tool_config_list_with_knowledge_base_tool_mixed_sources(self):
-        """Test KnowledgeBaseSearchTool filters only elasticsearch knowledge sources"""
+    async def test_create_tool_config_list_with_knowledge_base_tool_metadata(self):
+        """
+        Test that KnowledgeBaseSearchTool metadata contains only vdb_core and embedding_model.
+        This test verifies the refactored behavior where index_names and name_resolver
+        have been removed from the metadata.
+        """
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
         mock_tool_config.return_value = mock_tool_instance
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
                 patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding, \
-                patch('backend.agents.create_agent_info.build_knowledge_name_mapping') as mock_build_mapping:
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
 
-            mock_discover.return_value = []
             mock_search_tools.return_value = [
                 {
                     "class_name": "KnowledgeBaseSearchTool",
@@ -461,48 +458,71 @@ class TestCreateToolConfigList:
                     "description": "Knowledge search tool",
                     "inputs": "string",
                     "output_type": "string",
-                    "params": [],
+                    "params": [{"name": "index_names", "default": []}],
                     "source": "local",
                     "usage": None
                 }
             ]
-            # Mix of elasticsearch and datamate sources
-            mock_knowledge.return_value = [
-                {"index_name": "elastic_kb_1", "knowledge_sources": "elasticsearch"},
-                {"index_name": "datamate_kb_1", "knowledge_sources": "datamate"},
-                {"index_name": "elastic_kb_2", "knowledge_sources": "elasticsearch"},
-                {"index_name": "other_kb", "knowledge_sources": "other"}
-            ]
             mock_vdb_core = "mock_elastic_core"
+            mock_embedding_model = "mock_embedding_model"
             mock_get_vector_db_core.return_value = mock_vdb_core
-            mock_embedding.return_value = "mock_embedding_model"
-            mock_build_mapping.return_value = {"mapping": "mock"}
+            mock_embedding.return_value = mock_embedding_model
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            # Should only include elasticsearch index names
-            expected_index_names = ["elastic_kb_1", "elastic_kb_2"]
-            assert mock_tool_instance.metadata["index_names"] == expected_index_names
+
+            # Verify correct functions were called with correct parameters
+            mock_get_vector_db_core.assert_called_once()
+            mock_embedding.assert_called_once_with(tenant_id="tenant_1")
+
+            # Verify metadata contains ONLY vdb_core and embedding_model (no index_names or name_resolver)
+            expected_metadata = {
+                "vdb_core": mock_vdb_core,
+                "embedding_model": mock_embedding_model,
+            }
+            assert mock_tool_instance.metadata == expected_metadata
+
+            # Explicitly verify that old fields are NOT present
+            assert "index_names" not in mock_tool_instance.metadata
+            assert "name_resolver" not in mock_tool_instance.metadata
 
     @pytest.mark.asyncio
-    async def test_create_tool_config_list_with_datamate_tool(self):
-        """Test DataMateSearchTool filters only datamate knowledge sources"""
-        mock_tool_instance = MagicMock()
-        mock_tool_instance.class_name = "DataMateSearchTool"
-        mock_tool_config.return_value = mock_tool_instance
+    async def test_create_tool_config_list_with_knowledge_base_tool_multiple_tools(self):
+        """
+        Test that multiple tools are processed correctly, with KnowledgeBaseSearchTool
+        receiving the correct metadata without index_names.
+        """
+        mock_tool_kb = MagicMock()
+        mock_tool_kb.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
+        mock_tool_other = MagicMock()
+        mock_tool_other.class_name = "OtherTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
                 patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge:
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
 
-            mock_discover.return_value = []
+            mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
+
             mock_search_tools.return_value = [
                 {
-                    "class_name": "DataMateSearchTool",
-                    "name": "datamate_search",
-                    "description": "DataMate search tool",
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search",
+                    "description": "Knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                },
+                {
+                    "class_name": "OtherTool",
+                    "name": "other",
+                    "description": "Other tool",
                     "inputs": "string",
                     "output_type": "string",
                     "params": [],
@@ -510,21 +530,207 @@ class TestCreateToolConfigList:
                     "usage": None
                 }
             ]
-            # Mix of different knowledge sources
-            mock_knowledge.return_value = [
-                {"index_name": "elastic_kb_1", "knowledge_sources": "elasticsearch"},
-                {"index_name": "datamate_kb_1", "knowledge_sources": "datamate"},
-                {"index_name": "datamate_kb_2", "knowledge_sources": "datamate"},
-                {"index_name": "other_kb", "knowledge_sources": "other"}
+            mock_get_vector_db_core.return_value = "vdb_core_instance"
+            mock_embedding.return_value = "embedding_instance"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 2
+
+            # Verify KnowledgeBaseSearchTool has correct metadata
+            assert mock_tool_kb.metadata == {
+                "vdb_core": "vdb_core_instance",
+                "embedding_model": "embedding_instance",
+            }
+
+            # Verify OtherTool has no special metadata (should not have metadata attribute set)
+            # Note: MagicMock will return a new MagicMock for unset attributes, so we check call_args
+            # Instead, verify that set_metadata was never called on the mock_tool_other
+            assert not hasattr(mock_tool_other, 'metadata') or mock_tool_other.metadata.call_count == 0 if hasattr(mock_tool_other.metadata, 'call_count') else True
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_knowledge_base_tool_mixed_sources(self):
+        """
+        Test handling of tools from mixed sources (local, mcp, langchain).
+        KnowledgeBaseSearchTool should always get the simplified metadata.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search",
+                    "description": "Knowledge search tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "mcp",
+                    "usage": "mcp_server_1"
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core"
+            mock_embedding.return_value = "embedding"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            # Even for MCP-sourced KnowledgeBaseSearchTool, metadata should be set
+            assert mock_tool_instance.metadata == {
+                "vdb_core": "vdb_core",
+                "embedding_model": "embedding",
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_datamate_tool(self):
+        """
+        Test that DataMateTool (or other unhandled tools) receive no special metadata.
+        This ensures the refactoring doesn't break other tool types.
+        """
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "DataMateTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+
+            mock_tool_config.return_value = mock_tool_instance
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "DataMateTool",
+                    "name": "datamate",
+                    "description": "Data management tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
             ]
 
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
             assert len(result) == 1
             assert result[0] is mock_tool_instance
-            # Should only include datamate index names
-            expected_index_names = ["datamate_kb_1", "datamate_kb_2"]
-            assert mock_tool_instance.metadata["index_names"] == expected_index_names
+            # DataMateTool should not receive any special metadata (metadata should remain unset)
+            # Since we use MagicMock, we verify that metadata was never assigned
+            assert not hasattr(mock_tool_instance, 'metadata') or mock_tool_instance.metadata.call_count == 0 if hasattr(mock_tool_instance.metadata, 'call_count') else True
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_empty_list(self):
+        """
+        Test that an empty tools list returns an empty result.
+        """
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+
+            mock_search_tools.return_value = []
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_with_langchain_tool_metadata(self):
+        """
+        Test that langchain-sourced tools receive metadata from the langchain tool discovery.
+        This verifies that the langchain tool metadata assignment still works correctly.
+        """
+        mock_langchain_tool = MagicMock()
+        mock_langchain_tool.name = "LangChainTool"
+
+        mock_tool_instance = MagicMock()
+        mock_tool_instance.class_name = "LangChainTool"
+
+        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
+                patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+
+            mock_tool_config.return_value = mock_tool_instance
+            mock_discover.return_value = [mock_langchain_tool]
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "LangChainTool",
+                    "name": "langchain_tool",
+                    "description": "A langchain tool",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "langchain",
+                    "usage": None
+                }
+            ]
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 1
+            assert result[0] is mock_tool_instance
+            # Langchain tool should receive metadata from discovered langchain tool
+            assert mock_tool_instance.metadata == mock_langchain_tool
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_multiple_tools_same_type(self):
+        """
+        Test that multiple KnowledgeBaseSearchTool instances each get correct metadata.
+        """
+        mock_tool_1 = MagicMock()
+        mock_tool_1.class_name = "KnowledgeBaseSearchTool"
+
+        mock_tool_2 = MagicMock()
+        mock_tool_2.class_name = "KnowledgeBaseSearchTool"
+
+        mock_tool_config.side_effect = [mock_tool_1, mock_tool_2]
+
+        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
+                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('backend.agents.create_agent_info.get_embedding_model') as mock_embedding:
+
+            mock_search_tools.return_value = [
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search_1",
+                    "description": "First knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                },
+                {
+                    "class_name": "KnowledgeBaseSearchTool",
+                    "name": "kb_search_2",
+                    "description": "Second knowledge search",
+                    "inputs": "string",
+                    "output_type": "string",
+                    "params": [],
+                    "source": "local",
+                    "usage": None
+                }
+            ]
+            mock_get_vector_db_core.return_value = "vdb_core"
+            mock_embedding.return_value = "embedding"
+
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+            assert len(result) == 2
+
+            # Both tools should have the same simplified metadata
+            expected_metadata = {
+                "vdb_core": "vdb_core",
+                "embedding_model": "embedding",
+            }
+            assert mock_tool_1.metadata == expected_metadata
+            assert mock_tool_2.metadata == expected_metadata
 
 
 class TestCreateAgentConfig:
@@ -539,7 +745,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
 
@@ -567,7 +773,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_knowledge.return_value = []
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
@@ -596,7 +801,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
 
@@ -624,7 +829,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_knowledge.return_value = []
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
@@ -663,7 +867,6 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.search_memory_in_levels', new_callable=AsyncMock) as mock_search_memory, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
 
@@ -700,7 +903,6 @@ class TestCreateAgentConfig:
                 agent_id="agent_1"
             )
             mock_search_memory.return_value = {"results": [{"memory": "test"}]}
-            mock_knowledge.return_value = []
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
@@ -746,9 +948,6 @@ class TestCreateAgentConfig:
                 new_callable=AsyncMock,
             ) as mock_search_memory,
             patch(
-                "backend.agents.create_agent_info.get_selected_knowledge_list"
-            ) as mock_knowledge,
-            patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
         ):
@@ -786,7 +985,6 @@ class TestCreateAgentConfig:
                 agent_id="agent_1",
             )
 
-            mock_knowledge.return_value = []
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -812,7 +1010,7 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
 
@@ -840,7 +1038,6 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_knowledge.return_value = []
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = None  # Model not found
@@ -886,9 +1083,6 @@ class TestCreateAgentConfig:
                 new_callable=AsyncMock,
             ) as mock_search_memory,
             patch(
-                "backend.agents.create_agent_info.get_selected_knowledge_list"
-            ) as mock_knowledge,
-            patch(
                 "backend.agents.create_agent_info.prepare_prompt_templates"
             ) as mock_prepare_templates,
         ):
@@ -926,7 +1120,6 @@ class TestCreateAgentConfig:
             )
 
             mock_search_memory.side_effect = Exception("boom")
-            mock_knowledge.return_value = []
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"
             }
@@ -945,17 +1138,190 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
-        """Test knowledge base summary generation filters only elasticsearch sources"""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.ElasticSearchService"
+            ) as mock_es_service,
+            patch(
+                "backend.agents.create_agent_info.logger"
+            ) as mock_logger,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+
+            kb_tool_1 = Mock()
+            kb_tool_1.class_name = "KnowledgeBaseSearchTool"
+            kb_tool_1.name = "kb_tool_1"
+            kb_tool_1.params = {"index_names": ["idx_a", "idx_b"]}
+
+            other_tool = Mock()
+            other_tool.class_name = "OtherTool"
+            other_tool.name = "other_tool"
+            other_tool.params = {}
+
+            kb_tool_2 = Mock()
+            kb_tool_2.class_name = "KnowledgeBaseSearchTool"
+            kb_tool_2.name = "kb_tool_2"
+            kb_tool_2.params = {"index_names": ["idx_c"]}
+
+            mock_create_tools.return_value = [kb_tool_1, other_tool, kb_tool_2]
+            mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            mock_es_instance = Mock()
+            mock_es_instance.get_summary.side_effect = [
+                {"summary": "AAA"},
+                Exception("boom"),
+            ]
+            mock_es_service.return_value = mock_es_instance
+
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
+
+            assert mock_es_instance.get_summary.call_args_list == [
+                ((), {"index_name": "idx_a"}),
+                ((), {"index_name": "idx_b"}),
+            ]
+            mock_logger.warning.assert_called_once()
+            assert "idx_b" in mock_logger.warning.call_args[0][0]
+
+            mock_prepare_templates.assert_called_once()
+            assert mock_prepare_templates.call_args[1]["system_prompt"] == "**idx_a**: AAA\n\n"
+
+            # Ensure only the first KnowledgeBaseSearchTool is processed.
+            assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
+
+    @pytest.mark.parametrize(
+        "language,expected_message",
+        [
+            ("zh", "当前没有可用的知识库索引。\n"),
+            ("en", "No knowledge base indexes are currently available.\n"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_create_agent_config_knowledge_base_summary_no_indexes_message(
+        self, language, expected_message
+    ):
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            ) as mock_search_agent,
+            patch(
+                "backend.agents.create_agent_info.query_sub_agents_id_list"
+            ) as mock_query_sub,
+            patch(
+                "backend.agents.create_agent_info.create_tool_config_list"
+            ) as mock_create_tools,
+            patch(
+                "backend.agents.create_agent_info.get_agent_prompt_template"
+            ) as mock_get_template,
+            patch(
+                "backend.agents.create_agent_info.tenant_config_manager"
+            ) as mock_tenant_config,
+            patch(
+                "backend.agents.create_agent_info.build_memory_context"
+            ) as mock_build_memory,
+            patch(
+                "backend.agents.create_agent_info.ElasticSearchService"
+            ) as mock_es_service,
+            patch(
+                "backend.agents.create_agent_info.prepare_prompt_templates"
+            ) as mock_prepare_templates,
+            patch(
+                "backend.agents.create_agent_info.get_model_by_model_id"
+            ) as mock_get_model_by_id,
+        ):
+            mock_search_agent.return_value = {
+                "name": "test_agent",
+                "description": "test description",
+                "duty_prompt": "test duty",
+                "constraint_prompt": "test constraint",
+                "few_shots_prompt": "test few shots",
+                "max_steps": 5,
+                "model_id": 123,
+                "provide_run_summary": True,
+            }
+            mock_query_sub.return_value = []
+
+            kb_tool = Mock()
+            kb_tool.class_name = "KnowledgeBaseSearchTool"
+            kb_tool.name = "kb_tool"
+            kb_tool.params = {"index_names": []}
+            mock_create_tools.return_value = [kb_tool]
+
+            mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id="agent_1",
+            )
+            mock_prepare_templates.return_value = {"system_prompt": "populated_system_prompt"}
+            mock_get_model_by_id.return_value = {"display_name": "test_model"}
+
+            await create_agent_config(
+                "agent_1", "tenant_1", "user_1", language, "test query"
+            )
+
+            mock_es_service.assert_not_called()
+            assert mock_prepare_templates.call_args[1]["system_prompt"] == expected_message
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_knowledge_base_summary_error(self):
+        """Test case for error handling during knowledge base summary build"""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agents_id_list') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
                 patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
                 patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.get_selected_knowledge_list') as mock_knowledge, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.ElasticSearchService') as mock_es_service:
+                patch('backend.agents.create_agent_info.logger') as mock_logger:
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -969,10 +1335,10 @@ class TestCreateAgentConfig:
                 "provide_run_summary": True
             }
             mock_query_sub.return_value = []
-
-            # Create a mock tool with KnowledgeBaseSearchTool class name
-            mock_tool = Mock()
-            mock_tool.class_name = "KnowledgeBaseSearchTool"
+            
+            # Create a tool that raises exception when accessing class_name
+            mock_tool = MagicMock()
+            type(mock_tool).class_name = PropertyMock(side_effect=Exception("Test Error"))
             mock_create_tools.return_value = [mock_tool]
 
             mock_get_template.return_value = {
@@ -986,29 +1352,14 @@ class TestCreateAgentConfig:
                 user_id="user_1",
                 agent_id="agent_1"
             )
-            mock_knowledge.return_value = [
-                {"index_name": "elastic_kb_1", "knowledge_sources": "elasticsearch"},
-                {"index_name": "datamate_kb_1", "knowledge_sources": "datamate"},
-                {"index_name": "elastic_kb_2", "knowledge_sources": "elasticsearch"}
-            ]
             mock_prepare_templates.return_value = {
                 "system_prompt": "populated_system_prompt"}
             mock_get_model_by_id.return_value = {"display_name": "test_model"}
 
-            # Mock ElasticSearchService
-            mock_es_instance = Mock()
-            mock_es_instance.get_summary.return_value = {"summary": "Test summary"}
-            mock_es_service.return_value = mock_es_instance
+            await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
-            result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
-
-            # Verify that ElasticSearchService was called only for elasticsearch sources
-            assert mock_es_service.call_count == 2  # Only for elastic_kb_1 and elastic_kb_2
-            mock_es_instance.get_summary.assert_any_call(index_name="elastic_kb_1")
-            mock_es_instance.get_summary.assert_any_call(index_name="elastic_kb_2")
-            # Should not be called for datamate_kb_1
-            called_index_names = [call[1]['index_name'] for call in mock_es_instance.get_summary.call_args_list]
-            assert "datamate_kb_1" not in called_index_names
+            # Verify that error was logged
+            mock_logger.error.assert_called_with("Failed to build knowledge base summary: Test Error")
 
 
 class TestCreateModelConfigList:

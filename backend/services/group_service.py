@@ -16,7 +16,8 @@ from database.group_db import (
     query_groups_by_user,
     query_group_ids_by_user,
     check_user_in_group,
-    count_group_users
+    count_group_users,
+    check_group_name_exists
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.tenant_config_db import get_single_config_info, insert_config, update_config_by_tenant_config_id
@@ -207,6 +208,7 @@ def create_group(tenant_id: str, group_name: str, group_description: Optional[st
     Raises:
         NotFoundException: When user not found
         UnauthorizedError: When user doesn't have permission
+        ValidationError: When group name already exists in the tenant
     """
     # Check user permission
     if user_id:
@@ -217,6 +219,10 @@ def create_group(tenant_id: str, group_name: str, group_description: Optional[st
         user_role = user_info.get("user_role", "USER")
         if user_role not in ["SU", "ADMIN"]:
             raise UnauthorizedError(f"User role {user_role} not authorized to create groups")
+
+    # Check if group name already exists in the tenant
+    if check_group_name_exists(tenant_id, group_name):
+        raise ValidationError(f"Group name '{group_name}' already exists in this tenant")
 
     # Create group
     group_id = add_group(
@@ -250,6 +256,7 @@ def update_group(group_id: int, updates: Dict[str, Any], user_id: str) -> bool:
     Raises:
         NotFoundException: When user or group not found
         UnauthorizedError: When user doesn't have permission
+        ValidationError: When group name already exists in the tenant
     """
     # Check user permission
     user_info = get_user_tenant_by_user_id(user_id)
@@ -264,6 +271,13 @@ def update_group(group_id: int, updates: Dict[str, Any], user_id: str) -> bool:
     group = query_groups(group_id)
     if not group:
         raise NotFoundException(f"Group {group_id} not found")
+
+    tenant_id = group.get("tenant_id")
+
+    # Check if new group name already exists in the tenant (when updating group_name)
+    if "group_name" in updates and updates["group_name"]:
+        if check_group_name_exists(tenant_id, updates["group_name"], exclude_group_id=group_id):
+            raise ValidationError(f"Group name '{updates['group_name']}' already exists in this tenant")
 
     # Update group
     success = modify_group(
@@ -281,7 +295,6 @@ def update_group(group_id: int, updates: Dict[str, Any], user_id: str) -> bool:
 def delete_group(group_id: int, user_id: str) -> bool:
     """
     Delete group.
-    TODO: Clear user-group relationship, knowledgebases, agents, invitation codes under the group
 
     Args:
         group_id (int): Group ID

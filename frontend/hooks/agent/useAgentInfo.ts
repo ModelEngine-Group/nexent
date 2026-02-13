@@ -1,8 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { searchAgentInfo } from "@/services/agentConfigService";
 
 export function useAgentInfo(agentId: number | null) {
-	return useQuery({
+	const queryClient = useQueryClient();
+
+	const query = useQuery({
 		queryKey: ["agentInfo", agentId],
 		queryFn: async () => {
 			if (!agentId) return null;
@@ -15,4 +18,12 @@ export function useAgentInfo(agentId: number | null) {
 		enabled: !!agentId,
 		staleTime: 60_000,
 	});
+
+	const agentInfo = query.data ?? null;
+
+	return {
+		...query,
+		agentInfo,
+		invalidate: () => queryClient.invalidateQueries({ queryKey: ["agentInfo"] }),
+	};
 }

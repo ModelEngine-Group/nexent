@@ -10,8 +10,11 @@ from database.user_tenant_db import (
     soft_delete_user_tenant_by_user_id
 )
 from database.group_db import remove_user_from_all_groups
-from services.tenant_service import get_tenant_info
+from database.memory_config_db import soft_delete_all_configs_by_user_id
+from database.conversation_db import soft_delete_all_conversations_by_user
 from utils.auth_utils import get_supabase_admin_client
+from utils.memory_utils import build_memory_config
+from nexent.memory.memory_service import clear_memory
 
 logger = logging.getLogger(__name__)
 
@@ -105,37 +108,80 @@ async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str
         raise
 
 
-async def delete_user(user_id: str, deleted_by: str) -> bool:
+async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
-    Soft delete user and remove from all groups
+    Permanently delete user account and all related data.
+
+    This performs complete cleanup:
+    1) Soft-delete user-tenant relation and remove from all groups
+    2) Soft-delete memory user configs and all conversations
+    3) Clear user-level memories in memory store
+    4) Permanently delete user from Supabase
 
     Args:
         user_id (str): User ID to delete
-        deleted_by (str): ID of the user performing the deletion
-
-    Returns:
-        bool: True if deletion successful
-
-    Raises:
-        ValueError: When user not found
+        tenant_id (str): Tenant ID for memory operations
     """
     try:
-        # Soft delete user-tenant relationship
-        tenant_deleted = soft_delete_user_tenant_by_user_id(user_id, deleted_by)
+        logger.debug(f"Start permanently deleting user {user_id} and all related data...")
 
-        if not tenant_deleted:
-            raise ValueError(f"User {user_id} not found in any tenant")
-
-        # Remove user from all groups
+        # 1) Core user deletion (soft-delete user-tenant and groups)
         try:
-            remove_user_from_all_groups(user_id, deleted_by)
-        except Exception as group_exc:
-            # Log the error but don't fail the entire deletion
-            logger.warning(f"Failed to remove user {user_id} from groups: {str(group_exc)}")
+            tenant_deleted = soft_delete_user_tenant_by_user_id(user_id, user_id)
+            if not tenant_deleted:
+                raise ValueError(f"User {user_id} not found in any tenant")
 
-        logger.info(f"Soft deleted user {user_id} by user {deleted_by}")
-        return True
+            remove_user_from_all_groups(user_id, user_id)
+            logger.debug("\tUser tenant relationship and groups deleted.")
+        except Exception as e:
+            logger.error(f"Failed core deletion for user {user_id}: {e}")
+
+        # 2) Soft-delete memory configs
+        try:
+            soft_delete_all_configs_by_user_id(user_id, actor=user_id)
+            logger.debug("\tMemory user configs deleted.")
+        except Exception as e:
+            logger.error(f"Failed deleting configs for user {user_id}: {e}")
+
+        # 3) Soft-delete conversations
+        try:
+            deleted_convs = soft_delete_all_conversations_by_user(user_id)
+            logger.debug(f"\t{deleted_convs} conversations deleted.")
+        except Exception as e:
+            logger.error(f"Failed deleting conversations for user {user_id}: {e}")
+
+        # 4) Clear memory records
+        try:
+            memory_config = build_memory_config(tenant_id)
+            await clear_memory(
+                memory_level="user",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            await clear_memory(
+                memory_level="user_agent",
+                memory_config=memory_config,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            logger.debug("\tUser memories cleared.")
+        except Exception as e:
+            logger.error(f"Failed clearing memory for user {user_id}: {e}")
+
+        # 5) Delete from Supabase
+        try:
+            admin_client = get_supabase_admin_client()
+            if admin_client and hasattr(admin_client.auth, "admin"):
+                admin_client.auth.admin.delete_user(user_id)
+                logger.debug("\tSupabase user deleted.")
+            else:
+                raise RuntimeError("Supabase admin client not available")
+        except Exception as e:
+            logger.error(f"Failed deleting Supabase user {user_id}: {e}")
+
+        logger.info(f"Permanently deleted user {user_id} and all related data.")
 
     except Exception as exc:
-        logger.error(f"Failed to delete user {user_id}: {str(exc)}")
+        logger.error(f"Unexpected error in delete_user_and_cleanup for {user_id}: {str(exc)}")
         raise

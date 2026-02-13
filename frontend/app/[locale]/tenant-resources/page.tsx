@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Flex } from "antd";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import UserManageComp from "./components/UserManageComp";
 
@@ -10,16 +11,19 @@ import UserManageComp from "./components/UserManageComp";
  * Notes:
  * - The backend APIs may be unavailable during development; the UI uses
  *   hooks/services that provide mock data until real endpoints are wired.
- * - Layout follows the tenant-resource pattern used by the `agents` pages.
+ * - Layout uses Flex for responsive design and proper content flow.
  */
 export default function TenantResourcesPage() {
-  const { canAccessProtectedData } = useSetupFlow({
-    requireAdmin: true,
-  });
 
-  if (!canAccessProtectedData) {
-    return null;
-  }
-
-  return <UserManageComp />;
+  return (
+    <>
+      <Flex
+        vertical
+        style={{ width: "100%", height: "100%" }}
+        className="h-full w-full overflow-hidden"
+      >
+        <UserManageComp />
+      </Flex>
+    </>
+  );
 }

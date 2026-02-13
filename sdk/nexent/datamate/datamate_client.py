@@ -8,6 +8,8 @@ import logging
 from typing import Dict, List, Optional, Any
 import httpx
 
+from ..utils.http_client_manager import http_client_manager
+
 logger = logging.getLogger("datamate_client")
 
 
@@ -17,21 +19,32 @@ class DataMateClient:
 
     This client encapsulates all DataMate API calls and provides a clean interface
     for datamate knowledge base operations.
+
+    Uses shared HttpClientManager for connection pooling to avoid socket exhaustion
+    and port conflicts on Windows systems.
     """
 
-    def __init__(self, base_url: str, timeout: float = 30.0, verify_ssl: bool = True):
+    def __init__(self, base_url: str, timeout: float = 5.0, verify_ssl: bool = True):
         """
         Initialize DataMate client.
 
         Args:
             base_url: Base URL of DataMate server (e.g., "http://jasonwang.site:30000")
-            timeout: Request timeout in seconds (default: 30.0)
+            timeout: Request timeout in seconds (default: 5.0)
             verify_ssl: Whether to verify SSL certificates (default: True)
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.verify_ssl = verify_ssl
-        logger.info(f"Initialized DataMateClient with base_url: {self.base_url}, verify_ssl: {self.verify_ssl}")
+        # Cache HTTP client for reuse (uses shared HttpClientManager internally)
+        # This avoids socket exhaustion and port conflicts on Windows
+        self._http_client = http_client_manager.get_sync_client(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            verify_ssl=self.verify_ssl
+        )
+        logger.info(
+            f"Initialized DataMateClient with base_url: {self.base_url}, verify_ssl: {self.verify_ssl}")
 
     def _build_url(self, path: str) -> str:
         """Build full URL from path."""
@@ -70,7 +83,8 @@ class DataMateClient:
             if response.headers.get("content-type", "").startswith("application/json")
             else response.text
         )
-        raise Exception(f"{error_message} (status {response.status_code}): {error_detail}")
+        raise Exception(
+            f"{error_message} (status {response.status_code}): {error_detail}")
 
     def _make_request(
         self,
@@ -84,12 +98,14 @@ class DataMateClient:
         """
         Make HTTP request with error handling.
 
+        Uses the cached HTTP client for requests.
+
         Args:
             method: HTTP method ("GET" or "POST")
             url: Request URL
             headers: Request headers
             json: Optional JSON payload for POST requests
-            timeout: Optional timeout override
+            timeout: Optional timeout override (passed to request, not client creation)
             error_message: Error message to use if request fails
 
         Returns:
@@ -100,18 +116,21 @@ class DataMateClient:
         """
         request_timeout = timeout if timeout is not None else self.timeout
 
-        with httpx.Client(timeout=request_timeout, verify=self.verify_ssl) as client:
-            if method.upper() == "GET":
-                response = client.get(url, headers=headers)
-            elif method.upper() == "POST":
-                response = client.post(url, json=json, headers=headers)
-            else:
-                raise ValueError(f"Unsupported HTTP method: {method}")
+        # Use cached HTTP client for requests
+        # Note: timeout passed to request method overrides client's default
+        if method.upper() == "GET":
+            response = self._http_client.get(
+                url, headers=headers, timeout=request_timeout)
+        elif method.upper() == "POST":
+            response = self._http_client.post(
+                url, json=json, headers=headers, timeout=request_timeout)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
 
-            if response.status_code != 200:
-                self._handle_error_response(response, error_message)
+        if response.status_code != 200:
+            self._handle_error_response(response, error_message)
 
-            return response
+        return response
 
     def list_knowledge_bases(
         self,
@@ -138,9 +157,11 @@ class DataMateClient:
             payload = {"page": page, "size": size}
             headers = self._build_headers(authorization)
 
-            logger.info(f"Fetching DataMate knowledge bases from: {url}, page={page}, size={size}")
+            logger.info(
+                f"Fetching DataMate knowledge bases from: {url}, page={page}, size={size}")
 
-            response = self._make_request("POST", url, headers, json=payload, error_message="Failed to get knowledge base list")
+            response = self._make_request(
+                "POST", url, headers, json=payload, error_message="Failed to get knowledge base list")
             data = response.json()
 
             # Extract knowledge base list from response
@@ -148,15 +169,20 @@ class DataMateClient:
             if data.get("data"):
                 knowledge_bases = data.get("data").get("content", [])
 
-            logger.info(f"Successfully fetched {len(knowledge_bases)} knowledge bases from DataMate")
+            logger.info(
+                f"Successfully fetched {len(knowledge_bases)} knowledge bases from DataMate")
             return knowledge_bases
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error while fetching DataMate knowledge bases: {str(e)}")
-            raise RuntimeError(f"Failed to fetch DataMate knowledge bases: {str(e)}")
+            logger.error(
+                f"HTTP error while fetching DataMate knowledge bases: {str(e)}")
+            raise RuntimeError(
+                f"Failed to fetch DataMate knowledge bases: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error while fetching DataMate knowledge bases: {str(e)}")
-            raise RuntimeError(f"Failed to fetch DataMate knowledge bases: {str(e)}")
+            logger.error(
+                f"Unexpected error while fetching DataMate knowledge bases: {str(e)}")
+            raise RuntimeError(
+                f"Failed to fetch DataMate knowledge bases: {str(e)}")
 
     def get_knowledge_base_files(
         self,

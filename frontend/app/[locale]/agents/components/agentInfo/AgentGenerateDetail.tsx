@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
+  Tooltip,
   Tabs,
   Form,
   Input,
@@ -32,8 +33,13 @@ import {
   GENERATE_PROMPT_STREAM_TYPES,
 } from "@/const/agentConfig";
 import { generatePromptStream } from "@/services/promptService";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useTenantList } from "@/hooks/tenant/useTenantList";
+import { useGroupList } from "@/hooks/group/useGroupList";
+import { USER_ROLES } from "@/const/auth";
+import { Can } from "@/components/permission/Can";
 import ExpandEditModal from "./ExpandEditModal";
 
 const { TextArea } = Input;
@@ -59,11 +65,18 @@ export default function AgentGenerateDetail({
 }: AgentGenerateDetailProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { user, isSpeedMode } = useAuth();
+  const { user, groupIds: allowedGroupIds } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const [form] = Form.useForm();
 
   // Model data from React Query
   const { availableLlmModels, defaultLlmModel, isLoading: loadingModels } = useModelList();
+
+  // Tenant & group data for group selection
+  const { data: tenantData } = useTenantList();
+  const tenantId = user?.tenantId ?? tenantData?.[0]?.tenant_id ?? null;
+  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const groups = groupData?.groups || [];
 
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
@@ -71,6 +84,32 @@ export default function AgentGenerateDetail({
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+
+  // Only show "no edit permission" tooltip when the panel is active and agent is read-only.
+  // Note: when no agent is selected, AgentInfoComp shows an overlay and we should not show
+  // this tooltip in that state.
+  const showNoEditPermissionTip =
+    !editable && currentAgentId !== null && currentAgentId !== undefined;
+
+  const noEditPermissionTitle = showNoEditPermissionTip
+    ? t("agent.noEditPermission")
+    : undefined;
+
+  const wrapNoEditTooltipBlock = (node: React.ReactNode) => {
+    return (
+      <Tooltip title={noEditPermissionTitle}>
+        <span style={{ display: "block" }}>{node}</span>
+      </Tooltip>
+    );
+  };
+
+  const wrapNoEditTooltipInline = (node: React.ReactNode) => {
+    return (
+      <Tooltip title={noEditPermissionTitle}>
+        <span style={{ display: "inline-block" }}>{node}</span>
+      </Tooltip>
+    );
+  };
 
 
   // Ensure tenant config is loaded for default model selection
@@ -120,20 +159,73 @@ export default function AgentGenerateDetail({
     businessLogicModelId: 0,
   });
 
+  const normalizeNumberArray = (value: unknown): number[] => {
+    const arr = Array.isArray(value) ? value : [];
+    return Array.from(
+      new Set(arr.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
+    ).sort((a, b) => a - b);
+  };
+
+  const groupSelectOptions = useMemo(() => {
+    const selectedIds = normalizeNumberArray(editedAgent.group_ids || []);
+    const allowedSet = new Set(normalizeNumberArray(allowedGroupIds || []));
+    const canSelectAllGroups =
+      user?.role === USER_ROLES.SU ||
+      user?.role === USER_ROLES.ADMIN ||
+      user?.role === USER_ROLES.SPEED;
+
+    const baseGroups = canSelectAllGroups
+      ? groups
+      : groups.filter((g) => allowedSet.has(g.group_id));
+
+    const baseSet = new Set(baseGroups.map((g) => g.group_id));
+    const groupById = new Map(groups.map((g) => [g.group_id, g] as const));
+
+    const options: Array<{ label: string; value: number; disabled?: boolean }> =
+      baseGroups.map((g) => ({
+        label: g.group_name,
+        value: g.group_id,
+      }));
+
+    // Keep already-selected groups visible even if they are not selectable (disabled).
+    for (const id of selectedIds) {
+      if (baseSet.has(id)) continue;
+      const g = groupById.get(id);
+      options.push({
+        label: g?.group_name ?? `Group ${id}`,
+        value: id,
+        disabled: true,
+      });
+    }
+
+    return options;
+  }, [allowedGroupIds, editedAgent.group_ids, groups, user?.role]);
+
   // Initialize form values when component mounts or currentAgentId changes
   useEffect(() => {
-    const initialAgentInfo = {
+    const isCreateMode = editable && (currentAgentId === null || currentAgentId === undefined);
+
+    // Note:
+    // In create mode, do not set group_ids here. Otherwise, when switching from an existing
+    // agent to create mode (currentAgentId changes to null), this initializer can overwrite
+    // the default-group selection effect and leave group_ids empty.
+    const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
-      agentAuthor: editedAgent.author || "",
+      agentAuthor: editedAgent.author || user?.email || (isSpeedMode ? "Default User" : ""),
       mainAgentModel:
         editedAgent.model || defaultLlmModel?.displayName || "",
       mainAgentMaxStep: editedAgent.max_step || 5,
       agentDescription: editedAgent.description || "",
+      group_ids: normalizeNumberArray(editedAgent.group_ids || []),
       dutyPrompt: editedAgent.duty_prompt || "",
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
     };
+
+    if (isCreateMode) {
+      delete initialAgentInfo.group_ids;
+    }
 
     const initialBusinessInfo = {
       businessDescription: editedAgent.business_description || "",
@@ -148,7 +240,44 @@ export default function AgentGenerateDetail({
     setBusinessInfo(initialBusinessInfo);
 
     form.setFieldsValue(initialAgentInfo);
-  }, [currentAgentId, editedAgent, availableLlmModels, defaultLlmModel]);
+    // Sync model to store if not already set (e.g., in create mode with default model)
+    if ((isCreateMode || !editedAgent.model) && defaultLlmModel) {
+      onUpdateProfile({
+        model: defaultLlmModel.displayName || "",
+        model_id: defaultLlmModel.id || 0,
+      });
+    }
+    // We intentionally initialize the form only when switching agent (or when default model becomes available),
+    // otherwise it can create update loops with Form-controlled fields updating the store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentAgentId, defaultLlmModel?.id]);
+
+  // Default to selecting all groups when creating a new agent.
+  // Only applies when groups are loaded and no group is selected yet.
+  useEffect(() => {
+    const isCreateMode = editable && (currentAgentId === null || currentAgentId === undefined);
+    if (!isCreateMode) return;
+    if (!groups || groups.length === 0) return;
+
+    const currentGroupIds = normalizeNumberArray(editedAgent.group_ids || []);
+    if (currentGroupIds.length > 0) return;
+
+    const allowedSet = new Set(normalizeNumberArray(allowedGroupIds || []));
+    const canSelectAllGroups =
+      user?.role === USER_ROLES.SU ||
+      user?.role === USER_ROLES.ADMIN ||
+      user?.role === USER_ROLES.SPEED;
+    const selectableGroups = canSelectAllGroups
+      ? groups
+      : groups.filter((g) => allowedSet.has(g.group_id));
+
+    const allGroupIds = normalizeNumberArray(selectableGroups.map((g) => g.group_id));
+    if (allGroupIds.length === 0) return;
+
+    form.setFieldsValue({ group_ids: allGroupIds });
+    onUpdateProfile({ group_ids: allGroupIds });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editable, currentAgentId, groups, allowedGroupIds, user?.role]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
@@ -164,6 +293,12 @@ export default function AgentGenerateDetail({
     const selectedModel = availableLlmModels.find(
       (m) => m.name === modelName || m.displayName === modelName
     );
+    // Update local state so the Select component reflects the change
+    setBusinessInfo((prev) => ({
+      ...prev,
+      businessLogicModelName: modelName,
+      businessLogicModelId: selectedModel?.id || 0,
+    }));
     onUpdateBusinessInfo({
       business_description: businessInfo.businessDescription || "",
       business_logic_model_id: selectedModel?.id || 0,
@@ -173,8 +308,59 @@ export default function AgentGenerateDetail({
 
   // Handle expand modal functions
   const handleOpenExpandModal = (type: 'duty' | 'constraint' | 'few-shots') => {
+    if (!editable) return;
     setExpandModalType(type);
     setExpandModalOpen(true);
+  };
+
+  const renderExpandButton = (type: "duty" | "constraint" | "few-shots") => {
+    return wrapNoEditTooltipInline(
+      <Button
+        onClick={() => handleOpenExpandModal(type)}
+        title={t("systemPrompt.button.expand")}
+        icon={<Maximize2 size={12} />}
+        size="small"
+        type="text"
+        disabled={!editable}
+      />
+    );
+  };
+
+  const promptEditorStyle: React.CSSProperties = {
+    width: "100%",
+    height: "100%",
+    resize: "none",
+    border: "none",
+    outline: "none",
+    boxShadow: "none",
+    display: "block",
+    flex: 1,
+    minHeight: 0,
+  };
+
+  const renderPromptEditor = (
+    fieldName: "dutyPrompt" | "constraintPrompt" | "fewShotsPrompt",
+    placeholder: string,
+    onBlurUpdate: (value: string) => void
+  ) => {
+    const item = (
+      <Form.Item name={fieldName} className="mb-0 h-full">
+        <TextArea
+          placeholder={placeholder}
+          style={promptEditorStyle}
+          disabled={!editable}
+          onBlur={(e) => onBlurUpdate(e.target.value)}
+        />
+      </Form.Item>
+    );
+
+    return showNoEditPermissionTip ? (
+      <Tooltip title={t("agent.noEditPermission")}>
+        <div className="h-full">{item}</div>
+      </Tooltip>
+    ) : (
+      item
+    );
   };
 
   const handleCloseExpandModal = () => {
@@ -304,7 +490,7 @@ export default function AgentGenerateDetail({
         },
         (data) => {
           // Process streaming response data
-          
+
           switch (data.type) {
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
               form.setFieldsValue({ dutyPrompt: data.content });
@@ -313,7 +499,7 @@ export default function AgentGenerateDetail({
               form.setFieldsValue({ constraintPrompt: data.content });
               break;
             case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-              
+
               form.setFieldsValue({ fewShotsPrompt: data.content });
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
@@ -382,7 +568,8 @@ export default function AgentGenerateDetail({
         <div className="overflow-y-auto overflow-x-hidden h-full px-3">
           <Row gutter={[16, 16]}>
             <Col span={24}>
-              <Form form={form} layout="vertical" disabled={!editable}>
+              {wrapNoEditTooltipBlock(
+                <Form form={form} layout="vertical" disabled={!editable}>
                 <Form.Item
                   name="agentDisplayName"
                   label={t("agent.displayName")}
@@ -431,18 +618,43 @@ export default function AgentGenerateDetail({
                   />
                 </Form.Item>
 
+                <Can permission="group:read">
+                  <Form.Item
+                    name="group_ids"
+                    label={t("agent.userGroup")}
+                    className="mb-3"
+                  >
+                    <Select
+                      mode="multiple"
+                      placeholder={t("agent.userGroup")}
+                      options={groupSelectOptions}
+                      allowClear
+                      onChange={(value) => {
+                        const nextGroupIds = normalizeNumberArray(value || []);
+                        const currentGroupIds = normalizeNumberArray(
+                          editedAgent.group_ids || []
+                        );
+                        if (
+                          JSON.stringify(nextGroupIds) ===
+                          JSON.stringify(currentGroupIds)
+                        ) {
+                          return;
+                        }
+                        onUpdateProfile({ group_ids: nextGroupIds });
+                      }}
+                    />
+                  </Form.Item>
+                </Can>
+
                 <Form.Item
                   name="agentAuthor"
                   label={t("agent.author")}
-                  help={
-                    !isSpeedMode &&
-                    !form.getFieldValue("agentAuthor") &&
-                    user?.email &&
-                    t("agent.author.hint", {
-                      defaultValue: "Default: {{email}}",
-                      email: user.email,
-                    })
-                  }
+                  rules={[
+                    {
+                      required: true,
+                      message: t("agent.authorPlaceholder"),
+                    },
+                  ]}
                   className="mb-3"
                 >
                   <Input
@@ -533,6 +745,7 @@ export default function AgentGenerateDetail({
                   />
                 </Form.Item>
               </Form>
+              )}
             </Col>
           </Row>
         </div>
@@ -544,36 +757,18 @@ export default function AgentGenerateDetail({
       children: (
         <div className="overflow-y-auto overflow-x-hidden h-full relative">
           <div className="absolute top-2 right-2 z-10">
-            <Button
-              onClick={() => handleOpenExpandModal('duty')}
-              title={t("systemPrompt.button.expand")}
-              icon={<Maximize2 size={12} />}
-              size="small"
-              type="text"
-            />
+            {renderExpandButton("duty")}
           </div>
           <Form
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
           >
-            <Form.Item name="dutyPrompt" className="mb-0 h-full">
-              <TextArea
-                placeholder={t("systemPrompt.card.duty.title")}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  resize: "none",
-                  border: "none",
-                  outline: "none",
-                  boxShadow: "none",
-                  display: "block",
-                  flex: 1,
-                  minHeight: 0,
-                }}
-                onBlur={(e) => onUpdateProfile({ duty_prompt: e.target.value })}
-              />
-            </Form.Item>
+            {renderPromptEditor(
+              "dutyPrompt",
+              t("systemPrompt.card.duty.title"),
+              (value) => onUpdateProfile({ duty_prompt: value })
+            )}
           </Form>
         </div>
       ),
@@ -584,38 +779,18 @@ export default function AgentGenerateDetail({
       children: (
         <div className="overflow-y-auto overflow-x-hidden h-full relative">
           <div className="absolute top-2 right-2 z-10">
-            <Button
-              onClick={() => handleOpenExpandModal('constraint')}
-              title={t("systemPrompt.button.expand")}
-              icon={<Maximize2 size={12} />}
-              size="small"
-              type="text"
-            />
+            {renderExpandButton("constraint")}
           </div>
           <Form
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
           >
-            <Form.Item name="constraintPrompt" className="mb-0 h-full">
-              <TextArea
-                placeholder={t("systemPrompt.card.constraint.title")}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  resize: "none",
-                  border: "none",
-                  outline: "none",
-                  boxShadow: "none",
-                  display: "block",
-                  flex: 1,
-                  minHeight: 0,
-                }}
-                onBlur={(e) =>
-                  onUpdateProfile({ constraint_prompt: e.target.value })
-                }
-              />
-            </Form.Item>
+            {renderPromptEditor(
+              "constraintPrompt",
+              t("systemPrompt.card.constraint.title"),
+              (value) => onUpdateProfile({ constraint_prompt: value })
+            )}
           </Form>
         </div>
       ),
@@ -626,38 +801,18 @@ export default function AgentGenerateDetail({
       children: (
         <div className="overflow-y-auto overflow-x-hidden h-full relative">
           <div className="absolute top-2 right-2 z-10">
-            <Button
-              onClick={() => handleOpenExpandModal('few-shots')}
-              title={t("systemPrompt.button.expand")}
-              icon={<Maximize2 size={12} />}
-              size="small"
-              type="text"
-            />
+            {renderExpandButton("few-shots")}
           </div>
           <Form
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
           >
-            <Form.Item name="fewShotsPrompt" className="mb-0 h-full">
-              <TextArea
-                placeholder={t("systemPrompt.card.fewShots.title")}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  resize: "none",
-                  border: "none",
-                  outline: "none",
-                  boxShadow: "none",
-                  display: "block",
-                  flex: 1,
-                  minHeight: 0,
-                }}
-                onBlur={(e) =>
-                  onUpdateProfile({ few_shots_prompt: e.target.value })
-                }
-              />
-            </Form.Item>
+            {renderPromptEditor(
+              "fewShotsPrompt",
+              t("systemPrompt.card.fewShots.title"),
+              (value) => onUpdateProfile({ few_shots_prompt: value })
+            )}
           </Form>
         </div>
       ),
@@ -679,34 +834,36 @@ export default function AgentGenerateDetail({
               className="w-full rounded-md"
               styles={{ body: { padding: "16px" } }}
             >
-              <Input.TextArea
-                value={businessInfo.businessDescription}
-                onChange={(e) =>
-                  setBusinessInfo((prev) => ({
-                    ...prev,
-                    businessDescription: e.target.value,
-                  }))
-                }
-                onBlur={() =>
-                  handleBusinessDescriptionChange(
-                    businessInfo.businessDescription
-                  )
-                }
-                placeholder={t("businessLogic.placeholder")}
-                className="w-full resize-none text-sm mb-2"
-                style={{
-                  minHeight: "80px",
-                  maxHeight: "160px",
-                  border: "none",
-                  boxShadow: "none",
-                  padding: 0,
-                  background: "transparent",
-                  overflowX: "hidden",
-                  overflowY: "auto",
-                }}
-                autoSize={false}
-                disabled={!editable}
-              />
+              {wrapNoEditTooltipBlock(
+                <Input.TextArea
+                  value={businessInfo.businessDescription}
+                  onChange={(e) =>
+                    setBusinessInfo((prev) => ({
+                      ...prev,
+                      businessDescription: e.target.value,
+                    }))
+                  }
+                  onBlur={() =>
+                    handleBusinessDescriptionChange(
+                      businessInfo.businessDescription
+                    )
+                  }
+                  placeholder={t("businessLogic.placeholder")}
+                  className="w-full resize-none text-sm mb-2"
+                  style={{
+                    minHeight: "80px",
+                    maxHeight: "160px",
+                    border: "none",
+                    boxShadow: "none",
+                    padding: 0,
+                    background: "transparent",
+                    overflowX: "hidden",
+                    overflowY: "auto",
+                  }}
+                  autoSize={false}
+                  disabled={!editable}
+                />
+              )}
 
               {/* Control area */}
               <Flex style={{ width: "100%" }} align="center">
@@ -733,19 +890,21 @@ export default function AgentGenerateDetail({
                   />
                 </div>
                 <div style={{ marginLeft: 12 }}>
-                   <Button
-                    type="primary"
-                    size="middle"
-                    onClick={handleGenerateAgent}
-                    disabled={!editable || loadingModels || isGenerating}
-                    icon={<Zap size={16} />}
-                  >
-                    <span className="button-text-full">
-                      {isGenerating
-                        ? t("businessLogic.config.button.generating")
-                        : t("businessLogic.config.button.generatePrompt")}
-                    </span>
-                  </Button>
+                  {wrapNoEditTooltipInline(
+                    <Button
+                      type="primary"
+                      size="middle"
+                      onClick={handleGenerateAgent}
+                      disabled={!editable || loadingModels || isGenerating}
+                      icon={<Zap size={16} />}
+                    >
+                      <span className="button-text-full">
+                        {isGenerating
+                          ? t("businessLogic.config.button.generating")
+                          : t("businessLogic.config.button.generatePrompt")}
+                      </span>
+                    </Button>
+                  )}
                 </div>
               </Flex>
             </Card>

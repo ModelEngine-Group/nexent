@@ -1,7 +1,8 @@
 "use client";
 
 import { ReactNode, useState } from "react";
-import { Layout, Button } from "antd";
+import { usePathname } from "next/navigation";
+import { Layout, Button, Spin } from "antd";
 import { TopNavbar } from "@/components/navigation/TopNavbar";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 import { FooterLayout } from "@/components/navigation/FooterLayout";
@@ -10,23 +11,28 @@ import {
   FOOTER_CONFIG,
   SIDER_CONFIG,
 } from "@/const/layoutConstants";
-import { AuthDialogs } from "@/components/homepage/AuthDialogs";
-import { useAuth } from "@/hooks/useAuth";
+import { AuthDialogs } from "@/components/auth/AuthDialogs";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import { getEffectiveRoutePath } from "@/lib/auth";
 
 const { Header, Sider, Content, Footer } = Layout;
 
 export function ClientLayout({ children }: { children: ReactNode }) {
-  const { user, openLoginModal, openRegisterModal, isSpeedMode } = useAuth();
   const pathname = usePathname();
+  const { isAuthenticated } = useAuthenticationContext();
+  const { isAuthorized } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
 
   // Check if current route is setup page
   const isSetupPage = pathname?.includes("/setup");
 
-  // Authentication dialog states
-  const [loginPromptOpen, setLoginPromptOpen] = useState(false);
-  const [adminRequiredPromptOpen, setAdminRequiredPromptOpen] = useState(false);
+  const isChatPage = pathname?.includes("/chat");
+
+  // Home page does not require authorization
+  const isHomePage = getEffectiveRoutePath(pathname) === "/";
 
   // Sidebar collapse state
   const [collapsed, setCollapsed] = useState(false);
@@ -85,6 +91,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   };
 
   const contentStyle: React.CSSProperties = {
+    height: "100%",
     overflowY: "auto",
     overflowX: "hidden",
     position: "relative",
@@ -94,26 +101,10 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     backgroundColor: "#fff",
   };
 
-  // Authentication handlers
-  const handleAuthRequired = () => {
-    if (!isSpeedMode && !user) {
-      setLoginPromptOpen(true);
-    }
-  };
-
-  const handleAdminRequired = () => {
-    if (!isSpeedMode && user?.role !== "admin") {
-      setAdminRequiredPromptOpen(true);
-    }
-  };
-
-  const handleCloseLoginPrompt = () => setLoginPromptOpen(false);
-  const handleCloseAdminPrompt = () => setAdminRequiredPromptOpen(false);
-
   return (
     <Layout style={layoutStyle}>
       <Header style={headerStyle}>
-        <TopNavbar />
+        <TopNavbar isChatPage={isChatPage}/>
       </Header>
 
       <Layout>
@@ -127,11 +118,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           className="dark:bg-slate-900/95 border-r border-slate-200 dark:border-slate-700 backdrop-blur-sm shadow-sm"
         >
           <div style={siderInnerStyle}>
-            <SideNavigation
-              onAuthRequired={handleAuthRequired}
-              onAdminRequired={handleAdminRequired}
-              collapsed={collapsed}
-            />
+            <SideNavigation collapsed={collapsed} />
           </div>
           <Button
             type="primary"
@@ -156,7 +143,16 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           />
         </Sider>
 
-        <Content style={contentStyle}>{children}</Content>
+        {/* Don't render children until authorization is complete (except home page) */}
+        <Content style={contentStyle}>
+          {isHomePage || isAuthorized ? (
+            children
+          ) : (
+            <div className="flex items-center justify-center h-full w-full">
+              <Spin/>
+            </div>
+          )}
+        </Content>
       </Layout>
 
       {/* Conditionally render footer */}
@@ -169,22 +165,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
       {/* Global authentication dialogs */}
       {!isSpeedMode && (
         <>
-          <AuthDialogs
-            loginPromptOpen={loginPromptOpen}
-            adminPromptOpen={adminRequiredPromptOpen}
-            onCloseLoginPrompt={handleCloseLoginPrompt}
-            onCloseAdminPrompt={handleCloseAdminPrompt}
-            onLoginClick={() => {
-              setLoginPromptOpen(false);
-              setAdminRequiredPromptOpen(false);
-              openLoginModal();
-            }}
-            onRegisterClick={() => {
-              setLoginPromptOpen(false);
-              setAdminRequiredPromptOpen(false);
-              openRegisterModal();
-            }}
-          />
+          <AuthDialogs />
         </>
       )}
     </Layout>

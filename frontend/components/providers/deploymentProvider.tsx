@@ -1,6 +1,12 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
 
@@ -21,14 +27,17 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkDeploymentVersion = async () => {
       try {
-        const response = await fetch(API_ENDPOINTS.tenantConfig.deploymentVersion);
+        const response = await fetch(
+          API_ENDPOINTS.tenantConfig.deploymentVersion
+        );
         if (response.ok) {
           const data = await response.json();
-          const version = data.content?.deployment_version || data.deployment_version;
-          setIsSpeedMode(version === 'speed');
+          const version =
+            data.content?.deployment_version || data.deployment_version;
+          setIsSpeedMode(version === "speed");
         }
       } catch (error) {
-        log.error('Failed to check deployment version:', error);
+        log.error("Failed to check deployment version:", error);
         setIsSpeedMode(false);
       } finally {
         setIsDeploymentReady(true);
@@ -46,4 +55,3 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
 }
 
 export const useDeployment = () => useContext(DeploymentContext);
-

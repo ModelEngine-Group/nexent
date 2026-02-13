@@ -270,6 +270,102 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
     @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_group_permissions(self, mock_create_knowledge):
+        """
+        Test create_knowledge_base with group permissions.
+
+        Verifies that ingroup_permission and group_ids are correctly
+        passed to the knowledge record creation.
+        """
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 7,
+            "index_name": "7-uuid",
+            "knowledge_name": "kb1",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb1",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="EDIT",
+            group_ids=[1, 2, 3],
+        )
+
+        self.assertEqual(result["status"], "success")
+        # Verify that create_knowledge_record was called with group permissions
+        mock_create_knowledge.assert_called_once()
+        # Parameters are passed as positional argument (knowledge_data dict), not keyword args
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertEqual(call_kwargs["ingroup_permission"], "EDIT")
+        self.assertEqual(call_kwargs["group_ids"], [1, 2, 3])
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_partial_group_permissions(self, mock_create_knowledge):
+        """
+        Test create_knowledge_base with only ingroup_permission (no group_ids).
+
+        Verifies that the method handles partial group permissions correctly.
+        """
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 8,
+            "index_name": "8-uuid2",
+            "knowledge_name": "kb2",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb2",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="READ_ONLY",
+            # group_ids not provided
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_create_knowledge.assert_called_once()
+        # Parameters are passed as positional argument (knowledge_data dict), not keyword args
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertEqual(call_kwargs["ingroup_permission"], "READ_ONLY")
+        # group_ids should not be in the call if not provided
+        self.assertNotIn("group_ids", call_kwargs)
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    def test_create_knowledge_base_with_empty_group_ids(self, mock_create_knowledge):
+        """
+        Test create_knowledge_base with empty group_ids list.
+
+        Verifies that an empty list of group_ids is passed correctly.
+        """
+        self.mock_vdb_core.create_index.return_value = True
+        mock_create_knowledge.return_value = {
+            "knowledge_id": 9,
+            "index_name": "9-uuid3",
+            "knowledge_name": "kb3",
+        }
+
+        result = ElasticSearchService.create_knowledge_base(
+            knowledge_name="kb3",
+            embedding_dim=256,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-1",
+            ingroup_permission="PRIVATE",
+            group_ids=[],
+        )
+
+        self.assertEqual(result["status"], "success")
+        mock_create_knowledge.assert_called_once()
+        # Parameters are passed as positional argument (knowledge_data dict), not keyword args
+        call_kwargs = mock_create_knowledge.call_args[0][0]
+        self.assertEqual(call_kwargs["ingroup_permission"], "PRIVATE")
+        self.assertEqual(call_kwargs["group_ids"], [])
+
+    @patch('backend.services.vectordatabase_service.create_knowledge_record')
     def test_create_index_failure(self, mock_create_knowledge):
         """
         Test index creation failure.
@@ -687,6 +783,236 @@ class TestElasticSearchService(unittest.TestCase):
         # When include_stats=True, indices_info contains the detailed info with permissions
         self.assertIn("index1", result["indices"])
         self.assertIn("index2", result["indices"])
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_permission_edit_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that non-creator user gets EDIT permission when ingroup_permission is EDIT.
+
+        This test verifies that:
+        1. When user is not the creator but has group intersection
+        2. And ingroup_permission is EDIT, user gets EDIT permission
+        3. This covers line 611-612
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other_user",  # User is NOT creator
+                "ingroup_permission": "EDIT",  # EDIT permission
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1]  # User belongs to group 1
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,  # Need stats to see permissions
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that non-creator user gets READ_ONLY permission when ingroup_permission is READ_ONLY.
+
+        This test verifies that:
+        1. When user is not the creator but has group intersection
+        2. And ingroup_permission is READ_ONLY, user gets READ_ONLY permission
+        3. This covers line 614-615
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other_user",  # User is NOT creator
+                "ingroup_permission": "READ_ONLY",  # READ_ONLY permission
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1]  # User belongs to group 1
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,  # Need stats to see permissions
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that non-creator user gets default READ_ONLY permission when ingroup_permission is None or other value.
+
+        This test verifies that:
+        1. When user is not the creator but has group intersection
+        2. And ingroup_permission is None or not EDIT/READ_ONLY/PRIVATE, user gets default READ_ONLY permission
+        3. This covers line 605
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "1,2",
+                "created_by": "other_user",  # User is NOT creator
+                "ingroup_permission": None,  # None permission (will default to READ_ONLY)
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = [1]  # User belongs to group 1
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,  # Need stats to see permissions
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        self.assertEqual(len(result["indices_info"]), 1)
+        # When ingroup_permission is None, it defaults to READ_ONLY (line 584)
+        # Then line 605 sets permission = PERMISSION_READ (which is "READ_ONLY")
+        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_kb_group_ids_none(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices handles kb_group_ids_str as None correctly.
+
+        This test verifies that:
+        1. When kb_group_ids_str is None, kb_groups_empty is correctly calculated
+        2. This covers line 591 (None branch)
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": None,  # None value to test line 591
+                "created_by": "other_user",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []  # Empty user groups
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        # When both kb_group_ids and user_group_ids are empty/None, they are considered intersecting
+        # So the knowledge base should be visible
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
+
+    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    def test_list_indices_kb_group_ids_empty_string(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """
+        Test that list_indices handles kb_group_ids_str as empty string correctly.
+
+        This test verifies that:
+        1. When kb_group_ids_str is empty string, kb_groups_empty is correctly calculated
+        2. This covers line 591 (empty string branch)
+        """
+        # Setup
+        self.mock_vdb_core.get_user_indices.return_value = ["index1"]
+        self.mock_vdb_core.get_indices_detail.return_value = {
+            "index1": {"base_info": {"doc_count": 10, "embedding_model": "test-model"}}
+        }
+        mock_get_knowledge.return_value = [
+            {
+                "index_name": "index1",
+                "embedding_model_name": "test-model",
+                "group_ids": "",  # Empty string to test line 591
+                "created_by": "other_user",
+                "ingroup_permission": "EDIT",
+                "tenant_id": "test_tenant",
+                "knowledge_sources": "elasticsearch"
+            }
+        ]
+        mock_get_user_tenant.return_value = {
+            "user_role": "USER", "tenant_id": "test_tenant"}
+        mock_get_group_ids.return_value = []  # Empty user groups
+
+        # Execute
+        result = ElasticSearchService.list_indices(
+            pattern="*",
+            include_stats=True,
+            target_tenant_id="test_tenant",
+            user_id="test_user",
+            vdb_core=self.mock_vdb_core
+        )
+
+        # Assert
+        # When both kb_group_ids and user_group_ids are empty, they are considered intersecting
+        self.assertEqual(len(result["indices_info"]), 1)
+        self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
 
     @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
     @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
@@ -2527,6 +2853,231 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(payload["lang"], "en")
         self.assertIn("id", payload)
 
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_chunk_generates_embedding_when_tenant_provided(self, mock_get_embedding_model, mock_get_knowledge_record):
+        """
+        Test create_chunk generates and stores embedding when tenant_id is provided.
+        """
+        from types import SimpleNamespace
+
+        # Setup mocks
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+
+        # Mock knowledge record with embedding model name
+        mock_get_knowledge_record.return_value = {
+            "index_name": "kb-index",
+            "embedding_model_name": "text-embedding-3-small"
+        }
+
+        # Mock embedding model
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
+        mock_get_embedding_model.return_value = mock_embedding
+
+        chunk_request = SimpleNamespace(
+            chunk_id=None,
+            title=None,
+            filename="file.txt",
+            path_or_url="doc-1",
+            content="This is test content that needs embedding",
+            metadata={},
+        )
+
+        result = ElasticSearchService.create_chunk(
+            index_name="kb-index",
+            chunk_request=chunk_request,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-123",
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["chunk_id"], "chunk-1")
+
+        # Verify embedding was generated
+        mock_get_embedding_model.assert_called_once_with("tenant-123", "text-embedding-3-small")
+        mock_embedding.get_embeddings.assert_called_once()
+
+        # Verify vdb_core was called with embedding in payload
+        self.mock_vdb_core.create_chunk.assert_called_once()
+        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
+        self.assertIn("embedding", payload)
+        self.assertEqual(payload["embedding"], [0.1, 0.2, 0.3])
+        self.assertEqual(payload["embedding_model_name"], "text-embedding-3-small")
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_chunk_without_tenant_no_embedding_generated(self, mock_get_embedding_model, mock_get_knowledge_record):
+        """
+        Test create_chunk does not generate embedding when tenant_id is not provided.
+        """
+        from types import SimpleNamespace
+
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+
+        chunk_request = SimpleNamespace(
+            chunk_id=None,
+            title=None,
+            filename="file.txt",
+            path_or_url="doc-1",
+            content="Content without embedding",
+            metadata={},
+        )
+
+        result = ElasticSearchService.create_chunk(
+            index_name="kb-index",
+            chunk_request=chunk_request,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id=None,  # No tenant_id
+        )
+
+        self.assertEqual(result["status"], "success")
+
+        # Verify no embedding-related calls were made
+        mock_get_knowledge_record.assert_not_called()
+        mock_get_embedding_model.assert_not_called()
+
+        # Verify payload has no embedding
+        self.mock_vdb_core.create_chunk.assert_called_once()
+        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
+        self.assertNotIn("embedding", payload)
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_chunk_handles_embedding_failure_gracefully(self, mock_get_embedding_model, mock_get_knowledge_record):
+        """
+        Test create_chunk handles embedding generation failure gracefully.
+        """
+        from types import SimpleNamespace
+
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+
+        mock_get_knowledge_record.return_value = {
+            "index_name": "kb-index",
+            "embedding_model_name": "text-embedding-3-small"
+        }
+
+        # Embedding model raises exception
+        mock_get_embedding_model.side_effect = Exception("Embedding service unavailable")
+
+        chunk_request = SimpleNamespace(
+            chunk_id=None,
+            title=None,
+            filename="file.txt",
+            path_or_url="doc-1",
+            content="Content that would need embedding",
+            metadata={},
+        )
+
+        # Should not raise exception, just log warning
+        result = ElasticSearchService.create_chunk(
+            index_name="kb-index",
+            chunk_request=chunk_request,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-123",
+        )
+
+        # Result should still be successful (embedding is optional)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["chunk_id"], "chunk-1")
+
+        # Verify chunk was still created without embedding
+        self.mock_vdb_core.create_chunk.assert_called_once()
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_chunk_handles_empty_embedding_result(self, mock_get_embedding_model, mock_get_knowledge_record):
+        """
+        Test create_chunk handles empty embedding result gracefully.
+        """
+        from types import SimpleNamespace
+
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+
+        mock_get_knowledge_record.return_value = {
+            "index_name": "kb-index",
+            "embedding_model_name": "text-embedding-3-small"
+        }
+
+        # Embedding returns empty list
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.return_value = []
+        mock_get_embedding_model.return_value = mock_embedding
+
+        chunk_request = SimpleNamespace(
+            chunk_id=None,
+            title=None,
+            filename="file.txt",
+            path_or_url="doc-1",
+            content="Content with empty embedding",
+            metadata={},
+        )
+
+        result = ElasticSearchService.create_chunk(
+            index_name="kb-index",
+            chunk_request=chunk_request,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-123",
+        )
+
+        # Result should still be successful
+        self.assertEqual(result["status"], "success")
+
+        # Verify payload has no embedding when embedding is empty
+        self.mock_vdb_core.create_chunk.assert_called_once()
+        _, payload = self.mock_vdb_core.create_chunk.call_args[0]
+        self.assertNotIn("embedding", payload)
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    def test_create_chunk_with_unknown_model_name_still_calls_embedding_model(self, mock_get_embedding_model, mock_get_knowledge_record):
+        """
+        Test create_chunk when knowledge record has unknown embedding model.
+        The backend still calls get_embedding_model (it doesn't check for "unknown").
+        The "unknown" check is only in the frontend's read-only mode logic.
+        """
+        from types import SimpleNamespace
+
+        self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
+
+        # Knowledge record returns "unknown" as embedding model
+        mock_get_knowledge_record.return_value = {
+            "index_name": "kb-index",
+            "embedding_model_name": "unknown"
+        }
+
+        # Embedding model returns empty (model doesn't exist)
+        mock_embedding = MagicMock()
+        mock_embedding.get_embeddings.return_value = []
+        mock_get_embedding_model.return_value = mock_embedding
+
+        chunk_request = SimpleNamespace(
+            chunk_id=None,
+            title=None,
+            filename="file.txt",
+            path_or_url="doc-1",
+            content="Content with unknown model",
+            metadata={},
+        )
+
+        result = ElasticSearchService.create_chunk(
+            index_name="kb-index",
+            chunk_request=chunk_request,
+            vdb_core=self.mock_vdb_core,
+            user_id="user-1",
+            tenant_id="tenant-123",
+        )
+
+        # Should succeed, embedding model IS called but returns empty
+        self.assertEqual(result["status"], "success")
+
+        # Verify embedding model was called (backend doesn't skip based on "unknown")
+        mock_get_embedding_model.assert_called_once_with("tenant-123", "unknown")
+
     def test_update_chunk_builds_payload_and_calls_core(self):
         """
         Test update_chunk builds update payload and delegates to vdb_core.update_chunk.
@@ -3118,6 +3669,237 @@ class TestElasticSearchService(unittest.TestCase):
             self.assertIsNone(result)
             mock_tenant_config_manager.get_model_config.assert_called_once_with(
                 key="EMBEDDING_ID", tenant_id="test_tenant")
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_found(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name parameter when the model is found.
+
+        This test verifies that:
+        1. When model_name is provided and found in tenant's models, OpenAICompatibleEmbedding is returned
+        2. The correct parameters are passed to the embedding model
+        3. The function uses model_repo/model_name format for matching
+        """
+        # Setup - mock get_models to return a model that matches
+        mock_get_models.return_value = [
+            {
+                "model_repo": "openai",
+                "model_name": "text-embedding-ada-002",
+                "api_key": "test_api_key",
+                "base_url": "https://test.api.com",
+                "max_tokens": 1024,
+                "ssl_verify": True
+            }
+        ]
+
+        # Mock tenant config for fallback behavior (should NOT be called when model is found)
+        mock_tenant_config_manager.get_model_config.return_value = {
+            "model_type": "embedding",
+            "api_key": "fallback_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "text-embedding-ada-002"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="openai/text-embedding-ada-002")
+
+                # Assert
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="test_api_key",
+                    base_url="https://test.api.com",
+                    model_name="text-embedding-ada-002",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
+                # Tenant config should NOT be called when model is found
+                mock_tenant_config_manager.get_model_config.assert_not_called()
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_found_without_repo(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name when model is found without model_repo.
+
+        This test verifies that:
+        1. When model_name is provided and found (without model_repo), OpenAICompatibleEmbedding is returned
+        2. The function handles models without model_repo correctly using just model_name
+        """
+        # Setup - mock get_models to return a model without model_repo
+        mock_get_models.return_value = [
+            {
+                "model_name": "simple-model",
+                "api_key": "test_api_key",
+                "base_url": "https://test.api.com",
+                "max_tokens": 2048,
+                "ssl_verify": False
+            }
+        ]
+
+        # Mock tenant config for fallback behavior (should NOT be called when model is found)
+        mock_tenant_config_manager.get_model_config.return_value = {
+            "model_type": "embedding",
+            "api_key": "fallback_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "simple-model"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="simple-model")
+
+                # Assert
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="test_api_key",
+                    base_url="https://test.api.com",
+                    model_name="simple-model",
+                    embedding_dim=2048,
+                    ssl_verify=False
+                )
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_not_found(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name when the model is not found.
+
+        This test verifies that:
+        1. When model_name is provided but not found in tenant's models, fallback to default config
+        2. The function falls back to default embedding model behavior
+        """
+        # Setup - mock get_models to return empty list (model not found)
+        mock_get_models.return_value = []
+
+        # Mock tenant config for fallback behavior
+        mock_config = {
+            "model_type": "embedding",
+            "api_key": "fallback_api_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+        mock_tenant_config_manager.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "fallback-model"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="nonexistent-model")
+
+                # Assert
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                # Should fall back to default config
+                mock_tenant_config_manager.get_model_config.assert_called_once_with(
+                    key="EMBEDDING_ID", tenant_id="test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="fallback_api_key",
+                    base_url="https://fallback.api.com",
+                    model_name="fallback-model",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
+        finally:
+            # Restart the mock for other tests
+            self.get_embedding_model_patcher.start()
+
+    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('backend.services.vectordatabase_service.get_model_records')
+    def test_get_embedding_model_with_model_name_exception(self, mock_get_models, mock_tenant_config_manager):
+        """
+        Test get_embedding_model with model_name when database query throws exception.
+
+        This test verifies that:
+        1. When get_models throws an exception, the function logs a warning and falls back to default config
+        2. The function handles exceptions gracefully
+        """
+        # Setup - mock get_models to throw an exception
+        mock_get_models.side_effect = Exception("Database connection failed")
+
+        # Mock tenant config for fallback behavior
+        mock_config = {
+            "model_type": "embedding",
+            "api_key": "fallback_api_key",
+            "base_url": "https://fallback.api.com",
+            "model_name": "fallback-model",
+            "max_tokens": 1024
+        }
+        mock_tenant_config_manager.get_model_config.return_value = mock_config
+
+        # Stop the mock from setUp to test the real function
+        self.get_embedding_model_patcher.stop()
+
+        try:
+            with patch('backend.services.vectordatabase_service.OpenAICompatibleEmbedding') as mock_embedding_class, \
+                    patch('backend.services.vectordatabase_service.get_model_name_from_config') as mock_get_model_name:
+                mock_embedding_instance = MagicMock()
+                mock_embedding_class.return_value = mock_embedding_instance
+                mock_get_model_name.return_value = "fallback-model"
+
+                # Execute - now we can call the real function
+                from backend.services.vectordatabase_service import get_embedding_model
+                result = get_embedding_model("test_tenant", model_name="test-model")
+
+                # Assert - should fall back to default config
+                self.assertEqual(result, mock_embedding_instance)
+                mock_get_models.assert_called_once_with(
+                    {"model_type": "embedding"}, "test_tenant")
+                mock_tenant_config_manager.get_model_config.assert_called_once_with(
+                    key="EMBEDDING_ID", tenant_id="test_tenant")
+                mock_embedding_class.assert_called_once_with(
+                    api_key="fallback_api_key",
+                    base_url="https://fallback.api.com",
+                    model_name="fallback-model",
+                    embedding_dim=1024,
+                    ssl_verify=True
+                )
         finally:
             # Restart the mock for other tests
             self.get_embedding_model_patcher.start()

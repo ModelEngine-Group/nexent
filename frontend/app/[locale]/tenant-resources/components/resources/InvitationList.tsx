@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import dayjs from "dayjs";
 import {
   Table,
   Button,
@@ -25,13 +26,14 @@ import {
   createInvitation,
   updateInvitation,
   deleteInvitation,
+  checkInvitationCodeExists,
   type Invitation,
   type CreateInvitationRequest,
   type UpdateInvitationRequest,
 } from "@/services/invitationService";
 import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, Copy, CircleSlash } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
-import dayjs from "dayjs";
+import { formatDate } from "@/lib/date";
 
 const { Panel } = Collapse;
 
@@ -126,11 +128,17 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         return;
       }
 
+      // Format expiry_date from dayjs to string
+      const formattedExpiryDate =
+        values.expiry_date && dayjs(values.expiry_date).isValid()
+          ? dayjs(values.expiry_date).format("YYYY-MM-DD")
+          : undefined;
+
       if (editingInvitation) {
         // Update invitation
         const updateData: UpdateInvitationRequest = {
           capacity: values.capacity,
-          expiry_date: values.expiry_date ? values.expiry_date.format("YYYY-MM-DD") : undefined,
+          expiry_date: formattedExpiryDate,
           group_ids: values.group_ids || [],
         };
         await updateInvitation(editingInvitation.invitation_code, updateData);
@@ -143,7 +151,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           invitation_code: values.invitation_code?.toUpperCase(),
           capacity: values.capacity,
           group_ids: values.group_ids || [],
-          expiry_date: values.expiry_date ? values.expiry_date.format("YYYY-MM-DD") : undefined,
+          expiry_date: formattedExpiryDate,
         };
         await createInvitation(createData);
         message.success(t("tenantResources.invitation.invitationCreated"));
@@ -239,7 +247,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         key: "expiry_date",
         width: 120,
         render: (date: string) =>
-          date ? dayjs(date).format("YYYY-MM-DD") : <span className="text-gray-400">{t("tenantResources.invitation.noExpiry")}</span>,
+          date ? formatDate(date) : <span className="text-gray-400">{t("tenantResources.invitation.noExpiry")}</span>,
       },
       {
         title: t("tenantResources.invitation.groupNames"),
@@ -314,6 +322,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               title={t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code })}
               description={t("common.cannotBeUndone")}
               onConfirm={() => handleDelete(record.invitation_code)}
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
               <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
                 <Button
@@ -347,8 +357,8 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
   }, [invitations, tenantId]);
 
   return (
-    <div>
-      <div className="mb-4 flex justify-between items-center">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="mb-4 flex justify-between items-center flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate} icon={<Plus className="h-4 w-4"/>}>
@@ -366,6 +376,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           rowKey="invitation_id"
           pagination={{ pageSize: 10 }}
           scroll={{ x: 1000 }}
+          className="flex-1"
         />
       ) : (
         // Multi-tenant view with collapse
@@ -388,7 +399,13 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
 
       {/* Create/Edit Modal */}
       <Modal
-        title={editingInvitation ? t("tenantResources.invitation.editInvitation") : t("tenantResources.invitation.createInvitation")}
+        title={
+          <span>
+            {editingInvitation
+              ? `${t("tenantResources.invitation.editInvitation")}: ${editingInvitation.invitation_code}`
+              : t("tenantResources.invitation.createInvitation")}
+          </span>
+        }
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
@@ -398,17 +415,59 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
         maskClosable={false}
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            name="code_type"
-            label={t("tenantResources.invitation.codeType")}
-            rules={[{ required: true, message: t("tenantResources.invitation.codeTypeRequired") }]}
-          >
-            <Select placeholder={t("tenantResources.invitation.codeType")}>
-              <Select.Option value="ADMIN_INVITE">{t("tenantResources.invitation.codeType.ADMIN_INVITE")}</Select.Option>
-              <Select.Option value="DEV_INVITE">{t("tenantResources.invitation.codeType.DEV_INVITE")}</Select.Option>
-              <Select.Option value="USER_INVITE">{t("tenantResources.invitation.codeType.USER_INVITE")}</Select.Option>
-            </Select>
-          </Form.Item>
+          {!editingInvitation && (
+            <Form.Item
+              name="code_type"
+              label={t("tenantResources.invitation.codeType")}
+              rules={[{ required: true, message: t("tenantResources.invitation.codeTypeRequired") }]}
+            >
+              <Select
+                placeholder={t("tenantResources.invitation.codeType")}
+                options={[
+                  { value: "ADMIN_INVITE", label: t("tenantResources.invitation.codeType.ADMIN_INVITE") },
+                  { value: "DEV_INVITE", label: t("tenantResources.invitation.codeType.DEV_INVITE") },
+                  { value: "USER_INVITE", label: t("tenantResources.invitation.codeType.USER_INVITE") },
+                ]}
+              />
+            </Form.Item>
+          )}
+
+          {!editingInvitation && (
+            <Form.Item
+              name="invitation_code"
+              label={t("tenantResources.invitation.invitationCode")}
+              rules={[
+                {
+                  pattern: /^[A-Z0-9]*$/,
+                  message: t("tenantResources.invitation.invitationCodeInvalid")
+                },
+                {
+                  validator: async (_, value) => {
+                    if (!value) {
+                      return Promise.reject(new Error("Required"));
+                    }
+                    try {
+                      const exists = await checkInvitationCodeExists(value);
+                      if (exists) {
+                        return Promise.reject(new Error(t("tenantResources.invitation.alreadyExists")));
+                      }
+                      return Promise.resolve();
+                    } catch {
+                      return Promise.reject(new Error("Failed to check invitation code"));
+                    }
+                  },
+                }
+              ]}
+            >
+              <Input
+                placeholder={t("tenantResources.invitation.invitationCode")}
+                onChange={(e) => {
+                  const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+                  form.setFieldsValue({ invitation_code: value });
+                }}
+              />
+            </Form.Item>
+          )}
 
           <Form.Item
             name="capacity"
@@ -430,26 +489,6 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
             <Input type="number" placeholder={t("tenantResources.invitation.capacity")} min={1} />
           </Form.Item>
 
-          <Form.Item
-            name="invitation_code"
-            label={t("tenantResources.invitation.invitationCode")}
-            rules={[
-              {
-                pattern: /^[A-Z0-9]*$/,
-                message: t("tenantResources.invitation.invitationCodeInvalid")
-              }
-            ]}
-          >
-            <Input
-              placeholder={t("tenantResources.invitation.invitationCode")}
-              onChange={(e) => {
-                // Convert to uppercase and filter invalid characters
-                const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-                form.setFieldsValue({ invitation_code: value });
-              }}
-            />
-          </Form.Item>
-
           <Form.Item name="group_ids" label={t("tenantResources.invitation.groupNames")}>
             <Select
               mode="multiple"
@@ -466,6 +505,10 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               format="YYYY-MM-DD"
               placeholder={t("tenantResources.invitation.expiryDate")}
               style={{ width: "100%" }}
+              disabledDate={(current) => {
+                if (!current) return false;
+                return current < dayjs().startOf('day');
+              }}
             />
           </Form.Item>
         </Form>

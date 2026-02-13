@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict
 
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.client import get_db_session
@@ -141,14 +142,22 @@ def update_config_by_tenant_config_id_and_data(tenant_config_id: int, insert_dat
 
 def get_all_tenant_ids():
     """
-    Get all tenant IDs that have tenant configurations
+    Get all tenant IDs that have tenant configurations, sorted by creation time descending (newest first).
 
     Returns:
-        List[str]: List of tenant IDs
+        List[str]: List of tenant IDs sorted by creation time (newest first)
     """
     with get_db_session() as session:
-        result = session.query(TenantConfig.tenant_id).filter(
+        # Query tenant_ids grouped by tenant_id, ordered by maximum create_time (newest config creation)
+        result = session.query(
+            TenantConfig.tenant_id,
+            func.max(TenantConfig.create_time).label("max_create_time")
+        ).filter(
             TenantConfig.delete_flag == "N"
-        ).distinct().all()
+        ).group_by(
+            TenantConfig.tenant_id
+        ).order_by(
+            func.max(TenantConfig.create_time).desc()
+        ).all()
 
         return [row[0] for row in result]

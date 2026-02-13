@@ -28,6 +28,7 @@ import { ModelListCard } from "./model/ModelListCard";
 import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { Can } from "@/components/permission/Can";
 
 // ModelConnectStatus type definition
 type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
@@ -86,7 +87,6 @@ export interface ModelConfigSectionRef {
 
 interface ModelConfigSectionProps {
   skipVerification?: boolean;
-  canAccessProtectedData?: boolean;
 }
 
 export const ModelConfigSection = forwardRef<
@@ -95,9 +95,11 @@ export const ModelConfigSection = forwardRef<
 >((props, ref): ReactNode => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { skipVerification = false, canAccessProtectedData = false } = props;
+
+  const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig } = useConfig();
   const modelEngineEnable = appConfig.modelEngineEnabled;
+
   const modelData = getModelData(t);
   const { confirm } = useConfirmModal();
 
@@ -152,9 +154,6 @@ export const ModelConfigSection = forwardRef<
 
   // Initialize loading
   useEffect(() => {
-    if (!canAccessProtectedData) {
-      return;
-    }
     // Load configuration from backend first, then load model lists when component mounts
     const fetchData = async () => {
       await configService.loadConfigToFrontend();
@@ -163,7 +162,7 @@ export const ModelConfigSection = forwardRef<
     };
 
     fetchData();
-  }, [canAccessProtectedData, skipVerification]);
+  }, [skipVerification]);
 
   // Listen to field error highlight events
   useEffect(() => {
@@ -853,37 +852,41 @@ export const ModelConfigSection = forwardRef<
                 </Button>
               </Col>
             )}
-            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button
-                type="primary"
-                size="middle"
-                icon={<Plus size={16} />}
-                onClick={() => {
-                  setAddModalDefaultIsBatch(false);
-                  setIsAddModalOpen(true);
-                }}
-                style={{ width: "100%" }}
-                block
-              >
-                <span className="button-text-full">
-                  {t("modelConfig.button.addCustomModel")}
-                </span>
-              </Button>
-            </Col>
-            <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-              <Button
-                type="primary"
-                size="middle"
-                icon={<PenLine size={16} />}
-                onClick={() => setIsDeleteModalOpen(true)}
-                style={{ width: "100%" }}
-                block
-              >
-                <span className="button-text-full">
-                  {t("modelConfig.button.editCustomModel")}
-                </span>
-              </Button>
-            </Col>
+            <Can permission="model:create">
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Button
+                  type="primary"
+                  size="middle"
+                  icon={<Plus size={16} />}
+                  onClick={() => {
+                    setAddModalDefaultIsBatch(false);
+                    setIsAddModalOpen(true);
+                  }}
+                  style={{ width: "100%" }}
+                  block
+                >
+                  <span className="button-text-full">
+                    {t("modelConfig.button.addCustomModel")}
+                  </span>
+                </Button>
+              </Col>
+            </Can>
+            <Can permission="model:update">
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Button
+                  type="primary"
+                  size="middle"
+                  icon={<PenLine size={16} />}
+                  onClick={() => setIsDeleteModalOpen(true)}
+                  style={{ width: "100%" }}
+                  block
+                >
+                  <span className="button-text-full">
+                    {t("modelConfig.button.editCustomModel")}
+                  </span>
+                </Button>
+              </Col>
+            </Can>
             <Col xs={24} sm={12} md={6} lg={6} xl={6}>
               <Button
                 type="primary"

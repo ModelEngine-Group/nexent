@@ -2,11 +2,11 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Table, Button, Popconfirm, message, Tag } from "antd";
-import { Edit, Trash2 } from "lucide-react";
+import { Table, Button, Popconfirm, message, Tag, Pagination } from "antd";
+import { Edit, Trash2, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
-import { useModelList } from "@/hooks/model/useModelList";
+import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
@@ -15,10 +15,29 @@ import { CheckCircle, CircleSlash, XCircle, CircleEllipsis, CircleHelp } from "l
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
-  const { data: models = [], isLoading, refetch } = useModelList();
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Use manage API to get models for the specified tenant
+  const {
+    models = [],
+    total = 0,
+    isLoading,
+    refetch,
+  } = useManageTenantModels({
+    tenantId: tenantId || "",
+    page,
+    pageSize,
+  });
+
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
   const [editDialogVisible, setEditDialogVisible] = useState(false);
+
+  // Track which models are being checked for connectivity
+  const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(new Set());
 
   const openCreate = () => {
     setAddDialogVisible(true);
@@ -49,17 +68,64 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     setEditDialogVisible(true);
   };
 
-  const handleDelete = async (modelId: string, provider?: string) => {
+  const handleDelete = async (displayName: string, _provider?: string) => {
+    if (!tenantId) {
+      message.error("Tenant ID is required");
+      return;
+    }
     try {
-      await modelService.deleteCustomModel(modelId, provider);
-      message.success("Model deleted");
+      await modelService.deleteManageTenantModel({
+        tenantId,
+        displayName,
+      });
+      message.success(t("tenantResources.models.deleteSuccess"));
       refetch();
     } catch (error: any) {
       if (error.response?.data?.message) {
         message.error(error.response.data.message);
       } else {
-        message.error("Delete failed");
+        message.error(t("tenantResources.models.deleteFailed"));
       }
+    }
+  };
+
+  // Handle checking model connectivity
+  const handleCheckConnectivity = async (displayName: string) => {
+    if (!tenantId) {
+      message.error("Tenant ID is required");
+      return;
+    }
+
+    setCheckingConnectivity((prev) => new Set(prev).add(displayName));
+    try {
+      const isConnected = await modelService.checkManageTenantModelConnectivity(
+        tenantId,
+        displayName
+      );
+      if (isConnected) {
+        message.success(t("tenantResources.models.connectivitySuccess"));
+      } else {
+        message.warning(t("tenantResources.models.connectivityFailed"));
+      }
+      // Refresh the model list to get updated connectivity status
+      refetch();
+    } catch (error) {
+      message.error(t("tenantResources.models.connectivityError"));
+    } finally {
+      setCheckingConnectivity((prev) => {
+        const next = new Set(prev);
+        next.delete(displayName);
+        return next;
+      });
+    }
+  };
+
+  // Handle pagination change
+  const handlePageChange = (newPage: number, newPageSize: number) => {
+    setPage(newPage);
+    if (newPageSize !== pageSize) {
+      setPageSize(newPageSize);
+      setPage(1);
     }
   };
 
@@ -122,9 +188,18 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
     {
       title: t("common.actions"),
       key: "actions",
-      width: 250,
+      width: 300,
       render: (_, record: ModelOption) => (
         <div className="flex items-center space-x-2">
+          <Tooltip title={t("tenantResources.models.checkConnectivity")}>
+            <Button
+              type="text"
+              icon={checkingConnectivity.has(record.displayName) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              onClick={() => handleCheckConnectivity(record.displayName)}
+              size="small"
+              loading={checkingConnectivity.has(record.displayName)}
+            />
+          </Tooltip>
           <Tooltip title={t("tenantResources.models.editModel")}>
             <Button
               type="text"
@@ -135,8 +210,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
           </Tooltip>
           <Popconfirm
             title={t("tenantResources.models.confirmDelete")}
-            description="This action cannot be undone."
+            description={t("common.cannotBeUndone")}
             onConfirm={() => handleDelete(record.displayName, record.source)}
+            okText={t("common.confirm")}
+            cancelText={t("common.cancel")}
           >
             <Tooltip title={t("tenantResources.models.deleteModel")}>
               <Button
@@ -153,8 +230,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div />
         <div>
           <Button type="primary" onClick={openCreate}>
@@ -169,12 +246,15 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         loading={isLoading}
         rowKey="id"
         pagination={{ pageSize: 10 }}
+        scroll={{ x: true }}
+        className="flex-1"
       />
 
       <ModelAddDialog
         isOpen={addDialogVisible}
         onClose={handleAddDialogClose}
         onSuccess={handleAddDialogSuccess}
+        tenantId={tenantId || undefined}
       />
 
       <ModelEditDialog
@@ -182,6 +262,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         model={editingModel}
         onClose={handleEditDialogClose}
         onSuccess={handleEditDialogSuccess}
+        tenantId={tenantId || undefined}
       />
     </div>
   );

@@ -8,7 +8,6 @@ from pydantic import EmailStr
 
 from utils.auth_utils import (
     get_supabase_client,
-    get_supabase_admin_client,
     calculate_expires_at,
     get_jwt_expiry_seconds,
 )
@@ -16,16 +15,14 @@ from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, DEFAULT_TENANT
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError
 
 from database.model_management_db import create_model_record
-from database.user_tenant_db import insert_user_tenant, soft_delete_user_tenant_by_user_id, get_user_tenant_by_user_id
-from database.memory_config_db import soft_delete_all_configs_by_user_id
-from database.conversation_db import soft_delete_all_conversations_by_user
+from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
 from database.client import as_dict, get_db_session
 from database.db_models import RolePermission
-from utils.memory_utils import build_memory_config
-from nexent.memory.memory_service import clear_memory
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
+from services.tool_configuration_service import init_tool_list_for_tenant
+
 
 
 logging.getLogger("user_management_service").setLevel(logging.DEBUG)
@@ -157,6 +154,9 @@ async def signup_user(email: EmailStr,
         if is_admin:
             await generate_tts_stt_4_admin(tenant_id, user_id)
 
+        # Initialize tool list for the new tenant (only once per tenant)
+        await init_tool_list_for_tenant(tenant_id, user_id)
+
         return await parse_supabase_response(is_admin, response, user_role)
     else:
         logging.error(
@@ -270,6 +270,9 @@ async def signup_user_with_invitation(email: EmailStr,
 
         if user_role == "ADMIN":
             await generate_tts_stt_4_admin(tenant_id, user_id)
+
+        # Initialize tool list for the new tenant (only once per tenant)
+        await init_tool_list_for_tenant(tenant_id, user_id)
 
         return await parse_supabase_response(False, response, user_role)
     else:
@@ -428,78 +431,6 @@ async def get_session_by_authorization(authorization):
         raise UnauthorizedError("Session is invalid or expired")
 
 
-async def revoke_regular_user(user_id: str, tenant_id: str) -> None:
-    """Revoke a regular user's account and purge related data.
-
-    Steps:
-    1) Soft-delete user-tenant relation rows and memory user configs, and all conversations for the user in PostgreSQL.
-    2) Clear user-level memories in memory store (levels: "user" and "user_agent").
-    3) Permanently delete the user from Supabase using service role key (admin API).
-    """
-    try:
-        logging.debug(f"Start deleting user {user_id} related data...")
-        # 1) PostgreSQL soft-deletes
-        try:
-            soft_delete_user_tenant_by_user_id(user_id, actor=user_id)
-            logging.debug("\tTenant relationship deleted.")
-        except Exception as e:
-            logging.error(
-                f"Failed soft-deleting user-tenant for user {user_id}: {e}")
-
-        try:
-            soft_delete_all_configs_by_user_id(user_id, actor=user_id)
-            logging.debug("\tMemory user configs deleted.")
-        except Exception as e:
-            logging.error(
-                f"Failed soft-deleting memory user configs for user {user_id}: {e}")
-
-        try:
-            deleted_convs = soft_delete_all_conversations_by_user(user_id)
-            logging.debug(f"\t{deleted_convs} conversations deleted")
-        except Exception as e:
-            logging.error(
-                f"Failed soft-deleting conversations for user {user_id}: {e}")
-
-        # 2) Clear memory records
-        try:
-            memory_config = build_memory_config(tenant_id)
-            # Clear user-level memory
-            await clear_memory(
-                memory_level="user",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-            # Also clear user_agent-level memory for all agents (API clears by user + any agent)
-            await clear_memory(
-                memory_level="user_agent",
-                memory_config=memory_config,
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-            logging.debug(
-                "\tMemories under current embedding configuration deleted")
-        except Exception as e:
-            logging.error(f"Failed clearing memory for user {user_id}: {e}")
-
-        # 3) Delete Supabase user using admin API
-        try:
-            admin_client = get_supabase_admin_client()
-            if admin_client and hasattr(admin_client.auth, "admin"):
-                admin_client.auth.admin.delete_user(user_id)
-            else:
-                raise RuntimeError("Supabase admin client not available")
-            logging.debug("\tUser account deleted.")
-        except Exception as e:
-            logging.error(f"Failed deleting supabase user {user_id}: {e}")
-            # prior steps already purged local data
-        logging.info(f"Account {user_id} has been successfully deleted")
-    except Exception as e:
-        logging.error(
-            f"Unexpected error in revoke_regular_user for {user_id}: {e}")
-        # swallow to keep idempotent behavior
-
-
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
     """
     Get user information including user ID, group IDs, tenant ID, user role, permissions, and accessible routes.
@@ -521,6 +452,7 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
 
         tenant_id = user_tenant["tenant_id"]
         user_role = user_tenant["user_role"]
+        user_email = user_tenant["user_email"]
 
         # Get group IDs
         group_ids = query_group_ids_by_user(user_id)
@@ -533,10 +465,6 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
             permissions = [as_dict(record) for record in permission_records]
 
         permissions_data = format_role_permissions(permissions)
-
-        # Get user email from Supabase (placeholder for now)
-        # TODO: Implement user email retrieval from Supabase user object
-        user_email = "user@example.com"  # Placeholder
 
         return {
             "user": {

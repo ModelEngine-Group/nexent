@@ -5,24 +5,20 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, MousePointerClick, AlertCircle } from "lucide-react";
 
-import { fetchAllAgents } from "@/services/agentConfigService";
 import { getUrlParam } from "@/lib/utils";
 import log from "@/lib/logger";
-import { Agent, ChatAgentSelectorProps } from "@/types/chat";
+import { ChatAgentSelectorProps } from "@/types/chat";
+import { Agent } from "@/types/agentConfig";
 import { clearAgentNewMark } from "@/services/agentConfigService";
-import { useQueryClient } from "@tanstack/react-query";
-import { clearAgentAndSync } from "@/lib/agentNewUtils";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 export function ChatAgentSelector({
   selectedAgentId,
   onAgentSelect,
   disabled = false,
   isInitialMode = false,
-  agents: propAgents,
 }: ChatAgentSelectorProps) {
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({
     top: 0,
     left: 0,
@@ -32,20 +28,19 @@ export function ChatAgentSelector({
   const [isAutoSelectInit, setIsAutoSelectInit] = useState(false);
   const { t } = useTranslation("common");
   const buttonRef = useRef<HTMLDivElement>(null);
-
+  const { agents, invalidate, isLoading } = usePublishedAgentList();
 
   const selectedAgent = agents.find(
-    (agent) => agent.agent_id === selectedAgentId
+    (agent: Agent) => agent.id === String(selectedAgentId)
   );
-  const queryClient = useQueryClient();
 
   // Detect duplicate agent names and mark later-added agents as disabled
   // For agents with the same name, keep the first one (smallest ID) enabled, disable the rest
   const duplicateAgentInfo = useMemo(() => {
     // Create a map to track agents by name
     const nameToAgents = new Map<string, Agent[]>();
-    
-    agents.forEach((agent) => {
+
+    agents.forEach((agent: Agent) => {
       const agentName = agent.name;
       if (!nameToAgents.has(agentName)) {
         nameToAgents.set(agentName, []);
@@ -55,16 +50,16 @@ export function ChatAgentSelector({
 
     // For each group of agents with the same name, sort by ID (smallest first)
     // Mark all except the first one as disabled
-    const disabledAgentIds = new Set<number>();
-    
+    const disabledAgentIds = new Set<string>();
+
     nameToAgents.forEach((agents, name) => {
       if (agents.length > 1) {
-        // Sort by agent_id (smallest first)
-        const sortedAgents = [...agents].sort((a, b) => a.agent_id - b.agent_id);
-        
+        // Sort by id (smallest first)
+        const sortedAgents = [...agents].sort((a, b) => Number(a.id) - Number(b.id));
+
         // Mark all except the first one as disabled
         for (let i = 1; i < sortedAgents.length; i++) {
-          disabledAgentIds.add(sortedAgents[i].agent_id);
+          disabledAgentIds.add(sortedAgents[i].id);
         }
       }
     });
@@ -79,29 +74,24 @@ export function ChatAgentSelector({
     if (agents.length === 0 || isAutoSelectInit) return;
 
     // Get agent_id parameter from URL
-    const agentId = getUrlParam("agent_id", null as number | null, (str) =>
-      str ? Number(str) : null
+    const agentId = getUrlParam("agent_id", null as string | null, (str) =>
+      str ? str : null
     );
     if (agentId === null) return;
 
     // Check if agentId is a valid and effectively available agent
-    const agent = agents.find((a) => a.agent_id === agentId);
+    const agent = agents.find((a: Agent) => a.id === agentId);
     if (agent) {
       const isAvailableTool = agent.is_available !== false;
-      const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.agent_id);
+      const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.id);
       const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
-      
+
       if (isEffectivelyAvailable) {
-        handleAgentSelect(agentId);
+        handleAgentSelect(agent.id);
         setIsAutoSelectInit(true);
       }
     }
   };
-
-  useEffect(() => {
-    // Only load agents if not provided via props or if props is explicitly empty
-      setAgents(propAgents || []);
-  }, [propAgents]);
 
   // Execute auto-selection logic when agents are loaded
   useEffect(() => {
@@ -188,27 +178,13 @@ export function ChatAgentSelector({
     };
   }, [isOpen]);
 
-  const loadAgents = async () => {
-    setIsLoading(true);
-    try {
-      const result = await fetchAllAgents();
-      if (result.success) {
-        setAgents(result.data);
-      }
-    } catch (error) {
-      log.error("Failed to load Agent list:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleAgentSelect = async (agentId: number | null) => {
+  const handleAgentSelect = async (agentId: string | null) => {
     // Only effectively available agents can be selected
     if (agentId !== null) {
-      const agent = agents.find((a) => a.agent_id === agentId);
+      const agent = agents.find((a: Agent) => a.id === agentId);
       if (agent) {
         const isAvailableTool = agent.is_available !== false;
-        const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.agent_id);
+        const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.id);
         const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
 
         if (!isEffectivelyAvailable) {
@@ -218,14 +194,10 @@ export function ChatAgentSelector({
         // Clear NEW mark when agent is selected for chat (only if marked as new)
         if (agent.is_new === true) {
           try {
-            const res = await clearAgentAndSync(agentId, queryClient);
+            const res = await clearAgentNewMark(Number(agentId));
             if (res?.success) {
-              // update local agents state to reflect cleared NEW mark immediately
-              setAgents((prev) =>
-                prev.map((a) =>
-                  a.agent_id === agentId ? { ...a, is_new: false } : a
-                )
-              );
+              // Invalidate the query to refresh agents list
+              invalidate();
             } else {
               log.warn("Failed to clear NEW mark on select:", res);
             }
@@ -243,7 +215,7 @@ export function ChatAgentSelector({
     if (window.self !== window.top) {
       try {
         const selectedAgent = agents.find(
-          (agent) => agent.agent_id === agentId
+          (agent: Agent) => agent.id === agentId
         );
         const message = {
           type: "agent_selected",
@@ -372,11 +344,11 @@ export function ChatAgentSelector({
                     )}
                   </div>
                 ) : (
-                  allAgents.map((agent, idx) => {
+                  allAgents.map((agent: Agent, idx: number) => {
                     const isAvailableTool = agent.is_available !== false;
-                    const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.agent_id);
+                    const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.id);
                     const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
-                    
+
                     // Determine the reason for unavailability
                     let unavailableReason: string | null = null;
                     if (!isEffectivelyAvailable) {
@@ -389,28 +361,28 @@ export function ChatAgentSelector({
 
                     return (
                       <div
-                        key={agent.agent_id}
+                        key={agent.id}
                         className={`
                         flex items-start gap-3 px-3.5 py-2.5 text-sm
                         transition-all duration-150 ease-in-out
                         ${
                           isEffectivelyAvailable
                             ? `hover:bg-slate-50 cursor-pointer ${
-                                selectedAgentId === agent.agent_id
+                                selectedAgentId === agent.id
                                   ? "bg-blue-50/70 text-blue-600 hover:bg-blue-50/70"
                                   : ""
                               }`
                             : "opacity-60 cursor-not-allowed bg-slate-50/50"
                         }
                         ${
-                          selectedAgentId === agent.agent_id
+                          selectedAgentId === agent.id
                             ? "shadow-[inset_2px_0_0_0] shadow-blue-500"
                             : ""
                         }
                         ${idx !== 0 ? "border-t border-slate-100" : ""}
                       `}
                         onClick={() =>
-                          isEffectivelyAvailable && handleAgentSelect(agent.agent_id)
+                          isEffectivelyAvailable && handleAgentSelect(agent.id)
                         }
                       >
                         {/* Agent Icon */}
@@ -418,7 +390,7 @@ export function ChatAgentSelector({
                           {isEffectivelyAvailable ? (
                             <MousePointerClick
                               className={`h-4 w-4 ${
-                                selectedAgentId === agent.agent_id
+                                selectedAgentId === agent.id
                                   ? "text-blue-500"
                                   : "text-slate-500"
                               }`}
@@ -433,7 +405,7 @@ export function ChatAgentSelector({
                           <div
                             className={`font-medium truncate ${
                               isEffectivelyAvailable
-                                ? selectedAgentId === agent.agent_id
+                                ? selectedAgentId === agent.id
                                   ? "text-blue-600"
                                   : "text-slate-700 hover:text-slate-900"
                                 : "text-slate-400"
@@ -463,7 +435,7 @@ export function ChatAgentSelector({
                           <div
                             className={`text-xs mt-1 leading-relaxed ${
                               isEffectivelyAvailable
-                                ? selectedAgentId === agent.agent_id
+                                ? selectedAgentId === agent.id
                                   ? "text-blue-500"
                                   : "text-slate-500"
                                 : "text-slate-400"

@@ -1,7 +1,13 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef, useLayoutEffect } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useLayoutEffect,
+  useCallback,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { App, Modal, Row, Col, theme, Button, Input, Form } from "antd";
@@ -199,14 +205,10 @@ function DataConfig({ isActive }: DataConfigProps) {
     fetchKnowledgeBases,
     createKnowledgeBase,
     deleteKnowledgeBase,
-    selectKnowledgeBase,
     setActiveKnowledgeBase,
-    isKnowledgeBaseSelectable,
     hasKnowledgeBaseModelMismatch,
     refreshKnowledgeBaseData,
     refreshKnowledgeBaseDataWithDataMate,
-    loadUserSelectedKnowledgeBases,
-    saveUserSelectedKnowledgeBases,
     dispatch: kbDispatch,
   } = useKnowledgeBaseContext();
 
@@ -226,6 +228,8 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
+  const [newKbIngroupPermission, setNewKbIngroupPermission] = useState<string>("READ_ONLY");
+  const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -278,11 +282,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   // User configuration loading and saving logic based on isActive state
   const prevIsActiveRef = useRef<boolean | null>(null); // Initialize as null to distinguish first render
   const hasLoadedRef = useRef(false); // Track whether configuration has been loaded
-  const savedSelectedIdsRef = useRef<string[]>([]); // Save currently selected knowledge base IDs
-  const savedKnowledgeBasesRef = useRef<any[]>([]); // Save current knowledge base list
-  const hasUserInteractedRef = useRef(false); // Track whether user has interacted (prevent saving empty state during initial load)
   const hasCleanedRef = useRef(false); // Ensure auto-deselect runs only once per entry
-  const shouldPersistSelectionRef = useRef(false); // Flag to persist selection after change
 
   // Listen for isActive state changes
   useLayoutEffect(() => {
@@ -295,40 +295,12 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Mark ready to load when entering second page
     if ((prevIsActive === null || !prevIsActive) && isActive) {
       hasLoadedRef.current = false; // Reset loading state
-      hasUserInteractedRef.current = false; // Reset interaction state to prevent incorrect saving
       hasCleanedRef.current = false; // Reset auto-clean flag on entering
-    }
-
-    // Save user configuration when leaving second page
-    if (prevIsActive === true && !isActive) {
-      // Only save after user has interacted to prevent saving empty state during initial load
-      if (hasUserInteractedRef.current) {
-        const saveConfig = async () => {
-          localStorage.removeItem("preloaded_kb_data");
-          localStorage.removeItem("kb_cache");
-
-          try {
-            await saveUserSelectedKnowledgeBases();
-          } catch (error) {
-            log.error("保存用户配置失败:", error);
-          }
-        };
-
-        saveConfig();
-      }
-
-      hasLoadedRef.current = false; // Reset loading state
     }
 
     // Update ref
     prevIsActiveRef.current = isActive;
   }, [isActive]);
-
-  // Save current state to ref in real-time to ensure access during unmount
-  useEffect(() => {
-    savedSelectedIdsRef.current = kbState.selectedIds;
-    savedKnowledgeBasesRef.current = kbState.knowledgeBases;
-  }, [kbState.selectedIds, kbState.knowledgeBases]);
 
   // Helper function to get authorization headers
   const getAuthHeaders = () => {
@@ -344,47 +316,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     };
   };
 
-  // Save logic when component unmounts
-  useEffect(() => {
-    return () => {
-      // When component unmounts, if previously active and user has interacted, execute save
-      if (prevIsActiveRef.current === true && hasUserInteractedRef.current) {
-        // Use saved state instead of current potentially cleared state
-        const selectedKnowledgeBases = savedKnowledgeBasesRef.current.filter(
-          (kb) => savedSelectedIdsRef.current.includes(kb.id)
-        );
-
-        // Group knowledge bases by source
-        const knowledgeBySource: { nexent?: string[]; datamate?: string[] } =
-          {};
-        selectedKnowledgeBases.forEach((kb) => {
-          const source = kb.source as keyof typeof knowledgeBySource;
-          if (!knowledgeBySource[source]) {
-            knowledgeBySource[source] = [];
-          }
-          knowledgeBySource[source]!.push(kb.id);
-        });
-
-        try {
-          // Use fetch with keepalive to ensure request can be sent during page unload
-          fetch(API_ENDPOINTS.tenantConfig.updateKnowledgeList, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...getAuthHeaders(),
-            },
-            body: JSON.stringify(knowledgeBySource),
-            keepalive: true,
-          }).catch((error) => {
-            log.error("卸载时保存失败:", error);
-          });
-        } catch (error) {
-          log.error("卸载时保存请求异常:", error);
-        }
-      }
-    };
-  }, []);
-
   // Separately listen for knowledge base loading state, load user configuration when knowledge base loading is complete and in active state
   useEffect(() => {
     // Only execute when second page is active, knowledge base is loaded, and user configuration hasn't been loaded yet
@@ -394,16 +325,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       !kbState.isLoading &&
       !hasLoadedRef.current
     ) {
-      const loadConfig = async () => {
-        try {
-          await loadUserSelectedKnowledgeBases();
-          hasLoadedRef.current = true;
-        } catch (error) {
-          log.error("加载用户配置失败:", error);
-        }
-      };
-
-      loadConfig();
+      hasLoadedRef.current = true;
     }
   }, [isActive, kbState.knowledgeBases.length, kbState.isLoading]);
 
@@ -421,43 +343,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     const allowedModels = new Set<string>();
     if (embeddingName) allowedModels.add(embeddingName);
     if (multiEmbeddingName) allowedModels.add(multiEmbeddingName);
-
-    const currentSelected = kbState.selectedIds;
-    if (currentSelected.length === 0) {
-      hasCleanedRef.current = true;
-      return;
-    }
-
-    // If both empty, clear all
-    if (allowedModels.size === 0) {
-      shouldPersistSelectionRef.current = true;
-      kbDispatch({
-        type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
-        payload: [],
-      });
-      hasUserInteractedRef.current = true;
-      setShowAutoDeselectModal(true);
-      hasCleanedRef.current = true;
-      return;
-    }
-
-    const filtered = currentSelected.filter((id) => {
-      const kb = kbState.knowledgeBases.find((k) => k.id === id);
-      if (!kb) return false;
-      // DataMate knowledge bases are always allowed (skip model check)
-      if (kb.source === "datamate") return true;
-      return allowedModels.has(kb.embeddingModel);
-    });
-
-    if (filtered.length !== currentSelected.length) {
-      shouldPersistSelectionRef.current = true;
-      kbDispatch({
-        type: KNOWLEDGE_BASE_ACTION_TYPES.SELECT_KNOWLEDGE_BASE,
-        payload: filtered,
-      });
-      hasUserInteractedRef.current = true;
-      setShowAutoDeselectModal(true);
-    }
 
     hasCleanedRef.current = true;
   }, [
@@ -495,7 +380,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   ) => {
     // Only reset creation mode when user clicks
     if (fromUserClick) {
-      hasUserInteractedRef.current = true; // Mark user interaction
       setIsCreatingMode(false); // Reset creating mode
       setHasClickedUpload(false); // Reset upload button click state
     }
@@ -595,8 +479,6 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle knowledge base deletion
   const handleDelete = (id: string) => {
-    hasUserInteractedRef.current = true; // Mark user interaction
-
     // Find the knowledge base to check its source
     const kb = kbState.knowledgeBases.find((kb) => kb.id === id);
 
@@ -658,12 +540,14 @@ function DataConfig({ isActive }: DataConfigProps) {
       // Use unified success message
       message.success(t("knowledgeBase.message.syncSuccess"));
     } catch (error) {
-      // Use unified error message
-      message.error(
-        t("knowledgeBase.message.syncError", {
-          error: (error as Error)?.message || t("common.unknownError"),
-        })
-      );
+      // Check if it's a DataMate sync error
+      if (error instanceof Error && error.name === "DataMateSyncError") {
+        // Show DataMate-specific friendly error message
+        message.error(t("knowledgeBase.message.syncDataMateError"));
+      } else {
+        // Use unified error message
+        message.error(t("knowledgeBase.message.syncError"));
+      }
     } finally {
       // Clear sync loading state
       kbDispatch({
@@ -676,11 +560,46 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Handle DataMate configuration
   const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
   const [dataMateUrl, setDataMateUrl] = useState("");
+  const [dataMateUrlError, setDataMateUrlError] = useState<string | null>(null);
   const configStore = ConfigStore.getInstance();
 
-  // Monitor DataMate URL changes
+  /**
+   * Validate DataMate URL format
+   * @param url URL to validate
+   * @returns Error message if invalid, null if valid
+   */
+  const validateDataMateUrl = useCallback(
+    (url: string): string | null => {
+      if (!url || url.trim() === "") {
+        return null; // Empty URL is valid (optional field)
+      }
+
+      // Check if URL has http:// or https:// protocol
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        return t("knowledgeBase.error.invalidUrlProtocol");
+      }
+
+      // Check if URL is a valid format (has hostname)
+      try {
+        const urlObj = new URL(url);
+        if (!urlObj.hostname || urlObj.hostname.trim() === "") {
+          return t("knowledgeBase.error.invalidUrlFormat");
+        }
+      } catch {
+        return t("knowledgeBase.error.invalidUrlFormat");
+      }
+
+      return null; // Valid URL
+    },
+    [t]
+  );
+
+  // Monitor DataMate URL changes and validate
   useEffect(() => {
-    console.log("DataMate URL changed to:", dataMateUrl);
+    // Clear error when URL changes
+    if (dataMateUrlError) {
+      setDataMateUrlError(null);
+    }
   }, [dataMateUrl]);
 
   const handleDataMateConfig = () => {
@@ -688,6 +607,38 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   const handleDataMateConfigSave = async () => {
+    // Validate URL format before saving
+    const urlError = validateDataMateUrl(dataMateUrl);
+    if (urlError) {
+      setDataMateUrlError(urlError);
+      return;
+    }
+
+    // Test connection and sync if URL is provided (non-empty)
+    if (dataMateUrl.trim() !== "") {
+      setDataMateUrlError(t("knowledgeBase.message.testingConnection"));
+      try {
+        // First test basic connection
+        const connectionResult =
+          await knowledgeBaseService.testDataMateConnection(dataMateUrl);
+        if (!connectionResult.success) {
+          setDataMateUrlError(t("knowledgeBase.error.connectionFailed"));
+          return;
+        }
+
+        // Then test the actual sync endpoint (sync_datamate_knowledge)
+        // This is the actual operation that will be used when syncing knowledge bases
+        setDataMateUrlError(t("knowledgeBase.message.testingSync"));
+        await knowledgeBaseService.syncDataMateAndCreateRecords(dataMateUrl);
+      } catch (error) {
+        setDataMateUrlError(t("knowledgeBase.error.syncFailed"));
+        return;
+      }
+    }
+
+    // Clear any previous error and proceed with saving
+    setDataMateUrlError(null);
+
     try {
       console.log("Saving DataMate URL:", dataMateUrl);
 
@@ -739,10 +690,11 @@ function DataConfig({ isActive }: DataConfigProps) {
 
   // Handle new knowledge base creation
   const handleCreateNew = () => {
-    hasUserInteractedRef.current = true; // Mark user interaction
     // Generate default knowledge base name
     const defaultName = generateUniqueKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
+    setNewKbIngroupPermission("READ_ONLY");
+    setNewKbGroupIds([]);
     setIsCreatingMode(true);
     setHasClickedUpload(false); // Reset upload button click state
     setUploadFiles([]); // Reset upload files array, clear all pending upload files
@@ -803,7 +755,9 @@ function DataConfig({ isActive }: DataConfigProps) {
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
           t("knowledgeBase.description.default"),
-          "elasticsearch"
+          "elasticsearch",
+          newKbIngroupPermission,
+          newKbGroupIds
         );
 
         if (!newKB) {
@@ -920,46 +874,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
   }, [newlyCreatedKbId, viewingDocuments.length]);
 
-  // Handle knowledge base selection
-  const handleSelectKnowledgeBase = (id: string) => {
-    hasUserInteractedRef.current = true; // Mark user interaction
-    selectKnowledgeBase(id);
-    // Persist selection immediately after reducer updates state
-    shouldPersistSelectionRef.current = true;
-
-    // When selecting knowledge base also get latest data (low priority background operation)
-    setTimeout(async () => {
-      try {
-        // Use lower priority to refresh data as this is not a critical operation
-        await refreshKnowledgeBaseData(true);
-      } catch (error) {
-        log.error("刷新知识库数据失败:", error);
-        // Error doesn't affect user experience
-      }
-    }, 500); // Delay execution, lower priority
-  };
-
-  // Persist user selection changes immediately when flagged
-  useEffect(() => {
-    if (!isActive) return;
-    if (!shouldPersistSelectionRef.current) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        await saveUserSelectedKnowledgeBases();
-      } catch (error) {
-        log.error("保存用户选择的知识库失败:", error);
-      } finally {
-        if (!cancelled) {
-          shouldPersistSelectionRef.current = false;
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [kbState.selectedIds, isActive, saveUserSelectedKnowledgeBases]);
-
   // Update active knowledge base ID in polling service when component initializes or active knowledge base changes
   useEffect(() => {
     if (kbState.activeKnowledgeBase) {
@@ -1042,19 +956,16 @@ function DataConfig({ isActive }: DataConfigProps) {
           >
             <KnowledgeBaseList
               knowledgeBases={kbState.knowledgeBases}
-              selectedIds={kbState.selectedIds}
               activeKnowledgeBase={kbState.activeKnowledgeBase}
               currentEmbeddingModel={kbState.currentEmbeddingModel}
               isLoading={kbState.isLoading}
               syncLoading={kbState.syncLoading}
-              onSelect={handleSelectKnowledgeBase}
               onClick={handleKnowledgeBaseClick}
               onDelete={handleDelete}
               onSync={handleSync}
               onCreateNew={handleCreateNew}
               onDataMateConfig={handleDataMateConfig}
               showDataMateConfig={modelEngineEnabled}
-              isSelectable={isKnowledgeBaseSelectable}
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
@@ -1095,6 +1006,11 @@ function DataConfig({ isActive }: DataConfigProps) {
                 onNameChange={handleNameChange}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 hasDocuments={hasClickedUpload || docState.isUploading}
+                // Group permission and user groups for create mode
+                ingroupPermission={newKbIngroupPermission}
+                onIngroupPermissionChange={setNewKbIngroupPermission}
+                selectedGroupIds={newKbGroupIds}
+                onSelectedGroupIdsChange={setNewKbGroupIds}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}
@@ -1128,6 +1044,10 @@ function DataConfig({ isActive }: DataConfigProps) {
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 hasDocuments={viewingDocuments.length > 0}
                 isNewlyCreatedAndWaiting={isNewlyCreatedAndWaiting}
+                onChunkCountChange={() => {
+                  // Trigger knowledge base list update to refresh chunk count
+                  knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
+                }}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}
@@ -1196,6 +1116,8 @@ function DataConfig({ isActive }: DataConfigProps) {
         onOk={handleDataMateConfigSave}
         onCancel={() => {
           setShowDataMateConfigModal(false);
+          // Clear error state
+          setDataMateUrlError(null);
           // Reload config to ensure we have the latest values
           loadDataMateConfig();
         }}
@@ -1210,10 +1132,19 @@ function DataConfig({ isActive }: DataConfigProps) {
             {t("knowledgeBase.modal.dataMateConfig.description")}
           </div>
           <Form layout="vertical">
-            <Form.Item label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}>
+            <Form.Item
+              label={t("knowledgeBase.modal.dataMateConfig.urlLabel")}
+              help={dataMateUrlError}
+              validateStatus={dataMateUrlError ? "error" : undefined}
+            >
               <Input
                 value={dataMateUrl}
                 onChange={(e) => setDataMateUrl(e.target.value)}
+                onBlur={() => {
+                  // Validate on blur
+                  const error = validateDataMateUrl(dataMateUrl);
+                  setDataMateUrlError(error);
+                }}
                 placeholder={t(
                   "knowledgeBase.modal.dataMateConfig.urlPlaceholder"
                 )}

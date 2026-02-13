@@ -188,8 +188,13 @@ mock_nexent_core_module = types.ModuleType("nexent.core")
 mock_nexent_core_module.utils = mock_nexent_core_utils_module
 mock_nexent_core_module.models = mock_nexent_core_models_module
 mock_nexent_core_module.MessageObserver = _MockMessageObserver
+
+# Create nexent.utils module placeholder - will be populated inside the with block
+mock_nexent_utils_module = types.ModuleType("nexent.utils")
+
 mock_nexent_module = types.ModuleType("nexent")
 mock_nexent_module.core = mock_nexent_core_module
+mock_nexent_module.utils = mock_nexent_utils_module
 mock_nexent_storage_module = types.ModuleType("nexent.storage")
 mock_nexent_storage_module.MinIOStorageClient = MagicMock()
 mock_nexent_module.storage = mock_nexent_storage_module
@@ -228,6 +233,7 @@ module_mocks = {
     "nexent": mock_nexent_module,
     "nexent.core": mock_nexent_core_module,
     "nexent.core.utils": mock_nexent_core_utils_module,
+    "nexent.utils": mock_nexent_utils_module,
     "nexent.core.utils.observer": mock_nexent_core_utils_observer_module,
     "sdk": mock_sdk_module,
     "sdk.nexent": mock_sdk_nexent_module,
@@ -256,9 +262,21 @@ module_mocks = {
 # Import the classes under test with patched dependencies in place
 # ---------------------------------------------------------------------------
 with patch.dict("sys.modules", module_mocks):
+    # Create mock http_client_manager module for analyze_text_file_tool
+    # This is needed because analyze_text_file_tool.py uses absolute import:
+    # "from nexent.utils.http_client_manager import http_client_manager"
+    mock_http_client_manager_module = MagicMock()
+    mock_http_client_manager_module.http_client_manager = MagicMock()
+
+    # We need to add this to sys.modules before the import happens
+    sys.modules["nexent.utils.http_client_manager"] = mock_http_client_manager_module
+
     from sdk.nexent.core.agents import nexent_agent
     from sdk.nexent.core.agents.nexent_agent import NexentAgent, ActionStep, TaskStep
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory
+
+    # Clean up after import
+    sys.modules.pop("nexent.utils.http_client_manager", None)
 
 
 # ----------------------------------------------------------------------------
@@ -746,7 +764,6 @@ def test_create_local_tool_knowledge_base_search_tool_success(nexent_agent_insta
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.index_names == ["index1", "index2"]
     assert mock_kb_tool_instance.vdb_core == mock_vdb_core
     assert mock_kb_tool_instance.embedding_model == mock_embedding_model
 
@@ -797,11 +814,11 @@ def test_create_local_tool_knowledge_base_search_tool_with_conflicting_params(ne
     # Only non-excluded params should be passed to __init__ due to smolagents wrapper restrictions
     mock_kb_tool_class.assert_called_once_with(
         top_k=10,  # From filtered_params (not in conflict list)
+        index_names=["conflicting_index"],  # Not excluded by current implementation
     )
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.index_names == ["index1", "index2"]  # From metadata, not params
     assert mock_kb_tool_instance.vdb_core == mock_vdb_core  # From metadata, not params
     assert mock_kb_tool_instance.embedding_model == mock_embedding_model  # From metadata, not params
 
@@ -842,7 +859,6 @@ def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_
     # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_kb_tool_instance.index_names == []  # Empty list when None
     assert mock_kb_tool_instance.vdb_core is None
     assert mock_kb_tool_instance.embedding_model is None
     assert result == mock_kb_tool_instance
@@ -1367,7 +1383,6 @@ def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == ["datamate_index1", "datamate_index2"]
 
 
 
@@ -1407,7 +1422,6 @@ def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_
     # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == []  # Empty list when None
 
 
 def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
@@ -1448,7 +1462,6 @@ def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == ["datamate_index1", "datamate_index2"]
 
 
 def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_instance):
@@ -1487,7 +1500,6 @@ def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_
     # Verify excluded parameters were set directly as attributes with None defaults when metadata is missing
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-    assert mock_datamate_tool_instance.index_names == []  # Empty list when None
 
 
 if __name__ == "__main__":

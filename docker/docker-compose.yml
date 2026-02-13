@@ -87,6 +87,7 @@ services:
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+      - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
       <<: [*minio-vars, *es-vars]

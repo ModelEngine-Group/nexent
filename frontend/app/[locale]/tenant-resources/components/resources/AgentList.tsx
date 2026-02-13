@@ -17,19 +17,22 @@ import {
   Spin,
 } from "antd";
 import {
-  Edit,
   Trash2,
   Maximize2,
-  CircleCheck,
+  CheckCircle,
   CircleSlash,
+  Clock,
+  Eye,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { deleteAgent, searchAgentInfo, updateAgentInfo } from "@/services/agentConfigService";
+import { deleteAgent, searchAgentInfo } from "@/services/agentConfigService";
+import { fetchAgentVersionList } from "@/services/agentVersionService";
 import { Agent } from "@/types/agentConfig";
 import ExpandEditModal from "@/app/agents/components/agentInfo/ExpandEditModal";
+import type { AgentVersion } from "@/services/agentVersionService";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -48,15 +51,10 @@ type AgentListRow = Pick<
   model_id?: number;
   model_name?: string;
   model_display_name?: string;
+  is_published?: boolean;
+  current_version_no?: number;
 };
 
-// Fullscreen edit modal state interface
-interface FullscreenEditState {
-  visible: boolean;
-  field: "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt" | null;
-  title: string;
-  value: string;
-}
 
 export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
@@ -79,23 +77,31 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     }
   };
 
-  // Edit modal state
+  // View modal state
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentListRow | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
 
-  // Fullscreen edit modal state
-  const [fullscreenEdit, setFullscreenEdit] = useState<FullscreenEditState>({
+  // Fullscreen view modal state
+  const [fullscreenEdit, setFullscreenEdit] = useState<{
+    visible: boolean;
+    field: "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt" | null;
+    title: string;
+    value: string;
+  }>({
     visible: false,
     field: null,
     title: "",
     value: "",
   });
 
-  const { agents, isLoading, refetch } = useAgentList({
-    staleTime: 0, // Always fetch fresh data for admin view
-  });
+  // Version list state for each agent
+  const [agentVersions, setAgentVersions] = useState<Map<number, AgentVersion[]>>(new Map());
+  const [loadingVersions, setLoadingVersions] = useState<Map<number, boolean>>(new Map());
+  // Selected version for each agent (0 means current version)
+  const [selectedVersions, setSelectedVersions] = useState<Map<number, number>>(new Map());
+
+  const { agents, isLoading, refetch } = useAgentList(tenantId);
 
   // Fetch groups for group name mapping and selection
   const { data: groupData } = useGroupList(tenantId, 1, 100);
@@ -119,7 +125,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const handleDelete = async (agent: AgentListRow) => {
     try {
       // Agent ID is string in frontend type but number in backend service
-      const res = await deleteAgent(Number(agent.id));
+      const res = await deleteAgent(Number(agent.id), tenantId ?? undefined);
       if (res.success) {
         message.success(t("businessLogic.config.error.agentDeleteSuccess"));
         queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -137,7 +143,10 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     setEditModalVisible(true);
 
     try {
-      const res = await searchAgentInfo(Number(agent.id));
+      const agentId = Number(agent.id);
+      // Get selected version for this agent (default to 0 for current version)
+      const selectedVersionNo = selectedVersions.get(agentId) ?? 0;
+      const res = await searchAgentInfo(agentId, tenantId ?? undefined, selectedVersionNo);
       if (res.success && res.data) {
         const detail = res.data;
         setEditingAgent(agent);
@@ -161,50 +170,13 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     }
   };
 
-  const handleEditSubmit = async () => {
-    if (!editingAgent) return;
-
-    try {
-      const values = await form.validateFields();
-      setIsSaving(true);
-
-      const groupIds = (values.group_ids || [])
-        .map((id: unknown) => Number(id))
-        .filter((id: number) => Number.isFinite(id));
-
-      const res = await updateAgentInfo({
-        agent_id: Number(editingAgent.id),
-        name: editingAgent.name,
-        display_name: values.display_name,
-        description: values.description,
-        duty_prompt: values.duty_prompt,
-        constraint_prompt: values.constraint_prompt,
-        few_shots_prompt: values.few_shots_prompt,
-        group_ids: groupIds,
-        author: editingAgent.author,
-      });
-
-      if (res.success) {
-        message.success(t("businessLogic.config.message.agentSaveSuccess"));
-        setEditModalVisible(false);
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-      } else {
-        message.error(res.message || t("businessLogic.config.error.saveFailed"));
-      }
-    } catch (error) {
-      message.error(t("businessLogic.config.error.saveFailed"));
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const handleEditModalCancel = () => {
     setEditModalVisible(false);
     setEditingAgent(null);
     form.resetFields();
   };
 
-  // Fullscreen edit handlers
+  // Fullscreen view handlers
   const openFullscreenEdit = (
     field: "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt",
     title: string
@@ -219,10 +191,31 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   };
 
   const handleFullscreenSave = (value: string) => {
-    if (fullscreenEdit.field) {
-      form.setFieldValue(fullscreenEdit.field, value);
-    }
+    // In view mode, don't save changes, just close
     setFullscreenEdit({ visible: false, field: null, title: "", value: "" });
+  };
+
+  // Load agent versions when dropdown is opened
+  const handleVersionDropdownOpen = async (agentId: number, open: boolean) => {
+    if (open && !agentVersions.has(agentId)) {
+      setLoadingVersions(prev => new Map(prev).set(agentId, true));
+      try {
+        const res = await fetchAgentVersionList(agentId, tenantId ?? undefined);
+        if (res.success && res.data) {
+          setAgentVersions(prev => new Map(prev).set(agentId, res.data.items || []));
+        } else {
+          message.error(res.message || t("common.unknownError"));
+        }
+      } catch (error) {
+        message.error(t("common.unknownError"));
+      } finally {
+        setLoadingVersions(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(agentId);
+          return newMap;
+        });
+      }
+    }
   };
 
   const columns = [
@@ -230,19 +223,19 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       title: t("agent.displayName"),
       dataIndex: "display_name",
       key: "display_name",
-      width: "15%",
+      width: "14%",
       render: (text: string) => <Text strong>{text}</Text>,
     },
     {
       title: t("agent.name"),
       dataIndex: "name",
       key: "name",
-      width: "15%",
+      width: "14%",
     },
     {
       title: t("agent.llmModel"),
       key: "llm_model",
-      width: "20%",
+      width: "18%",
       render: (_: unknown, record: AgentListRow) => {
         const primary = record.model_display_name || record.model_name || "-";
         const secondary = record.model_name || "";
@@ -283,10 +276,69 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       },
     },
     {
+      title: t("agent.version"),
+      key: "version",
+      width: "10%",
+      render: (_: unknown, record: AgentListRow) => {
+        const agentId = Number(record.id);
+        const versions = agentVersions.get(agentId) || [];
+        const isLoading = loadingVersions.get(agentId) || false;
+        // Default to 0 (current version) if not selected
+        const selectedVersionNo = selectedVersions.has(agentId)
+          ? selectedVersions.get(agentId)!
+          : 0;
+
+        // Build options: current version (0) first, then other versions
+        const options = [
+          {
+            label: t("agent.version.current"),
+            value: 0,
+          },
+          ...versions.map((version) => ({
+            label: version.version_name,
+            value: version.version_no,
+          })),
+        ];
+
+        return (
+          <Select
+            placeholder={t("agent.version.current")}
+            value={selectedVersionNo}
+            loading={isLoading}
+            onDropdownVisibleChange={(open) => handleVersionDropdownOpen(agentId, open)}
+            onChange={(value) => {
+              setSelectedVersions(prev => new Map(prev).set(agentId, value));
+            }}
+            style={{ width: "100%" }}
+            options={options}
+          />
+        );
+      },
+    },
+    {
       title: t("common.status"),
       key: "status",
-      width: "15%",
+      width: "10%",
       render: (_: unknown, record: AgentListRow) => {
+        const isPublished = record.is_published === true;
+
+        // If not published, only show unpublished status
+        if (!isPublished) {
+          return (
+            <div className="flex items-center gap-2 min-w-0">
+              <Tag
+                color="#AEB6BF"
+                className="inline-flex items-center"
+                variant="solid"
+              >
+                <Clock className="w-3 h-3 mr-1" />
+                {t("agent.status.unpublished")}
+              </Tag>
+            </div>
+          );
+        }
+
+        // If published, show available/unavailable status
         const isAvailable = record.is_available !== false;
         const reasons = Array.isArray(record.unavailable_reasons)
           ? record.unavailable_reasons.filter((r) => Boolean(r))
@@ -297,11 +349,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           <div className="flex items-center gap-2 min-w-0">
             {isAvailable ? (
               <Tag
-                color="success"
+                color="#229954"
                 className="inline-flex items-center"
                 variant="solid"
               >
-                <CircleCheck className="mr-1" size={12} />
+                <CheckCircle className="w-3 h-3 mr-1" />
                 {t("mcpConfig.status.available")}
               </Tag>
             ) : (
@@ -310,11 +362,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                 placement="top"
               >
                 <Tag
-                  color="error"
+                  color="#E74C3C"
                   className="inline-flex items-center"
                   variant="solid"
                 >
-                  <CircleSlash className="mr-1" size={12} />
+                  <CircleSlash className="w-3.5 h-3 mr-1" />
                   {t("mcpConfig.status.unavailable")}
                 </Tag>
               </Tooltip>
@@ -326,13 +378,13 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     {
       title: t("common.actions"),
       key: "action",
-      width: "25%",
+      width: "14%",
       render: (_: any, record: AgentListRow) => (
         <div className="flex items-center space-x-2">
-          <Tooltip title={t("common.edit")}>
+          <Tooltip title={t("agent.action.view")}>
             <Button
               type="text"
-              icon={<Edit className="h-4 w-4" />}
+              icon={<Eye className="h-4 w-4" />}
               onClick={() => openEditModal(record)}
               size="small"
             />
@@ -341,7 +393,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             title={t("businessLogic.config.modal.deleteTitle")}
             description={t("businessLogic.config.modal.deleteContent", { name: record.display_name })}
             onConfirm={() => handleDelete(record)}
-            okText={t("common.delete")}
+            okText={t("common.confirm")}
             cancelText={t("common.cancel")}
           >
             <Tooltip title={t("common.delete")}>
@@ -359,9 +411,9 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   ];
 
   return (
-    <div className="flex flex-col">
-      <div className="space-y-6">
-        <div>
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="space-y-6 flex-1 overflow-auto">
+        <div className="min-w-0">
           <Table
             columns={columns}
             dataSource={agents as AgentListRow[]}
@@ -375,16 +427,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         </div>
       </div>
 
-      {/* Edit Modal */}
+      {/* View Modal */}
       <Modal
-        title={t("agent.action.modify")}
+        title={t("agent.action.view")}
         open={editModalVisible}
-        onOk={handleEditSubmit}
         onCancel={handleEditModalCancel}
-        okText={t("common.confirm")}
-        cancelText={t("common.cancel")}
+        footer={[
+          <Button key="close" onClick={handleEditModalCancel}>
+            {t("common.cancel")}
+          </Button>
+        ]}
         width={700}
-        confirmLoading={isSaving}
         maskClosable={false}
       >
         <Spin spinning={isLoadingDetail}>
@@ -393,7 +446,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               name="display_name"
               label={t("agent.displayName")}
             >
-              <Input placeholder={t("agent.displayNamePlaceholder")} />
+              <Input placeholder={t("agent.displayNamePlaceholder")} readOnly />
             </Form.Item>
 
             <Form.Item
@@ -411,6 +464,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                       placeholder={t("agent.descriptionPlaceholder")}
                       autoSize={{ minRows: 4, maxRows: 6 }}
                       style={{ resize: "none", paddingRight: 32 }}
+                      readOnly
                     />
                     <Tooltip title={t("common.fullscreen")}>
                       <Button
@@ -445,6 +499,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                       placeholder={t("agent.dutyPromptPlaceholder")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
+                      readOnly
                     />
                     <Tooltip title={t("common.fullscreen")}>
                       <Button
@@ -479,6 +534,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                       placeholder={t("agent.constraintPromptPlaceholder")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
+                      readOnly
                     />
                     <Tooltip title={t("common.fullscreen")}>
                       <Button
@@ -513,6 +569,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                       placeholder={t("agent.fewShotsPromptPlaceholder")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
+                      readOnly
                     />
                     <Tooltip title={t("common.fullscreen")}>
                       <Button
@@ -543,20 +600,37 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                   label: group.group_name,
                   value: group.group_id,
                 }))}
-                allowClear
+                open={false}
+                onDropdownVisibleChange={() => false}
+                onClick={(e) => e.preventDefault()}
+                onFocus={(e) => e.target.blur()}
+                tagRender={(props) => {
+                  const { label } = props;
+                  return (
+                    <Tag
+                      style={{
+                        margin: "2px",
+                        border: "1px solid #d9d9d9",
+                      }}
+                    >
+                      {label}
+                    </Tag>
+                  );
+                }}
               />
             </Form.Item>
           </Form>
         </Spin>
       </Modal>
 
-      {/* Fullscreen Edit Modal */}
+      {/* Fullscreen View Modal */}
       <ExpandEditModal
         open={fullscreenEdit.visible}
         title={fullscreenEdit.title}
         content={fullscreenEdit.value}
         onClose={() => setFullscreenEdit({ visible: false, field: null, title: "", value: "" })}
         onSave={handleFullscreenSave}
+        readOnly={true}
       />
     </div>
   );

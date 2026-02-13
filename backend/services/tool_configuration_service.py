@@ -1,4 +1,3 @@
-import asyncio
 import importlib
 import inspect
 import json
@@ -21,11 +20,10 @@ from database.tool_db import (
     query_tool_instances_by_id,
     update_tool_table_from_scan_tool_list,
     search_last_tool_instance_by_tool_id,
+    check_tool_list_initialized,
 )
 from services.file_management_service import get_llm_model
 from services.vectordatabase_service import get_embedding_model, get_vector_db_core
-from services.tenant_config_service import get_selected_knowledge_list, build_knowledge_name_mapping
-from database.knowledge_db import get_index_name_by_knowledge_name
 from database.client import minio_client
 from services.image_service import get_vlm_model
 
@@ -258,6 +256,8 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
 
     Args:
         tool_info: ToolInstanceInfoRequest containing tool configuration data
+        tenant_id: Tenant ID
+        user_id: User ID
 
     Returns:
         Dictionary containing the updated tool instance
@@ -265,8 +265,10 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     Raises:
         ValueError: If database update fails
     """
+    # Use version_no from request if provided, otherwise default to 0
+    version_no = getattr(tool_info, 'version_no', 0)
     tool_instance = create_or_update_tool_by_tool_info(
-        tool_info, tenant_id, user_id)
+        tool_info, tenant_id, user_id, version_no=version_no)
     return {
         "tool_instance": tool_instance
     }
@@ -314,6 +316,28 @@ async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_serve
         # Convert all failures (including SystemExit) to domain error to avoid process exit
         raise MCPConnectionError(
             f"failed to get tool from remote MCP server, detail: {e}")
+
+
+async def init_tool_list_for_tenant(tenant_id: str, user_id: str):
+    """
+    Initialize tool list for a new tenant.
+    This function scans and populates available tools from local, MCP, and LangChain sources.
+
+    Args:
+        tenant_id: Tenant ID for MCP tools (required for MCP tools)
+        user_id: User ID for tracking who initiated the scan
+
+    Returns:
+        Dictionary containing initialization result with tool count
+    """
+    # Check if tools have already been initialized for this tenant
+    if check_tool_list_initialized(tenant_id):
+        logger.info(f"Tool list already initialized for tenant {tenant_id}, skipping")
+        return {"status": "already_initialized", "message": "Tool list already exists"}
+
+    logger.info(f"Initializing tool list for new tenant: {tenant_id}")
+    await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+    return {"status": "success", "message": "Tool list initialized successfully"}
 
 
 async def update_tool_list(tenant_id: str, user_id: str):
@@ -540,55 +564,12 @@ def _validate_local_tool(
                     instantiation_params[param_name] = param.default
 
         if tool_name == "knowledge_base_search":
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(
-                    f"Tenant ID and User ID are required for {tool_name} validation")
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if knowledge_info.get(
-                'knowledge_sources') == 'elasticsearch']
-            name_resolver = build_knowledge_name_mapping(
-                tenant_id=tenant_id, user_id=user_id)
-
-            # Fallback: if user provided index_names in inputs, try to resolve them even when no selection stored
-            if (not index_names) and inputs and inputs.get("index_names"):
-                raw_names = inputs.get("index_names")
-                if isinstance(raw_names, str):
-                    raw_names = [raw_names]
-                resolved_indices = []
-                for raw in raw_names:
-                    try:
-                        resolved = get_index_name_by_knowledge_name(
-                            raw, tenant_id=tenant_id)
-                        name_resolver[raw] = resolved
-                        resolved_indices.append(resolved)
-                    except Exception:
-                        # If not found as knowledge_name, assume it's already an index_name
-                        resolved_indices.append(raw)
-                index_names = resolved_indices
-
             embedding_model = get_embedding_model(tenant_id=tenant_id)
             vdb_core = get_vector_db_core()
             params = {
                 **instantiation_params,
-                'index_names': index_names,
-                'name_resolver': name_resolver,
                 'vdb_core': vdb_core,
                 'embedding_model': embedding_model,
-            }
-            tool_instance = tool_class(**params)
-        elif tool_name == "datamate_search":
-            if not tenant_id or not user_id:
-                raise ToolExecutionException(
-                    f"Tenant ID and User ID are required for {tool_name} validation")
-            knowledge_info_list = get_selected_knowledge_list(
-                tenant_id=tenant_id, user_id=user_id)
-            index_names = [knowledge_info.get("index_name") for knowledge_info in knowledge_info_list if
-                           knowledge_info.get('knowledge_sources') == 'datamate']
-
-            params = {
-                **instantiation_params,
-                'index_names': index_names,
             }
             tool_instance = tool_class(**params)
         elif tool_name == "analyze_image":

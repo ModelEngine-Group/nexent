@@ -14,15 +14,6 @@ from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, 
 logger = logging.getLogger("datamate_search_tool")
 
 
-def _normalize_index_names(index_names: Optional[Union[str, List[str]]]) -> List[str]:
-    """Normalize index_names to list; accept single string and keep None as empty list."""
-    if index_names is None:
-        return []
-    if isinstance(index_names, str):
-        return [index_names]
-    return list(index_names)
-
-
 class DataMateSearchTool(Tool):
     """DataMate knowledge base search tool"""
     name = "datamate_search"
@@ -47,11 +38,11 @@ class DataMateSearchTool(Tool):
 
     def __init__(
         self,
-        server_url: str = Field(description="DataMate server url"),
+        server_url: str = Field(description="DataMate server url. (e.g., 'https://192.168.1.100:8080' or 'https://datamate.example.com:8443')"),
         verify_ssl: bool = Field(
             description="Whether to verify SSL certificates for HTTPS connections", default=False),
         index_names: List[str] = Field(
-            description="The list of index names to search", default=None, exclude=True),
+            description="The list of index names to search"),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
         top_k: int = Field(

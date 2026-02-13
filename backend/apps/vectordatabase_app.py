@@ -53,14 +53,32 @@ def create_new_index(
         index_name: str = Path(..., description="Name of the index to create"),
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
+        request: Dict[str, Any] = Body(
+            None, description="Request body with optional fields (ingroup_permission, group_ids)"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
 ):
     """Create a new vector index and store it in the knowledge table"""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+
+        # Extract optional fields from request body
+        ingroup_permission = None
+        group_ids = None
+        if request:
+            ingroup_permission = request.get("ingroup_permission")
+            group_ids = request.get("group_ids")
+
         # Treat path parameter as user-facing knowledge base name for new creations
-        return ElasticSearchService.create_knowledge_base(index_name, embedding_dim, vdb_core, user_id, tenant_id)
+        return ElasticSearchService.create_knowledge_base(
+            knowledge_name=index_name,
+            embedding_dim=embedding_dim,
+            vdb_core=vdb_core,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            ingroup_permission=ingroup_permission,
+            group_ids=group_ids,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -395,6 +413,7 @@ def create_chunk(
             chunk_request=payload,
             vdb_core=vdb_core,
             user_id=user_id,
+            tenant_id=tenant_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:

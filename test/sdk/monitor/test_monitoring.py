@@ -21,31 +21,6 @@ import pytest
 import asyncio
 from unittest.mock import Mock, MagicMock, patch
 
-# Mock OpenTelemetry components before importing the monitoring module
-
-
-@pytest.fixture(autouse=True)
-def mock_opentelemetry():
-    """Mock all OpenTelemetry dependencies."""
-    with patch.dict('sys.modules', {
-        'opentelemetry': MagicMock(),
-        'opentelemetry.trace': MagicMock(),
-        'opentelemetry.metrics': MagicMock(),
-        'opentelemetry.trace.status': MagicMock(),
-        'opentelemetry.exporter.prometheus': MagicMock(),
-        'opentelemetry.sdk.metrics': MagicMock(),
-        'opentelemetry.sdk.trace.export': MagicMock(),
-        'opentelemetry.sdk.trace': MagicMock(),
-        'opentelemetry.instrumentation.requests': MagicMock(),
-        'opentelemetry.instrumentation.fastapi': MagicMock(),
-        'opentelemetry.exporter.jaeger.thrift': MagicMock(),
-        'opentelemetry.sdk.resources': MagicMock(),
-    }):
-        yield
-
-
-# Import after mocking
-
 
 class TestMonitoringConfig:
     """Test MonitoringConfig dataclass."""

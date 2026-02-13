@@ -3,25 +3,30 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
-import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle } from "lucide-react";
+import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
+import { App } from "antd";
 
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
+import { USER_ROLES } from "@/const/auth";
 
 export function AvatarDropdown() {
-  const { user, isLoading, logout, openLoginModal, openRegisterModal } =
-    useAuth();
+  const { user, isAuthzReady } = useAuthorizationContext();
+  const { isLoading, logout, revoke, openLoginModal, openRegisterModal } =
+    useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { t } = useTranslation("common");
+  const { modal } = App.useApp();
   const { confirm } = useConfirmModal();
 
+  // Show loading while authentication is in progress
   if (isLoading) {
     return <Spin size="small" />;
   }
-
   if (!user) {
     const items: ItemType[] = [
       {
@@ -91,7 +96,7 @@ export function AvatarDropdown() {
           <div className="font-medium">{user.email}</div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
-              {t(user.role === "admin" ? "auth.admin" : "auth.user")}
+              {t(`auth.${(user.role).toLowerCase()}`)}
             </Tag>
           </div>
         </div>
@@ -130,6 +135,31 @@ export function AvatarDropdown() {
         });
       },
     },
+    {
+      key: "revoke",
+      icon: <Power size={16} />,
+      label: t("auth.revoke"),
+      // danger: true,
+      className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
+      onClick: () => {
+        if (user.role === USER_ROLES.ADMIN) {
+          modal.error({
+            title: t("auth.refuseRevoke"),
+            content: t("auth.refuseRevokePrompt"),
+            okText: t("auth.confirm"),
+          });
+        } else {
+          confirm({
+            title: t("auth.confirmRevoke"),
+            content: t("auth.confirmRevokePrompt"),
+            okText: t("auth.confirmRevokeOk"),
+            onOk: () => {
+              revoke();
+            },
+          });
+        }
+      },
+    },
   ];
 
   return (
@@ -145,7 +175,7 @@ export function AvatarDropdown() {
         )}
       >
         <Avatar
-          src={user.avatar_url}
+          src={user.avatarUrl}
           className="cursor-pointer"
           size="default"
           icon={<UserRound size={18} />}

@@ -1,46 +1,30 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchAgentList as fetchAgentListService } from "@/services/agentConfigService";
 import { useMemo, useEffect } from "react";
+import { Agent } from "@/types/agentConfig";
 
-export function useAgentList(options?: { enabled?: boolean; staleTime?: number }) {
+export function useAgentList(tenantId: string | null) {
 	const queryClient = useQueryClient();
 
 	const query = useQuery({
-		queryKey: ["agents"],
+		queryKey: ["agents", tenantId],
 		queryFn: async () => {
-			const res = await fetchAgentListService();
+			const res = await fetchAgentListService(tenantId ?? undefined);
 			if (!res || !res.success) {
 				throw new Error(res?.message || "Failed to fetch agents");
 			}
 			return res.data || [];
 		},
-		staleTime: options?.staleTime ?? 60_000,
-		enabled: options?.enabled ?? true,
+		staleTime: 60_000,
+		enabled: !!tenantId,
 	});
 
 	const agents = query.data ?? [];
 
 	const availableAgents = useMemo(() => {
-		return (agents as any[]).filter((a) => a.is_available !== false);
+		return (agents as Agent[]).filter((a) => a.is_available !== false);
 	}, [agents]);
-	// Listen for cross-tab agent updates via BroadcastChannel
-	useEffect(() => {
-		let bc: BroadcastChannel | null = null;
-		try {
-			bc = new BroadcastChannel("nexent-agent-updates");
-			bc.onmessage = (ev) => {
-				if (ev?.data?.type === "agents_updated") {
-					queryClient.invalidateQueries({ queryKey: ["agents"] });
-				}
-			};
-		} catch (e) {
-			// ignore if unsupported
-		}
-		return () => {
-			if (bc) bc.close();
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+
 	return {
 		...query,
 		agents,

@@ -296,7 +296,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.delete_flag IS 'Whether it is deleted. O
 
 -- Create the ag_tenant_agent_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
-    agent_id SERIAL PRIMARY KEY NOT NULL,
+    agent_id INTEGER NOT NULL,
     name VARCHAR(100),
     display_name VARCHAR(100),
     description VARCHAR,
@@ -316,11 +316,14 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     enabled BOOLEAN DEFAULT FALSE,
     is_new BOOLEAN DEFAULT FALSE,
     provide_run_summary BOOLEAN DEFAULT FALSE,
+    version_no INTEGER DEFAULT 0 NOT NULL,
+    current_version_no INTEGER NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
-    delete_flag VARCHAR(1) DEFAULT 'N'
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (agent_id, version_no)
 );
 
 -- Create a function to update the update_time column
@@ -366,6 +369,8 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.is_new IS 'Whether this agent is marked as new for the user';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -375,18 +380,20 @@ WHERE delete_flag = 'N';
 
 -- Create the ag_tool_instance_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_instance_t (
-    tool_instance_id SERIAL PRIMARY KEY NOT NULL,
+    tool_instance_id INTEGER NOT NULL,
     tool_id INTEGER,
     agent_id INTEGER,
     params JSON,
     user_id VARCHAR(100),
     tenant_id VARCHAR(100),
     enabled BOOLEAN DEFAULT FALSE,
+    version_no INTEGER DEFAULT 0 NOT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
-    delete_flag VARCHAR(1) DEFAULT 'N'
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (tool_instance_id, version_no)
 );
 
 -- Add comment to the table
@@ -400,6 +407,7 @@ COMMENT ON COLUMN nexent.ag_tool_instance_t.params IS 'Parameter configuration';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.user_id IS 'User ID';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.tenant_id IS 'Tenant ID';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.enabled IS 'Enable flag';
+COMMENT ON COLUMN nexent.ag_tool_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.create_time IS 'Creation time';
 COMMENT ON COLUMN nexent.ag_tool_instance_t.update_time IS 'Update time';
 
@@ -554,15 +562,17 @@ COMMENT ON COLUMN nexent.user_tenant_t.delete_flag IS 'Delete flag, Y/N';
 
 -- Create the ag_agent_relation_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
-    relation_id SERIAL PRIMARY KEY NOT NULL,
+    relation_id INTEGER NOT NULL,
     selected_agent_id INTEGER,
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
+    version_no INTEGER DEFAULT 0 NOT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
     updated_by VARCHAR(100),
-    delete_flag VARCHAR(1) DEFAULT 'N'
+    delete_flag VARCHAR(1) DEFAULT 'N',
+    PRIMARY KEY (relation_id, version_no)
 );
 
 -- Create a function to update the update_time column
@@ -588,6 +598,7 @@ COMMENT ON COLUMN nexent.ag_agent_relation_t.relation_id IS 'Relationship ID, pr
 COMMENT ON COLUMN nexent.ag_agent_relation_t.selected_agent_id IS 'Selected agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.parent_agent_id IS 'Parent agent ID';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.ag_agent_relation_t.created_by IS 'Creator ID, audit field';
@@ -782,14 +793,7 @@ COMMENT ON COLUMN nexent.tenant_group_user_t.created_by IS 'Created by';
 COMMENT ON COLUMN nexent.tenant_group_user_t.updated_by IS 'Updated by';
 COMMENT ON COLUMN nexent.tenant_group_user_t.delete_flag IS 'Delete flag, Y/N';
 
--- 5. Add fields to user_tenant_t table
-ALTER TABLE nexent.user_tenant_t
-ADD COLUMN IF NOT EXISTS user_role VARCHAR(30);
-
--- Add comments for new fields in user_tenant_t table
-COMMENT ON COLUMN nexent.user_tenant_t.user_role IS 'User role: SU, ADMIN, DEV, USER';
-
--- 6. Create role_permission_t table for role permissions
+-- 5. Create role_permission_t table for role permissions
 CREATE TABLE IF NOT EXISTS nexent.role_permission_t (
     role_permission_id SERIAL PRIMARY KEY,
     user_role VARCHAR(30) NOT NULL,
@@ -806,225 +810,238 @@ COMMENT ON COLUMN nexent.role_permission_t.permission_category IS 'Permission ca
 COMMENT ON COLUMN nexent.role_permission_t.permission_type IS 'Permission type';
 COMMENT ON COLUMN nexent.role_permission_t.permission_subtype IS 'Permission subtype';
 
--- Add primary key constraint for role_permission_t table
-ALTER TABLE nexent.role_permission_t ADD CONSTRAINT role_permission_t_pkey PRIMARY KEY (role_permission_id);
+-- 6. Insert role permission data after clearing old data
+DELETE FROM nexent.role_permission_t;
 
-
--- Insert role permission data with conflict handling
 INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_category, permission_type, permission_subtype) VALUES
 (1, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(2, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(3, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(4, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(5, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(6, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(7, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(8, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(9, 'SU', 'RESOURCE', 'AGENT', 'READ'),
-(10, 'SU', 'RESOURCE', 'AGENT', 'DELETE'),
-(11, 'SU', 'RESOURCE', 'KB', 'READ'),
-(12, 'SU', 'RESOURCE', 'KB', 'DELETE'),
-(13, 'SU', 'RESOURCE', 'KB.GROUPS', 'READ'),
-(14, 'SU', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
-(15, 'SU', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
-(16, 'SU', 'RESOURCE', 'USER.ROLE', 'READ'),
-(17, 'SU', 'RESOURCE', 'USER.ROLE', 'UPDATE'),
-(18, 'SU', 'RESOURCE', 'USER.ROLE', 'DELETE'),
-(19, 'SU', 'RESOURCE', 'MCP', 'READ'),
-(20, 'SU', 'RESOURCE', 'MCP', 'DELETE'),
-(21, 'SU', 'RESOURCE', 'MEM.SETTING', 'READ'),
-(22, 'SU', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
-(23, 'SU', 'RESOURCE', 'MEM.AGENT', 'READ'),
-(24, 'SU', 'RESOURCE', 'MEM.AGENT', 'DELETE'),
-(25, 'SU', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
-(26, 'SU', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
-(27, 'SU', 'RESOURCE', 'MODEL', 'CREATE'),
-(28, 'SU', 'RESOURCE', 'MODEL', 'READ'),
-(29, 'SU', 'RESOURCE', 'MODEL', 'UPDATE'),
-(30, 'SU', 'RESOURCE', 'MODEL', 'DELETE'),
-(31, 'SU', 'RESOURCE', 'TENANT', 'CREATE'),
-(32, 'SU', 'RESOURCE', 'TENANT', 'READ'),
-(33, 'SU', 'RESOURCE', 'TENANT', 'UPDATE'),
-(34, 'SU', 'RESOURCE', 'TENANT', 'DELETE'),
-(35, 'SU', 'RESOURCE', 'TENANT.INFO', 'READ'),
-(36, 'SU', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
-(37, 'SU', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
-(38, 'SU', 'RESOURCE', 'TENANT.INVITE', 'READ'),
-(39, 'SU', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(40, 'SU', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
-(41, 'SU', 'RESOURCE', 'GROUP', 'CREATE'),
-(42, 'SU', 'RESOURCE', 'GROUP', 'READ'),
-(43, 'SU', 'RESOURCE', 'GROUP', 'UPDATE'),
-(44, 'SU', 'RESOURCE', 'GROUP', 'DELETE'),
-(45, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(46, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(47, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(48, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(49, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(50, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(51, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(52, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(53, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(54, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(55, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(56, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(57, 'ADMIN', 'RESOURCE', 'AGENT', 'CREATE'),
-(58, 'ADMIN', 'RESOURCE', 'AGENT', 'READ'),
-(59, 'ADMIN', 'RESOURCE', 'AGENT', 'UPDATE'),
-(60, 'ADMIN', 'RESOURCE', 'AGENT', 'DELETE'),
-(61, 'ADMIN', 'RESOURCE', 'KB', 'CREATE'),
-(62, 'ADMIN', 'RESOURCE', 'KB', 'READ'),
-(63, 'ADMIN', 'RESOURCE', 'KB', 'UPDATE'),
-(64, 'ADMIN', 'RESOURCE', 'KB', 'DELETE'),
-(65, 'ADMIN', 'RESOURCE', 'KB.GROUPS', 'READ'),
-(66, 'ADMIN', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
-(67, 'ADMIN', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
-(68, 'ADMIN', 'RESOURCE', 'USER.ROLE', 'READ'),
-(69, 'ADMIN', 'RESOURCE', 'MCP', 'CREATE'),
-(70, 'ADMIN', 'RESOURCE', 'MCP', 'READ'),
-(71, 'ADMIN', 'RESOURCE', 'MCP', 'UPDATE'),
-(72, 'ADMIN', 'RESOURCE', 'MCP', 'DELETE'),
-(73, 'ADMIN', 'RESOURCE', 'MEM.SETTING', 'READ'),
-(74, 'ADMIN', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
-(75, 'ADMIN', 'RESOURCE', 'MEM.AGENT', 'CREATE'),
-(76, 'ADMIN', 'RESOURCE', 'MEM.AGENT', 'READ'),
-(77, 'ADMIN', 'RESOURCE', 'MEM.AGENT', 'DELETE'),
-(78, 'ADMIN', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
-(79, 'ADMIN', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
-(80, 'ADMIN', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
-(81, 'ADMIN', 'RESOURCE', 'MODEL', 'CREATE'),
-(82, 'ADMIN', 'RESOURCE', 'MODEL', 'READ'),
-(83, 'ADMIN', 'RESOURCE', 'MODEL', 'UPDATE'),
-(84, 'ADMIN', 'RESOURCE', 'MODEL', 'DELETE'),
-(85, 'ADMIN', 'RESOURCE', 'TENANT.INFO', 'READ'),
-(86, 'ADMIN', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
-(87, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
-(88, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'READ'),
-(89, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(90, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
-(91, 'ADMIN', 'RESOURCE', 'GROUP', 'CREATE'),
-(92, 'ADMIN', 'RESOURCE', 'GROUP', 'READ'),
-(93, 'ADMIN', 'RESOURCE', 'GROUP', 'UPDATE'),
-(94, 'ADMIN', 'RESOURCE', 'GROUP', 'DELETE'),
-(95, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(96, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(97, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(98, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(99, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(100, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(101, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(102, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(103, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(104, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(105, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(106, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(107, 'DEV', 'RESOURCE', 'AGENT', 'CREATE'),
-(108, 'DEV', 'RESOURCE', 'AGENT', 'READ'),
-(109, 'DEV', 'RESOURCE', 'AGENT', 'UPDATE'),
-(110, 'DEV', 'RESOURCE', 'AGENT', 'DELETE'),
-(111, 'DEV', 'RESOURCE', 'KB', 'CREATE'),
-(112, 'DEV', 'RESOURCE', 'KB', 'READ'),
-(113, 'DEV', 'RESOURCE', 'KB', 'UPDATE'),
-(114, 'DEV', 'RESOURCE', 'KB', 'DELETE'),
-(115, 'DEV', 'RESOURCE', 'KB.GROUPS', 'READ'),
-(116, 'DEV', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
-(117, 'DEV', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
-(118, 'DEV', 'RESOURCE', 'USER.ROLE', 'READ'),
-(119, 'DEV', 'RESOURCE', 'MCP', 'CREATE'),
-(120, 'DEV', 'RESOURCE', 'MCP', 'READ'),
-(121, 'DEV', 'RESOURCE', 'MCP', 'UPDATE'),
-(122, 'DEV', 'RESOURCE', 'MCP', 'DELETE'),
-(123, 'DEV', 'RESOURCE', 'MEM.SETTING', 'READ'),
-(124, 'DEV', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
-(125, 'DEV', 'RESOURCE', 'MEM.AGENT', 'READ'),
-(126, 'DEV', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
-(127, 'DEV', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
-(128, 'DEV', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
-(129, 'DEV', 'RESOURCE', 'MODEL', 'READ'),
-(130, 'DEV', 'RESOURCE', 'TENANT.INFO', 'READ'),
-(131, 'DEV', 'RESOURCE', 'GROUP', 'READ'),
-(132, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(133, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(134, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(135, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(136, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(137, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(138, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(139, 'USER', 'RESOURCE', 'AGENT', 'READ'),
-(140, 'USER', 'RESOURCE', 'KB', 'CREATE'),
-(141, 'USER', 'RESOURCE', 'KB', 'READ'),
-(142, 'USER', 'RESOURCE', 'KB', 'UPDATE'),
-(143, 'USER', 'RESOURCE', 'KB', 'DELETE'),
-(144, 'USER', 'RESOURCE', 'KB.GROUPS', 'READ'),
-(145, 'USER', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
-(146, 'USER', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
-(147, 'USER', 'RESOURCE', 'USER.ROLE', 'READ'),
-(148, 'USER', 'RESOURCE', 'MCP', 'CREATE'),
-(149, 'USER', 'RESOURCE', 'MCP', 'READ'),
-(150, 'USER', 'RESOURCE', 'MCP', 'UPDATE'),
-(151, 'USER', 'RESOURCE', 'MCP', 'DELETE'),
-(152, 'USER', 'RESOURCE', 'MEM.SETTING', 'READ'),
-(153, 'USER', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
-(154, 'USER', 'RESOURCE', 'MEM.AGENT', 'READ'),
-(155, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
-(156, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
-(157, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
-(158, 'USER', 'RESOURCE', 'MODEL', 'READ'),
-(159, 'USER', 'RESOURCE', 'TENANT.INFO', 'READ'),
-(160, 'USER', 'RESOURCE', 'GROUP', 'READ'),
-(161, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
-(162, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
-(163, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
-(164, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
-(165, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
-(166, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
-(167, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
-(168, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
-(169, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
-(170, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
-(171, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
-(172, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
-(173, 'SPEED', 'RESOURCE', 'AGENT', 'CREATE'),
-(174, 'SPEED', 'RESOURCE', 'AGENT', 'READ'),
-(175, 'SPEED', 'RESOURCE', 'AGENT', 'UPDATE'),
-(176, 'SPEED', 'RESOURCE', 'AGENT', 'DELETE'),
-(177, 'SPEED', 'RESOURCE', 'KB', 'CREATE'),
-(178, 'SPEED', 'RESOURCE', 'KB', 'READ'),
-(179, 'SPEED', 'RESOURCE', 'KB', 'UPDATE'),
-(180, 'SPEED', 'RESOURCE', 'KB', 'DELETE'),
-(181, 'SPEED', 'RESOURCE', 'KB.GROUPS', 'READ'),
-(182, 'SPEED', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
-(183, 'SPEED', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
-(184, 'SPEED', 'RESOURCE', 'USER.ROLE', 'READ'),
-(185, 'SPEED', 'RESOURCE', 'MCP', 'CREATE'),
-(186, 'SPEED', 'RESOURCE', 'MCP', 'READ'),
-(187, 'SPEED', 'RESOURCE', 'MCP', 'UPDATE'),
-(188, 'SPEED', 'RESOURCE', 'MCP', 'DELETE'),
-(189, 'SPEED', 'RESOURCE', 'MEM.SETTING', 'READ'),
-(190, 'SPEED', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
-(191, 'SPEED', 'RESOURCE', 'MEM.AGENT', 'CREATE'),
-(192, 'SPEED', 'RESOURCE', 'MEM.AGENT', 'READ'),
-(193, 'SPEED', 'RESOURCE', 'MEM.AGENT', 'DELETE'),
-(194, 'SPEED', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
-(195, 'SPEED', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
-(196, 'SPEED', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
-(197, 'SPEED', 'RESOURCE', 'MODEL', 'CREATE'),
-(198, 'SPEED', 'RESOURCE', 'MODEL', 'READ'),
-(199, 'SPEED', 'RESOURCE', 'MODEL', 'UPDATE'),
-(200, 'SPEED', 'RESOURCE', 'MODEL', 'DELETE'),
-(201, 'SPEED', 'RESOURCE', 'TENANT.INFO', 'READ'),
-(202, 'SPEED', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
-(203, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
-(204, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
-(205, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(206, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
-(207, 'SPEED', 'RESOURCE', 'GROUP', 'CREATE'),
-(208, 'SPEED', 'RESOURCE', 'GROUP', 'READ'),
-(209, 'SPEED', 'RESOURCE', 'GROUP', 'UPDATE'),
-(210, 'SPEED', 'RESOURCE', 'GROUP', 'DELETE')
-ON CONFLICT (role_permission_id) DO NOTHING;
+(2, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
+(3, 'SU', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
+(4, 'SU', 'RESOURCE', 'AGENT', 'READ'),
+(5, 'SU', 'RESOURCE', 'AGENT', 'DELETE'),
+(6, 'SU', 'RESOURCE', 'KB', 'READ'),
+(7, 'SU', 'RESOURCE', 'KB', 'DELETE'),
+(8, 'SU', 'RESOURCE', 'KB.GROUPS', 'READ'),
+(9, 'SU', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
+(10, 'SU', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
+(11, 'SU', 'RESOURCE', 'USER.ROLE', 'READ'),
+(12, 'SU', 'RESOURCE', 'USER.ROLE', 'UPDATE'),
+(13, 'SU', 'RESOURCE', 'USER.ROLE', 'DELETE'),
+(14, 'SU', 'RESOURCE', 'MCP', 'READ'),
+(15, 'SU', 'RESOURCE', 'MCP', 'DELETE'),
+(16, 'SU', 'RESOURCE', 'MEM.SETTING', 'READ'),
+(17, 'SU', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
+(18, 'SU', 'RESOURCE', 'MEM.AGENT', 'READ'),
+(19, 'SU', 'RESOURCE', 'MEM.AGENT', 'DELETE'),
+(20, 'SU', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
+(21, 'SU', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
+(22, 'SU', 'RESOURCE', 'MODEL', 'CREATE'),
+(23, 'SU', 'RESOURCE', 'MODEL', 'READ'),
+(24, 'SU', 'RESOURCE', 'MODEL', 'UPDATE'),
+(25, 'SU', 'RESOURCE', 'MODEL', 'DELETE'),
+(26, 'SU', 'RESOURCE', 'TENANT', 'CREATE'),
+(27, 'SU', 'RESOURCE', 'TENANT', 'READ'),
+(28, 'SU', 'RESOURCE', 'TENANT', 'UPDATE'),
+(29, 'SU', 'RESOURCE', 'TENANT', 'DELETE'),
+(30, 'SU', 'RESOURCE', 'TENANT.LIST', 'READ'),
+(31, 'SU', 'RESOURCE', 'TENANT.INFO', 'READ'),
+(32, 'SU', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
+(33, 'SU', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
+(34, 'SU', 'RESOURCE', 'TENANT.INVITE', 'READ'),
+(35, 'SU', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
+(36, 'SU', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
+(37, 'SU', 'RESOURCE', 'GROUP', 'CREATE'),
+(38, 'SU', 'RESOURCE', 'GROUP', 'READ'),
+(39, 'SU', 'RESOURCE', 'GROUP', 'UPDATE'),
+(40, 'SU', 'RESOURCE', 'GROUP', 'DELETE'),
+(41, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(42, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(43, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
+(44, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
+(45, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
+(46, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
+(47, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
+(48, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
+(49, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
+(50, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
+(51, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
+(52, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(53, 'ADMIN', 'VISIBILITY', 'LEFT_NAV_MENU', '/tenant-resources'),
+(54, 'ADMIN', 'RESOURCE', 'AGENT', 'CREATE'),
+(55, 'ADMIN', 'RESOURCE', 'AGENT', 'READ'),
+(56, 'ADMIN', 'RESOURCE', 'AGENT', 'UPDATE'),
+(57, 'ADMIN', 'RESOURCE', 'AGENT', 'DELETE'),
+(58, 'ADMIN', 'RESOURCE', 'KB', 'CREATE'),
+(59, 'ADMIN', 'RESOURCE', 'KB', 'READ'),
+(60, 'ADMIN', 'RESOURCE', 'KB', 'UPDATE'),
+(61, 'ADMIN', 'RESOURCE', 'KB', 'DELETE'),
+(62, 'ADMIN', 'RESOURCE', 'KB.GROUPS', 'READ'),
+(63, 'ADMIN', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
+(64, 'ADMIN', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
+(65, 'ADMIN', 'RESOURCE', 'USER.ROLE', 'READ'),
+(66, 'ADMIN', 'RESOURCE', 'MCP', 'CREATE'),
+(67, 'ADMIN', 'RESOURCE', 'MCP', 'READ'),
+(68, 'ADMIN', 'RESOURCE', 'MCP', 'UPDATE'),
+(69, 'ADMIN', 'RESOURCE', 'MCP', 'DELETE'),
+(70, 'ADMIN', 'RESOURCE', 'MEM.SETTING', 'READ'),
+(71, 'ADMIN', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
+(72, 'ADMIN', 'RESOURCE', 'MEM.AGENT', 'CREATE'),
+(73, 'ADMIN', 'RESOURCE', 'MEM.AGENT', 'READ'),
+(74, 'ADMIN', 'RESOURCE', 'MEM.AGENT', 'DELETE'),
+(75, 'ADMIN', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
+(76, 'ADMIN', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
+(77, 'ADMIN', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
+(78, 'ADMIN', 'RESOURCE', 'MODEL', 'CREATE'),
+(79, 'ADMIN', 'RESOURCE', 'MODEL', 'READ'),
+(80, 'ADMIN', 'RESOURCE', 'MODEL', 'UPDATE'),
+(81, 'ADMIN', 'RESOURCE', 'MODEL', 'DELETE'),
+(82, 'ADMIN', 'RESOURCE', 'TENANT.INFO', 'READ'),
+(83, 'ADMIN', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
+(84, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
+(85, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'READ'),
+(86, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
+(87, 'ADMIN', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
+(88, 'ADMIN', 'RESOURCE', 'GROUP', 'CREATE'),
+(89, 'ADMIN', 'RESOURCE', 'GROUP', 'READ'),
+(90, 'ADMIN', 'RESOURCE', 'GROUP', 'UPDATE'),
+(91, 'ADMIN', 'RESOURCE', 'GROUP', 'DELETE'),
+(92, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(93, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(94, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
+(95, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
+(96, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
+(97, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
+(98, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
+(99, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
+(100, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
+(101, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
+(102, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
+(103, 'DEV', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(104, 'DEV', 'RESOURCE', 'AGENT', 'CREATE'),
+(105, 'DEV', 'RESOURCE', 'AGENT', 'READ'),
+(106, 'DEV', 'RESOURCE', 'AGENT', 'UPDATE'),
+(107, 'DEV', 'RESOURCE', 'AGENT', 'DELETE'),
+(108, 'DEV', 'RESOURCE', 'KB', 'CREATE'),
+(109, 'DEV', 'RESOURCE', 'KB', 'READ'),
+(110, 'DEV', 'RESOURCE', 'KB', 'UPDATE'),
+(111, 'DEV', 'RESOURCE', 'KB', 'DELETE'),
+(112, 'DEV', 'RESOURCE', 'KB.GROUPS', 'READ'),
+(113, 'DEV', 'RESOURCE', 'KB.GROUPS', 'UPDATE'),
+(114, 'DEV', 'RESOURCE', 'KB.GROUPS', 'DELETE'),
+(115, 'DEV', 'RESOURCE', 'USER.ROLE', 'READ'),
+(116, 'DEV', 'RESOURCE', 'MCP', 'CREATE'),
+(117, 'DEV', 'RESOURCE', 'MCP', 'READ'),
+(118, 'DEV', 'RESOURCE', 'MCP', 'UPDATE'),
+(119, 'DEV', 'RESOURCE', 'MCP', 'DELETE'),
+(120, 'DEV', 'RESOURCE', 'MEM.SETTING', 'READ'),
+(121, 'DEV', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
+(122, 'DEV', 'RESOURCE', 'MEM.AGENT', 'READ'),
+(123, 'DEV', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
+(124, 'DEV', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
+(125, 'DEV', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
+(126, 'DEV', 'RESOURCE', 'MODEL', 'READ'),
+(127, 'DEV', 'RESOURCE', 'TENANT.INFO', 'READ'),
+(128, 'DEV', 'RESOURCE', 'GROUP', 'READ'),
+(129, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(130, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(131, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
+(132, 'USER', 'VISIBILITY', 'LEFT_NAV_MENU', '/users'),
+(133, 'USER', 'RESOURCE', 'AGENT', 'READ'),
+(134, 'USER', 'RESOURCE', 'USER.ROLE', 'READ'),
+(135, 'USER', 'RESOURCE', 'MEM.SETTING', 'READ'),
+(136, 'USER', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
+(137, 'USER', 'RESOURCE', 'MEM.AGENT', 'READ'),
+(138, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
+(139, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
+(140, 'USER', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
+(141, 'USER', 'RESOURCE', 'TENANT.INFO', 'READ'),
+(142, 'USER', 'RESOURCE', 'GROUP', 'READ'),
+(143, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/'),
+(144, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/chat'),
+(145, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/setup'),
+(146, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/space'),
+(147, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/market'),
+(148, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/agents'),
+(149, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/knowledges'),
+(150, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/mcp-tools'),
+(151, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/monitoring'),
+(152, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/models'),
+(153, 'SPEED', 'VISIBILITY', 'LEFT_NAV_MENU', '/memory'),
+(154, 'SPEED', 'RESOURCE', 'AGENT', 'CREATE'),
+(155, 'SPEED', 'RESOURCE', 'AGENT', 'READ'),
+(156, 'SPEED', 'RESOURCE', 'AGENT', 'UPDATE'),
+(157, 'SPEED', 'RESOURCE', 'AGENT', 'DELETE'),
+(158, 'SPEED', 'RESOURCE', 'KB', 'CREATE'),
+(159, 'SPEED', 'RESOURCE', 'KB', 'READ'),
+(160, 'SPEED', 'RESOURCE', 'KB', 'UPDATE'),
+(161, 'SPEED', 'RESOURCE', 'KB', 'DELETE'),
+(166, 'SPEED', 'RESOURCE', 'MCP', 'CREATE'),
+(167, 'SPEED', 'RESOURCE', 'MCP', 'READ'),
+(168, 'SPEED', 'RESOURCE', 'MCP', 'UPDATE'),
+(169, 'SPEED', 'RESOURCE', 'MCP', 'DELETE'),
+(170, 'SPEED', 'RESOURCE', 'MEM.SETTING', 'READ'),
+(171, 'SPEED', 'RESOURCE', 'MEM.SETTING', 'UPDATE'),
+(172, 'SPEED', 'RESOURCE', 'MEM.AGENT', 'CREATE'),
+(173, 'SPEED', 'RESOURCE', 'MEM.AGENT', 'READ'),
+(174, 'SPEED', 'RESOURCE', 'MEM.AGENT', 'DELETE'),
+(175, 'SPEED', 'RESOURCE', 'MEM.PRIVATE', 'CREATE'),
+(176, 'SPEED', 'RESOURCE', 'MEM.PRIVATE', 'READ'),
+(177, 'SPEED', 'RESOURCE', 'MEM.PRIVATE', 'DELETE'),
+(178, 'SPEED', 'RESOURCE', 'MODEL', 'CREATE'),
+(179, 'SPEED', 'RESOURCE', 'MODEL', 'READ'),
+(180, 'SPEED', 'RESOURCE', 'MODEL', 'UPDATE'),
+(181, 'SPEED', 'RESOURCE', 'MODEL', 'DELETE'),
+(182, 'SPEED', 'RESOURCE', 'TENANT.INFO', 'READ'),
+(183, 'SPEED', 'RESOURCE', 'TENANT.INFO', 'UPDATE'),
+(184, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
+(185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
+(186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
+(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
-VALUES ('user_id', 'tenant_id', 'SPEED', NULL, 'system', 'system')
+VALUES ('user_id', 'tenant_id', 'SPEED', '', 'system', 'system')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;
+
+-- Create the ag_tenant_agent_version_t table for agent version management
+CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_version_t (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
+    agent_id INTEGER NOT NULL,
+    version_no INTEGER NOT NULL,
+    version_name VARCHAR(100),
+    release_note TEXT,
+    source_version_no INTEGER NULL,
+    source_type VARCHAR(30) NULL,
+    status VARCHAR(30) DEFAULT 'RELEASED',
+    created_by VARCHAR(100) NOT NULL,
+    create_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100),
+    update_time TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+ALTER TABLE nexent.ag_tenant_agent_version_t OWNER TO "root";
+
+-- Add comments for version fields in existing tables
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
+COMMENT ON COLUMN nexent.ag_tool_instance_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+COMMENT ON COLUMN nexent.ag_agent_relation_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
+
+-- Add comments for ag_tenant_agent_version_t table
+COMMENT ON TABLE nexent.ag_tenant_agent_version_t IS 'Agent version metadata table. Stores version info, release notes, and version lineage.';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.id IS 'Primary key, auto-increment';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.agent_id IS 'Agent ID';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.version_no IS 'Version number, starts from 1. Does not include 0 (draft)';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.version_name IS 'User-defined version name for display (e.g., "Stable v2.1", "Hotfix-001"). NULL means use version_no as display.';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.release_note IS 'Release notes / publish remarks';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_version_no IS 'Source version number. If this version is a rollback, record the source version number.';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.source_type IS 'Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish).';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.status IS 'Version status: RELEASED / DISABLED / ARCHIVED';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.created_by IS 'User who published this version';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.create_time IS 'Version creation timestamp';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.updated_by IS 'Last user who updated this version';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.update_time IS 'Last update timestamp';
+COMMENT ON COLUMN nexent.ag_tenant_agent_version_t.delete_flag IS 'Soft delete flag: Y/N';

@@ -19,6 +19,7 @@ interface ModelEditDialogProps {
   model: ModelOption | null;
   onClose: () => void;
   onSuccess: () => Promise<void>;
+  tenantId?: string; // Optional tenant ID for manage operations
 }
 
 export const ModelEditDialog = ({
@@ -26,6 +27,7 @@ export const ModelEditDialog = ({
   model,
   onClose,
   onSuccess,
+  tenantId,
 }: ModelEditDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -105,36 +107,60 @@ export const ModelEditDialog = ({
     try {
       const modelType = form.type as ModelType;
 
-      const config = {
-        modelName: form.name,
-        modelType: modelType,
-        baseUrl: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : parseInt(form.maxTokens),
-        embeddingDim:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : undefined,
-      };
+      // Use manage interface if tenantId is provided
+      if (tenantId) {
+        // Call backend healthcheck API for tenant management
+        const result = await modelService.checkManageTenantModelConnectivity(
+          tenantId,
+          form.displayName || form.name
+        );
 
-      const result = await modelService.verifyModelConfigConnectivity(config);
-
-      // Set connectivity status
-      let connectivityMessage = "";
-      if (result.connectivity) {
-        connectivityMessage = t("model.dialog.connectivity.status.available");
+        // Set connectivity status
+        let connectivityMessage = "";
+        if (result) {
+          connectivityMessage = t("model.dialog.connectivity.status.available");
+        } else {
+          connectivityMessage = t("model.dialog.connectivity.status.unavailable");
+        }
+        setConnectivityStatus({
+          status: result
+            ? MODEL_STATUS.AVAILABLE
+            : MODEL_STATUS.UNAVAILABLE,
+          message: connectivityMessage,
+        });
       } else {
-        connectivityMessage = t("model.dialog.connectivity.status.unavailable");
+        // Use local config verification for non-tenant operations
+        const config = {
+          modelName: form.name,
+          modelType: modelType,
+          baseUrl: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : parseInt(form.maxTokens),
+          embeddingDim:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : undefined,
+        };
+
+        const result = await modelService.verifyModelConfigConnectivity(config);
+
+        // Set connectivity status
+        let connectivityMessage = "";
+        if (result.connectivity) {
+          connectivityMessage = t("model.dialog.connectivity.status.available");
+        } else {
+          connectivityMessage = t("model.dialog.connectivity.status.unavailable");
+        }
+        setConnectivityStatus({
+          status: result.connectivity
+            ? MODEL_STATUS.AVAILABLE
+            : MODEL_STATUS.UNAVAILABLE,
+          message: connectivityMessage,
+        });
       }
-      setConnectivityStatus({
-        status: result.connectivity
-          ? MODEL_STATUS.AVAILABLE
-          : MODEL_STATUS.UNAVAILABLE,
-        message: connectivityMessage,
-      });
     } catch (error) {
       setConnectivityStatus({
         status: "unavailable",
@@ -159,25 +185,40 @@ export const ModelEditDialog = ({
       const originalDisplayName = model.displayName || model.name;
       const newDisplayName = form.displayName;
 
-      await modelService.updateSingleModel({
-        currentDisplayName: originalDisplayName,
-        // Only send displayName if it changed
-        ...(newDisplayName !== originalDisplayName
-          ? { displayName: newDisplayName }
-          : {}),
-        url: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
-        source: model.source,
-        // Send chunk size range for embedding models
-        ...(isEmbeddingModel
-          ? {
-              expectedChunkSize: form.chunkSizeRange[0],
-              maximumChunkSize: form.chunkSizeRange[1],
-              chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
-            }
-          : {}),
-      });
+      // Use manage interface if tenantId is provided
+      if (tenantId) {
+        await modelService.updateManageTenantModel({
+          tenantId,
+          currentDisplayName: originalDisplayName,
+          displayName: newDisplayName !== originalDisplayName ? newDisplayName : undefined,
+          url: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens: maxTokensValue !== 0 ? maxTokensValue : undefined,
+          expectedChunkSize: isEmbeddingModel ? form.chunkSizeRange[0] : undefined,
+          maximumChunkSize: isEmbeddingModel ? form.chunkSizeRange[1] : undefined,
+          chunkingBatchSize: isEmbeddingModel ? parseInt(form.chunkingBatchSize) || 10 : undefined,
+        });
+      } else {
+        await modelService.updateSingleModel({
+          currentDisplayName: originalDisplayName,
+          // Only send displayName if it changed
+          ...(newDisplayName !== originalDisplayName
+            ? { displayName: newDisplayName }
+            : {}),
+          url: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
+          source: model.source,
+          // Send chunk size range for embedding models
+          ...(isEmbeddingModel
+            ? {
+                expectedChunkSize: form.chunkSizeRange[0],
+                maximumChunkSize: form.chunkSizeRange[1],
+                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+        });
+      }
 
       // Update local configuration (only when currently edited model is selected in configuration)
       const modelConfigKeyMap: Record<ModelType, string> = {

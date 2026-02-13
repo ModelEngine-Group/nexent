@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Row,
   Col,
@@ -15,14 +15,12 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Users, Plus, Edit, Trash2, Building2 } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
+import { Users, Plus, Edit, Edit2, Building2 } from "lucide-react";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
   createTenant,
   updateTenant,
-  deleteTenant,
 } from "@/services/tenantService";
 import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
@@ -32,7 +30,9 @@ import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
 import McpList from "./resources/McpList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { USER_ROLES } from "@/const/modelConfig";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
+import { Can } from "@/components/permission/Can";
 
 // Removed mockTenants - now using real data from API
 
@@ -69,6 +69,8 @@ function TenantList({
     setModalVisible(true);
   };
 
+  // Tenant deletion not yet implemented
+  /*
   const handleDelete = async (tenantId: string) => {
     try {
       await deleteTenant(tenantId);
@@ -83,6 +85,7 @@ function TenantList({
       message.error(t("tenantResources.tenantDeleteFailed"));
     }
   };
+  */
 
   const handleSubmit = async () => {
     try {
@@ -102,8 +105,20 @@ function TenantList({
         message.success(t("tenantResources.tenants.created"));
       }
       setModalVisible(false);
-    } catch (err) {
-      message.error(t("tenantResources.tenantOperationFailed"));
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message || err?.message || "";
+      const nameConflictMatch = errorMessage.match(/Tenant with name '(.*)' already exists/i);
+
+      if (nameConflictMatch && nameConflictMatch[1]) {
+        // Extract the duplicate name and show translated error
+        message.error(t("tenantResources.tenants.nameExists", { name: nameConflictMatch[1] }));
+      } else if (errorMessage.includes("Tenant name cannot be empty")) {
+        // Handle empty name error
+        message.error(t("tenantResources.tenants.nameRequired"));
+      } else {
+        // Show generic error for other cases
+        message.error(t("tenantResources.tenantOperationFailed"));
+      }
     }
   };
 
@@ -156,16 +171,20 @@ function TenantList({
                     }}
                     className="p-1 hover:bg-gray-200 rounded"
                   />
+                  {/* Delete button hidden - tenant deletion not yet implemented */}
+                  {/*
                   <Popconfirm
                     title={t("tenantResources.tenants.confirmDelete", {
                       name: tenant.tenant_name,
                     })}
-                    description="This action cannot be undone."
+                    description={t("common.cannotBeUndone")}
                     onConfirm={(e) => {
                       e?.stopPropagation();
                       handleDelete(tenant.tenant_id);
                     }}
                     onCancel={(e) => e?.stopPropagation()}
+                    okText={t("common.confirm")}
+                    cancelText={t("common.cancel")}
                   >
                     <Button
                       type="text"
@@ -175,6 +194,7 @@ function TenantList({
                       className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
                     />
                   </Popconfirm>
+                  */}
                 </div>
               </div>
             </div>
@@ -192,6 +212,8 @@ function TenantList({
         open={modalVisible}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
       >
         <Form layout="vertical" form={form}>
           <Form.Item
@@ -215,11 +237,11 @@ function TenantList({
 export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
-  const { user } = useAuth()
 
   // Check if user is super admin (speed mode or admin role)
-  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
+  const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
 
   // Get real tenant data from API
   const {
@@ -232,12 +254,70 @@ export default function UserManageComp() {
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
 
-  // For non-super admins, use their current tenant (from user metadata or default)
-  const [tenantId, setTenantId] = useState<string | null>(tenants[0]?.tenant_id || null);
+  // For non-super admins, automatically select their own tenant based on user.tenantId
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSuperAdmin && user?.tenantId && !tenantId) {
+      setTenantId(user.tenantId);
+    }
+  }, [isSuperAdmin, tenantId, user?.tenantId]);
 
   // Get current tenant name
   const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
   const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+
+  // Tenant name editing states
+  const [isEditingTenantName, setIsEditingTenantName] = useState(false);
+  const [editingTenantName, setEditingTenantName] = useState("");
+  const tenantNameInputRef = useRef<any>(null);
+
+  // Start editing tenant name
+  const startEditingTenantName = () => {
+    if (!tenantId) return;
+    setEditingTenantName(currentTenantName);
+    setIsEditingTenantName(true);
+    // Focus input after render
+    setTimeout(() => {
+      tenantNameInputRef.current?.focus();
+    }, 0);
+  };
+
+  // Save tenant name
+  const saveTenantName = async () => {
+    if (!tenantId) return;
+    const trimmedName = editingTenantName.trim();
+    if (!trimmedName) {
+      message.error(t("tenantResources.tenants.nameRequired"));
+      return;
+    }
+    if (trimmedName === currentTenantName) {
+      setIsEditingTenantName(false);
+      return;
+    }
+    try {
+      await updateTenant(tenantId, { tenant_name: trimmedName });
+      await refetchTenants();
+      message.success(t("tenantResources.tenants.updated"));
+      setIsEditingTenantName(false);
+    } catch (error) {
+      message.error(t("tenantResources.tenantOperationFailed"));
+    }
+  };
+
+  // Cancel editing tenant name
+  const cancelEditingTenantName = () => {
+    setEditingTenantName("");
+    setIsEditingTenantName(false);
+  };
+
+  // Handle input key events
+  const handleTenantNameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      saveTenantName();
+    } else if (e.key === "Escape") {
+      cancelEditingTenantName();
+    }
+  };
 
   return (
     <div className="w-full h-full">
@@ -266,36 +346,57 @@ export default function UserManageComp() {
           </motion.div>
         </div>
       </div>
-      <Row className="h-full">
-        <Col className="h-full" style={{ width: 300 }}>
-          <div className="h-full pr-6">
-            <div className="sticky top-6">
-              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
-                <TenantList
-                  selected={tenantId}
-                  onSelect={(id) => setTenantId(id)}
-                  tenants={tenants}
-                  onTenantsChange={setTenantsState}
-                  onTenantsRefetch={refetchTenants}
-                  loading={tenantsLoading}
-                  t={t}
-                />
+      <Row className="flex-1 min-h-0 h-full" align="stretch">
+        <Can permission="tenant.list:read">
+          <Col className="flex flex-col h-full" style={{ width: 300 }}>
+            <div className="h-full pr-6">
+              <div className="sticky top-6">
+                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+                  <TenantList
+                    selected={tenantId}
+                    onSelect={(id) => setTenantId(id)}
+                    tenants={tenants}
+                    onTenantsChange={setTenantsState}
+                    onTenantsRefetch={refetchTenants}
+                    loading={tenantsLoading}
+                    t={t}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </Col>
-        <Col className="flex-1 p-6">
-          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 min-h-[300px]">
+          </Col>
+        </Can>
+        <Col className="flex-1 flex flex-col p-6 overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
             {/* Tenant name header */}
-            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {currentTenantName}
-              </h2>
+            <div className="mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              {isEditingTenantName ? (
+                <Input
+                  ref={tenantNameInputRef}
+                  value={editingTenantName}
+                  onChange={(e) => setEditingTenantName(e.target.value)}
+                  onBlur={saveTenantName}
+                  onKeyDown={handleTenantNameKeyDown}
+                  className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                  placeholder={t("tenantResources.tenants.name")}
+                />
+              ) : (
+                <div
+                  className="flex items-center gap-2 group cursor-pointer"
+                  onClick={startEditingTenantName}
+                >
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {currentTenantName}
+                  </h2>
+                  <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              )}
             </div>
 
             {tenantId ? (
               <Tabs
                 defaultActiveKey="users"
+                className="h-full flex flex-col"
                 items={[
                   {
                     key: "users",

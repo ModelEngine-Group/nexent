@@ -51,10 +51,8 @@ class TestPromptService(unittest.TestCase):
     @patch('backend.services.prompt_service.query_tools_by_ids')
     @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.update_agent')
     def test_generate_and_save_system_prompt_impl(
         self,
-        mock_update_agent,
         mock_query_all_agents,
         mock_search_agent_info,
         mock_query_tools,
@@ -116,26 +114,12 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(call_args[0][1], "Test task")  # task_description
         self.assertEqual(call_args[0][2], [mock_tool1, mock_tool2])  # tool_info_list
 
-        # Verify update_agent was called with the correct parameters
-        mock_update_agent.assert_called_once()
-        call_args = mock_update_agent.call_args
-        self.assertEqual(call_args[1]['agent_id'], 123)
-        self.assertEqual(call_args[1]['tenant_id'], "tenant456")
-        self.assertEqual(call_args[1]['user_id'], "user123")
-
-        # Verify the agent_info object has the correct structure
-        agent_info = call_args[1]['agent_info']
-        self.assertEqual(agent_info.agent_id, 123)
-        self.assertEqual(agent_info.business_description, "Test task")
-
     @patch('backend.services.prompt_service.generate_system_prompt')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
     @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
     @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
-    @patch('backend.services.prompt_service.update_agent')
     def test_generate_and_save_system_prompt_impl_create_mode(
         self,
-        mock_update_agent,
         mock_get_enabled_tools,
         mock_get_enabled_sub_agents,
         mock_query_all_agents,
@@ -189,10 +173,6 @@ class TestPromptService(unittest.TestCase):
             "zh"
         )
 
-        # In create mode, should NOT call update_agent
-        mock_update_agent.assert_not_called()
-
-    @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
     @patch('backend.services.prompt_service._regenerate_agent_name_with_llm')
     @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
@@ -211,7 +191,6 @@ class TestPromptService(unittest.TestCase):
         mock_check_display_dup,
         mock_regen_name,
         mock_regen_display,
-        mock_update_agent,
     ):
         """Duplicate agent_var_name / agent_display_name should be regenerated via LLM helpers."""
         # Tool and sub-agent info do not matter for this test
@@ -255,9 +234,7 @@ class TestPromptService(unittest.TestCase):
 
         mock_regen_name.assert_called_once()
         mock_regen_display.assert_called_once()
-        mock_update_agent.assert_called_once()
 
-    @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service._generate_unique_display_name_with_suffix')
     @patch('backend.services.prompt_service._generate_unique_agent_name_with_suffix')
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
@@ -280,7 +257,6 @@ class TestPromptService(unittest.TestCase):
         mock_regen_display,
         mock_generate_unique_name,
         mock_generate_unique_display,
-        mock_update_agent,
     ):
         """When regeneration fails, duplicate names should fall back to suffix helpers."""
         mock_query_tools.return_value = []
@@ -323,9 +299,7 @@ class TestPromptService(unittest.TestCase):
 
         mock_generate_unique_name.assert_called_once()
         mock_generate_unique_display.assert_called_once()
-        mock_update_agent.assert_called_once()
 
-    @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
     @patch('backend.services.prompt_service._check_agent_name_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
@@ -340,7 +314,6 @@ class TestPromptService(unittest.TestCase):
         mock_query_all_agents,
         mock_check_name_dup,
         mock_check_display_dup,
-        mock_update_agent,
     ):
         """When agent_var_name or agent_display_name is_complete is False, skip duplicate checking (line 193 else branch)."""
         # Setup
@@ -388,9 +361,7 @@ class TestPromptService(unittest.TestCase):
         # Duplicate checking should only be called for complete items
         mock_check_name_dup.assert_called_once()
         mock_check_display_dup.assert_called_once()
-        mock_update_agent.assert_called_once()
 
-    @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
     @patch('backend.services.prompt_service._check_agent_name_duplicate')
     @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
@@ -405,7 +376,6 @@ class TestPromptService(unittest.TestCase):
         mock_query_all_agents,
         mock_check_name_dup,
         mock_check_display_dup,
-        mock_update_agent,
     ):
         """Test agent_display_name path when is_complete is True and no duplicate (line 235)."""
         # Setup
@@ -442,9 +412,7 @@ class TestPromptService(unittest.TestCase):
         
         # Should check for duplicate but not regenerate
         mock_check_display_dup.assert_called_once()
-        mock_update_agent.assert_called_once()
 
-    @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service._generate_unique_display_name_with_suffix')
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
     @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
@@ -463,7 +431,6 @@ class TestPromptService(unittest.TestCase):
         mock_check_display_dup,
         mock_regen_display,
         mock_generate_unique_display,
-        mock_update_agent,
     ):
         """Test agent_display_name path when is_complete is True and duplicate exists, regenerates with LLM (line 235-250)."""
         # Setup
@@ -503,9 +470,7 @@ class TestPromptService(unittest.TestCase):
         # Should check for duplicate and regenerate
         mock_check_display_dup.assert_called_once()
         mock_regen_display.assert_called_once()
-        mock_update_agent.assert_called_once()
 
-    @patch('backend.services.prompt_service.update_agent')
     @patch('backend.services.prompt_service._generate_unique_display_name_with_suffix')
     @patch('backend.services.prompt_service._regenerate_agent_display_name_with_llm')
     @patch('backend.services.prompt_service._check_agent_display_name_duplicate')
@@ -524,7 +489,6 @@ class TestPromptService(unittest.TestCase):
         mock_check_display_dup,
         mock_regen_display,
         mock_generate_unique_display,
-        mock_update_agent,
     ):
         """Test agent_display_name path when is_complete is True, duplicate exists, LLM regeneration fails, uses fallback (line 235-250)."""
         # Setup
@@ -565,7 +529,6 @@ class TestPromptService(unittest.TestCase):
         mock_check_display_dup.assert_called_once()
         mock_regen_display.assert_called_once()
         mock_generate_unique_display.assert_called_once()
-        mock_update_agent.assert_called_once()
 
     @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable(self, mock_generate_impl):

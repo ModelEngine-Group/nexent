@@ -15,7 +15,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from consts.exceptions import NotFoundException, UnauthorizedError
+from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from backend.services.invitation_service import (
     create_invitation_code,
     update_invitation_code,
@@ -62,7 +62,9 @@ def mock_invitation_info():
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_admin_invite(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -80,6 +82,8 @@ def test_create_invitation_code_admin_invite(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the generated code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     result = create_invitation_code(
         tenant_id="test_tenant",
@@ -108,7 +112,9 @@ def test_create_invitation_code_admin_invite(
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_dev_invite_admin_role(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -126,6 +132,8 @@ def test_create_invitation_code_dev_invite_admin_role(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the generated code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     result = create_invitation_code(
         tenant_id="test_tenant",
@@ -207,13 +215,41 @@ def test_create_invitation_code_user_not_found(mock_get_user_info):
         )
 
 
+@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('backend.services.invitation_service.query_invitation_by_code')
+def test_create_invitation_code_duplicate(mock_query_invitation_by_code, mock_get_user_info, mock_user_info):
+    """Test creating invitation code with duplicate code raises DuplicateError"""
+    # Setup mocks
+    mock_user_info["user_role"] = "SU"
+    mock_get_user_info.return_value = mock_user_info
+    # Simulate that the invitation code already exists
+    mock_query_invitation_by_code.return_value = {
+        "invitation_id": 1,
+        "invitation_code": "EXISTING",
+        "status": "IN_USE"
+    }
+
+    with pytest.raises(DuplicateError, match="Invitation code 'EXISTING' already exists"):
+        create_invitation_code(
+            tenant_id="test_tenant",
+            code_type="ADMIN_INVITE",
+            invitation_code="existing",  # lowercase, will be converted to uppercase
+            user_id="test_user"
+        )
+
+    # Verify that query_invitation_by_code was called with the uppercase code
+    mock_query_invitation_by_code.assert_called_once_with("EXISTING")
+
+
 @patch('backend.services.invitation_service.get_tenant_default_group_id')
 @patch('backend.services.invitation_service.get_user_tenant_by_user_id')
 @patch('backend.services.invitation_service._generate_unique_invitation_code')
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_default_empty_group_ids(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -231,6 +267,8 @@ def test_create_invitation_code_default_empty_group_ids(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the generated code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     # Test ADMIN_INVITE with no default group - should result in empty group_ids
     result = create_invitation_code(
@@ -252,7 +290,9 @@ def test_create_invitation_code_default_empty_group_ids(
 @patch('backend.services.invitation_service.add_invitation')
 @patch('backend.services.invitation_service.query_invitation_by_id')
 @patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('backend.services.invitation_service.query_invitation_by_code')
 def test_create_invitation_code_provided_code_uppercase_conversion(
+    mock_query_invitation_by_code,
     mock_update_status,
     mock_query_invitation,
     mock_add_invitation,
@@ -268,6 +308,8 @@ def test_create_invitation_code_provided_code_uppercase_conversion(
     mock_add_invitation.return_value = 123
     mock_update_status.return_value = None
     mock_query_invitation.return_value = {"status": "IN_USE"}
+    # Mock that the provided code doesn't exist yet
+    mock_query_invitation_by_code.return_value = None
 
     result = create_invitation_code(
         tenant_id="test_tenant",
@@ -1146,3 +1188,108 @@ def test_delete_invitation_code_not_found(mock_query_invitation, mock_get_user, 
             invitation_id=123,
             user_id="test_user"
         )
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_same_day_not_expired(mock_count_usage):
+    """Test _calculate_current_status with same-day expiry date should NOT be expired (new logic)"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 2
+
+    # Test with today's date as expiry - should NOT be expired
+    today = datetime.now().date()
+    today_datetime = datetime.combine(today, datetime.min.time())
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": today_datetime,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should keep original status since same day is not expired
+    assert result["status"] == "IN_USE"
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_yesterday_expired(mock_count_usage):
+    """Test _calculate_current_status with yesterday's date as expiry SHOULD be expired"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime, timedelta
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 2
+
+    # Test with yesterday's date as expiry - should be expired
+    yesterday = datetime.now().date() - timedelta(days=1)
+    yesterday_datetime = datetime.combine(yesterday, datetime.min.time())
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": yesterday_datetime,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should set status to EXPIRE since yesterday is strictly before today
+    assert result["status"] == "EXPIRE"
+
+
+@patch('backend.services.invitation_service.count_invitation_usage')
+def test_calculate_current_status_same_day_string_not_expired(mock_count_usage):
+    """Test _calculate_current_status with same-day string expiry date should NOT be expired (new logic)"""
+    from backend.services.invitation_service import _calculate_current_status
+    from datetime import datetime
+
+    # Mock usage count below capacity
+    mock_count_usage.return_value = 1
+
+    # Test with today's date as expiry string - should NOT be expired
+    today = datetime.now()
+    today_str = today.strftime("%Y-%m-%dT%H:%M:%S")
+    input_data = {
+        "invitation_id": 123,
+        "expiry_date": today_str,
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+
+    result = _calculate_current_status(input_data)
+
+    # Should keep original status since same day is not expired
+    assert result["status"] == "IN_USE"
+
+
+@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('backend.services.invitation_service.modify_invitation')
+def test_update_invitation_code_status_same_day_not_expired(
+    mock_modify_invitation,
+    mock_count_usage,
+    mock_query_invitation_by_id
+):
+    """Test update_invitation_code_status with today's expiry date should NOT expire"""
+    from datetime import datetime, timedelta
+
+    # Mock invitation expiring today
+    today = datetime.now().date()
+    today_datetime = datetime.combine(today, datetime.min.time())
+
+    mock_query_invitation_by_id.return_value = {
+        "invitation_id": 123,
+        "expiry_date": today_datetime.isoformat(),  # Today's date as expiry
+        "capacity": 5,
+        "status": "IN_USE"
+    }
+    mock_count_usage.return_value = 2  # Below capacity
+
+    result = update_invitation_code_status(123)
+
+    # Should return False because status didn't change (today is not expired)
+    assert result is False
+    mock_modify_invitation.assert_not_called()

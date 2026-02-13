@@ -23,19 +23,25 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     """
     Get tenant information by tenant ID
 
+    If TENANT_NAME config is missing, automatically create one with default name.
+
     Args:
         tenant_id (str): Tenant ID
 
     Returns:
         Dict[str, Any]: Tenant information
-
-    Raises:
-        NotFoundException: When tenant not found
     """
+    if not tenant_id:
+        return {}
+
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
     if not name_config:
-        logging.warning(f"The name of tenant {tenant_id} not found.")
+        logger.warning(f"The name of tenant {tenant_id} not found, creating default config.")
+        # Auto-create TENANT_NAME config with default name
+        _ensure_tenant_name_config(tenant_id)
+        # Re-fetch after creation
+        name_config = get_single_config_info(tenant_id, TENANT_NAME)
 
     group_config = get_single_config_info(tenant_id, DEFAULT_GROUP_ID)
 
@@ -46,6 +52,64 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     }
 
     return tenant_info
+
+
+def _ensure_tenant_name_config(tenant_id: str) -> bool:
+    """
+    Ensure TENANT_NAME config exists for the tenant.
+    Creates a default name config if it doesn't exist.
+
+    Args:
+        tenant_id: Tenant ID
+
+    Returns:
+        bool: True if config exists or was created successfully, False otherwise
+    """
+    # Check if already exists (double-check in case of race condition)
+    existing = get_single_config_info(tenant_id, TENANT_NAME)
+    if existing:
+        return True
+
+    # Create default TENANT_NAME config
+    tenant_name_data = {
+        "tenant_id": tenant_id,
+        "config_key": TENANT_NAME,
+        "config_value": "Unnamed Tenant",
+        "created_by": "system_auto_create",
+        "updated_by": "system_auto_create"
+    }
+    success = insert_config(tenant_name_data)
+    if success:
+        logger.info(f"Auto-created TENANT_NAME config for tenant {tenant_id}")
+    else:
+        logger.error(f"Failed to auto-create TENANT_NAME config for tenant {tenant_id}")
+    return success
+
+
+def check_tenant_name_exists(tenant_name: str, exclude_tenant_id: Optional[str] = None) -> bool:
+    """
+    Check if a tenant with the given name already exists
+
+    Args:
+        tenant_name (str): Tenant name to check
+        exclude_tenant_id (Optional[str]): Tenant ID to exclude from check (for rename operations)
+
+    Returns:
+        bool: True if tenant name already exists, False otherwise
+    """
+    all_tenant_ids = get_all_tenant_ids()
+
+    for tid in all_tenant_ids:
+        # Skip if this is the tenant being updated
+        if exclude_tenant_id and tid == exclude_tenant_id:
+            continue
+
+        # Check if this tenant has the given name
+        name_config = get_single_config_info(tid, TENANT_NAME)
+        if name_config and name_config.get("config_value") == tenant_name:
+            return True
+
+    return False
 
 
 def get_all_tenants() -> List[Dict[str, Any]]:
@@ -87,23 +151,18 @@ def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[st
         Dict[str, Any]: Created tenant information
 
     Raises:
-        ValidationError: When tenant creation fails
+        ValidationError: When tenant creation fails or tenant name already exists
     """
     # Generate a random UUID for tenant_id
     tenant_id = str(uuid.uuid4())
 
-    # Check if tenant already exists (extremely unlikely with UUID, but good practice)
-    try:
-        existing_tenant = get_tenant_info(tenant_id)
-        if existing_tenant:
-            raise ValidationError(f"Tenant {tenant_id} already exists")
-    except NotFoundException:
-        # Tenant doesn't exist, which is what we want
-        pass
-
     # Validate tenant name
     if not tenant_name or not tenant_name.strip():
         raise ValidationError("Tenant name cannot be empty")
+
+    # Check if tenant name already exists
+    if check_tenant_name_exists(tenant_name.strip()):
+        raise ValidationError(f"Tenant with name '{tenant_name.strip()}' already exists")
 
     try:
         # Create default group first
@@ -163,6 +222,8 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
     """
     Update tenant information
 
+    If TENANT_NAME config doesn't exist, creates it with the provided name.
+
     Args:
         tenant_id (str): Tenant ID
         tenant_name (str): New tenant name
@@ -172,25 +233,39 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
         Dict[str, Any]: Updated tenant information
 
     Raises:
-        NotFoundException: When tenant not found
-        ValidationError: When tenant name is invalid
+        ValidationError: When tenant name is invalid or update fails
     """
-    # Check if tenant exists and get current name config
-    name_config = get_single_config_info(tenant_id, TENANT_NAME)
-    if not name_config:
-        raise NotFoundException(f"Tenant {tenant_id} not found")
-
     # Validate tenant name
     if not tenant_name or not tenant_name.strip():
         raise ValidationError("Tenant name cannot be empty")
 
-    # Update tenant name
-    success = update_config_by_tenant_config_id(
-        name_config["tenant_config_id"],
-        tenant_name.strip()
-    )
-    if not success:
-        raise ValidationError("Failed to update tenant name")
+    # Check if tenant name already exists (exclude current tenant)
+    if check_tenant_name_exists(tenant_name.strip(), exclude_tenant_id=tenant_id):
+        raise ValidationError(f"Tenant with name '{tenant_name.strip()}' already exists")
+
+    # Check if tenant name config exists
+    name_config = get_single_config_info(tenant_id, TENANT_NAME)
+    if not name_config:
+        # Tenant config doesn't exist, create it with the provided name
+        logger.info(f"TENANT_NAME config not found for {tenant_id}, creating new config.")
+        tenant_name_data = {
+            "tenant_id": tenant_id,
+            "config_key": TENANT_NAME,
+            "config_value": tenant_name.strip(),
+            "created_by": updated_by,
+            "updated_by": updated_by
+        }
+        success = insert_config(tenant_name_data)
+        if not success:
+            raise ValidationError("Failed to create tenant name configuration")
+    else:
+        # Update existing config
+        success = update_config_by_tenant_config_id(
+            name_config["tenant_config_id"],
+            tenant_name.strip()
+        )
+        if not success:
+            raise ValidationError("Failed to update tenant name")
 
     # Return updated tenant information
     updated_tenant = get_tenant_info(tenant_id)

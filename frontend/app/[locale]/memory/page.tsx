@@ -19,10 +19,11 @@ import {
 } from "lucide-react";
 import { useTranslation, Trans } from "react-i18next";
 
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useMemory } from "@/hooks/useMemory";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { USER_ROLES, MEMORY_TAB_KEYS, MemoryTabKey } from "@/const/modelConfig";
+import { MEMORY_TAB_KEYS, MemoryTabKey } from "@/const/modelConfig";
 import {
   MEMORY_SHARE_STRATEGY,
   MemoryShareStrategy,
@@ -39,21 +40,12 @@ import { MemoryMenuList } from "./MemoryMenuList";
 export default function MemoryContent() {
   const { message } = App.useApp();
   const { t } = useTranslation("common");
-  const { user, isSpeedMode } = useAuth();
+  const { user } = useAuthorizationContext();
+  const { isSpeedMode } = useDeployment();
   const { confirm } = useConfirmModal();
 
   // Use custom hook for common setup flow logic
-  const { canAccessProtectedData, pageVariants, pageTransition } = useSetupFlow(
-    {
-      requireAdmin: false,
-    }
-  );
-
-  const role: (typeof USER_ROLES)[keyof typeof USER_ROLES] = (
-    isSpeedMode || user?.role === USER_ROLES.ADMIN
-      ? USER_ROLES.ADMIN
-      : USER_ROLES.USER
-  ) as (typeof USER_ROLES)[keyof typeof USER_ROLES];
+  const { pageVariants, pageTransition } = useSetupFlow();
 
   // Mock user and tenant IDs (should come from context)
   const currentUserId = "user1";
@@ -305,8 +297,7 @@ export default function MemoryContent() {
       ),
       children: renderBaseSettings(),
     },
-    ...(role === USER_ROLES.ADMIN
-      ? [
+ [
           {
             key: MEMORY_TAB_KEYS.TENANT,
             label: (
@@ -331,8 +322,7 @@ export default function MemoryContent() {
               !memory.memoryEnabled ||
               memory.shareOption === MEMORY_SHARE_STRATEGY.NEVER,
           },
-        ]
-      : []),
+        ],
     {
       key: MEMORY_TAB_KEYS.USER_PERSONAL,
       label: (
@@ -368,7 +358,7 @@ export default function MemoryContent() {
           transition={pageTransition}
           style={{ width: "100%", height: "100%" }}
         >
-          {canAccessProtectedData ? (
+
             <div className="w-full h-full flex items-center justify-center">
               <div
                 className="w-full mx-auto"
@@ -386,7 +376,7 @@ export default function MemoryContent() {
                 >
                   <Tabs
                     size="middle"
-                    items={tabItems}
+                    items={tabItems as any}
                     activeKey={memory.activeTabKey}
                     onChange={(key) => memory.setActiveTabKey(key)}
                     tabBarStyle={{
@@ -396,7 +386,6 @@ export default function MemoryContent() {
                 </div>
               </div>
             </div>
-          ) : null}
         </motion.div>
       </div>
     </>

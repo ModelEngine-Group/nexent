@@ -237,6 +237,49 @@ export const modelService = {
     }
   },
 
+  // List provider models for a specific tenant (admin/manage operation)
+  getManageProviderModelList: async (params: {
+    tenantId: string;
+    provider: string;
+    modelType: string;
+    apiKey?: string;
+    baseUrl?: string;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.manageProviderModelList,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            provider: params.provider,
+            model_type: params.modelType,
+            ...(params.apiKey ? { api_key: params.apiKey } : {}),
+            ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+          }),
+        }
+      );
+      log.log("getManageProviderModelList response", response);
+      const result = await response.json();
+      log.log("getManageProviderModelList result", result);
+      if (response.status !== 200) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to get provider model list",
+          response.status
+        );
+      }
+      return result.data || [];
+    } catch (error) {
+      log.log("getManageProviderModelList error", error);
+      if (error instanceof ModelError) throw error;
+      throw new ModelError("Failed to get provider model list", 500);
+    }
+  },
+
   updateSingleModel: async (model: {
     currentDisplayName: string;
     displayName?: string;
@@ -381,6 +424,41 @@ export const modelService = {
     }
   },
 
+  // Check model connectivity for a specific tenant (admin/manage operation)
+  checkManageTenantModelConnectivity: async (
+    tenantId: string,
+    displayName: string,
+    signal?: AbortSignal
+  ): Promise<boolean> => {
+    try {
+      if (!displayName) return false;
+      const response = await fetch(API_ENDPOINTS.model.manageModelHealthcheck, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          display_name: displayName,
+        }),
+        signal,
+      });
+      const result = await response.json();
+      if (response.status === 200 && result.data) {
+        return result.data.connectivity;
+      }
+      return false;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        log.warn(`验证模型 ${displayName} (租户: ${tenantId}) 连接被取消`);
+        throw error;
+      }
+      log.error(`验证模型 ${displayName} (租户: ${tenantId}) 连接失败:`, error);
+      return false;
+    }
+  },
+
   // Verify model configuration connectivity before adding it
   verifyModelConfigConnectivity: async (
     config: {
@@ -464,6 +542,332 @@ export const modelService = {
     } catch (error) {
       log.warn("Failed to load LLM models:", error);
       return [];
+    }
+  },
+
+  // Manage tenant models (for admin operations with tenant_id)
+  getManageTenantModels: async (params: {
+    tenantId: string;
+    modelType?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
+    models: ModelOption[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    tenantName: string;
+  }> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageModelList, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          model_type: params.modelType,
+          page: params.page || 1,
+          page_size: params.pageSize || 20,
+        }),
+      });
+      const result = await response.json();
+
+      if (response.status === STATUS_CODES.SUCCESS && result.data) {
+        return {
+          models: result.data.models.map((model: any) => ({
+            id: model.model_id,
+            name: model.model_name,
+            type: model.model_type as ModelType,
+            maxTokens: model.max_tokens || 0,
+            source: model.model_factory as ModelSource,
+            apiKey: model.api_key || "",
+            apiUrl: model.base_url || "",
+            displayName: model.display_name || model.model_name,
+            connect_status: model.connect_status as ModelConnectStatus,
+            expectedChunkSize: model.expected_chunk_size,
+            maximumChunkSize: model.maximum_chunk_size,
+            chunkingBatchSize: model.chunk_batch,
+          })),
+          total: result.data.total || 0,
+          page: result.data.page || 1,
+          pageSize: result.data.page_size || 20,
+          totalPages: result.data.total_pages || 0,
+          tenantName: result.data.tenant_name || "",
+        };
+      }
+
+      return {
+        models: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        totalPages: 0,
+        tenantName: "",
+      };
+    } catch (error) {
+      log.warn("Failed to load manage tenant models:", error);
+      return {
+        models: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        totalPages: 0,
+        tenantName: "",
+      };
+    }
+  },
+
+  // Create model for a specific tenant
+  createManageTenantModel: async (params: {
+    tenantId: string;
+    name: string;
+    type: ModelType;
+    url: string;
+    apiKey: string;
+    maxTokens?: number;
+    displayName?: string;
+    expectedChunkSize?: number;
+    maximumChunkSize?: number;
+    chunkingBatchSize?: number;
+  }): Promise<void> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageModelCreate, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          model_repo: "",
+          model_name: params.name,
+          model_type: params.type,
+          base_url: params.url,
+          api_key: params.apiKey,
+          max_tokens: params.maxTokens || 4096,
+          display_name: params.displayName || params.name,
+          expected_chunk_size: params.expectedChunkSize,
+          maximum_chunk_size: params.maximumChunkSize,
+          chunk_batch: params.chunkingBatchSize,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to create model for tenant",
+          response.status
+        );
+      }
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to create manage tenant model:", error);
+      throw new ModelError("Failed to create model for tenant", 500);
+    }
+  },
+
+  // Update model for a specific tenant
+  updateManageTenantModel: async (params: {
+    tenantId: string;
+    currentDisplayName: string;
+    displayName?: string;
+    url: string;
+    apiKey: string;
+    maxTokens?: number;
+    expectedChunkSize?: number;
+    maximumChunkSize?: number;
+    chunkingBatchSize?: number;
+  }): Promise<void> => {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.manageModelUpdate(params.currentDisplayName),
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            current_display_name: params.currentDisplayName,
+            ...(params.displayName !== undefined ? { display_name: params.displayName } : {}),
+            base_url: params.url,
+            api_key: params.apiKey,
+            ...(params.maxTokens !== undefined ? { max_tokens: params.maxTokens } : {}),
+            ...(params.expectedChunkSize !== undefined ? { expected_chunk_size: params.expectedChunkSize } : {}),
+            ...(params.maximumChunkSize !== undefined ? { maximum_chunk_size: params.maximumChunkSize } : {}),
+            ...(params.chunkingBatchSize !== undefined ? { chunk_batch: params.chunkingBatchSize } : {}),
+          }),
+        }
+      );
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to update model for tenant",
+          response.status
+        );
+      }
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to update manage tenant model:", error);
+      throw new ModelError("Failed to update model for tenant", 500);
+    }
+  },
+
+  // Delete model from a specific tenant
+  deleteManageTenantModel: async (params: {
+    tenantId: string;
+    displayName: string;
+  }): Promise<void> => {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.manageModelDelete(params.displayName),
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tenant_id: params.tenantId,
+            display_name: params.displayName,
+          }),
+        }
+      );
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to delete model for tenant",
+          response.status
+        );
+      }
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to delete manage tenant model:", error);
+      throw new ModelError("Failed to delete model for tenant", 500);
+    }
+  },
+
+  // Batch create models for a specific tenant
+  batchCreateManageTenantModels: async (params: {
+    tenantId: string;
+    provider: string;
+    type: string;
+    apiKey: string;
+    models: Array<{
+      id: string;
+      object?: string;
+      created?: number;
+      owned_by?: string;
+      max_tokens?: number;
+    }>;
+  }): Promise<{ tenantId: string; provider: string; type: string; modelsCount: number }> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageModelBatchCreate, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          provider: params.provider,
+          type: params.type,
+          api_key: params.apiKey,
+          models: params.models,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(
+          result.detail || result.message || "Failed to batch create models for tenant",
+          response.status
+        );
+      }
+      return {
+        tenantId: result.data.tenant_id,
+        provider: result.data.provider,
+        type: result.data.type,
+        modelsCount: result.data.models_count,
+      };
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to batch create manage tenant models:", error);
+      throw new ModelError("Failed to batch create models for tenant", 500);
+    }
+  },
+
+  // Create/fetch provider models for a specific tenant (admin/manage operation)
+  addManageProviderModel: async (params: {
+    tenantId: string;
+    provider: string;
+    type: ModelType;
+    apiKey: string;
+    baseUrl?: string;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageProviderModelCreate, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          provider: params.provider,
+          model_type: params.type,
+          api_key: params.apiKey,
+          ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(result.detail || result.message || "Failed to create provider models for tenant", response.status);
+      }
+      return result.data || [];
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to create manage provider models:", error);
+      throw new ModelError("Failed to create provider models for tenant", 500);
+    }
+  },
+
+  // Get provider selected modal list for a specific tenant (admin/manage operation)
+  getManageProviderSelectedModalList: async (params: {
+    tenantId: string;
+    provider: string;
+    type: ModelType;
+  }): Promise<any[]> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.manageProviderModelList, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: params.tenantId,
+          provider: params.provider,
+          model_type: params.type,
+        }),
+      });
+
+      const result = await response.json();
+      if (response.status !== STATUS_CODES.SUCCESS) {
+        throw new ModelError(result.detail || result.message || "Failed to get provider selected list for tenant", response.status);
+      }
+      return result.data || [];
+    } catch (error) {
+      if (error instanceof ModelError) throw error;
+      log.warn("Failed to get manage provider selected list:", error);
+      throw new ModelError("Failed to get provider selected list for tenant", 500);
     }
   },
 };

@@ -60,6 +60,18 @@ sys.modules['database.client'] = client_mock
 sys.modules['backend.database.client'] = client_mock
 
 # 模拟db_models模块
+# First, try to import real classes before mocking (if possible)
+_real_agent_info = None
+_real_tool_instance = None
+_real_agent_relation = None
+try:
+    # Try to import real classes before they get mocked
+    # This will only work if the module can be imported without database connection
+    from backend.database.db_models import AgentInfo as _real_agent_info, ToolInstance as _real_tool_instance, AgentRelation as _real_agent_relation
+except (ImportError, Exception):
+    # If import fails (e.g., database not available), we'll use mocks
+    pass
+
 db_models_mock = MagicMock()
 db_models_mock.AgentInfo = MagicMock()
 db_models_mock.ToolInstance = MagicMock()
@@ -89,12 +101,29 @@ class MockAgent:
     def __init__(self):
         self.agent_id = 1
         self.name = "test_agent"
+        self.display_name = "test_agent"
         self.tenant_id = "tenant1"
         self.delete_flag = "N"
         self.enabled = True
         self.updated_by = None
         self.business_logic_model_id = None
         self.business_logic_model_name = None
+        self.description = None
+        self.author = None
+        self.model_id = None
+        self.model_name = None
+        self.max_steps = 5
+        self.duty_prompt = None
+        self.constraint_prompt = None
+        self.few_shots_prompt = None
+        self.parent_agent_id = None
+        self.provide_run_summary = None
+        self.business_description = None
+        self.group_ids = None
+        self.is_new = True
+        self.current_version_no = None
+        self.version_no = 0
+        self.created_by = None
 
 class MockAgentRelation:
     def __init__(self):
@@ -287,7 +316,7 @@ def test_update_agent_success(monkeypatch, mock_session):
     agent_info = MagicMock()
     agent_info.__dict__ = {"name": "updated_agent", "description": "updated description"}
 
-    update_agent(1, agent_info, "tenant1", "user1")
+    update_agent(1, agent_info, "user1")
 
     assert mock_agent.updated_by == "user1"
 
@@ -320,7 +349,7 @@ def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_sessio
         "group_ids": [1, 2],
     }
 
-    update_agent(1, agent_info, "tenant1", "user1")
+    update_agent(1, agent_info, "user1")
 
     # name should remain unchanged because None is skipped
     assert mock_agent.name == "test_agent"
@@ -347,25 +376,31 @@ def test_update_agent_not_found(monkeypatch, mock_session):
     agent_info.__dict__ = {"name": "updated_agent"}
 
     with pytest.raises(ValueError, match="ag_tenant_agent_t Agent not found"):
-        update_agent(999, agent_info, "tenant1", "user1")
+        update_agent(999, agent_info, "user1")
 
 def test_delete_agent_by_id_success(monkeypatch, mock_session):
     """测试成功删除agent"""
     session, query = mock_session
-    mock_update = MagicMock()
-    mock_filter = MagicMock()
-    mock_filter.update = mock_update
-    query.filter.return_value = mock_filter
+    # Mock session.execute instead of query.filter.update
+    mock_execute = MagicMock()
+    session.execute = mock_execute
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
+    # Restore real AgentInfo and ToolInstance classes for SQLAlchemy update
+    # Use the real classes that were saved before mocking
+    if _real_agent_info is not None:
+        monkeypatch.setattr("backend.database.agent_db.AgentInfo", _real_agent_info)
+    if _real_tool_instance is not None:
+        monkeypatch.setattr("backend.database.agent_db.ToolInstance", _real_tool_instance)
+
     delete_agent_by_id(1, "tenant1", "user1")
 
-    # 验证调用了两次update（一次更新AgentInfo，一次更新ToolInstance）
-    assert mock_update.call_count == 2
+    # 验证调用了两次execute（一次更新AgentInfo，一次更新ToolInstance）
+    assert mock_execute.call_count == 2
 
 def test_query_all_agent_info_by_tenant_id(monkeypatch, mock_session):
     """测试查询所有agent信息"""
@@ -404,7 +439,7 @@ def test_insert_related_agent_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.agent_db.AgentRelation", lambda **kwargs: MagicMock())
 
-    result = insert_related_agent(1, 2, "tenant1")
+    result = insert_related_agent(1, 2, "tenant1", "user1")
 
     assert result is True
     session.add.assert_called_once()
@@ -422,7 +457,7 @@ def test_insert_related_agent_failure(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.agent_db.AgentRelation", lambda **kwargs: MagicMock())
 
-    result = insert_related_agent(1, 2, "tenant1")
+    result = insert_related_agent(1, 2, "tenant1", "user1")
 
     assert result is False
 
@@ -439,7 +474,7 @@ def test_delete_related_agent_success(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
-    result = delete_related_agent(1, 2, "tenant1")
+    result = delete_related_agent(1, 2, "tenant1", "user1")
 
     assert result is True
     mock_update.assert_called_once()
@@ -457,7 +492,7 @@ def test_delete_related_agent_failure(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
-    result = delete_related_agent(1, 2, "tenant1")
+    result = delete_related_agent(1, 2, "tenant1", "user1")
 
     assert result is False
 
@@ -536,6 +571,7 @@ def test_update_related_agents_add_new(monkeypatch, mock_session):
         tenant_id = MagicMock()
         delete_flag = MagicMock()
         selected_agent_id = MagicMock()
+        version_no = MagicMock()
 
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
@@ -548,7 +584,7 @@ def test_update_related_agents_add_new(monkeypatch, mock_session):
 
     # Verify: should add 2 new relations, no deletions
     assert session.add.call_count == 2
-    session.commit.assert_called_once()
+    # Note: update_related_agents doesn't explicitly call commit(), it relies on context manager
     # Verify update was not called since there are no deletions
     mock_update.assert_not_called()
 
@@ -592,7 +628,7 @@ def test_update_related_agents_delete_existing(monkeypatch, mock_session):
     # Verify: should soft delete 2 relations, add none
     mock_update.assert_called_once()
     session.add.assert_not_called()
-    session.commit.assert_called_once()
+    # Note: update_related_agents doesn't explicitly call commit(), it relies on context manager
 
 
 def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
@@ -636,6 +672,7 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
         tenant_id = MagicMock()
         delete_flag = MagicMock()
         selected_agent_id = MagicMock()
+        version_no = MagicMock()
 
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
@@ -649,7 +686,7 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
     # Verify: should delete 2 (relation with selected_agent_id=2), add 4
     mock_update.assert_called_once()
     assert session.add.call_count == 1
-    session.commit.assert_called_once()
+    # Note: update_related_agents doesn't explicitly call commit(), it relies on context manager
 
 
 def test_update_related_agents_no_changes(monkeypatch, mock_session):
@@ -683,7 +720,7 @@ def test_update_related_agents_no_changes(monkeypatch, mock_session):
 
     # Verify: no deletions, no additions
     session.add.assert_not_called()
-    session.commit.assert_called_once()
+    # Note: update_related_agents doesn't explicitly call commit(), it relies on context manager
 
 
 def test_clear_agent_new_mark_success(monkeypatch):
