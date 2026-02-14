@@ -24,11 +24,46 @@ class DataMateSearchTool(Tool):
         "domain expertise, or any information that has been indexed in the DataMate knowledge base. "
         "Suitable for queries requiring access to stored knowledge that may not be publicly available."
     )
+
+    description_zh = "基于你的查询词在 DataMate 知识库中进行搜索，返回最相关的搜索结果。适用于检索 DataMate 知识库中存储的领域专业知识、文档和信息。当用户询问与专业知识、技术文档、领域专长或任何已在 DataMate 知识库中建立索引的信息相关的问题时，请使用此工具。"
+
     inputs = {
         "query": {
             "type": "string",
             "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
         },
+    }
+
+    init_param_descriptions = {
+        "server_url": {
+            "description": "DataMate server url",
+            "description_zh": "服务器 IP 地址"
+        },
+        "verify_ssl": {
+            "description": "Whether to verify SSL certificates for HTTPS connections",
+            "description_zh": "是否验证 HTTPS 连接的 SSL 证书"
+        },
+        "index_names": {
+            "description": "The list of index names to search",
+            "description_zh": "要搜索的知识库名称列表（支持用户可见的 knowledge_name 或内部的 index_name）。如果未提供，将搜索所有可用的知识库。"
+        },
+        "top_k": {
+            "description": "Default maximum number of search results to return",
+            "description_zh": "返回的搜索结果最大数量"
+        },
+        "threshold": {
+            "description": "Default similarity threshold for search results",
+            "description_zh": "搜索结果的相似度阈值"
+        },
+        "kb_page": {
+            "description": "Page index when listing knowledge bases from DataMate",
+            "description_zh": "从 DataMate 列出知识库时的页面索引"
+        },
+        "kb_page_size": {
+            "description": "Page size when listing knowledge bases from DataMate",
+            "description_zh": "从 DataMate 列出知识库时的页面大小"
+        }
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
