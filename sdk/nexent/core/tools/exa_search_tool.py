@@ -29,6 +29,22 @@ class ExaSearchTool(Tool):
             "description_zh": "要执行的搜索查询词"
         }
     }
+
+    init_param_descriptions = {
+        "exa_api_key": {
+            "description": "Exa API key",
+            "description_zh": "Exa API 密钥"
+        },
+        "max_results": {
+            "description": "Maximum number of search results",
+            "description_zh": "返回搜索结果的最大数量"
+        },
+        "image_filter": {
+            "description": "Whether to enable image filtering",
+            "description_zh": "是否启用图片过滤"
+        }
+    }
+
     output_type = "string"
     category = ToolCategory.SEARCH.value
     tool_sign = ToolSign.EXA_SEARCH.value  # Used to distinguish different index sources in summary
