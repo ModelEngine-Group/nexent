@@ -308,7 +308,7 @@ class ToolSourceEnum(Enum):
 class ToolInfo(BaseModel):
     name: str
     description: str
-    params: List
+    description_zh: Optional[str] = None
     source: str
     inputs: str
     output_type: str

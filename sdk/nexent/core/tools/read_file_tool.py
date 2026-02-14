@@ -20,9 +20,28 @@ class ReadFileTool(Tool):
                   "Supports custom encoding, defaults to utf-8. " \
                   "Returns the file content as a string along with file metadata."
 
+    description_zh = "读取指定文件的内容，路径需为工作区相对路径（例如，'documents/file.txt'），出于安全考虑，不支持绝对路径。支持自定义编码，默认为 utf-8 ，文件内容以字符串形式返回，同时返回文件元数据。"
+
     inputs = {
-        "file_path": {"type": "string", "description": "Relative path of the file to read (e.g., 'documents/file.txt')"},
-        "encoding": {"type": "string", "description": "File encoding, defaults to utf-8", "default": "utf-8", "nullable": True}
+        "file_path": {
+            "type": "string",
+            "description": "Relative path of the file to read (e.g., 'documents/file.txt')",
+            "description_zh": "要读取的文件的相对路径（例如，'documents/file.txt'）"
+        },
+        "encoding": {
+            "type": "string",
+            "description": "File encoding, defaults to utf-8",
+            "description_zh": "文件编码，默认为 utf-8",
+            "default": "utf-8",
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value

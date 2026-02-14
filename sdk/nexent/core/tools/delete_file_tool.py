@@ -20,8 +20,21 @@ class DeleteFileTool(Tool):
                   "This operation is irreversible and only works on individual files, not directories. " \
                   "Use with caution as deleted files cannot be recovered."
 
+    description_zh = "删除指定路径的单个文件，路径需为工作区相对路径（例如，'documents/file.txt'），出于安全考虑，不支持绝对路径。该操作仅对单个文件生效，不支持删除目录。删除的文件无法恢复，使用时请谨慎操作。"
+
     inputs = {
-        "file_path": {"type": "string", "description": "Relative path of the file to delete (e.g., 'documents/file.txt')"}
+        "file_path": {
+            "type": "string",
+            "description": "Relative path of the file to delete (e.g., 'documents/file.txt')",
+            "description_zh": "要删除的文件的相对路径（例如，'documents/file.txt'）"
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value

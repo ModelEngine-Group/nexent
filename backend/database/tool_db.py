@@ -1,6 +1,6 @@
 import re
+import json
 from typing import List
-
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
@@ -225,21 +225,51 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
 
 
 def add_tool_field(tool_info):
+    from services.tool_configuration_service import get_local_tools_description_zh
+    
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
         query = session.query(ToolInfo).filter(
             ToolInfo.tool_id == tool_info["tool_id"])
         tool = query.first()
-
         # add tool params
         tool_params = tool.params
         for ele in tool_params:
             param_name = ele["name"]
             ele["default"] = tool_info["params"].get(param_name)
-
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-
+        
+        # Merge description_zh from SDK for local tools
+        tool_name = tool_dict.get("name")
+        if tool_dict.get("source") == "local":
+            local_tool_descriptions = get_local_tools_description_zh()
+            if tool_name in local_tool_descriptions:
+                sdk_info = local_tool_descriptions[tool_name]
+                tool_dict["description_zh"] = sdk_info.get("description_zh")
+                
+                # Merge params description_zh from SDK
+                for param in tool_params:
+                    if not param.get("description_zh"):
+                        for sdk_param in sdk_info.get("params", []):
+                            if sdk_param.get("name") == param.get("name"):
+                                param["description_zh"] = sdk_param.get("description_zh")
+                                break
+                
+                # Merge inputs description_zh from SDK
+                inputs_str = tool_dict.get("inputs", "{}")
+                try:
+                    inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                    if isinstance(inputs, dict):
+                        for key, value in inputs.items():
+                            if isinstance(value, dict) and not value.get("description_zh"):
+                                sdk_inputs = sdk_info.get("inputs", {})
+                                if key in sdk_inputs:
+                                    value["description_zh"] = sdk_inputs[key].get("description_zh")
+                        tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info

@@ -19,11 +19,44 @@ class ListDirectoryTool(Tool):
                   "Absolute paths are not allowed for security reasons. " \
                   "Returns a hierarchical tree view of files and directories with metadata."
 
+    description_zh = "以树形结构格式列出目录下所有内容。路径需为工作区相对路径（例如，'documents'或'.'表示当前工作空间），出于安全考虑，不支持绝对路径。"
+
     inputs = {
-        "directory_path": {"type": "string", "description": "Relative path of the directory to list (e.g., 'documents' or '.' for workspace root)", "default": ".", "nullable": True},
-        "max_depth": {"type": "integer", "description": "Maximum depth to traverse (default: 3, max: 10)", "default": 3, "nullable": True},
-        "show_hidden": {"type": "boolean", "description": "Whether to show hidden files/directories (starting with .)", "default": False, "nullable": True},
-        "show_size": {"type": "boolean", "description": "Whether to show file sizes", "default": True, "nullable": True}
+        "directory_path": {
+            "type": "string",
+            "description": "Relative path of the directory to list (e.g., 'documents' or '.' for workspace root)",
+            "description_zh": "要列出的目录的相对路径（例如，'documents'或'.'表示工作区根目录）",
+            "default": ".",
+            "nullable": True
+        },
+        "max_depth": {
+            "type": "integer",
+            "description": "Maximum depth to traverse (default: 3, max: 10)",
+            "description_zh": "遍历的最大深度（默认：3，最大：10）",
+            "default": 3,
+            "nullable": True
+        },
+        "show_hidden": {
+            "type": "boolean",
+            "description": "Whether to show hidden files/directories (starting with .)",
+            "description_zh": "是否显示隐藏文件/目录（以.开头）",
+            "default": False,
+            "nullable": True
+        },
+        "show_size": {
+            "type": "boolean",
+            "description": "Whether to show file sizes",
+            "description_zh": "是否显示文件大小",
+            "default": True,
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "init_path": {
+            "description": "Initial workspace path",
+            "description_zh": "初始工作区路径"
+        }
     }
     output_type = "string"
     category = ToolCategory.FILE.value
