@@ -317,6 +317,10 @@ def determine_user_role(user_id, tenant_id, user_email):
     if user_email and user_email.lower() == LEGACY_ADMIN_EMAIL.lower():
         return "ADMIN"
 
+    # Rule 3: If tenant_id is empty, set it to SU
+    if not tenant_id:
+        return "SU"
+
     # Default: USER
     return "USER"
 
