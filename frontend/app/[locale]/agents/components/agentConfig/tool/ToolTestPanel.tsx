@@ -205,9 +205,11 @@ export default function ToolTestPanel({
       );
 
       // Call validateTool with parameters
+      const toolName = tool.origin_name || tool.name || "";
+      const toolSource = tool.source || "";
       const result = await validateTool(
-        tool.origin_name || tool.name,
-        tool.source, // Tool source
+        toolName,
+        toolSource, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
         configs // tool configuration parameters
