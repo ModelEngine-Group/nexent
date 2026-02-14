@@ -2800,3 +2800,160 @@ class TestUpdateToolList:
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestGetLocalToolsDescriptionZh:
+    """Tests for get_local_tools_description_zh function - tests description_zh i18n support."""
+
+    def setup_method(self):
+        """Import the function to test."""
+        from backend.services.tool_configuration_service import get_local_tools_description_zh
+        self.get_local_tools_description_zh = get_local_tools_description_zh
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_returns_correct_structure_with_description_zh(self, mock_get_classes):
+        """Test that function returns correct structure with description_zh for tools."""
+        # Create a mock tool class with description_zh
+        class MockToolWithDescriptionZh:
+            name = "test_search_tool"
+            description = "A test search tool"
+            description_zh = "测试搜索工具"
+            inputs = {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                    "description_zh": "搜索查询词"
+                }
+            }
+            init_param_descriptions = {
+                "api_key": {
+                    "description": "API key for the service",
+                    "description_zh": "服务的API密钥"
+                }
+            }
+
+            def __init__(self, api_key: str = "default"):
+                self.api_key = api_key
+
+        mock_get_classes.return_value = [MockToolWithDescriptionZh]
+
+        result = self.get_local_tools_description_zh()
+
+        # Verify structure
+        assert "test_search_tool" in result
+        tool_info = result["test_search_tool"]
+        assert "description_zh" in tool_info
+        assert tool_info["description_zh"] == "测试搜索工具"
+        assert "params" in tool_info
+        assert "inputs" in tool_info
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_extracts_param_description_zh(self, mock_get_classes):
+        """Test that function extracts description_zh from init params."""
+        class MockToolWithParamDescriptions:
+            name = "test_tool"
+            description = "Test tool"
+            description_zh = "测试工具"
+            inputs = {}
+            init_param_descriptions = {
+                "param1": {
+                    "description": "First parameter",
+                    "description_zh": "第一个参数"
+                },
+                "param2": {
+                    "description": "Second parameter",
+                    "description_zh": "第二个参数"
+                }
+            }
+
+            def __init__(self, param1: str = "", param2: int = 0):
+                self.param1 = param1
+                self.param2 = param2
+
+        mock_get_classes.return_value = [MockToolWithParamDescriptions]
+
+        result = self.get_local_tools_description_zh()
+
+        tool_info = result["test_tool"]
+        params = tool_info["params"]
+
+        # Find params with description_zh
+        param1_info = next((p for p in params if p["name"] == "param1"), None)
+        param2_info = next((p for p in params if p["name"] == "param2"), None)
+
+        assert param1_info is not None
+        assert param1_info["description_zh"] == "第一个参数"
+        assert param2_info is not None
+        assert param2_info["description_zh"] == "第二个参数"
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_extracts_inputs_description_zh(self, mock_get_classes):
+        """Test that function extracts description_zh from inputs."""
+        class MockToolWithInputDescriptions:
+            name = "search_tool"
+            description = "Search tool"
+            description_zh = "搜索工具"
+            inputs = {
+                "query": {
+                    "type": "string",
+                    "description": "Search query string",
+                    "description_zh": "搜索查询字符串"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results",
+                    "description_zh": "最大结果数"
+                }
+            }
+            init_param_descriptions = {}
+
+            def __init__(self):
+                pass
+
+        mock_get_classes.return_value = [MockToolWithInputDescriptions]
+
+        result = self.get_local_tools_description_zh()
+
+        tool_info = result["search_tool"]
+        inputs = tool_info["inputs"]
+
+        assert "query" in inputs
+        assert inputs["query"]["description_zh"] == "搜索查询字符串"
+        assert "limit" in inputs
+        assert inputs["limit"]["description_zh"] == "最大结果数"
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_returns_empty_dict_when_no_tools(self, mock_get_classes):
+        """Test that function returns empty dict when no tools available."""
+        mock_get_classes.return_value = []
+
+        result = self.get_local_tools_description_zh()
+
+        assert result == {}
+
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_handles_tool_without_description_zh(self, mock_get_classes):
+        """Test that function handles tools without description_zh gracefully."""
+        class MockToolWithoutDescriptionZh:
+            name = "legacy_tool"
+            description = "Legacy tool without Chinese description"
+            # No description_zh attribute
+            inputs = {}
+            init_param_descriptions = {}
+
+            def __init__(self):
+                pass
+
+        mock_get_classes.return_value = [MockToolWithoutDescriptionZh]
+
+        result = self.get_local_tools_description_zh()
+
+        # Should still return the tool, but with None for description_zh
+        assert "legacy_tool" in result
+        tool_info = result["legacy_tool"]
+        assert "description_zh" in tool_info
+        assert tool_info["description_zh"] is None
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -82,10 +82,15 @@ def get_local_tools() -> List[ToolInfo]:
             if param_name == "self" or param.default.exclude:
                 continue
 
+            # Get description in both languages
+            param_description = param.default.description if hasattr(param.default, 'description') else ""
+            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+
             param_info = {
                 "type": python_type_to_json_schema(param.annotation),
                 "name": param_name,
-                "description": param.default.description
+                "description": param_description,
+                "description_zh": param_description_zh
             }
             if param.default.default is PydanticUndefined:
                 param_info["optional"] = False
@@ -95,14 +100,29 @@ def get_local_tools() -> List[ToolInfo]:
 
             init_params_list.append(param_info)
 
-        # get tool fixed attributes
+        # Get tool fixed attributes with bilingual support
+        tool_description_zh = getattr(tool_class, 'description_zh', None)
+        tool_inputs = getattr(tool_class, 'inputs', {})
+
+        # Process inputs to add bilingual descriptions
+        processed_inputs = {}
+        if isinstance(tool_inputs, dict):
+            for key, value in tool_inputs.items():
+                if isinstance(value, dict):
+                    processed_inputs[key] = {
+                        **value,
+                        "description_zh": value.get("description_zh")
+                    }
+                else:
+                    processed_inputs[key] = value
+
         tool_info = ToolInfo(
             name=getattr(tool_class, 'name'),
             description=getattr(tool_class, 'description'),
+            description_zh=tool_description_zh,
             params=init_params_list,
             source=ToolSourceEnum.LOCAL.value,
-            inputs=json.dumps(getattr(tool_class, 'inputs'),
-                              ensure_ascii=False),
+            inputs=json.dumps(processed_inputs, ensure_ascii=False),
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             class_name=tool_class.__name__,
@@ -111,6 +131,61 @@ def get_local_tools() -> List[ToolInfo]:
         )
         tools_info.append(tool_info)
     return tools_info
+
+
+def get_local_tools_description_zh() -> Dict[str, Dict]:
+    """
+    Get description_zh for all local tools from SDK (not persisted to DB).
+
+    Returns:
+        Dict mapping tool name to {"description_zh": ..., "params": [...], "inputs": {...}}
+    """
+    tools_classes = get_local_tools_classes()
+    result = {}
+    for tool_class in tools_classes:
+        tool_name = getattr(tool_class, 'name')
+
+        # Get tool-level description_zh
+        description_zh = getattr(tool_class, 'description_zh', None)
+
+        # Get class-level init_param_descriptions for fallback
+        init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
+
+        # Get param-level description_zh
+        init_params_list = []
+        sig = inspect.signature(tool_class.__init__)
+        for param_name, param in sig.parameters.items():
+            if param_name == "self" or param.default.exclude:
+                continue
+
+            # First try to get from param.default.description_zh (FieldInfo)
+            param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+
+            # Fallback to init_param_descriptions if not found
+            if param_description_zh is None and param_name in init_param_descriptions:
+                param_description_zh = init_param_descriptions[param_name].get('description_zh')
+
+            init_params_list.append({
+                "name": param_name,
+                "description_zh": param_description_zh
+            })
+
+        # Get inputs description_zh
+        tool_inputs = getattr(tool_class, 'inputs', {})
+        inputs_description_zh = {}
+        if isinstance(tool_inputs, dict):
+            for key, value in tool_inputs.items():
+                if isinstance(value, dict) and value.get("description_zh"):
+                    inputs_description_zh[key] = {
+                        "description_zh": value.get("description_zh")
+                    }
+
+        result[tool_name] = {
+            "description_zh": description_zh,
+            "params": init_params_list,
+            "inputs": inputs_description_zh
+        }
+    return result
 
 
 def get_local_tools_classes() -> List[type]:
@@ -371,20 +446,61 @@ async def list_all_tools(tenant_id: str):
     List all tools for a given tenant
     """
     tools_info = query_all_tools(tenant_id)
+
+    # Get description_zh from SDK for local tools (not persisted to DB)
+    local_tool_descriptions = get_local_tools_description_zh()
+
     # only return the fields needed
     formatted_tools = []
     for tool in tools_info:
+        tool_name = tool.get("name")
+
+        # Merge description_zh from SDK for local tools
+        if tool.get("source") == "local" and tool_name in local_tool_descriptions:
+            sdk_info = local_tool_descriptions[tool_name]
+            description_zh = sdk_info.get("description_zh")
+
+            # Merge params description_zh from SDK (independent of tool-level description_zh)
+            params = tool.get("params", [])
+            if params:
+                for param in params:
+                    if not param.get("description_zh"):
+                        # Find matching param in SDK
+                        for sdk_param in sdk_info.get("params", []):
+                            if sdk_param.get("name") == param.get("name"):
+                                param["description_zh"] = sdk_param.get("description_zh")
+                                break
+
+            # Merge inputs description_zh from SDK
+            inputs_str = tool.get("inputs", "{}")
+            try:
+                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+                if isinstance(inputs, dict):
+                    for key, value in inputs.items():
+                        if isinstance(value, dict) and not value.get("description_zh"):
+                            # Find matching input in SDK
+                            sdk_inputs = sdk_info.get("inputs", {})
+                            if key in sdk_inputs:
+                                value["description_zh"] = sdk_inputs[key].get("description_zh")
+                    inputs_str = json.dumps(inputs, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        else:
+            description_zh = tool.get("description_zh")
+            inputs_str = tool.get("inputs", "{}")
+
         formatted_tool = {
             "tool_id": tool.get("tool_id"),
-            "name": tool.get("name"),
+            "name": tool_name,
             "origin_name": tool.get("origin_name"),
             "description": tool.get("description"),
+            "description_zh": description_zh,
             "source": tool.get("source"),
             "is_available": tool.get("is_available"),
             "create_time": tool.get("create_time"),
             "usage": tool.get("usage"),
             "params": tool.get("params", []),
-            "inputs": tool.get("inputs", {}),
+            "inputs": inputs_str,
             "category": tool.get("category")
         }
         formatted_tools.append(formatted_tool)

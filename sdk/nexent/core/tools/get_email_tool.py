@@ -19,12 +19,57 @@ class GetEmailTool(Tool):
         "Get emails from email server. Supports filtering emails by time range and sender (sender must be an email address, not a name or non-ASCII string; subject filtering is not supported due to IMAP limitations)."
     )
 
+    description_zh = "获取邮件，支持按时间范围和发件人筛选。。受 IMAP 限制，暂不支持按主题筛选。"
+
     inputs = {
-        "days": {"type": "integer", "description": "Get emails from the past few days, default is 7 days", "default": 7,
-                 "nullable": True},
-        "sender": {"type": "string", "description": "Filter by sender (must be an email address, not a name or non-ASCII string)", "nullable": True},
-        "max_emails": {"type": "integer", "description": "Maximum number of emails to retrieve, default is 10",
-                       "default": 10, "nullable": True}}
+        "days": {
+            "type": "integer",
+            "description": "Get emails from the past few days, default is 7 days",
+            "description_zh": "搜索邮件的天数，默认为 7 天",
+            "default": 7,
+            "nullable": True
+        },
+        "sender": {
+            "type": "string",
+            "description": "Filter by sender (must be an email address, not a name or non-ASCII string)",
+            "description_zh": "按发件人邮箱地址筛选",
+            "nullable": True
+        },
+        "max_emails": {
+            "type": "integer",
+            "description": "Maximum number of emails to retrieve, default is 10",
+            "description_zh": "最多获取的邮件数量，默认为 10",
+            "default": 10,
+            "nullable": True
+        }
+    }
+
+    init_param_descriptions = {
+        "imap_server": {
+            "description": "IMAP Server Address",
+            "description_zh": "IMAP 服务器地址"
+        },
+        "imap_port": {
+            "description": "IMAP Server Port",
+            "description_zh": "IMAP 服务器端口"
+        },
+        "username": {
+            "description": "IMAP Server Username",
+            "description_zh": "IMAP 服务器用户名"
+        },
+        "password": {
+            "description": "IMAP Server Password",
+            "description_zh": "IMAP 服务器密码"
+        },
+        "use_ssl": {
+            "description": "Use SSL",
+            "description_zh": "使用 SSL"
+        },
+        "timeout": {
+            "description": "Timeout",
+            "description_zh": "连接超时时间（秒）"
+        }
+    }
     output_type = "string"
     category = ToolCategory.EMAIL.value
 

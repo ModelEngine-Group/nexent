@@ -13,6 +13,7 @@ import {
 } from "@/services/agentConfigService";
 import log from "@/lib/logger";
 import { DEFAULT_TYPE } from "@/const/constants";
+import { getLocalizedDescription } from "@/lib/utils";
 
 const { Text, Title } = Typography;
 
@@ -204,9 +205,11 @@ export default function ToolTestPanel({
       );
 
       // Call validateTool with parameters
+      const toolName = tool.origin_name || tool.name || "";
+      const toolSource = tool.source || "";
       const result = await validateTool(
-        tool.origin_name || tool.name,
-        tool.source, // Tool source
+        toolName,
+        toolSource, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
         configs // tool configuration parameters
@@ -385,6 +388,12 @@ export default function ToolTestPanel({
                         paramInfo.description
                           ? paramInfo.description
                           : paramName;
+                      const description_zh =
+                        paramInfo &&
+                        typeof paramInfo === "object" &&
+                        paramInfo.description_zh
+                          ? paramInfo.description_zh
+                          : undefined;
 
                       const fieldName = `param_${paramName}`;
                       const rules: any[] = [];
@@ -455,13 +464,13 @@ export default function ToolTestPanel({
                           name={fieldName}
                           rules={rules}
                           tooltip={{
-                            title: description,
+                            title: getLocalizedDescription(description, description_zh),
                             placement: "topLeft",
                             styles: { root: { maxWidth: 400 } },
                           }}
                         >
                           <Input
-                            placeholder={description}
+                            placeholder={getLocalizedDescription(description, description_zh)}
                           />
                         </Form.Item>
                       );

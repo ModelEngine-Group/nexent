@@ -14,6 +14,8 @@ import {
 import { MarketAgentDetail } from "@/types/market";
 import { getToolSourceLabel, getGenericLabel } from "@/lib/agentLabelMapper";
 import { getCategoryIcon } from "@/const/marketConfig";
+import { getLocalizedDescription } from "@/lib/utils";
+import { useLocalTools } from "@/hooks/useLocalTools";
 
 interface MarketAgentDetailModalProps {
   visible: boolean;
@@ -34,6 +36,7 @@ export default function MarketAgentDetailModal({
 }: MarketAgentDetailModalProps) {
   const { t, i18n } = useTranslation("common");
   const isZh = i18n.language === "zh" || i18n.language === "zh-CN";
+  const { localTools } = useLocalTools();
 
   if (!agentDetails && !loading) {
     return null;
@@ -282,43 +285,105 @@ export default function MarketAgentDetailModal({
       children: (
         <div className="space-y-3">
           {agentDetails?.tools && agentDetails.tools.length > 0 ? (
-            agentDetails.tools.map((tool) => (
-              <div
-                key={tool.id}
-                className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-base">{tool.name}</h4>
-                    <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-                      {needsConfig(tool.description) ? (
-                        renderFieldValue(tool.description)
-                      ) : (
-                        tool.description ||
-                        t("market.detail.toolDescription", "No description")
-                      )}
+            agentDetails.tools.map((tool) => {
+              const localTool = tool.source === "local" ? localTools[tool.name] : null;
+              const mergedTool = localTool ? {
+                ...tool,
+                description_zh: localTool.description_zh,
+                inputs: localTool.inputs
+              } : tool;
+
+              return (
+                <div
+                  key={tool.id}
+                  className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-base">{mergedTool.name}</h4>
+                      <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+                        {needsConfig(getLocalizedDescription(mergedTool.description, mergedTool.description_zh)) ? (
+                          renderFieldValue(getLocalizedDescription(mergedTool.description, mergedTool.description_zh))
+                        ) : (
+                          getLocalizedDescription(mergedTool.description, mergedTool.description_zh) ||
+                          t("market.detail.toolDescription", "No description")
+                        )}
+                      </div>
                     </div>
                   </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {mergedTool.source && (
+                      <Tag color="blue">
+                        {t("common.source", "Source")}: {getToolSourceLabel(mergedTool.source, t)}
+                      </Tag>
+                    )}
+                    {mergedTool.usage && (
+                      <Tag color="green">
+                        {t("common.usage", "Usage")}: {mergedTool.usage}
+                      </Tag>
+                    )}
+                    {mergedTool.output_type && (
+                      <Tag color="purple">
+                        {t("common.output", "Output")}: {mergedTool.output_type}
+                      </Tag>
+                    )}
+                  </div>
+                  {(() => {
+                    let inputsObj: Record<string, any> = {};
+                    if (mergedTool.inputs) {
+                      if (Array.isArray(mergedTool.inputs)) {
+                        inputsObj = {};
+                        mergedTool.inputs.forEach((item: any, index: number) => {
+                          if (item && (item.name || item.type)) {
+                            inputsObj[item.name || String(index)] = item;
+                          }
+                        });
+                      } else if (typeof mergedTool.inputs === 'string') {
+                        try {
+                          const parsed = JSON.parse(mergedTool.inputs);
+                          if (Array.isArray(parsed)) {
+                            inputsObj = {};
+                            parsed.forEach((item: any, index: number) => {
+                              if (item && (item.name || item.type)) {
+                                inputsObj[item.name || String(index)] = item;
+                              }
+                            });
+                          } else {
+                            inputsObj = parsed;
+                          }
+                        } catch {
+                          inputsObj = {};
+                        }
+                      } else {
+                        inputsObj = mergedTool.inputs;
+                      }
+                    }
+                    return Object.keys(inputsObj).length > 0 ? (
+                      <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600">
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">
+                          {t("market.detail.inputParameters", "Input Parameters")}:
+                        </div>
+                        <div className="space-y-2">
+                          {Object.entries(inputsObj).map(([key, value]) => (
+                            <div key={key} className="text-xs">
+                              <span className="font-medium">{value.name || key}</span>
+                              <span className="text-slate-500 dark:text-slate-400 ml-2">
+                                ({value.type})
+                              </span>
+                              {getLocalizedDescription(value.description, value.description_zh) ? (
+                                <div className="text-slate-600 dark:text-slate-300 mt-1">
+                                  {getLocalizedDescription(value.description, value.description_zh)}
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  {tool.source && (
-                    <Tag color="blue">
-                      {t("common.source", "Source")}: {getToolSourceLabel(tool.source, t)}
-                    </Tag>
-                  )}
-                  {tool.usage && (
-                    <Tag color="green">
-                      {t("common.usage", "Usage")}: {tool.usage}
-                    </Tag>
-                  )}
-                  {tool.output_type && (
-                    <Tag color="purple">
-                      {t("common.output", "Output")}: {tool.output_type}
-                    </Tag>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <Empty
               description={t("market.detail.noTools", "No tools configured")}
