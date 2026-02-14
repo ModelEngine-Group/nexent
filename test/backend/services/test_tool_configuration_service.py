@@ -2805,6 +2805,11 @@ if __name__ == '__main__':
 class TestGetLocalToolsDescriptionZh:
     """Tests for get_local_tools_description_zh function - tests description_zh i18n support."""
 
+    def setup_method(self):
+        """Import the function to test."""
+        from backend.services.tool_configuration_service import get_local_tools_description_zh
+        self.get_local_tools_description_zh = get_local_tools_description_zh
+
     @patch('backend.services.tool_configuration_service.get_local_tools_classes')
     def test_returns_correct_structure_with_description_zh(self, mock_get_classes):
         """Test that function returns correct structure with description_zh for tools."""
@@ -2832,7 +2837,7 @@ class TestGetLocalToolsDescriptionZh:
 
         mock_get_classes.return_value = [MockToolWithDescriptionZh]
 
-        result = get_local_tools_description_zh()
+        result = self.get_local_tools_description_zh()
 
         # Verify structure
         assert "test_search_tool" in result
@@ -2867,7 +2872,7 @@ class TestGetLocalToolsDescriptionZh:
 
         mock_get_classes.return_value = [MockToolWithParamDescriptions]
 
-        result = get_local_tools_description_zh()
+        result = self.get_local_tools_description_zh()
 
         tool_info = result["test_tool"]
         params = tool_info["params"]
@@ -2907,7 +2912,7 @@ class TestGetLocalToolsDescriptionZh:
 
         mock_get_classes.return_value = [MockToolWithInputDescriptions]
 
-        result = get_local_tools_description_zh()
+        result = self.get_local_tools_description_zh()
 
         tool_info = result["search_tool"]
         inputs = tool_info["inputs"]
@@ -2922,7 +2927,7 @@ class TestGetLocalToolsDescriptionZh:
         """Test that function returns empty dict when no tools available."""
         mock_get_classes.return_value = []
 
-        result = get_local_tools_description_zh()
+        result = self.get_local_tools_description_zh()
 
         assert result == {}
 
@@ -2941,7 +2946,7 @@ class TestGetLocalToolsDescriptionZh:
 
         mock_get_classes.return_value = [MockToolWithoutDescriptionZh]
 
-        result = get_local_tools_description_zh()
+        result = self.get_local_tools_description_zh()
 
         # Should still return the tool, but with None for description_zh
         assert "legacy_tool" in result
