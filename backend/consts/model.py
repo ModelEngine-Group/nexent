@@ -255,7 +255,7 @@ class GeneratePromptRequest(BaseModel):
 
 class GenerateTitleRequest(BaseModel):
     conversation_id: int
-    history: List[Dict[str, str]]
+    question: str
 
 
 # used in agent/search agent/update for save agent info
