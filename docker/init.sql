@@ -296,7 +296,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.delete_flag IS 'Whether it is deleted. O
 
 -- Create the ag_tenant_agent_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
-    agent_id INTEGER NOT NULL,
+    agent_id SERIAL INTEGER NOT NULL,
     name VARCHAR(100),
     display_name VARCHAR(100),
     description VARCHAR,
