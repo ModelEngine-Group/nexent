@@ -900,7 +900,7 @@
   "auth.revokeSuccess": "Account deleted successfully",
   "auth.revokeFailed": "Account deletion failed, please try again later",
   "auth.refuseRevoke": "Delete Account",
-  "auth.refuseRevokePrompt": "Your role is tenant administrator. Account deletion for admin is not yet supported.",
+  "auth.refuseRevokePrompt": "Your role is administrator. Account deletion for admin is not yet supported.",
   "auth.adminAccount": "Administrator Account",
   "auth.adminAccountDescription": "Administrators have more privileges to configure models, create Agents, etc.",
   "auth.admin": "Admin",
