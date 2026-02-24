@@ -40,6 +40,14 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		return models.filter((model) => model.type === "embedding" && model.connect_status === "available");
 	}, [models]);
 
+	const vlmModels = useMemo(() => {
+		return models.filter((model) => model.type === "vlm");
+	}, [models]);
+
+	const availableVlmModels = useMemo(() => {
+		return models.filter((model) => model.type === "vlm" && model.connect_status === "available");
+	}, [models]);
+
   // Get default LLM model from tenant configuration
   const defaultLlmModel = useMemo(() => {
     try {
@@ -84,6 +92,8 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		availableLlmModels,
 		embeddingModels,
 		availableEmbeddingModels,
+		vlmModels,
+    availableVlmModels,
     defaultLlmModel,
 		invalidate: () => queryClient.invalidateQueries({ queryKey: ["models"] }),
 	};

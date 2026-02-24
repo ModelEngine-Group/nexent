@@ -33,6 +33,8 @@ def get_vlm_model(tenant_id: str):
     # Get the tenant config
     vlm_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["vlm"], tenant_id=tenant_id)
+    if not vlm_model_config:
+        return None
     return OpenAIVLModel(
                 observer=MessageObserver(),
                 model_id=get_model_name_from_config(
