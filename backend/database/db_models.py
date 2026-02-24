@@ -201,7 +201,8 @@ class AgentInfo(TableBase):
     __tablename__ = "ag_tenant_agent_t"
     __table_args__ = {"schema": SCHEMA}
 
-    agent_id = Column(Integer, nullable=False, primary_key=True, autoincrement=True, doc="ID")
+    agent_id = Column(Integer, Sequence(
+        "ag_tenant_agent_t_agent_id_seq", schema=SCHEMA), nullable=False, primary_key=True, autoincrement=True, doc="ID")
     version_no = Column(Integer, default=0, nullable=False, primary_key=True, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     name = Column(String(100), doc="Agent name")
     display_name = Column(String(100), doc="Agent display name")
