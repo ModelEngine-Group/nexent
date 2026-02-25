@@ -161,7 +161,7 @@ def get_file_url(object_name: str, bucket: Optional[str] = None, expires: int = 
     return response
 
 
-def get_file_size(object_name: str, bucket: Optional[str] = None) -> int:
+def get_file_size_from_minio(object_name: str, bucket: Optional[str] = None) -> int:
     """
     Get file size by object name
     """

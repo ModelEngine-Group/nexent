@@ -65,7 +65,7 @@ with patch('backend.database.attachment_db.minio_client', minio_client_mock):
         upload_fileobj,
         download_file,
         get_file_url,
-        get_file_size,
+        get_file_size_from_minio,
         file_exists,
         copy_file,
         list_files,
@@ -309,7 +309,7 @@ class TestGetFileSizeFromMinio:
         """Test successful file size retrieval"""
         minio_client_mock.get_file_size.return_value = 1024
         
-        size = ('attachments/test.txt', 'bucket')
+        size = get_file_size_from_minio('attachments/test.txt', 'bucket')
         
         assert size == 1024
         minio_client_mock.get_file_size.assert_called_once_with('attachments/test.txt', 'bucket')
@@ -318,7 +318,7 @@ class TestGetFileSizeFromMinio:
         """Test  uses default bucket when not specified"""
         minio_client_mock.get_file_size.return_value = 2048
         
-        size = ('attachments/test.txt')
+        size = get_file_size_from_minio('attachments/test.txt')
         
         assert size == 2048
         assert minio_client_mock.get_file_size.call_args_list[-1] == call(

@@ -17,7 +17,7 @@ from database.attachment_db import (
     get_file_url,
     get_content_type,
     get_file_stream,
-    get_file_size,
+    get_file_size_from_minio,
     delete_file,
     list_files,
     file_exists,
@@ -352,7 +352,7 @@ def _validate_uploaded_pdf(temp_object_name: str, local_pdf_path: str) -> bool:
     try:
         # 1. Check file size matches using metadata (avoid full buffering)
         local_size = os.path.getsize(local_pdf_path)
-        remote_size = get_file_size(temp_object_name)
+        remote_size = get_file_size_from_minio(temp_object_name)
         if remote_size <= 0:
             logger.warning(f"PDF validation failed: cannot read remote size for {temp_object_name}")
             return False
