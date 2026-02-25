@@ -1228,7 +1228,7 @@ class ElasticSearchService:
                 summarize_clusters_map_reduce,
                 merge_cluster_summaries
             )
-
+ 
             # Use new Map-Reduce approach
             # Sample reasonable number of documents
             sample_count = min(batch_size // 5, 200)
