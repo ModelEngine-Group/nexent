@@ -37,10 +37,7 @@ async def signup(request: UserSignUpRequest):
             f"Mock signup request: email={request.email}, is_admin={request.is_admin}")
 
         # Mock success response matching user_management_app.py format
-        if request.is_admin:
-            success_message = "🎉 Admin account registered successfully! You now have system management permissions."
-        else:
-            success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
 
         user_data = {
             "user": {
