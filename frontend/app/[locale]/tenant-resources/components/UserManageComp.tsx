@@ -144,8 +144,7 @@ function TenantList({
             const signupResult = await authService.signUp(
               values.adminEmail,
               values.adminPassword,
-              invitation.invitation_code,
-              false // autoLogin=false to avoid logging in as the new admin
+              invitation.invitation_code
             );
 
             if (signupResult.error) {
@@ -209,7 +208,7 @@ function TenantList({
         className="space-y-1 overflow-y-auto"
         style={{ maxHeight: "calc(100vh - 340px)" }}
       >
-        {loading && tenants.length === 0 ? (
+        {loading && (
           <div key="loading" className="p-4 text-center text-gray-500">
             <Spin size="small" /> Loading tenants...
           </div>

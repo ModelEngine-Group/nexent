@@ -136,7 +136,7 @@ class TestUserSignup:
 
             assert response.status_code == HTTPStatus.OK
             data = response.json()
-            assert "Admin account registered successfully" in data["message"]
+            assert "🎉 User account registered successfully! Please start experiencing the AI assistant service." in data["message"]
             assert "data" in data
             mock_signup.assert_called_once_with(
                 email="admin@example.com",
