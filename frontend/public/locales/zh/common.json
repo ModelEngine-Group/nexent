@@ -436,6 +436,9 @@
   "toolPool.category.other": "其他",
   "toolPool.noTools": "暂无可用工具",
   "toolPool.error.requiredFields": "以下必填字段未填写: {{fields}}",
+  "toolPool.vlmRequired": "需要配置视觉语言模型",
+  "toolPool.vlmDisabledTooltip": "请联系管理员配置可用的视觉语言模型",
+  "toolPool.embeddingDisabledTooltip": "请联系管理员配置可用的向量模型",
   "toolPool.tooltip.functionGuide": "1. 本地知识库检索功能，请启用knowledge_base_search工具；\n2. 文本文件解析功能，请启用analyze_text_file工具；\n3. 图片解析功能，请启用analyze_image工具。",
 
   "tool.message.unavailable": "该工具当前不可用，无法选择",
@@ -902,7 +905,7 @@
   "auth.revokeSuccess": "账号删除成功",
   "auth.revokeFailed": "账号删除失败，请稍后重试",
   "auth.refuseRevoke": "删除账号",
-  "auth.refuseRevokePrompt": "您的身份为租户管理员，账号暂不支持删除。",
+  "auth.refuseRevokePrompt": "您的身份为管理员，账号暂不支持删除。",
   "auth.adminAccount": "管理员账号",
   "auth.adminAccountDescription": "管理员拥有更多权限，可以配置模型、创建智能体等",
   "auth.admin": "管理员",

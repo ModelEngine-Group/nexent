@@ -30,15 +30,8 @@ export default function AgentInfoComp({
 }: AgentInfoCompProps) {
   const { t } = useTranslation("common");
 
-  // Get data from store
-  const {
-    editedAgent,
-    updateBusinessInfo,
-    updateProfileInfo,
-    isCreatingMode,
-    currentAgentPermission,
-  } = useAgentConfigStore();
-
+  const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
+  const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
   const isPanelActive = (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
@@ -61,16 +54,6 @@ export default function AgentInfoComp({
 
   // Generation state shared with AgentGenerateDetail
   const [isGenerating, setIsGenerating] = useState(false);
-
-  // Handle business info updates
-  const handleUpdateBusinessInfo = (updates: AgentBusinessInfo) => {
-    updateBusinessInfo(updates);
-  };
-
-  // Handle profile info updates
-  const handleUpdateProfile = (updates: AgentProfileInfo) => {
-    updateProfileInfo(updates);
-  };
 
   return (
     <>
@@ -131,10 +114,6 @@ export default function AgentInfoComp({
               <Flex vertical className="h-full min-h-0 w-full min-w-0">
                 <AgentGenerateDetail
                   editable={isEditable}
-                  editedAgent={editedAgent}
-                  currentAgentId={currentAgentId}
-                  onUpdateProfile={handleUpdateProfile}
-                  onUpdateBusinessInfo={handleUpdateBusinessInfo}
                   isGenerating={isGenerating}
                   setIsGenerating={setIsGenerating}
                 />

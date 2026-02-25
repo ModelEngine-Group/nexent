@@ -258,7 +258,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
   },
   tenant: {
-    list: `${API_BASE_URL}/tenants`,
+    list: `${API_BASE_URL}/tenants/tenant-list`,
     create: `${API_BASE_URL}/tenants`,
     detail: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
