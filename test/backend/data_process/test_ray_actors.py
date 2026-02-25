@@ -71,7 +71,7 @@ def import_module(monkeypatch):
     # Provide a full stub module for database.attachment_db to avoid importing real Minio client
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
     fake_attachment_db_mod.get_file_stream = lambda source: io.BytesIO(b"file-bytes")
-    fake_attachment_db_mod.get_file_size = lambda path_or_url: 0
+    fake_attachment_db_mod.get_file_size_from_minio = lambda path_or_url: 0
     monkeypatch.setitem(sys.modules, "database.attachment_db", fake_attachment_db_mod)
     # Ensure parent package 'database' exists and link submodule for proper resolution
     if "database" not in sys.modules:
