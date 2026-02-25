@@ -88,7 +88,7 @@ export default function AgentVersionCompareModal({
       ]
     : [
         <Button key="close" type="primary" onClick={onCancel}>
-          {t("common.close")}
+          {t("common.button.close")}
         </Button>,
       ];
 
