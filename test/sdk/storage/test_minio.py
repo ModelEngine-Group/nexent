@@ -820,12 +820,12 @@ class TestMinIOStorageClientDeleteFile:
         assert "Unexpected error" in result
 
 
-class TestMinIOStorageClientExists:
-    """Test cases for exists method"""
+class TestMinIOStorageClientFileExists:
+    """Test cases for file_exists method"""
 
     @patch('nexent.storage.minio.boto3')
-    def test_exists_true(self, mock_boto3):
-        """Test exists returns True when file exists"""
+    def test_file_exists_true(self, mock_boto3):
+        """Test file_exists returns True when file exists"""
         mock_client = MagicMock()
         mock_boto3.client.return_value = mock_client
         mock_client.head_bucket.return_value = None
@@ -838,14 +838,14 @@ class TestMinIOStorageClientExists:
             default_bucket="test-bucket"
         )
 
-        exists = client.exists('test.txt', 'test-bucket')
+        result = client.file_exists('test.txt', 'test-bucket')
 
-        assert exists is True
+        assert result is True
         mock_client.head_object.assert_called_once_with(Bucket='test-bucket', Key='test.txt')
 
     @patch('nexent.storage.minio.boto3')
-    def test_exists_false(self, mock_boto3):
-        """Test exists returns False when file doesn't exist"""
+    def test_file_exists_false(self, mock_boto3):
+        """Test file_exists returns False when file doesn't exist"""
         mock_client = MagicMock()
         mock_boto3.client.return_value = mock_client
         mock_client.head_bucket.return_value = None
@@ -863,13 +863,13 @@ class TestMinIOStorageClientExists:
             default_bucket="test-bucket"
         )
 
-        exists = client.exists('test.txt')
+        result = client.file_exists('test.txt')
 
-        assert exists is False
+        assert result is False
 
     @patch('nexent.storage.minio.boto3')
-    def test_exists_without_bucket(self, mock_boto3):
-        """Test exists returns False when bucket is not specified"""
+    def test_file_exists_without_bucket(self, mock_boto3):
+        """Test file_exists returns False when bucket is not specified"""
         mock_client = MagicMock()
         mock_boto3.client.return_value = mock_client
 
@@ -879,7 +879,7 @@ class TestMinIOStorageClientExists:
             secret_key="minioadmin"
         )
 
-        exists = client.exists('test.txt')
+        result = client.file_exists('test.txt')
 
-        assert exists is False
+        assert result is False
 
