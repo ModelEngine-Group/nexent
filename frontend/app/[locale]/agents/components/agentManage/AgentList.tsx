@@ -274,7 +274,7 @@ export default function AgentList({
       onSuccess: () => {
         message.success(
           t("businessLogic.config.error.agentDeleteSuccess", {
-            name: agent.name,
+            name: agent.display_name || agent.name || "",
           })
         );
 
@@ -300,7 +300,7 @@ export default function AgentList({
     confirm.confirm({
       title: t("businessLogic.config.modal.deleteTitle"),
       content: t("businessLogic.config.modal.deleteContent", {
-        name: agent.name,
+        name: agent.display_name || agent.name || "",
       }),
       onOk: () => handleDeleteAgent(agent),
     });

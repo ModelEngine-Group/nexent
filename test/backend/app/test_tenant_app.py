@@ -26,7 +26,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from consts.model import TenantCreateRequest, TenantUpdateRequest
+from consts.model import TenantCreateRequest, TenantUpdateRequest, PaginationRequest
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -174,7 +174,7 @@ class TestTenantRetrieval:
             assert data["detail"] == "Failed to retrieve tenant"
 
     def test_get_all_tenants_success(self):
-        """Test successful retrieval of all tenants"""
+        """Test successful retrieval of all tenants with pagination"""
         mock_tenants = [
             {
                 "tenant_id": "tenant-123",
@@ -188,23 +188,68 @@ class TestTenantRetrieval:
             }
         ]
 
-        with patch('apps.tenant_app.get_all_tenants') as mock_get_all_tenants:
-            mock_get_all_tenants.return_value = mock_tenants
+        with patch('apps.tenant_app.get_tenants_paginated') as mock_get_tenants:
+            mock_get_tenants.return_value = {
+                "data": mock_tenants,
+                "total": 2,
+                "page": 1,
+                "page_size": 20,
+                "total_pages": 1
+            }
 
-            response = client.get("/tenants")
+            request_data = {
+                "page": 1,
+                "page_size": 20
+            }
+
+            response = client.post("/tenants/tenant-list", json=request_data)
 
             assert response.status_code == HTTPStatus.OK
             data = response.json()
             assert data["message"] == "Tenants retrieved successfully"
             assert data["data"] == mock_tenants
-            mock_get_all_tenants.assert_called_once()
+            assert data["total"] == 2
+            assert data["page"] == 1
+            assert data["page_size"] == 20
+            assert data["total_pages"] == 1
+            mock_get_tenants.assert_called_once_with(page=1, page_size=20)
+
+    def test_get_all_tenants_pagination(self):
+        """Test tenant list with custom pagination parameters"""
+        with patch('apps.tenant_app.get_tenants_paginated') as mock_get_tenants:
+            mock_get_tenants.return_value = {
+                "data": [],
+                "total": 100,
+                "page": 2,
+                "page_size": 10,
+                "total_pages": 10
+            }
+
+            request_data = {
+                "page": 2,
+                "page_size": 10
+            }
+
+            response = client.post("/tenants/tenant-list", json=request_data)
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["page"] == 2
+            assert data["page_size"] == 10
+            assert data["total"] == 100
+            mock_get_tenants.assert_called_once_with(page=2, page_size=10)
 
     def test_get_all_tenants_unexpected_error(self):
         """Test retrieval of all tenants with unexpected error"""
-        with patch('apps.tenant_app.get_all_tenants') as mock_get_all_tenants:
-            mock_get_all_tenants.side_effect = Exception("Database error")
+        with patch('apps.tenant_app.get_tenants_paginated') as mock_get_tenants:
+            mock_get_tenants.side_effect = Exception("Database error")
 
-            response = client.get("/tenants")
+            request_data = {
+                "page": 1,
+                "page_size": 20
+            }
+
+            response = client.post("/tenants/tenant-list", json=request_data)
 
             assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
             data = response.json()

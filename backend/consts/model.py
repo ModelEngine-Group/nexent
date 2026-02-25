@@ -507,12 +507,11 @@ class TenantUpdateRequest(BaseModel):
                              description="New tenant display name")
 
 
-class TenantResponse(BaseModel):
-    """Response model for tenant information"""
-    tenant_id: str = Field(..., description="Tenant identifier")
-    tenant_name: str = Field(..., description="Tenant display name")
-    default_group_id: Optional[int] = Field(
-        None, description="Default group ID for the tenant")
+# Pagination request model
+class PaginationRequest(BaseModel):
+    """Request model for pagination parameters"""
+    page: int = Field(1, ge=1, description="Page number")
+    page_size: int = Field(20, ge=1, le=100, description="Items per page")
 
 
 # Group Management Data Models

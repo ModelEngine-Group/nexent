@@ -21,10 +21,10 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from consts.exceptions import NotFoundException, ValidationError
+from consts.exceptions import ValidationError
 from backend.services.tenant_service import (
     get_tenant_info,
-    get_all_tenants,
+    get_tenants_paginated,
     create_tenant,
     update_tenant_info,
     delete_tenant,
@@ -169,11 +169,11 @@ class TestGetTenantInfo:
         service_mocks['insert_config'].assert_called_once()
 
 
-class TestGetAllTenants:
-    """Test cases for get_all_tenants function"""
+class TestGetTenantsPaginated:
+    """Test cases for get_tenants_paginated function"""
 
-    def test_get_all_tenants_success(self, service_mocks):
-        """Test successfully retrieving all tenants"""
+    def test_get_tenants_paginated_success(self, service_mocks):
+        """Test successfully retrieving tenants with pagination"""
         # Setup
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
         tenant_infos = [
@@ -184,17 +184,21 @@ class TestGetAllTenants:
 
         # Mock dependencies
         with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('backend.services.tenant_service.get_tenant_info', side_effect=tenant_infos) as mock_get_tenant_info:
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=tenant_infos):
 
             # Execute
-            result = get_all_tenants()
+            result = get_tenants_paginated(page=1, page_size=20)
 
             # Assert
-            assert len(result) == 3
-            assert result == tenant_infos
+            assert result["total"] == 3
+            assert result["page"] == 1
+            assert result["page_size"] == 20
+            assert result["total_pages"] == 1
+            assert len(result["data"]) == 3
+            assert result["data"] == tenant_infos
 
-    def test_get_all_tenants_with_missing_configs(self, service_mocks):
-        """Test get_all_tenants when some tenants have missing configs"""
+    def test_get_tenants_paginated_with_missing_configs(self, service_mocks):
+        """Test get_tenants_paginated when some tenants have missing configs"""
         # Setup
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
 
@@ -218,41 +222,95 @@ class TestGetAllTenants:
              patch('backend.services.tenant_service.get_tenant_info', side_effect=mock_get_tenant_info):
 
             # Execute
-            result = get_all_tenants()
+            result = get_tenants_paginated(page=1, page_size=20)
 
             # Assert - should return all tenants, with failed tenant having empty fields
-            assert len(result) == 3
-            assert result[0]["tenant_id"] == "tenant1"
-            assert result[0]["tenant_name"] == "Tenant 1"
-            assert result[0]["default_group_id"] == "group1"
-            assert result[1]["tenant_id"] == "tenant2"
-            assert result[1]["tenant_name"] == "Tenant 2"
-            assert result[1]["default_group_id"] == "group2"
+            assert result["total"] == 3
+            assert len(result["data"]) == 3
+            assert result["data"][0]["tenant_id"] == "tenant1"
+            assert result["data"][0]["tenant_name"] == "Tenant 1"
+            assert result["data"][0]["default_group_id"] == "group1"
+            assert result["data"][1]["tenant_id"] == "tenant2"
+            assert result["data"][1]["tenant_name"] == "Tenant 2"
+            assert result["data"][1]["default_group_id"] == "group2"
             # Failed tenant should have empty name and default_group_id
-            assert result[2]["tenant_id"] == "tenant3"
-            assert result[2]["tenant_name"] == ""
-            assert result[2]["default_group_id"] == 'group3'
+            assert result["data"][2]["tenant_id"] == "tenant3"
+            assert result["data"][2]["tenant_name"] == ""
+            assert result["data"][2]["default_group_id"] == 'group3'
 
-    def test_get_all_tenants_empty_list(self, service_mocks):
-        """Test get_all_tenants when no tenants exist"""
+    def test_get_tenants_paginated_empty_list(self, service_mocks):
+        """Test get_tenants_paginated when no tenants exist"""
         # Mock dependencies
         with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=[]) as mock_get_tenant_ids:
 
             # Execute
-            result = get_all_tenants()
+            result = get_tenants_paginated(page=1, page_size=20)
 
             # Assert
-            assert result == []
+            assert result["data"] == []
+            assert result["total"] == 0
+            assert result["total_pages"] == 1
             mock_get_tenant_ids.assert_called_once()
 
-    def test_get_all_tenants_get_all_tenant_ids_exception(self, service_mocks):
-        """Test get_all_tenants when get_all_tenant_ids raises exception"""
+    def test_get_tenants_paginated_get_all_tenant_ids_exception(self, service_mocks):
+        """Test get_tenants_paginated when get_all_tenant_ids raises exception"""
         # Mock dependencies
         with patch('backend.services.tenant_service.get_all_tenant_ids', side_effect=Exception("Database error")) as mock_get_tenant_ids:
 
             # Execute & Assert
             with pytest.raises(Exception, match="Database error"):
-                get_all_tenants()
+                get_tenants_paginated(page=1, page_size=20)
+
+    def test_get_tenants_paginated_custom_page_size(self, service_mocks):
+        """Test get_tenants_paginated with custom page and page_size"""
+        # Setup
+        tenant_ids = ["tenant1", "tenant2", "tenant3", "tenant4", "tenant5"]
+        
+        # Create a function that returns tenant info based on tenant_id
+        def mock_get_tenant_info(tenant_id):
+            idx = int(tenant_id.replace("tenant", ""))
+            return {"tenant_id": tenant_id, "tenant_name": f"Tenant {idx}", "default_group_id": f"group{idx}"}
+
+        # Mock dependencies
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=mock_get_tenant_info):
+
+            # Execute - page 2 with page_size 2 should return tenants 3 and 4
+            result = get_tenants_paginated(page=2, page_size=2)
+
+            # Assert
+            assert result["total"] == 5
+            assert result["page"] == 2
+            assert result["page_size"] == 2
+            assert result["total_pages"] == 3
+            assert len(result["data"]) == 2
+            assert result["data"][0]["tenant_id"] == "tenant3"
+            assert result["data"][1]["tenant_id"] == "tenant4"
+
+    def test_get_tenants_paginated_last_page(self, service_mocks):
+        """Test get_tenants_paginated on the last page with fewer items"""
+        # Setup
+        tenant_ids = ["tenant1", "tenant2", "tenant3", "tenant4", "tenant5"]
+        
+        # Create a function that returns tenant info based on tenant_id
+        def mock_get_tenant_info(tenant_id):
+            idx = int(tenant_id.replace("tenant", ""))
+            return {"tenant_id": tenant_id, "tenant_name": f"Tenant {idx}", "default_group_id": f"group{idx}"}
+
+        # Mock dependencies
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=mock_get_tenant_info):
+
+            # Execute - page 3 with page_size 2 should return only tenant5
+            result = get_tenants_paginated(page=3, page_size=2)
+
+            # Assert
+            assert result["total"] == 5
+            assert result["page"] == 3
+            assert result["page_size"] == 2
+            assert result["total_pages"] == 3
+            assert len(result["data"]) == 1
+            assert result["data"][0]["tenant_id"] == "tenant5"
 
 
 class TestCreateTenant:
