@@ -112,22 +112,35 @@ def check_tenant_name_exists(tenant_name: str, exclude_tenant_id: Optional[str] 
     return False
 
 
-def get_all_tenants() -> List[Dict[str, Any]]:
+def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     """
-    Get all tenants
+    Get tenants with pagination support
+
+    Args:
+        page (int): Page number (starting from 1)
+        page_size (int): Number of items per page
 
     Returns:
-        List[Dict[str, Any]]: List of all tenant information
+        Dict[str, Any]: Dictionary containing paginated tenant data and pagination info
     """
-    tenant_ids = get_all_tenant_ids()
-    tenants = []
+    # Get all tenant IDs first
+    all_tenant_ids = get_all_tenant_ids()
+    total = len(all_tenant_ids)
 
-    for tenant_id in tenant_ids:
+    # Calculate pagination
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+
+    # Get tenant IDs for current page
+    page_tenant_ids = all_tenant_ids[start_idx:end_idx]
+
+    tenants = []
+    for tenant_id in page_tenant_ids:
         try:
             tenant_info = get_tenant_info(tenant_id)
             tenants.append(tenant_info)
         except NotFoundException:
-            # Return tenant with basic info but empty name for frontend to show as "unnamed tenant"
             logging.warning(f"Tenant info of {tenant_id} not found. Returning basic tenant structure.")
             tenant_info = {
                 "tenant_id": tenant_id,
@@ -136,7 +149,13 @@ def get_all_tenants() -> List[Dict[str, Any]]:
             }
             tenants.append(tenant_info)
 
-    return tenants
+    return {
+        "data": tenants,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[str, Any]:

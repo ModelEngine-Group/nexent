@@ -296,7 +296,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.delete_flag IS 'Whether it is deleted. O
 
 -- Create the ag_tenant_agent_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
-    agent_id INTEGER NOT NULL,
+    agent_id SERIAL NOT NULL,
     name VARCHAR(100),
     display_name VARCHAR(100),
     description VARCHAR,
@@ -996,7 +996,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (184, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
+(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE');
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)

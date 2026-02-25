@@ -4,13 +4,17 @@ Tenant management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Body
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
-from consts.model import TenantCreateRequest, TenantUpdateRequest
+from consts.model import (
+    PaginationRequest,
+    TenantCreateRequest,
+    TenantUpdateRequest,
+)
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from services.tenant_service import create_tenant, get_tenant_info, get_all_tenants, update_tenant_info
+from services.tenant_service import create_tenant, get_tenant_info, get_tenants_paginated, update_tenant_info
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -109,23 +113,32 @@ async def get_tenant_endpoint(tenant_id: str) -> JSONResponse:
         )
 
 
-@router.get("")
-async def get_all_tenants_endpoint() -> JSONResponse:
+@router.post("/tenant-list")
+async def get_all_tenants_endpoint(
+    pagination: PaginationRequest = Body(...)
+) -> JSONResponse:
     """
-    Get all tenants
+    Get all tenants with pagination support
+
+    Args:
+        pagination: Pagination parameters (page, page_size)
 
     Returns:
-        JSONResponse: List of all tenants
+        JSONResponse: Paginated list of tenants with total count
     """
     try:
-        # Get all tenants
-        tenants = get_all_tenants()
+        # Get paginated tenants
+        result = get_tenants_paginated(page=pagination.page, page_size=pagination.page_size)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
                 "message": "Tenants retrieved successfully",
-                "data": tenants
+                "data": result["data"],
+                "total": result["total"],
+                "page": result["page"],
+                "page_size": result["page_size"],
+                "total_pages": result["total_pages"]
             }
         )
 
