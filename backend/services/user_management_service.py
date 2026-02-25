@@ -120,51 +120,6 @@ async def check_auth_service_health():
                 raise ConnectionError("Auth service is unavailable")
 
 
-async def signup_user(email: EmailStr,
-                      password: str,
-                      is_admin: Optional[bool] = False,
-                      invite_code: Optional[str] = None):
-    """User registration"""
-    client = get_supabase_client()
-    logging.info(
-        f"Receive registration request: email={email}, is_admin={is_admin}")
-    if is_admin:
-        await verify_invite_code(invite_code)
-
-    # Set user metadata, including role information
-    response = client.auth.sign_up({
-        "email": email,
-        "password": password,
-        "options": {
-            "data": {"role": "admin" if is_admin else "user"}
-        }
-    })
-
-    if response.user:
-        user_id = response.user.id
-        user_role = "admin" if is_admin else "user"
-        tenant_id = user_id if is_admin else "tenant_id"
-
-        # Create user tenant relationship
-        insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_email=email)
-
-        logging.info(
-            f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}")
-
-        if is_admin:
-            await generate_tts_stt_4_admin(tenant_id, user_id)
-
-        # Initialize tool list for the new tenant (only once per tenant)
-        await init_tool_list_for_tenant(tenant_id, user_id)
-
-        return await parse_supabase_response(is_admin, response, user_role)
-    else:
-        logging.error(
-            "Supabase registration request returned no user object")
-        raise UserRegistrationException(
-            "Registration service is temporarily unavailable, please try again later")
-
-
 async def signup_user_with_invitation(email: EmailStr,
                                       password: str,
                                       invite_code: Optional[str] = None):

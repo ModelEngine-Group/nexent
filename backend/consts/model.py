@@ -32,7 +32,6 @@ class UserSignUpRequest(BaseModel):
     password: str = Field(..., min_length=6)
     is_admin: Optional[bool] = False
     invite_code: Optional[str] = None
-    with_new_invitation: Optional[bool] = False
 
 
 class UserSignInRequest(BaseModel):

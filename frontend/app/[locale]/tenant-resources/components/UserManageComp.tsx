@@ -12,6 +12,7 @@ import {
   Input,
   Popconfirm,
   message,
+  Switch,
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -22,6 +23,8 @@ import {
   createTenant,
   updateTenant,
 } from "@/services/tenantService";
+import { createInvitation } from "@/services/invitationService";
+import { authService } from "@/services/authService";
 import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
@@ -44,6 +47,8 @@ function TenantList({
   onTenantsRefetch,
   loading,
   t,
+  onUserListRefresh,
+  onInvitationListRefresh,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
@@ -52,14 +57,20 @@ function TenantList({
   onTenantsRefetch: () => void;
   loading?: boolean;
   t: (key: string, options?: any) => string;
+    onUserListRefresh?: () => void;
+    onInvitationListRefresh?: () => void;
 }) {
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
 
+  // State for generate admin account feature
+  const [generateAdminAccount, setGenerateAdminAccount] = useState(false);
+
   const openCreate = () => {
     setEditingTenant(null);
     form.resetFields();
+    setGenerateAdminAccount(false);
     setModalVisible(true);
   };
 
@@ -90,6 +101,7 @@ function TenantList({
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
+
       if (editingTenant) {
         await updateTenant(editingTenant.tenant_id, {
           tenant_name: values.name,
@@ -98,11 +110,55 @@ function TenantList({
         await onTenantsRefetch();
         message.success(t("tenantResources.tenants.updated"));
       } else {
+        // Create tenant first
         const newTenant = await createTenant({ tenant_name: values.name });
         // Refresh the tenant list to include the new tenant
         await onTenantsRefetch();
         onSelect(newTenant.tenant_id);
         message.success(t("tenantResources.tenants.created"));
+
+        // If generate admin account is enabled, create invitation and register admin
+        if (generateAdminAccount && values.adminEmail && values.adminPassword) {
+          try {
+            // Create invitation code with capacity=1 and code_type=ADMIN_INVITE
+            const invitation = await createInvitation({
+              tenant_id: newTenant.tenant_id,
+              code_type: "ADMIN_INVITE",
+              capacity: 1,
+            });
+
+            // Register admin account using the invitation code
+            const signupResult = await authService.signUp(
+              values.adminEmail,
+              values.adminPassword,
+              invitation.invitation_code,
+              false // autoLogin=false to avoid logging in as the new admin
+            );
+
+            if (signupResult.error) {
+              // Handle signup error
+              const errorMsg = signupResult.error.message || "";
+              if (errorMsg.includes("already exists") || errorMsg.includes("EMAIL_ALREADY_EXISTS")) {
+                message.error(t("tenantResources.tenants.emailAlreadyExists"));
+              } else {
+                message.error(t("tenantResources.tenants.failedToCreateAdminAccount"));
+              }
+            } else {
+              message.success(t("tenantResources.tenants.adminAccountCreated"));
+              // Refresh user list and invitation list to show the newly created admin
+              onUserListRefresh?.();
+              onInvitationListRefresh?.();
+            }
+          } catch (adminError: any) {
+            // Handle admin account creation error
+            const errorMsg = adminError?.response?.data?.message || adminError?.message || "";
+            if (errorMsg.includes("already exists") || errorMsg.includes("EMAIL_ALREADY_EXISTS")) {
+              message.error(t("tenantResources.tenants.emailAlreadyExists"));
+            } else {
+              message.error(t("tenantResources.tenants.failedToCreateAdminAccount"));
+            }
+          }
+        }
       }
       setModalVisible(false);
     } catch (err: any) {
@@ -137,14 +193,17 @@ function TenantList({
         />
       </div>
       <div className="space-y-1">
-        {loading ? (
-          <div className="p-4 text-center text-gray-500">
+        {loading && (
+          <div key="loading" className="p-4 text-center text-gray-500">
             Loading tenants...
           </div>
-        ) : tenants.length === 0 ? (
-          <div className="p-4 text-center text-gray-500">No tenants found</div>
-        ) : (
-          tenants.map((tenant) => (
+        )}
+        {!loading && tenants.length === 0 && (
+          <div key="empty" className="p-4 text-center text-gray-500">No tenants found</div>
+        )}
+        {!loading && tenants.length > 0 && (
+          <>
+            {tenants.map((tenant) => (
             <div
               key={tenant.tenant_id}
               className={`group p-2 rounded-md cursor-pointer transition-all ${
@@ -198,7 +257,8 @@ function TenantList({
                 </div>
               </div>
             </div>
-          ))
+            ))}
+          </>
         )}
       </div>
 
@@ -215,19 +275,109 @@ function TenantList({
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
       >
-        <Form layout="vertical" form={form}>
+        <Form layout="vertical" form={form} autoComplete="off" style={{ marginBottom: -12 }}>
           <Form.Item
             name="name"
             label={t("tenantResources.tenants.name")}
             rules={[
               {
                 required: true,
-                message: t("common.required") || "Please enter tenant name",
+                message: t("common.required"),
               },
             ]}
           >
-            <Input placeholder="Enter tenant name" />
+            <Input placeholder={t("tenantResources.tenants.namePlaceholder")} />
           </Form.Item>
+
+          {/* Generate Admin Account Switch - Only show in create mode */}
+          {!editingTenant && (
+            <>
+              <Form.Item
+                labelCol={{ span: 24 }}
+                wrapperCol={{ span: 24 }}
+              >
+                <div className="flex items-center justify-between">
+                  <span>{t("tenantResources.tenants.generateAdminAccount")}</span>
+                  <Switch
+                    checked={generateAdminAccount}
+                    onChange={(checked) => {
+                      setGenerateAdminAccount(checked);
+                      if (!checked) {
+                        form.resetFields(["adminEmail", "adminPassword", "confirmAdminPassword"]);
+                      }
+                    }}
+                  />
+                </div>
+              </Form.Item>
+
+              {/* Admin account fields - show when switch is enabled */}
+              {generateAdminAccount && (
+                <>
+                  <Form.Item
+                    name="adminEmail"
+                    label={t("tenantResources.tenants.adminEmail")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("tenantResources.tenants.adminEmailRequired"),
+                      },
+                      {
+                        type: "email",
+                        message: t("tenantResources.tenants.invalidEmailFormat"),
+                      },
+                    ]}
+                  >
+                    <Input placeholder={t("tenantResources.tenants.adminEmail")} autoComplete="new-email" />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="adminPassword"
+                    label={t("tenantResources.tenants.adminPassword")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("tenantResources.tenants.adminPasswordRequired"),
+                      },
+                      {
+                        min: 6,
+                        message: t("tenantResources.tenants.weakPassword"),
+                      },
+                    ]}
+                  >
+                    <Input.Password
+                      placeholder={t("tenantResources.tenants.adminPassword")}
+                      autoComplete="new-password"
+                    />
+                  </Form.Item>
+
+                  <Form.Item
+                    name="confirmAdminPassword"
+                    label={t("tenantResources.tenants.confirmAdminPassword")}
+                    dependencies={["adminPassword"]}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("tenantResources.tenants.adminPasswordRequired"),
+                      },
+                      ({ getFieldValue }) => ({
+                        validator(_, value) {
+                          if (!value || getFieldValue("adminPassword") === value) {
+                            return Promise.resolve();
+                          }
+                          return Promise.reject(new Error(t("tenantResources.tenants.passwordsDoNotMatch")));
+                        },
+                      }),
+                    ]}
+                  >
+                    <Input.Password
+                      placeholder={t("tenantResources.tenants.confirmAdminPassword")}
+                      autoComplete="new-password"
+                    />
+                  </Form.Item>
+                </>
+              )}
+            </>
+          )}
         </Form>
       </Modal>
     </div>
@@ -253,6 +403,12 @@ export default function UserManageComp() {
 
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
+
+  // User list refresh key - increment to trigger user list refetch
+  const [userListRefreshKey, setUserListRefreshKey] = useState(0);
+
+  // Invitation list refresh key - increment to trigger invitation list refetch
+  const [invitationListRefreshKey, setInvitationListRefreshKey] = useState(0);
 
   // For non-super admins, automatically select their own tenant based on user.tenantId
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -360,6 +516,8 @@ export default function UserManageComp() {
                     onTenantsRefetch={refetchTenants}
                     loading={tenantsLoading}
                     t={t}
+                    onUserListRefresh={() => setUserListRefreshKey((prev) => prev + 1)}
+                    onInvitationListRefresh={() => setInvitationListRefreshKey((prev) => prev + 1)}
                   />
                 </div>
               </div>
@@ -401,7 +559,7 @@ export default function UserManageComp() {
                   {
                     key: "users",
                     label: t("tenantResources.tabs.users") || "Users",
-                    children: <UserList tenantId={tenantId} />,
+                    children: <UserList tenantId={tenantId} refreshKey={userListRefreshKey} />,
                   },
                   {
                     key: "groups",
@@ -432,7 +590,7 @@ export default function UserManageComp() {
                   {
                     key: "invitations",
                     label: t("tenantResources.invitation.tab") || "Invitations",
-                    children: <InvitationList tenantId={tenantId} />,
+                    children: <InvitationList tenantId={tenantId} refreshKey={invitationListRefreshKey} />,
                   },
                 ]}
               />
@@ -441,7 +599,7 @@ export default function UserManageComp() {
                 <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
                   <Users className="h-8 w-8 text-gray-400" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
                   {t("tenantResources.selectTenantFirst") ||
                     "Please select a tenant"}
                 </h3>

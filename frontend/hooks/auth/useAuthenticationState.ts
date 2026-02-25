@@ -115,8 +115,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     async (
       email: string,
       password: string,
-      inviteCode?: string,
-      withNewInvitation?: boolean
+      inviteCode?: string
     ) => {
       setIsLoading(true);
 
@@ -124,8 +123,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
         const { data, error } = await authService.signUp(
           email,
           password,
-          inviteCode,
-          withNewInvitation
+          inviteCode
         );
 
         if (error) {

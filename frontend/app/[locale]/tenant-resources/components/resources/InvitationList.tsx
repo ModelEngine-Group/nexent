@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import dayjs from "dayjs";
 import {
@@ -37,7 +37,7 @@ import { formatDate } from "@/lib/date";
 
 const { Panel } = Collapse;
 
-export default function InvitationList({ tenantId }: { tenantId: string | null }) {
+export default function InvitationList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
   const { t } = useTranslation("common");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -54,6 +54,13 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
     sort_by: "update_time",
     sort_order: "desc",
   });
+
+  // Trigger refetch when refreshKey changes
+  useEffect(() => {
+    if (refreshKey && refreshKey > 0 && tenantId) {
+      refetch();
+    }
+  }, [refreshKey, tenantId, refetch]);
 
   // Fetch groups for group selection
   const { data: groupData } = useGroupList(tenantId, 1, 100); // Get all groups for selection
@@ -104,7 +111,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
   const handleDelete = async (invitationCode: string) => {
     try {
       await deleteInvitation(invitationCode);
-      message.success(t("tenantResources.invitationDeleted"));
+      message.success(t("tenantResources.invitation.invitationDeleted"));
       refetch();
     } catch (error: any) {
       // Check if it's an authentication error
@@ -444,7 +451,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
                 {
                   validator: async (_, value) => {
                     if (!value) {
-                      return Promise.reject(new Error("Required"));
+                      return Promise.resolve();
                     }
                     try {
                       const exists = await checkInvitationCodeExists(value);
@@ -460,7 +467,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
               ]}
             >
               <Input
-                placeholder={t("tenantResources.invitation.invitationCode")}
+                placeholder={t("tenantResources.invitation.invitationCodePlaceholder")}
                 onChange={(e) => {
                   const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
                   form.setFieldsValue({ invitation_code: value });
@@ -503,7 +510,7 @@ export default function InvitationList({ tenantId }: { tenantId: string | null }
           <Form.Item name="expiry_date" label={t("tenantResources.invitation.expiryDate")}>
             <DatePicker
               format="YYYY-MM-DD"
-              placeholder={t("tenantResources.invitation.expiryDate")}
+              placeholder={t("tenantResources.invitation.expiryDatePlaceholder")}
               style={{ width: "100%" }}
               disabledDate={(current) => {
                 if (!current) return false;

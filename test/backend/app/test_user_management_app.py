@@ -98,7 +98,7 @@ class TestUserSignup:
 
     def test_signup_success_regular_user(self):
         """Test successful regular user registration"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.return_value = {"user_id": "123", "email": "test@example.com"}
 
             response = client.post(
@@ -106,25 +106,23 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "is_admin": False,
                     "invite_code": None
                 }
             )
 
             assert response.status_code == HTTPStatus.OK
             data = response.json()
-            assert "User account registered successfully" in data["message"]
+            assert "registered successfully" in data["message"]
             assert "data" in data
             mock_signup.assert_called_once_with(
                 email="test@example.com",
                 password="password123",
-                is_admin=False,
                 invite_code=None
             )
 
     def test_signup_success_admin_user(self):
         """Test successful admin user registration"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.return_value = {"user_id": "123", "email": "admin@example.com"}
 
             response = client.post(
@@ -132,7 +130,6 @@ class TestUserSignup:
                 json={
                     "email": "admin@example.com",
                     "password": "password123",
-                    "is_admin": True,
                     "invite_code": "admin_code"
                 }
             )
@@ -144,13 +141,12 @@ class TestUserSignup:
             mock_signup.assert_called_once_with(
                 email="admin@example.com",
                 password="password123",
-                is_admin=True,
                 invite_code="admin_code"
             )
 
     def test_signup_no_invite_code_exception(self):
         """Test registration fails due to missing invite code"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = NoInviteCodeException("No invite code configured")
 
             response = client.post(
@@ -158,7 +154,6 @@ class TestUserSignup:
                 json={
                     "email": "admin@example.com",
                     "password": "password123",
-                    "is_admin": True,
                     "invite_code": None
                 }
             )
@@ -169,7 +164,7 @@ class TestUserSignup:
 
     def test_signup_incorrect_invite_code_exception(self):
         """Test registration fails due to incorrect invite code"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = IncorrectInviteCodeException("Invalid invite code")
 
             response = client.post(
@@ -177,7 +172,6 @@ class TestUserSignup:
                 json={
                     "email": "admin@example.com",
                     "password": "password123",
-                    "is_admin": True,
                     "invite_code": "wrong_code"
                 }
             )
@@ -188,7 +182,7 @@ class TestUserSignup:
 
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = UserRegistrationException("Service error")
 
             response = client.post(
@@ -196,7 +190,6 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "is_admin": False,
                     "invite_code": None
                 }
             )
@@ -207,7 +200,7 @@ class TestUserSignup:
 
     def test_signup_email_already_exists(self):
         """Test registration fails due to email already existing"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = AuthApiError("Email already exists", 400, "email_exists")
 
             response = client.post(
@@ -215,7 +208,6 @@ class TestUserSignup:
                 json={
                     "email": "existing@example.com",
                     "password": "password123",
-                    "is_admin": False,
                     "invite_code": None
                 }
             )
@@ -226,7 +218,7 @@ class TestUserSignup:
 
     def test_signup_weak_password(self):
         """Test registration fails due to weak password"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = AuthWeakPasswordError("Password too weak", 400, ["Password is too weak"])
 
             response = client.post(
@@ -234,7 +226,6 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "weakpass",
-                    "is_admin": False,
                     "invite_code": None
                 }
             )
@@ -245,7 +236,7 @@ class TestUserSignup:
 
     def test_signup_unknown_error(self):
         """Test registration fails due to unknown error"""
-        with patch('apps.user_management_app.signup_user') as mock_signup:
+        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = Exception("Unknown error")
 
             response = client.post(
@@ -253,7 +244,6 @@ class TestUserSignup:
                 json={
                     "email": "test@example.com",
                     "password": "password123",
-                    "is_admin": False,
                     "invite_code": None
                 }
             )
@@ -751,7 +741,7 @@ class TestRevokeUserAccount:
 class TestIntegration:
     """Integration tests for user management flow"""
 
-    @patch('apps.user_management_app.signup_user')
+    @patch('apps.user_management_app.signup_user_with_invitation')
     @patch('apps.user_management_app.signin_user')
     @patch('apps.user_management_app.get_session_by_authorization')
     @patch('apps.user_management_app.get_authorized_client')
@@ -764,7 +754,6 @@ class TestIntegration:
             json={
                 "email": "test@example.com",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
@@ -832,7 +821,6 @@ class TestDataValidation:
             json={
                 "email": "invalid-email",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
