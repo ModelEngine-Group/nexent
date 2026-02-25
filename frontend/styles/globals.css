@@ -333,3 +333,8 @@ tr.selected-row > td:first-child::before {
   pointer-events: none;
   border-radius: 0 4px 4px 0;
 }
+
+/* Override antd Tooltip inner border to prevent double borders */
+.ant-tooltip .ant-tooltip-inner {
+  border: none !important;
+}
