@@ -12,6 +12,8 @@ import {
   Input,
   Popconfirm,
   message,
+  Spin,
+  Pagination,
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
@@ -34,13 +36,20 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
 
+// Default page size for pagination
+const DEFAULT_PAGE_SIZE = 20;
+
 // Removed mockTenants - now using real data from API
 
 function TenantList({
   selected,
   onSelect,
   tenants,
-  onTenantsChange,
+  total,
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
   onTenantsRefetch,
   loading,
   t,
@@ -48,7 +57,11 @@ function TenantList({
   selected: string | null;
   onSelect: (id: string) => void;
   tenants: Tenant[];
-  onTenantsChange: (tenants: Tenant[]) => void;
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  onPageChange?: (page: number) => void;
   onTenantsRefetch: () => void;
   loading?: boolean;
   t: (key: string, options?: any) => string;
@@ -57,6 +70,7 @@ function TenantList({
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
 
+  // Handle scroll event for infinite loading
   const openCreate = () => {
     setEditingTenant(null);
     form.resetFields();
@@ -136,17 +150,21 @@ function TenantList({
           className="p-1 hover:bg-gray-100 rounded"
         />
       </div>
-      <div className="space-y-1">
-        {loading ? (
+      <div
+        className="space-y-1 overflow-y-auto"
+        style={{ maxHeight: "calc(100vh - 340px)" }}
+      >
+        {loading && tenants.length === 0 ? (
           <div className="p-4 text-center text-gray-500">
-            Loading tenants...
+            <Spin size="small" /> Loading tenants...
           </div>
         ) : tenants.length === 0 ? (
           <div className="p-4 text-center text-gray-500">No tenants found</div>
         ) : (
-          tenants.map((tenant) => (
+          <>
+            {tenants.map((tenant, index) => (
             <div
-              key={tenant.tenant_id}
+              key={tenant.tenant_id || `tenant-${index}`}
               className={`group p-2 rounded-md cursor-pointer transition-all ${
                 selected === tenant.tenant_id
                   ? "bg-blue-50 border border-blue-200"
@@ -198,9 +216,25 @@ function TenantList({
                 </div>
               </div>
             </div>
-          ))
+          ))}
+          </>
         )}
       </div>
+
+      {/* Pagination */}
+      {total !== undefined && total > 0 && (
+        <div className="p-2 flex justify-center">
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            onChange={onPageChange}
+            showSizeChanger={false}
+            size="small"
+            hideOnSinglePage={true}
+          />
+        </div>
+      )}
 
       {/* Tenant Modal */}
       <Modal
@@ -243,13 +277,27 @@ export default function UserManageComp() {
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
 
-  // Get real tenant data from API
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Get paginated tenant data from API
   const {
     data: tenantData,
     isLoading: tenantsLoading,
     refetch: refetchTenants,
-  } = useTenantList();
-  const tenants = tenantData || [];
+  } = useTenantList({ page: currentPage, page_size: DEFAULT_PAGE_SIZE });
+
+  // Handle page change
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  // Reset tenants when page changes to super admin
+  useEffect(() => {
+    if (isSuperAdmin) {
+      setCurrentPage(1);
+    }
+  }, [isSuperAdmin]);
 
   // Tenant management state for super admin operations
   const [tenantsState, setTenantsState] = useState<Tenant[]>([]);
@@ -263,7 +311,7 @@ export default function UserManageComp() {
   }, [isSuperAdmin, tenantId, user?.tenantId]);
 
   // Get current tenant name
-  const currentTenant = tenants.find((t) => t.tenant_id === tenantId);
+  const currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
   const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
 
   // Tenant name editing states
@@ -355,9 +403,16 @@ export default function UserManageComp() {
                   <TenantList
                     selected={tenantId}
                     onSelect={(id) => setTenantId(id)}
-                    tenants={tenants}
-                    onTenantsChange={setTenantsState}
-                    onTenantsRefetch={refetchTenants}
+                    tenants={tenantData?.data || []}
+                    total={tenantData?.total}
+                    page={tenantData?.page}
+                    pageSize={tenantData?.page_size}
+                    totalPages={tenantData?.total_pages}
+                    onPageChange={handlePageChange}
+                    onTenantsRefetch={() => {
+                      setCurrentPage(1);
+                      refetchTenants();
+                    }}
                     loading={tenantsLoading}
                     t={t}
                   />
