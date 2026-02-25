@@ -203,7 +203,6 @@ export default function AgentGenerateDetail({
 
   // Initialize form values when component mounts or currentAgentId changes
   useEffect(() => {
-    console.log("avaliableLlmModels", isCreatingMode, availableLlmModels);
 
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
@@ -238,15 +237,12 @@ export default function AgentGenerateDetail({
     form.setFieldsValue(initialAgentInfo);
     // Sync model to store if not already set (e.g., in create mode with default model)
     if (isCreatingMode && defaultLlmModel) {
-      console.log("111defaultLlmModel", defaultLlmModel);
       updateProfileInfo({
         model: defaultLlmModel.displayName || "",
         model_id: defaultLlmModel.id || 0,
       });
     }
-    // We intentionally initialize the form only when switching agent (or when default model becomes available),
-    // otherwise it can create update loops with Form-controlled fields updating the store.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [currentAgentId, defaultLlmModel?.id, isCreatingMode]);
 
   // Default to selecting all groups when creating a new agent.
