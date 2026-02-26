@@ -1622,7 +1622,8 @@ class TestCreateAgentRunInfo:
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):
-        """Test case for successfully creating agent run info"""
+        """Test case for successfully creating agent run info with dict format mcp_host"""
+        mock_agent_run_info.reset_mock()
         with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
                 patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
@@ -1638,7 +1639,8 @@ class TestCreateAgentRunInfo:
                 {
                     "remote_mcp_server_name": "test_server",
                     "remote_mcp_server": "http://test.server",
-                    "status": True
+                    "status": True,
+                    "authorization_token": None
                 }
             ]
             mock_create_agent.return_value = "agent_config"
@@ -1656,13 +1658,17 @@ class TestCreateAgentRunInfo:
                 language="zh"
             )
 
-            # Verify that AgentRunInfo was called correctly
-            mock_agent_run_info.assert_called_once_with(
+            # Verify that AgentRunInfo was called correctly with dict format mcp_host
+            assert mock_agent_run_info.call_count == 1
+            mock_agent_run_info.assert_called_with(
                 query="processed_query",
                 model_config_list=["model_config"],
                 observer=mock_message_observer.return_value,
                 agent_config="agent_config",
-                mcp_host=["http://test.server"],
+                mcp_host=[{
+                    "url": "http://test.server",
+                    "transport": "streamable-http"
+                }],
                 history=[],
                 stop_event="stop_event"
             )
@@ -1684,14 +1690,268 @@ class TestCreateAgentRunInfo:
                 "test_server": {
                     "remote_mcp_server_name": "test_server",
                     "remote_mcp_server": "http://test.server",
-                    "status": True
+                    "status": True,
+                    "authorization_token": None
                 },
                 "nexent": {
                     "remote_mcp_server_name": "nexent",
                     "remote_mcp_server": "http://nexent.mcp/sse",
-                    "status": True
+                    "status": True,
+                    "authorization_token": None
                 }
             })
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_authorization_token(self):
+        """Test case for mcp_host with authorization token"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "test_server",
+                    "remote_mcp_server": "http://test.server",
+                    "status": True,
+                    "authorization_token": "bearer_token_123"
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://test.server"]
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host includes authorization token
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://test.server",
+                "transport": "streamable-http",
+                "authorization": "bearer_token_123"
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_sse_transport(self):
+        """Test case for mcp_host with SSE transport (URL ends with /sse)"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "sse_server",
+                    "remote_mcp_server": "http://sse.server/sse",
+                    "status": True,
+                    "authorization_token": None
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://sse.server/sse"]
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host uses SSE transport
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == {
+                "url": "http://sse.server/sse",
+                "transport": "sse"
+            }
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_fallback_to_string_format(self):
+        """Test case for fallback to string format when MCP record not found"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            # Return empty list so the URL from filter won't be found in remote_mcp_list
+            mock_get_mcp.return_value = []
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            # Filter returns a URL that doesn't exist in remote_mcp_list
+            mock_filter.return_value = ["http://unknown.server"]
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host falls back to string format
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == "http://unknown.server"
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_mixed_scenarios(self):
+        """Test case for mixed scenarios: multiple servers with different configurations"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "server1",
+                    "remote_mcp_server": "http://server1.com",
+                    "status": True,
+                    "authorization_token": "token1"
+                },
+                {
+                    "remote_mcp_server_name": "server2",
+                    "remote_mcp_server": "http://server2.com/sse",
+                    "status": True,
+                    "authorization_token": None
+                },
+                {
+                    "remote_mcp_server_name": "server3",
+                    "remote_mcp_server": "http://server3.com",
+                    "status": True,
+                    "authorization_token": "token3"
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            # Filter returns URLs: one with token, one SSE without token, one unknown
+            mock_filter.return_value = [
+                "http://server1.com",
+                "http://server2.com/sse",
+                "http://unknown.server"
+            ]
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host contains mixed formats
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 3
+            # First: dict with authorization and streamable-http
+            assert mcp_host[0] == {
+                "url": "http://server1.com",
+                "transport": "streamable-http",
+                "authorization": "token1"
+            }
+            # Second: dict with SSE transport, no authorization
+            assert mcp_host[1] == {
+                "url": "http://server2.com/sse",
+                "transport": "sse"
+            }
+            # Third: string format (fallback for unknown server)
+            assert mcp_host[2] == "http://unknown.server"
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_with_status_false(self):
+        """Test case for MCP record with status=False (should not be matched)"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "disabled_server",
+                    "remote_mcp_server": "http://disabled.server",
+                    "status": False,  # Status is False
+                    "authorization_token": "token"
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            # Filter returns URL that exists but has status=False
+            mock_filter.return_value = ["http://disabled.server"]
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify mcp_host falls back to string format because status=False
+            assert mock_agent_run_info.call_count == 1
+            call_args = mock_agent_run_info.call_args
+            mcp_host = call_args[1]["mcp_host"]
+            assert len(mcp_host) == 1
+            assert mcp_host[0] == "http://disabled.server"
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_forwards_allow_memory_false(self):

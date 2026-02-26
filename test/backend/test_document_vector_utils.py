@@ -54,7 +54,6 @@ from backend.utils.document_vector_utils import (
     merge_cluster_summaries,
     get_documents_from_es,
     process_documents_for_clustering,
-    extract_cluster_content,
     analyze_cluster_coherence,
     merge_duplicate_documents_in_clusters
 )
@@ -499,32 +498,6 @@ class TestProcessDocumentsForClustering:
             assert isinstance(documents, dict)
             assert isinstance(embeddings, dict)
             assert len(documents) == len(embeddings)
-
-
-class TestExtractClusterContent:
-    """Test cluster content extraction"""
-
-    def test_extract_cluster_content(self):
-        """Test extracting content from cluster documents"""
-        document_samples = {
-            'doc1': {
-                'chunks': [{'content': 'Content 1'}],
-                'filename': 'doc1.pdf'
-            },
-            'doc2': {
-                'chunks': [{'content': 'Content 2'}],
-                'filename': 'doc2.pdf'
-            }
-        }
-        doc_ids = ['doc1', 'doc2']
-
-        result = extract_cluster_content(document_samples, doc_ids)
-
-        assert isinstance(result, str)  # The function returns a formatted string
-        assert 'Content 1' in result
-        assert 'Content 2' in result
-        assert 'doc1.pdf' in result
-        assert 'doc2.pdf' in result
 
 
 class TestAnalyzeClusterCoherence:

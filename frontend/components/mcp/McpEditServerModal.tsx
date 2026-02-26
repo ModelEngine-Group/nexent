@@ -7,9 +7,10 @@ const { Text } = Typography;
 interface McpEditServerModalProps {
   open: boolean;
   onCancel: () => void;
-  onSave: (name: string, url: string) => Promise<void>;
+  onSave: (name: string, url: string, authorizationToken?: string | null) => Promise<void>;
   initialName: string;
   initialUrl: string;
+  initialAuthorizationToken?: string | null;
   loading: boolean;
 }
 
@@ -19,21 +20,24 @@ export default function McpEditServerModal({
   onSave,
   initialName,
   initialUrl,
+  initialAuthorizationToken,
   loading,
 }: McpEditServerModalProps) {
   const { t } = useTranslation("common");
   const [name, setName] = useState(initialName);
   const [url, setUrl] = useState(initialUrl);
+  const [authorizationToken, setAuthorizationToken] = useState(initialAuthorizationToken || "");
 
   useEffect(() => {
     if (open) {
       setName(initialName);
       setUrl(initialUrl);
+      setAuthorizationToken(initialAuthorizationToken || "");
     }
-  }, [open, initialName, initialUrl]);
+  }, [open, initialName, initialUrl, initialAuthorizationToken]);
 
   const handleSave = () => {
-    onSave(name, url);
+    onSave(name, url, authorizationToken || null);
   };
 
   return (
@@ -54,6 +58,15 @@ export default function McpEditServerModal({
         <div>
           <Text strong>{t("mcpConfig.editServer.mcpUrl")}</Text>
           <Input value={url} onChange={(e) => setUrl(e.target.value)} className="mt-2" />
+        </div>
+        <div>
+          <Text strong>{t("mcpConfig.editServer.authorizationToken")}</Text>
+          <Input.Password
+            value={authorizationToken}
+            onChange={(e) => setAuthorizationToken(e.target.value)}
+            placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
+            className="mt-2"
+          />
         </div>
       </Space>
     </Modal>

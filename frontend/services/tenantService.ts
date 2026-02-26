@@ -44,6 +44,22 @@ export interface CreateTenantResponse {
   message: string;
 }
 
+export interface TenantUser {
+  user_tenant_id: number;
+  user_id: string;
+  tenant_id: string;
+  user_role: string;
+  user_email: string;
+  create_time: string;
+  update_time: string;
+}
+
+export interface TenantUsersResponse {
+  users: TenantUser[];
+  total: number;
+  message: string;
+}
+
 export interface ListTenantsParams {
   page?: number;
   page_size?: number;
@@ -160,5 +176,36 @@ export async function deleteTenant(tenantId: string): Promise<void> {
       throw error;
     }
     throw new ApiError(500, "Failed to delete tenant");
+  }
+}
+
+/**
+ * Get users belonging to a tenant (using existing users/list endpoint)
+ */
+export async function getTenantUsers(tenantId: string): Promise<TenantUsersResponse> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.users.list, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tenant_id: tenantId,
+        page: 1,
+        page_size: 100, // Get all users for delete warning
+      }),
+    });
+
+    const result = await response.json();
+    return {
+      users: result.data || [],
+      total: result.pagination?.total || 0,
+      message: result.message || "",
+    };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to fetch tenant users");
   }
 }

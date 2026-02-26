@@ -12,6 +12,7 @@ from database.agent_version_db import (
     query_agent_draft,
     insert_version,
     update_version_status,
+    update_version,
     update_agent_current_version,
     insert_agent_snapshot,
     insert_tool_snapshot,
@@ -334,6 +335,40 @@ def update_version_status_impl(
         raise ValueError(f"Version {version_no} not found")
 
     return {"message": "Status updated successfully"}
+
+
+def update_version_impl(
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    version_no: int,
+    version_name: Optional[str] = None,
+    release_note: Optional[str] = None,
+) -> dict:
+    """
+    Update version metadata (version_name and release_note)
+    """
+    # Check if version exists
+    version = search_version_by_version_no(agent_id, tenant_id, version_no)
+    if not version:
+        raise ValueError(f"Version {version_no} not found")
+
+    rows_affected = update_version(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        version_name=version_name,
+        release_note=release_note,
+        updated_by=user_id,
+    )
+
+    if rows_affected == 0:
+        raise ValueError("No changes to update")
+
+    return {
+        "message": "Version updated successfully",
+        "version_no": version_no,
+    }
 
 
 def delete_version_impl(

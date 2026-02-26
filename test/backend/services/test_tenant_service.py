@@ -21,7 +21,7 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
 patch('backend.database.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from consts.exceptions import ValidationError
+from consts.exceptions import ValidationError, NotFoundException
 from backend.services.tenant_service import (
     get_tenant_info,
     get_tenants_paginated,
@@ -603,11 +603,385 @@ class TestUpdateTenantInfo:
 class TestDeleteTenant:
     """Test cases for delete_tenant function"""
 
-    def test_delete_tenant_always_fails(self):
-        """Test that delete_tenant always raises NotImplementedError"""
+    def test_delete_tenant_success(self):
+        """Test successfully deleting a tenant and all associated resources"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        # Mock dependencies
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.delete_model_record') as mock_delete_model, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.delete_knowledge_record') as mock_delete_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.delete_tools_by_agent_id') as mock_delete_tools, \
+             patch('backend.services.tenant_service.delete_agent_relationship') as mock_delete_rel, \
+             patch('backend.services.tenant_service.delete_agent_by_id') as mock_delete_agent, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.delete_mcp_record_by_name_and_url') as mock_delete_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.remove_invitation') as mock_remove_invitation, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            # Configure mocks
+            mock_get_config.return_value = {"tenant_config_id": 1, "config_value": "Test Tenant"}
+
+            # Empty lists for resources
+            mock_query_groups.return_value = {"data": []}
+            mock_get_models.return_value = []
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+            mock_get_mcp.return_value = []
+            mock_get_invitations.return_value = []
+            # Return some configs to verify deletion is called
+            mock_get_all_configs.return_value = [
+                {"tenant_config_id": 1},
+                {"tenant_config_id": 2},
+                {"tenant_config_id": 3}
+            ]
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert
+            assert result is True
+
+            # Verify soft delete of users was called
+            mock_soft_delete_users.assert_called_once_with(tenant_id, deleted_by)
+
+            # Verify configs deletion was called
+            mock_delete_config.assert_called()
+
+    def test_delete_tenant_not_found(self):
+        """Test delete_tenant when tenant doesn't exist"""
+        # Setup
+        tenant_id = "nonexistent_tenant"
+        deleted_by = "admin_user"
+
+        # Mock get_single_config_info to return None (tenant not found)
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
+            mock_get_config.return_value = None
+
         # Execute & Assert
-        with pytest.raises(NotImplementedError, match="Tenant deletion is not yet implemented"):
-            delete_tenant("any_tenant", "any_user")
+            with pytest.raises(NotFoundException, match="does not exist"):
+                delete_tenant(tenant_id, deleted_by)
+
+    def test_delete_tenant_validation_error(self):
+        """Test delete_tenant when validation fails"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        # Mock dependencies to raise ValidationError during deletion
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users:
+            mock_get_config.return_value = {"tenant_config_id": 1}
+            mock_soft_delete_users.side_effect = ValidationError("Database error")
+
+            # Execute & Assert
+            with pytest.raises(ValidationError, match="Failed to delete tenant"):
+                delete_tenant(tenant_id, deleted_by)
+
+    def test_delete_tenant_with_groups(self):
+        """Test delete_tenant deletes all groups in the tenant"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+
+            # Mock groups
+            mock_query_groups.return_value = {
+                "data": [
+                    {"group_id": 1, "group_name": "Group 1"},
+                    {"group_id": 2, "group_name": "Group 2"}
+                ]
+            }
+
+            mock_get_models.return_value = []
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+            mock_get_mcp.return_value = []
+            mock_get_invitations.return_value = []
+            mock_get_all_configs.return_value = []
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert
+            assert result is True
+            assert mock_remove_group.call_count == 2
+
+    def test_delete_tenant_with_group_deletion_error(self):
+        """Test delete_tenant handles group deletion errors gracefully"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+
+            # Mock groups - one group
+            mock_query_groups.return_value = {
+                "data": [
+                    {"group_id": 1, "group_name": "Group 1"},
+                ]
+            }
+
+            # Make remove_group raise an exception to test error handling
+            mock_remove_group.side_effect = Exception("Database error deleting group")
+
+            mock_get_models.return_value = []
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+            mock_get_mcp.return_value = []
+            mock_get_invitations.return_value = []
+            mock_get_all_configs.return_value = []
+
+            # Execute - should not raise, should handle exception gracefully
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert - deletion should still succeed despite group deletion error
+            assert result is True
+            # Verify remove_group was called and exception was caught
+            mock_remove_group.assert_called_once()
+
+    def test_delete_tenant_with_models(self):
+        """Test delete_tenant deletes all models in the tenant"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.delete_model_record') as mock_delete_model, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+            mock_query_groups.return_value = {"data": []}
+
+            # Mock models
+            mock_get_models.return_value = [
+                {"model_id": 1, "model_name": "Model 1"},
+                {"model_id": 2, "model_name": "Model 2"}
+            ]
+
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+            mock_get_mcp.return_value = []
+            mock_get_invitations.return_value = []
+            mock_get_all_configs.return_value = []
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert
+            assert result is True
+            assert mock_delete_model.call_count == 2
+
+    def test_delete_tenant_with_model_deletion_error(self):
+        """Test delete_tenant handles model deletion errors gracefully"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.delete_model_record') as mock_delete_model, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+            mock_query_groups.return_value = {"data": []}
+
+            # Mock models with one causing error
+            mock_get_models.return_value = [
+                {"model_id": 1, "model_name": "Model 1"},
+            ]
+            mock_delete_model.side_effect = Exception("Database error")
+
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+            mock_get_mcp.return_value = []
+            mock_get_invitations.return_value = []
+            mock_get_all_configs.return_value = []
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert - should succeed despite error
+            assert result is True
+
+    def test_delete_tenant_with_agents(self):
+        """Test delete_tenant deletes all agents in the tenant"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.delete_tools_by_agent_id') as mock_delete_tools, \
+             patch('backend.services.tenant_service.delete_agent_relationship') as mock_delete_rel, \
+             patch('backend.services.tenant_service.delete_agent_by_id') as mock_delete_agent, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+            mock_query_groups.return_value = {"data": []}
+            mock_get_models.return_value = []
+            mock_get_knowledge.return_value = []
+
+            # Mock agents - both draft and published
+            mock_get_agents.return_value = [
+                {"agent_id": "agent-1", "agent_name": "Agent 1"},
+            ]
+
+            mock_get_mcp.return_value = []
+            mock_get_invitations.return_value = []
+            mock_get_all_configs.return_value = []
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert
+            assert result is True
+            # Verify agent deletion calls (version 0)
+            mock_delete_tools.assert_called()
+            mock_delete_rel.assert_called()
+            mock_delete_agent.assert_called()
+
+    def test_delete_tenant_with_mcp_records(self):
+        """Test delete_tenant deletes all MCP configurations in the tenant"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.delete_mcp_record_by_name_and_url') as mock_delete_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+            mock_query_groups.return_value = {"data": []}
+            mock_get_models.return_value = []
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+
+            # Mock MCP records
+            mock_get_mcp.return_value = [
+                {"mcp_id": 1, "mcp_name": "MCP 1", "mcp_server": "http://mcp1.com"},
+                {"mcp_id": 2, "mcp_name": "MCP 2", "mcp_server": "http://mcp2.com"}
+            ]
+
+            mock_get_invitations.return_value = []
+            mock_get_all_configs.return_value = []
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert
+            assert result is True
+            assert mock_delete_mcp.call_count == 2
+
+    def test_delete_tenant_with_invitations(self):
+        """Test delete_tenant deletes all invitations in the tenant"""
+        # Setup
+        tenant_id = "test_tenant"
+        deleted_by = "admin_user"
+
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.remove_invitation') as mock_remove_invitation, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
+
+            mock_get_config.return_value = {"tenant_config_id": 1}
+            mock_query_groups.return_value = {"data": []}
+            mock_get_models.return_value = []
+            mock_get_knowledge.return_value = []
+            mock_get_agents.return_value = []
+            mock_get_mcp.return_value = []
+
+            # Mock invitations
+            mock_get_invitations.return_value = [
+                {"invitation_id": "inv-1"},
+                {"invitation_id": "inv-2"}
+            ]
+
+            mock_get_all_configs.return_value = []
+
+            # Execute
+            result = delete_tenant(tenant_id, deleted_by)
+
+            # Assert
+            assert result is True
+            assert mock_remove_invitation.call_count == 2
 
 
 class TestCreateDefaultGroupForTenant:
