@@ -70,7 +70,7 @@ function TenantList({
   pageSize?: number;
   totalPages?: number;
   onPageChange?: (page: number) => void;
-  onTenantsRefetch: () => void;
+  onTenantsRefetch: () => Promise<unknown>;
   loading?: boolean;
   t: (key: string, options?: any) => string;
     onUserListRefresh?: () => void;
@@ -692,9 +692,9 @@ export default function UserManageComp() {
                     pageSize={tenantData?.page_size}
                     totalPages={tenantData?.total_pages}
                     onPageChange={handlePageChange}
-                    onTenantsRefetch={() => {
+                    onTenantsRefetch={async () => {
                       setCurrentPage(1);
-                      refetchTenants();
+                      return refetchTenants();
                     }}
                     loading={tenantsLoading}
                     t={t}
