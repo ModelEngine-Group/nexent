@@ -8,6 +8,10 @@ COPY frontend /opt/frontend
 # Build Next.js application
 WORKDIR /opt/frontend
 
+# BuildKit must be enabled for --mount=type=cache to work
+# Docker 23.0+ has BuildKit enabled by default
+# For older versions, set environment variable: DOCKER_BUILDKIT=1
+# Or add "features": {"buildkit": true} to ~/.docker/config.json
 # Use BuildKit named caches for npm cache and node_modules
 # - id=npm-cache: persists across builds, keyed by cache id
 # - sharing=locked: allows concurrent access from multiple builds
