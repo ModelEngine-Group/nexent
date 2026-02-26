@@ -1715,6 +1715,71 @@ def test_update_version_status_api_exception(mocker, mock_auth_header):
     assert "Update version status error" in response.json()["detail"]
 
 
+def test_update_version_api_success(mocker, mock_auth_header):
+    """Test successful version metadata update"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_update_version = mocker.patch("apps.agent_app.update_version_impl")
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_update_version.return_value = {
+        "message": "Version updated successfully",
+        "version_no": 1
+    }
+
+    response = config_client.put(
+        "/agent/123/versions/1",
+        json={"version_name": "Updated Version", "release_note": "Updated note"},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    mock_update_version.assert_called_once_with(
+        agent_id=123,
+        tenant_id="test_tenant_id",
+        user_id="test_user_id",
+        version_no=1,
+        version_name="Updated Version",
+        release_note="Updated note"
+    )
+    assert response.json()["version_no"] == 1
+
+
+def test_update_version_api_bad_request(mocker, mock_auth_header):
+    """Test update version with ValueError"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_update_version = mocker.patch("apps.agent_app.update_version_impl")
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_update_version.side_effect = ValueError("No changes to update")
+
+    response = config_client.put(
+        "/agent/123/versions/1",
+        json={"version_name": "Updated Version"},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No changes to update"
+
+
+def test_update_version_api_exception(mocker, mock_auth_header):
+    """Test update version with general exception"""
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_update_version = mocker.patch("apps.agent_app.update_version_impl")
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_update_version.side_effect = Exception("Database error")
+
+    response = config_client.put(
+        "/agent/123/versions/1",
+        json={"version_name": "Updated Version"},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 500
+    assert "Update version error" in response.json()["detail"]
+
+
 def test_delete_version_api_success(mocker, mock_auth_header):
     """Test successful version deletion"""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

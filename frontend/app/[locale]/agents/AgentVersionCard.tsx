@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   EllipsisVertical,
   Trash2,
-  ArchiveRestore
+  ArchiveRestore,
+  Edit
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -45,6 +46,7 @@ import log from "@/lib/logger";
 import { message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
+import AgentVersionPubulishModal from "./versions/AgentVersionPubulishModal";
 
 const { Text } = Typography;
 
@@ -150,6 +152,7 @@ export function VersionCardItem({
   // Modal state
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rollbackLoading, setRollbackLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -362,6 +365,12 @@ export function VersionCardItem({
               menu={{
                 items: [
                   {
+                    key: 'edit',
+                    label: t("common.edit"),
+                    icon: <Edit size={14} />,
+                    onClick: () => setEditModalOpen(true)
+                  },
+                  {
                     key: 'rollback',
                     label: t("agent.version.rollback"),
                     icon: <RotateCcw size={14} />,
@@ -531,6 +540,23 @@ export function VersionCardItem({
           </div>
         </Flex>
       </Modal>
+
+      {/* Edit Version Modal */}
+      <AgentVersionPubulishModal
+        open={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        agentId={agentId}
+        versionNo={version.version_no}
+        isEdit={true}
+        initialValues={{
+          version_name: version.version_name,
+          release_note: version.release_note,
+        }}
+        onUpdated={() => {
+          // Refresh version list using the proper invalidate function
+          invalidateAgentVersionList();
+        }}
+      />
     </div>
   );
 }
