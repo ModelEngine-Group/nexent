@@ -27,6 +27,9 @@ import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSe
 import {
   useKnowledgeBasesForToolConfig,
 } from "@/hooks/useKnowledgeBaseSelector";
+import {
+  useKnowledgeBaseConfigChangeHandler,
+} from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
 
@@ -177,12 +180,6 @@ export default function ToolConfigModal({
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
 
-  // Track previous Dify config to detect changes
-  const prevDifyConfig = useRef<{ serverUrl: string; apiKey: string }>({
-    serverUrl: "",
-    apiKey: "",
-  });
-
   // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
   // For datamate_search, use the server_url from the form as config
   const datamateServerUrl = useMemo(() => {
@@ -206,40 +203,26 @@ export default function ToolConfigModal({
         : undefined
   );
 
-  // Track if initial load is complete to avoid duplicate API calls
-  const isInitialLoadComplete = useRef(false);
+  // Handle config change: clear knowledge base selection and refetch
+  // Uses shared hook for both Dify and DataMate tools
+  const handleKbConfigChange = useCallback(() => {
+    // Clear previous knowledge base selection
+    setSelectedKbIds([]);
+    setSelectedKbDisplayNames([]);
+    // Refetch knowledge bases with new config
+    refetchKnowledgeBases();
+  }, [refetchKnowledgeBases]);
 
-  // Handle Dify config change: clear knowledge base selection and refetch
-  // This must be placed after refetchKnowledgeBases is defined
-  useEffect(() => {
-    if (toolKbType !== "dify_search") {
-      return;
-    }
-
-    const hasUrlChanged = difyConfig.serverUrl !== prevDifyConfig.current.serverUrl;
-    const hasApiKeyChanged = difyConfig.apiKey !== prevDifyConfig.current.apiKey;
-
-    // If URL or API key has changed, clear selection and refetch
-    if (hasUrlChanged || hasApiKeyChanged) {
-      // Only clear and refetch if both values are not empty (initial load case)
-      if (difyConfig.serverUrl && difyConfig.apiKey) {
-        // Clear previous knowledge base selection
-        setSelectedKbIds([]);
-        setSelectedKbDisplayNames([]);
-
-        // Refetch knowledge bases with new config
-        refetchKnowledgeBases();
-      } else {
-        // Clear knowledge base list when URL or API key is cleared
-        setSelectedKbIds([]);
-        setSelectedKbDisplayNames([]);
-      }
-
-      // Update previous config
-      prevDifyConfig.current = { ...difyConfig };
-      isInitialLoadComplete.current = true;
-    }
-  }, [difyConfig, toolKbType, refetchKnowledgeBases]);
+  useKnowledgeBaseConfigChangeHandler({
+    toolKbType,
+    config:
+      toolKbType === "dify_search"
+        ? difyConfig
+        : toolKbType === "datamate_search"
+          ? { serverUrl: datamateServerUrl }
+          : undefined,
+    onConfigChange: handleKbConfigChange,
+  });
 
   // Get current embedding model from config for model matching
   const currentEmbeddingModel = useMemo(() => {
@@ -588,12 +571,14 @@ export default function ToolConfigModal({
   }, [kbSelectorVisible, initialParams, toolRequiresKbSelection]);
 
   // Trigger refetch when opening for knowledge base tools (with loading state support)
-  // Skip if initial load was already done by config change effect
+  // Skip if initial load was already done to avoid duplicate API calls
+  const hasTriggeredInitialRefetch = useRef(false);
   useEffect(() => {
-    if (toolRequiresKbSelection && isOpen) {
-      // For Dify, only refetch if we have valid config and initial load is complete
+    if (toolRequiresKbSelection && isOpen && !hasTriggeredInitialRefetch.current) {
+      hasTriggeredInitialRefetch.current = true;
+      // For Dify, only refetch if we have valid config
       if (toolKbType === "dify_search") {
-        if (difyConfig.serverUrl && difyConfig.apiKey && !isInitialLoadComplete.current) {
+        if (difyConfig.serverUrl && difyConfig.apiKey) {
           refetchKnowledgeBases();
         }
       } else {
