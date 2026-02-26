@@ -629,7 +629,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                     </div>
                   ) : (
                     <div
-                          className="w-full h-full cursor-text"
+                          className="w-full h-full cursor-text hover:bg-gray-50"
                       onClick={() => {
                         if (!isSummarizing) {
                           setIsEditing(true);
@@ -641,10 +641,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           value={summary}
                           onChange={(e) => setSummary(e.target.value)}
                           onBlur={() => setIsEditing(false)}
-                              className="w-full h-full border-0 resize-none focus:shadow-none hover:bg-gray-50"
+                              className="w-full h-full border-0 resize-none focus:shadow-none"
                           style={{
                             height: '100%',
-                            minHeight: '150px',
                             padding: '20px',
                             fontSize: '18px',
                             lineHeight: '1.7',
@@ -654,7 +653,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           placeholder={t("document.summary.placeholder")}
                         />
                       ) : (
-                              <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap hover:bg-gray-50">
+                              <div className="p-5 text-lg leading-[1.7] whitespace-pre-wrap">
                                 <MarkdownRenderer content={summary} />
                               </div>
                       )}
