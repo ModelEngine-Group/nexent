@@ -7,7 +7,14 @@ COPY frontend /opt/frontend
 
 # Build Next.js application
 WORKDIR /opt/frontend
-RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
+
+# Use BuildKit named caches for npm cache and node_modules
+# - id=npm-cache: persists across builds, keyed by cache id
+# - sharing=locked: allows concurrent access from multiple builds
+# Cache will be reused as long as package.json and package-lock.json content don't change
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
+    --mount=type=cache,id=node-modules,target=/opt/frontend/node_modules,sharing=locked \
+    if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
     npm install --verbose && \
     NODE_ENV=production npm run build && \
     mkdir -p ../frontend-dist && \
@@ -32,9 +39,6 @@ RUN if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
     cd ../frontend-dist && \
     if [ -n "$MIRROR" ]; then npm config set registry "$MIRROR"; fi && \
     npm install --verbose --omit=dev --production && \
-    npm cache clean --force && \
-    rm -rf /root/.npm && \
-    rm -rf /root/.cache && \
     rm -rf .next/cache
 
 # Production stage
