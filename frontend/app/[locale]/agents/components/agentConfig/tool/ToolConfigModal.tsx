@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -26,7 +26,6 @@ import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import {
   useKnowledgeBasesForToolConfig,
-  useSyncKnowledgeBases,
 } from "@/hooks/useKnowledgeBaseSelector";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
@@ -178,6 +177,12 @@ export default function ToolConfigModal({
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
 
+  // Track previous Dify config to detect changes
+  const prevDifyConfig = useRef<{ serverUrl: string; apiKey: string }>({
+    serverUrl: "",
+    apiKey: "",
+  });
+
   // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
   // For datamate_search, use the server_url from the form as config
   const datamateServerUrl = useMemo(() => {
@@ -201,8 +206,40 @@ export default function ToolConfigModal({
         : undefined
   );
 
-  // Sync knowledge bases hook
-  const { syncKnowledgeBases, isSyncing } = useSyncKnowledgeBases();
+  // Track if initial load is complete to avoid duplicate API calls
+  const isInitialLoadComplete = useRef(false);
+
+  // Handle Dify config change: clear knowledge base selection and refetch
+  // This must be placed after refetchKnowledgeBases is defined
+  useEffect(() => {
+    if (toolKbType !== "dify_search") {
+      return;
+    }
+
+    const hasUrlChanged = difyConfig.serverUrl !== prevDifyConfig.current.serverUrl;
+    const hasApiKeyChanged = difyConfig.apiKey !== prevDifyConfig.current.apiKey;
+
+    // If URL or API key has changed, clear selection and refetch
+    if (hasUrlChanged || hasApiKeyChanged) {
+      // Only clear and refetch if both values are not empty (initial load case)
+      if (difyConfig.serverUrl && difyConfig.apiKey) {
+        // Clear previous knowledge base selection
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
+
+        // Refetch knowledge bases with new config
+        refetchKnowledgeBases();
+      } else {
+        // Clear knowledge base list when URL or API key is cleared
+        setSelectedKbIds([]);
+        setSelectedKbDisplayNames([]);
+      }
+
+      // Update previous config
+      prevDifyConfig.current = { ...difyConfig };
+      isInitialLoadComplete.current = true;
+    }
+  }, [difyConfig, toolKbType, refetchKnowledgeBases]);
 
   // Get current embedding model from config for model matching
   const currentEmbeddingModel = useMemo(() => {
@@ -492,19 +529,71 @@ export default function ToolConfigModal({
   useEffect(() => {
     if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
       const displayNames = selectedKbIds.map((id) => {
-        const kb = knowledgeBases.find((k) => k.id === id);
+        // Use robust ID comparison
+        const kb = knowledgeBases.find((k) => String(k.id).trim() === String(id).trim());
         return kb?.display_name || kb?.name || id;
       });
       setSelectedKbDisplayNames(displayNames);
     }
   }, [knowledgeBases, selectedKbIds]);
 
+  // Filter selectedKbIds to only include knowledge bases that exist in the current list
+  // This handles cases where knowledge bases are no longer available (e.g., wrong URL)
+  useEffect(() => {
+    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+      const validKbIds = selectedKbIds.filter((id) =>
+        knowledgeBases.some((kb) => String(kb.id).trim() === String(id).trim())
+      );
+      if (validKbIds.length !== selectedKbIds.length) {
+        setSelectedKbIds(validKbIds);
+        // Also update display names
+        const displayNames = validKbIds.map((id) => {
+          const kb = knowledgeBases.find((k) => String(k.id).trim() === String(id).trim());
+          return kb?.display_name || kb?.name || id;
+        });
+        setSelectedKbDisplayNames(displayNames);
+      }
+    }
+  }, [knowledgeBases]);
+
+  // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
+  // This ensures the modal receives the correct selected IDs
+  useEffect(() => {
+    if (kbSelectorVisible && selectedKbIds.length === 0 && initialParams.length > 0) {
+      // Parse initial index_names/dataset_ids value for knowledge base selection
+      if (toolRequiresKbSelection) {
+        const kbParam = initialParams.find(
+          (p) => p.name === "index_names" || p.name === "dataset_ids"
+        );
+        if (kbParam?.value) {
+          let ids: string[] = [];
+          if (Array.isArray(kbParam.value)) {
+            ids = kbParam.value.map(String);
+          } else if (typeof kbParam.value === "string") {
+            try {
+              const parsed = JSON.parse(kbParam.value);
+              if (Array.isArray(parsed)) {
+                ids = parsed.map(String);
+              }
+            } catch {
+              ids = kbParam.value.split(",").filter(Boolean);
+            }
+          }
+          if (ids.length > 0) {
+            setSelectedKbIds(ids);
+          }
+        }
+      }
+    }
+  }, [kbSelectorVisible, initialParams, toolRequiresKbSelection]);
+
   // Trigger refetch when opening for knowledge base tools (with loading state support)
+  // Skip if initial load was already done by config change effect
   useEffect(() => {
     if (toolRequiresKbSelection && isOpen) {
-      // For Dify, only refetch if we have valid config
+      // For Dify, only refetch if we have valid config and initial load is complete
       if (toolKbType === "dify_search") {
-        if (difyConfig.serverUrl && difyConfig.apiKey) {
+        if (difyConfig.serverUrl && difyConfig.apiKey && !isInitialLoadComplete.current) {
           refetchKnowledgeBases();
         }
       } else {
@@ -1230,16 +1319,10 @@ export default function ToolConfigModal({
         isLoading={kbLoading}
         showCheckbox={true}
         onSync={(toolType) =>
-          syncKnowledgeBases(
-            toolType,
-            toolType === "datamate_search"
-              ? { serverUrl: datamateServerUrl }
-              : toolType === "dify_search"
-                ? difyConfig
-                : undefined
-          )
+          // Use refetchKnowledgeBases instead of syncKnowledgeBases to properly update React Query cache
+          refetchKnowledgeBases()
         }
-        syncLoading={isSyncing === getToolType()}
+        syncLoading={kbLoading}
         isSelectable={canSelectKnowledgeBase}
         currentEmbeddingModel={currentEmbeddingModel}
         difyConfig={
