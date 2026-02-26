@@ -1325,7 +1325,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
-                if len(user_group_ids.intersection(agent_group_ids)) == 0:
+                if len(user_group_ids.intersection(agent_group_ids)) == 0 and user_id != agent.get("created_by"):
                     continue
 
             # Use shared availability check function
