@@ -64,7 +64,6 @@ class TestUserSignup:
             json={
                 "email": "user@example.com",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
@@ -76,25 +75,6 @@ class TestUserSignup:
         assert data["data"]["user"]["role"] == "user"
         assert data["data"]["registration_type"] == "user"
 
-    def test_signup_admin_user(self):
-        """Test successful admin user registration"""
-        response = client.post(
-            "/user/signup",
-            json={
-                "email": "admin@example.com",
-                "password": "password123",
-                "is_admin": True,
-                "invite_code": "admin_code"
-            }
-        )
-
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert "Admin account registered successfully" in data["message"]
-        assert "You now have system management permissions" in data["message"]
-        assert data["data"]["user"]["role"] == "admin"
-        assert data["data"]["registration_type"] == "admin"
-
     def test_signup_response_structure(self):
         """Test complete response structure"""
         response = client.post(
@@ -102,7 +82,6 @@ class TestUserSignup:
             json={
                 "email": "test@example.com",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
@@ -137,7 +116,6 @@ class TestUserSignup:
             json={
                 "email": "error@example.com",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
@@ -320,7 +298,7 @@ class TestRequestValidation:
         """Test signup with missing required fields"""
         response = client.post(
             "/user/signup",
-            json={"email": "test@example.com"}  # Missing password, is_admin
+            json={"email": "test@example.com"}  # Missing password
         )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
@@ -339,7 +317,6 @@ class TestRequestValidation:
             json={
                 "email": "invalid-email",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
@@ -357,7 +334,6 @@ class TestIntegrationFlow:
             json={
                 "email": "flow@example.com",
                 "password": "password123",
-                "is_admin": False,
                 "invite_code": None
             }
         )
@@ -445,7 +421,6 @@ class TestMockDataConsistency:
                 json={
                     "email": email,
                     "password": "password123",
-                    "is_admin": False,
                     "invite_code": None
                 }
             )

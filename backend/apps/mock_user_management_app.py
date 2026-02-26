@@ -33,20 +33,16 @@ async def signup(request: UserSignUpRequest):
     Mock user registration endpoint
     """
     try:
-        logger.info(
-            f"Mock signup request: email={request.email}, is_admin={request.is_admin}")
+        logger.info(f"Mock signup request: email={request.email}")
 
         # Mock success response matching user_management_app.py format
-        if request.is_admin:
-            success_message = "🎉 Admin account registered successfully! You now have system management permissions."
-        else:
-            success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
 
         user_data = {
             "user": {
                 "id": MOCK_USER["id"],
                 "email": request.email,
-                "role": "admin" if request.is_admin else "user"
+                "role": "user"
             },
             "session": {
                 "access_token": MOCK_SESSION["access_token"],
@@ -54,7 +50,7 @@ async def signup(request: UserSignUpRequest):
                 "expires_at": int((datetime.now() + timedelta(days=3650)).timestamp()),
                 "expires_in_seconds": MOCK_SESSION["expires_in_seconds"]
             },
-            "registration_type": "admin" if request.is_admin else "user"
+            "registration_type": "user"
         }
 
         return JSONResponse(status_code=HTTPStatus.OK,

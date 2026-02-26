@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
@@ -30,11 +30,18 @@ import {
   type CreateGroupRequest,
 } from "@/services/groupService";
 
-export default function UserList({ tenantId }: { tenantId: string | null }) {
+export default function UserList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
   const { t } = useTranslation("common");
 
   const { data, isLoading, refetch } = useUserList(tenantId);
   const { data: groupsData } = useGroupList(tenantId);
+
+  // Trigger refetch when refreshKey changes
+  useEffect(() => {
+    if (refreshKey && refreshKey > 0 && tenantId) {
+      refetch();
+    }
+  }, [refreshKey, tenantId, refetch]);
 
   const users = data?.users || [];
   const groups = groupsData?.groups || [];

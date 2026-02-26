@@ -182,7 +182,7 @@ export const authService = {
     email: string,
     password: string,
     inviteCode?: string,
-    withNewInvitation?: boolean
+    autoLogin: boolean = true
   ): Promise<SessionResponse> => {
     try {
       const response = await fetch(API_ENDPOINTS.user.signup, {
@@ -194,7 +194,6 @@ export const authService = {
           email,
           password,
           invite_code: inviteCode || null,
-          with_new_invitation: withNewInvitation || false,
         }),
       });
 
@@ -211,6 +210,11 @@ export const authService = {
         };
       }
 
+
+      // If autoLogin is false, skip session building and storage
+      if (!autoLogin) {
+        return { data: { session: null }, error: null };
+      }
 
       // If the session information is not returned when registering, try to login
       if (!data.data.session || !data.data.session.access_token) {
