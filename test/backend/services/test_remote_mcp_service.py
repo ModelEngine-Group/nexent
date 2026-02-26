@@ -1052,14 +1052,12 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_update_success(self, mock_check_name, mock_get_token, mock_health, mock_update_record):
+    async def test_update_success(self, mock_check_name, mock_health, mock_update_record):
         """Test successful MCP server update"""
         # Current name exists, new name is different and doesn't exist, health check passes
         # current exists, new doesn't
         mock_check_name.side_effect = [True, False]
-        mock_get_token.return_value = 'Bearer existing_token'
         mock_health.return_value = True
 
         update_data = MockMCPUpdateRequest(
@@ -1075,14 +1073,9 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         # Verify calls
         mock_check_name.assert_any_call(mcp_name='old_name', tenant_id='tid')
         mock_check_name.assert_any_call(mcp_name='new_name', tenant_id='tid')
-        mock_get_token.assert_called_once_with(
-            mcp_name='old_name',
-            mcp_server='http://old.url',
-            tenant_id='tid'
-        )
         mock_health.assert_called_once_with(
             remote_mcp_server='http://new.url',
-            authorization_token='Bearer existing_token'
+            authorization_token=None
         )
         mock_update_record.assert_called_once_with(
             update_data=update_data,
@@ -1118,13 +1111,11 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_update_success_same_name(self, mock_check_name, mock_get_token, mock_health, mock_update_record):
+    async def test_update_success_same_name(self, mock_check_name, mock_health, mock_update_record):
         """Test successful MCP server update with same name (only URL change)"""
         # Current name exists, new name is same so no additional check, health check passes
         mock_check_name.return_value = True  # current exists
-        mock_get_token.return_value = 'Bearer existing_token'
         mock_health.return_value = True
 
         update_data = MockMCPUpdateRequest(
@@ -1141,14 +1132,9 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_check_name.call_count, 1)
         mock_check_name.assert_called_with(
             mcp_name='same_name', tenant_id='tid')
-        mock_get_token.assert_called_once_with(
-            mcp_name='same_name',
-            mcp_server='http://old.url',
-            tenant_id='tid'
-        )
         mock_health.assert_called_once_with(
             remote_mcp_server='http://new.url',
-            authorization_token='Bearer existing_token'
+            authorization_token=None
         )
         mock_update_record.assert_called_once_with(
             update_data=update_data,
@@ -1197,13 +1183,11 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(context.exception), "New MCP name already exists")
 
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_update_health_check_fail(self, mock_check_name, mock_get_token, mock_health):
+    async def test_update_health_check_fail(self, mock_check_name, mock_health):
         """Test update when health check fails"""
         mock_check_name.side_effect = [
             True, False]  # current exists, new doesn't
-        mock_get_token.return_value = 'Bearer existing_token'
         mock_health.return_value = False  # health check fails
 
         update_data = MockMCPUpdateRequest(
@@ -1220,17 +1204,15 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
                          "New MCP server connection failed")
         mock_health.assert_called_once_with(
             remote_mcp_server='http://unreachable.url',
-            authorization_token='Bearer existing_token'
+            authorization_token=None
         )
 
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_update_health_check_exception(self, mock_check_name, mock_get_token, mock_health):
+    async def test_update_health_check_exception(self, mock_check_name, mock_health):
         """Test update when health check raises exception"""
         mock_check_name.side_effect = [
             True, False]  # current exists, new doesn't
-        mock_get_token.return_value = 'Bearer existing_token'
         mock_health.side_effect = MCPConnectionError("Connection failed")
 
         update_data = MockMCPUpdateRequest(
@@ -1247,20 +1229,18 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
                          "New MCP server connection failed")
         mock_health.assert_called_once_with(
             remote_mcp_server='http://failing.url',
-            authorization_token='Bearer existing_token'
+            authorization_token=None
         )
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    async def test_update_db_error(self, mock_check_name, mock_get_token, mock_health, mock_update_record):
+    async def test_update_db_error(self, mock_check_name, mock_health, mock_update_record):
         """Test update when database operation fails"""
         from sqlalchemy.exc import SQLAlchemyError
 
         # current exists, new doesn't
         mock_check_name.side_effect = [True, False]
-        mock_get_token.return_value = 'Bearer existing_token'
         mock_health.return_value = True
         mock_update_record.side_effect = SQLAlchemyError("Database error")
 
