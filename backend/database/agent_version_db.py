@@ -173,6 +173,46 @@ def update_version_status(
         return result.rowcount
 
 
+def update_version(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+    version_name: Optional[str] = None,
+    release_note: Optional[str] = None,
+    updated_by: Optional[str] = None,
+) -> int:
+    """
+    Update version metadata (version_name and release_note)
+    Returns: number of rows affected
+    """
+    # Build update values dynamically
+    update_values = {}
+    if version_name is not None:
+        update_values["version_name"] = version_name
+    if release_note is not None:
+        update_values["release_note"] = release_note
+    if updated_by is not None:
+        update_values["updated_by"] = updated_by
+
+    if not update_values:
+        return 0
+
+    update_values["update_time"] = func.now()
+
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentVersion)
+            .where(
+                AgentVersion.agent_id == agent_id,
+                AgentVersion.tenant_id == tenant_id,
+                AgentVersion.version_no == version_no,
+                AgentVersion.delete_flag == 'N',
+            )
+            .values(**update_values)
+        )
+        return result.rowcount
+
+
 def update_agent_current_version(
     agent_id: int,
     tenant_id: str,

@@ -779,6 +779,12 @@ class VersionStatusRequest(BaseModel):
     status: str = Field(..., description="New status: DISABLED / ARCHIVED")
 
 
+class VersionUpdateRequest(BaseModel):
+    """Request model for updating version metadata (name and description)"""
+    version_name: Optional[str] = Field(None, description="User-defined version name for display")
+    release_note: Optional[str] = Field(None, description="Release notes / version description")
+
+
 class VersionCompareRequest(BaseModel):
     """Request model for comparing two versions"""
     version_no_a: int = Field(..., description="First version number for comparison")

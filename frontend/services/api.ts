@@ -55,6 +55,7 @@ export const API_ENDPOINTS = {
       rollback: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
       compare: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions/compare`,
       delete: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      update: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
   tool: {
