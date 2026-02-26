@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Button, message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { publishVersion, updateVersion, AgentVersion } from "@/services/agentVersionService";
+import { publishVersion, updateVersion } from "@/services/agentVersionService";
+import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import log from "@/lib/logger";
 
 const { TextArea } = Input;
@@ -16,7 +17,6 @@ export interface AgentVersionPubulishModalProps {
   agentId?: number | null;
   versionNo?: number | null;
   isEdit?: boolean;
-  agentVersionList?: AgentVersion[];
   initialValues?: {
     version_name?: string;
     release_note?: string;
@@ -38,6 +38,9 @@ export default function AgentVersionPubulishModal({
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
+  // Get version list for duplicate name validation
+  const { agentVersionList } = useAgentVersionList(agentId ?? null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [publishForm] = Form.useForm();
 
@@ -51,6 +54,28 @@ export default function AgentVersionPubulishModal({
       }
     }
   }, [open, isEdit, initialValues, publishForm]);
+
+  // Custom validator for duplicate version name
+  const validateVersionName = {
+    validator(_: unknown, value: string) {
+      if (!value) {
+        return Promise.resolve();
+      }
+
+      // Find duplicate version name (exclude current version if editing)
+      const duplicate = (agentVersionList || []).find(
+        (v) =>
+          v.version_name?.toLowerCase() === value.toLowerCase() &&
+          (!isEdit || v.version_no !== versionNo)
+      );
+
+      if (duplicate) {
+        return Promise.reject(new Error(t("agent.version.versionNameDuplicate")));
+      }
+
+      return Promise.resolve();
+    },
+  };
 
   const handleSubmit = async (values: { version_name?: string; release_note?: string }) => {
     if (isEdit) {
@@ -137,7 +162,10 @@ export default function AgentVersionPubulishModal({
         <Form.Item
           label={t("agent.version.versionName")}
           name="version_name"
-          rules={[{ required: true, message: t("agent.version.versionNameRequired") }]}
+          rules={[
+            { required: true, message: t("agent.version.versionNameRequired") },
+            validateVersionName,
+          ]}
         >
           <Input placeholder={t("agent.version.versionNamePlaceholder")} />
         </Form.Item>
