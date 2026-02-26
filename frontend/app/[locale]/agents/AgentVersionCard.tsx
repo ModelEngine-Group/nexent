@@ -553,8 +553,8 @@ export function VersionCardItem({
           release_note: version.release_note,
         }}
         onUpdated={() => {
-          // Refresh version list
-          queryClient.invalidateQueries({ queryKey: ["agentVersions", agentId] });
+          // Refresh version list using the proper invalidate function
+          invalidateAgentVersionList();
         }}
       />
     </div>
