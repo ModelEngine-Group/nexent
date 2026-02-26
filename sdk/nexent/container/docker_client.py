@@ -387,18 +387,18 @@ class DockerContainerClient(ContainerClient):
 
                 if url_stripped.endswith("/sse"):
                     transport = SSETransport(
-                        url=url,
+                        url=url_stripped,
                         headers=headers
                     )
                 elif url_stripped.endswith("/mcp"):
                     transport = StreamableHttpTransport(
-                        url=url,
+                        url=url_stripped,
                         headers=headers
                     )
                 else:
                     # Default to StreamableHttpTransport for unrecognized formats
                     transport = StreamableHttpTransport(
-                        url=url,
+                        url=url_stripped,
                         headers=headers
                     )
 

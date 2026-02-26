@@ -485,7 +485,8 @@ def test_update_mcp_record_by_name_and_url_success(monkeypatch, mock_session):
         "mcp_name": "new_name",
         "mcp_server": "http://new.url",
         "updated_by": "user1",
-        "status": True
+        "status": True,
+        "authorization_token": None
     })
 
 
@@ -521,7 +522,8 @@ def test_update_mcp_record_by_name_and_url_without_status(monkeypatch, mock_sess
     mock_update.assert_called_once_with({
         "mcp_name": "new_name",
         "mcp_server": "http://new.url",
-        "updated_by": "user1"
+        "updated_by": "user1",
+        "authorization_token": None
     })
 
 
@@ -724,7 +726,7 @@ def test_update_mcp_record_by_name_and_url_with_authorization_token(monkeypatch,
 
 
 def test_update_mcp_record_by_name_and_url_without_authorization_token(monkeypatch, mock_session):
-    """Test update of MCP record without authorization token (should not include it in update)"""
+    """Test update of MCP record without authorization token (None will be included in update)"""
     session, query = mock_session
     mock_update = MagicMock()
     mock_filter = MagicMock()
@@ -753,17 +755,18 @@ def test_update_mcp_record_by_name_and_url_without_authorization_token(monkeypat
         status=True
     )
 
-    # Verify the update was called without authorization_token
+    # Verify the update was called with authorization_token as None
     mock_update.assert_called_once_with({
         "mcp_name": "new_name",
         "mcp_server": "http://new.url",
         "updated_by": "user1",
-        "status": True
+        "status": True,
+        "authorization_token": None
     })
 
 
 def test_update_mcp_record_by_name_and_url_with_none_authorization_token(monkeypatch, mock_session):
-    """Test update of MCP record with None authorization token (should not include it in update)"""
+    """Test update of MCP record with None authorization token (None will be included in update)"""
     session, query = mock_session
     mock_update = MagicMock()
     mock_filter = MagicMock()
@@ -791,11 +794,12 @@ def test_update_mcp_record_by_name_and_url_with_none_authorization_token(monkeyp
         user_id="user1"
     )
 
-    # Verify the update was called without authorization_token (None should not be included)
+    # Verify the update was called with authorization_token as None
     mock_update.assert_called_once_with({
         "mcp_name": "new_name",
         "mcp_server": "http://new.url",
-        "updated_by": "user1"
+        "updated_by": "user1",
+        "authorization_token": None
     })
 
 

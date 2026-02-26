@@ -50,12 +50,12 @@ def _create_mcp_transport(url: str, authorization_token: Optional[str] = None):
     headers = {"Authorization": authorization_token} if authorization_token else {}
 
     if url_stripped.endswith("/sse"):
-        return SSETransport(url=url, headers=headers)
+        return SSETransport(url=url_stripped, headers=headers)
     elif url_stripped.endswith("/mcp"):
-        return StreamableHttpTransport(url=url, headers=headers)
+        return StreamableHttpTransport(url=url_stripped, headers=headers)
     else:
         # Default to StreamableHttpTransport for unrecognized formats
-        return StreamableHttpTransport(url=url, headers=headers)
+        return StreamableHttpTransport(url=url_stripped, headers=headers)
 
 
 def python_type_to_json_schema(annotation: Any) -> str:

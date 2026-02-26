@@ -130,14 +130,8 @@ async def update_remote_mcp_server_list(
                 f"New MCP name already exists, tenant_id: {tenant_id}, new_mcp_server_name: {update_data.new_service_name}")
             raise MCPNameIllegal("New MCP name already exists")
 
-    # Get authorization token: use new one if provided, otherwise get existing from database
+    # User authorization token
     authorization_token = update_data.new_authorization_token
-    if authorization_token is None:
-        authorization_token = get_mcp_authorization_token_by_name_and_url(
-            mcp_name=update_data.current_service_name,
-            mcp_server=update_data.current_mcp_url,
-            tenant_id=tenant_id
-        )
 
     # Check if the new server URL is accessible
     try:

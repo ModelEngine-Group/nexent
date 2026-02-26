@@ -663,7 +663,7 @@ class TestUpdateToolInfoImpl:
                 self.agent_id = 1
                 self.tool_id = 1
                 # Explicitly do not set version_no
-        
+
         mock_request = MockToolInfoWithoutVersion()
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
@@ -915,12 +915,12 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_sse_with_token(self, mock_sse_transport):
         """Test creating SSETransport for URL ending with /sse and with authorization token"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_sse_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("http://test-server.com/sse", "Bearer token123")
-        
+
         assert result == mock_transport
         mock_sse_transport.assert_called_once_with(
             url="http://test-server.com/sse",
@@ -931,12 +931,12 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_sse_without_token(self, mock_sse_transport):
         """Test creating SSETransport for URL ending with /sse and without authorization token"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_sse_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("http://test-server.com/sse", None)
-        
+
         assert result == mock_transport
         mock_sse_transport.assert_called_once_with(
             url="http://test-server.com/sse",
@@ -947,12 +947,12 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_mcp_with_token(self, mock_http_transport):
         """Test creating StreamableHttpTransport for URL ending with /mcp and with authorization token"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_http_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("http://test-server.com/mcp", "Bearer token456")
-        
+
         assert result == mock_transport
         mock_http_transport.assert_called_once_with(
             url="http://test-server.com/mcp",
@@ -963,12 +963,12 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_mcp_without_token(self, mock_http_transport):
         """Test creating StreamableHttpTransport for URL ending with /mcp and without authorization token"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_http_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("http://test-server.com/mcp", None)
-        
+
         assert result == mock_transport
         mock_http_transport.assert_called_once_with(
             url="http://test-server.com/mcp",
@@ -979,12 +979,12 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_default_with_token(self, mock_http_transport):
         """Test creating default StreamableHttpTransport for unrecognized URL format with authorization token"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_http_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("http://test-server.com/api", "Bearer token789")
-        
+
         assert result == mock_transport
         mock_http_transport.assert_called_once_with(
             url="http://test-server.com/api",
@@ -995,12 +995,12 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_default_without_token(self, mock_http_transport):
         """Test creating default StreamableHttpTransport for unrecognized URL format without authorization token"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_http_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("http://test-server.com/api", None)
-        
+
         assert result == mock_transport
         mock_http_transport.assert_called_once_with(
             url="http://test-server.com/api",
@@ -1011,16 +1011,16 @@ class TestCreateMcpTransport:
     def test_create_mcp_transport_sse_with_whitespace(self, mock_sse_transport):
         """Test creating SSETransport for URL with whitespace ending with /sse"""
         from backend.services.tool_configuration_service import _create_mcp_transport
-        
+
         mock_transport = Mock()
         mock_sse_transport.return_value = mock_transport
-        
+
         result = _create_mcp_transport("  http://test-server.com/sse  ", "token")
-        
+
         assert result == mock_transport
         # Verify URL is stripped before checking ending
         mock_sse_transport.assert_called_once_with(
-            url="  http://test-server.com/sse  ",
+            url="http://test-server.com/sse",
             headers={"Authorization": "token"}
         )
 
@@ -1037,7 +1037,7 @@ class TestGetToolFromRemoteMcpServer:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         # Mock client
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -1095,11 +1095,11 @@ class TestGetToolFromRemoteMcpServer:
         """Test getting tools from remote MCP server with authorization token from database"""
         # Mock authorization token from database
         mock_get_token.return_value = "Bearer token_from_db"
-        
+
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         # Mock client
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -1128,14 +1128,14 @@ class TestGetToolFromRemoteMcpServer:
         # Verify results
         assert len(result) == 1
         assert result[0].name == "test_tool"
-        
+
         # Verify authorization token was fetched from database
         mock_get_token.assert_called_once_with(
             mcp_name="test_server",
             mcp_server="http://test-server.com",
             tenant_id="tenant1"
         )
-        
+
         # Verify transport was created with token
         mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token_from_db")
 
@@ -1148,7 +1148,7 @@ class TestGetToolFromRemoteMcpServer:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         # Mock client
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -1177,7 +1177,7 @@ class TestGetToolFromRemoteMcpServer:
         # Verify results
         assert len(result) == 1
         assert result[0].name == "test_tool"
-        
+
         # Verify transport was created with provided token (not fetched from DB)
         mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer provided_token")
 
@@ -1188,7 +1188,7 @@ class TestGetToolFromRemoteMcpServer:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client_cls.return_value = mock_client
@@ -1207,14 +1207,14 @@ class TestGetToolFromRemoteMcpServer:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         mock_client_cls.side_effect = Exception("Connection failed")
 
         from backend.services.tool_configuration_service import get_tool_from_remote_mcp_server
 
         with pytest.raises(MCPConnectionError):
             await get_tool_from_remote_mcp_server("test_server", "http://test-server.com")
-        
+
         # Verify transport was created before connection error
         mock_create_transport.assert_called_once_with("http://test-server.com", None)
 
@@ -1227,7 +1227,7 @@ class TestGetToolFromRemoteMcpServer:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client_cls.return_value = mock_client
@@ -1659,7 +1659,7 @@ class TestLoadLastToolConfigImpl:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         # Mock client
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -1692,7 +1692,7 @@ class TestLoadLastToolConfigImpl:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         # Mock client
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -1727,7 +1727,7 @@ class TestLoadLastToolConfigImpl:
         # Mock transport
         mock_transport = Mock()
         mock_create_transport.return_value = mock_transport
-        
+
         # Mock client with proper async context manager setup
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -2230,7 +2230,7 @@ class TestValidateLocalToolKnowledgeBaseSearch:
         mock_sig = Mock()
         mock_index_names_param = Mock()
         mock_index_names_param.default = ["default_index"]
-        
+
         mock_sig.parameters = {
             'self': Mock(),
             'index_names': mock_index_names_param,

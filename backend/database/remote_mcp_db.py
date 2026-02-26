@@ -158,7 +158,7 @@ def update_mcp_record_by_name_and_url(
         update_fields["status"] = status
 
     # Update authorization_token if provided
-    if hasattr(update_data, 'new_authorization_token') and update_data.new_authorization_token is not None:
+    if hasattr(update_data, 'new_authorization_token'):
         update_fields["authorization_token"] = update_data.new_authorization_token
 
     with get_db_session() as session:
