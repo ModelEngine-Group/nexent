@@ -10,20 +10,23 @@ import {
   Modal,
   Form,
   Input,
-  Popconfirm,
   message,
   Switch,
   Spin,
   Pagination,
+  Alert,
+  Space,
 } from "antd";
+import { Users, Plus, Edit, Edit2, Building2, Trash2, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Users, Plus, Edit, Edit2, Building2 } from "lucide-react";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
   createTenant,
   updateTenant,
+  deleteTenant,
+  getTenantUsers,
 } from "@/services/tenantService";
 import { createInvitation, deleteInvitation } from "@/services/invitationService";
 import { authService } from "@/services/authService";
@@ -80,6 +83,13 @@ function TenantList({
   // State for generate admin account feature
   const [generateAdminAccount, setGenerateAdminAccount] = useState(false);
 
+  // Delete modal state
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
+  const [tenantUsers, setTenantUsers] = useState<any[]>([]);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Handle scroll event for infinite loading
   const openCreate = () => {
     setEditingTenant(null);
     form.resetFields();
@@ -93,23 +103,63 @@ function TenantList({
     setModalVisible(true);
   };
 
-  // Tenant deletion not yet implemented
-  /*
-  const handleDelete = async (tenantId: string) => {
-    try {
-      await deleteTenant(tenantId);
-      message.success(t("tenantResources.tenants.deleted"));
-      const newTenants = tenants.filter((t) => t.tenant_id !== tenantId);
-      onTenantsChange(newTenants);
+  // Handle delete button click - show warning modal with users list
+  const handleDeleteClick = async (tenant: Tenant) => {
+    setDeletingTenant(tenant);
+    setDeleteLoading(true);
+    setDeleteModalVisible(true);
 
-      if (selected === tenantId && newTenants.length > 0) {
-        onSelect(newTenants[0].tenant_id);
-      }
+    try {
+      // Fetch users for this tenant
+      const usersData = await getTenantUsers(tenant.tenant_id);
+      setTenantUsers(usersData.users || []);
     } catch (error) {
-      message.error(t("tenantResources.tenantDeleteFailed"));
+      console.error("Failed to fetch tenant users:", error);
+      setTenantUsers([]);
+    } finally {
+      setDeleteLoading(false);
     }
   };
-  */
+
+  // Handle actual delete confirmation
+  const handleDeleteConfirm = async () => {
+    if (!deletingTenant) return;
+
+    try {
+      await deleteTenant(deletingTenant.tenant_id);
+      message.success(t("tenantResources.tenants.deleted"));
+
+      // Refresh the tenant list
+      await onTenantsRefetch();
+
+      // Clear selection if the deleted tenant was selected
+      // Use local tenants array which should be updated after refetch
+      if (selected === deletingTenant.tenant_id) {
+        const remainingTenants = tenants.filter(
+          (t: Tenant) => t.tenant_id !== deletingTenant.tenant_id
+        );
+        if (remainingTenants.length > 0) {
+          onSelect(remainingTenants[0].tenant_id);
+        } else {
+          onSelect("");
+        }
+      }
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.detail || error?.message || "";
+      message.error(errorMessage || t("tenantResources.tenantDeleteFailed"));
+    } finally {
+      setDeleteModalVisible(false);
+      setDeletingTenant(null);
+      setTenantUsers([]);
+    }
+  };
+
+  // Close delete modal
+  const handleDeleteCancel = () => {
+    setDeleteModalVisible(false);
+    setDeletingTenant(null);
+    setTenantUsers([]);
+  };
 
   const handleSubmit = async () => {
     try {
@@ -252,30 +302,17 @@ function TenantList({
                     }}
                     className="p-1 hover:bg-gray-200 rounded"
                   />
-                  {/* Delete button hidden - tenant deletion not yet implemented */}
-                  {/*
-                  <Popconfirm
-                    title={t("tenantResources.tenants.confirmDelete", {
-                      name: tenant.tenant_name,
-                    })}
-                    description={t("common.cannotBeUndone")}
-                    onConfirm={(e) => {
-                      e?.stopPropagation();
-                      handleDelete(tenant.tenant_id);
+                  {/* Delete button - shows warning modal with users list */}
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Trash2 className="h-3 w-3" />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteClick(tenant);
                     }}
-                    onCancel={(e) => e?.stopPropagation()}
-                    okText={t("common.confirm")}
-                    cancelText={t("common.cancel")}
-                  >
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<Trash2 className="h-3 w-3" />}
-                      onClick={(e) => e.stopPropagation()}
-                      className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
-                    />
-                  </Popconfirm>
-                  */}
+                    className="p-1 hover:bg-red-100 text-red-500 hover:text-red-600 rounded"
+                  />
                 </div>
               </div>
             </div>
@@ -416,6 +453,93 @@ function TenantList({
             </>
           )}
         </Form>
+      </Modal>
+
+      {/* Delete Tenant Warning Modal */}
+      <Modal
+        centered
+        title={
+          <Space className="text-red-600">
+            <AlertTriangle className="h-5 w-5" />
+            <span>{t("tenantResources.tenants.deleteTenant")}</span>
+          </Space>
+        }
+        open={deleteModalVisible}
+        onOk={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
+        okButtonProps={{ danger: true }}
+        confirmLoading={deleteLoading}
+        width={500}
+      >
+        <Alert
+          type="error"
+          showIcon
+          className="mb-4"
+          message={t("common.cannotBeUndone")}
+          description={
+            <ul className="list-disc pl-4 mt-2 space-y-1">
+              <li>
+                {t("tenantResources.tenants.willBeDeleted", {
+                  name: deletingTenant?.tenant_name,
+                })}
+              </li>
+              <li>{t("tenantResources.tenants.resourcesWillBeDeleted")}</li>
+            </ul>
+          }
+        />
+
+        {/* Users list */}
+        {deleteLoading ? (
+          <Spin size="small" />
+        ) : tenantUsers.length > 0 ? (
+          <div className="mt-4">
+            <div className="font-medium text-gray-700 dark:text-gray-300 mb-2">
+              {t("tenantResources.tenants.usersToBeDeleted", {
+                count: tenantUsers.length,
+              })}
+            </div>
+            <div className="max-h-32 overflow-y-auto border rounded-md">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 text-xs font-normal">
+                      {t("tenantResources.users.email")}
+                    </th>
+                    <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 text-xs font-normal">
+                      {t("tenantResources.users.role")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {tenantUsers.slice(0, 5).map((user: any, idx: number) => (
+                    <tr
+                      key={user.id || idx}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
+                        {user.username || "-"}
+                      </td>
+                      <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
+                        {t(`user.role.${user.role?.toLowerCase()}`) || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {tenantUsers.length > 5 && (
+                <div className="px-3 py-1.5 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800">
+                  ...and {tenantUsers.length - 5} more
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 text-gray-500 text-sm">
+            {t("tenantResources.tenants.noUsers")}
+          </div>
+        )}
       </Modal>
     </div>
   );

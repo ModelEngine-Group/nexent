@@ -89,7 +89,7 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       } catch (error) {
         console.warn("Failed to get default group:", error);
         // Show user-friendly message
-        message.warning("Unable to load default group. You can manually select groups.");
+        message.warning(t("tenantResources.invitation.loadDefaultGroupFailed"));
       }
     } else {
       console.log("No tenantId available for getting default group");
@@ -137,7 +137,7 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
       const values = await form.validateFields();
 
       if (!tenantId) {
-        message.error("No tenant selected");
+        message.error(t("common.noTenantSelected"));
         return;
       }
 

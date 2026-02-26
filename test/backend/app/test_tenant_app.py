@@ -365,16 +365,49 @@ class TestTenantUpdate:
 class TestTenantDeletion:
     """Test tenant deletion endpoint"""
 
-    def test_delete_tenant_not_implemented(self):
-        """Test tenant deletion returns not implemented"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user:
+    def test_delete_tenant_success(self):
+        """Test successful tenant deletion"""
+        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
+             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+
             mock_get_user.return_value = ("user-789", "tenant-123")
+            mock_delete_tenant.return_value = True
 
             response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
 
-            assert response.status_code == HTTPStatus.NOT_IMPLEMENTED
+            assert response.status_code == HTTPStatus.OK
             data = response.json()
-            assert "Tenant deletion is not yet implemented" in data["detail"]
+            assert "deleted successfully" in data["message"]
+            mock_get_user.assert_called_once_with("Bearer token")
+            mock_delete_tenant.assert_called_once_with("tenant-123", deleted_by="user-789")
+
+    def test_delete_tenant_not_found(self):
+        """Test tenant deletion when tenant doesn't exist"""
+        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
+             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+
+            mock_get_user.return_value = ("user-789", "tenant-123")
+            mock_delete_tenant.side_effect = NotFoundException("Tenant tenant-999 not found")
+
+            response = client.delete("/tenants/tenant-999", headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.NOT_FOUND
+            data = response.json()
+            assert "Tenant tenant-999 not found" in data["detail"]
+
+    def test_delete_tenant_validation_error(self):
+        """Test tenant deletion with validation error"""
+        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
+             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+
+            mock_get_user.return_value = ("user-789", "tenant-123")
+            mock_delete_tenant.side_effect = ValidationError("Cannot delete tenant with active resources")
+
+            response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
+
+            assert response.status_code == HTTPStatus.BAD_REQUEST
+            data = response.json()
+            assert "Cannot delete tenant with active resources" in data["detail"]
 
     def test_delete_tenant_unauthorized(self):
         """Test tenant deletion with unauthorized access"""
@@ -388,9 +421,12 @@ class TestTenantDeletion:
             assert "Invalid token" in data["detail"]
 
     def test_delete_tenant_unexpected_error(self):
-        """Test tenant deletion with unexpected error during auth"""
-        with patch('apps.tenant_app.get_current_user_id') as mock_get_user:
-            mock_get_user.side_effect = Exception("Auth service error")
+        """Test tenant deletion with unexpected error"""
+        with patch('apps.tenant_app.get_current_user_id') as mock_get_user, \
+             patch('apps.tenant_app.delete_tenant') as mock_delete_tenant:
+
+            mock_get_user.return_value = ("user-789", "tenant-123")
+            mock_delete_tenant.side_effect = Exception("Database error")
 
             response = client.delete("/tenants/tenant-123", headers={"Authorization": "Bearer token"})
 
