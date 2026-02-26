@@ -1299,6 +1299,11 @@
   "tenantResources.groups.selectUsers": "选择用户",
   "tenantResources.groups.totalMembers": "总成员数",
   "tenantResources.groups.updated": "用户组已更新",
+  "tenantResources.groups.loadMembersFailed": "加载组成员失败",
+  "tenantResources.groups.loadUsersFailed": "加载用户组用户失败",
+  "tenantResources.groups.deleteFailed": "删除用户组失败",
+  "tenantResources.groups.noTenantSelected": "未选择租户",
+  "tenantResources.groups.updateFailed": "更新用户组失败",
   "tenantResources.groups.noDescription": "无描述",
   "tenantResources.groups.duplicateName": "用户组名称已存在，请使用其他名称",
 
@@ -1385,6 +1390,13 @@
   "tenantResources.tenants.confirmAdminPassword": "确认密码",
   "tenantResources.tenants.adminAccountCreated": "租户管理员账户已创建",
   "tenantResources.tenants.failedToCreateAdminAccount": "创建租户管理员账户失败",
+  "tenantResources.tenants.tenantIdRequired": "租户ID是必需的",
+  "tenantResources.tenants.deleteWarning": "您即将删除租户 \"{{name}}\"",
+  "tenantResources.tenants.willBeDeleted": "租户 \"{{name}}\" 及其所有用户账号将被永久删除",
+  "tenantResources.tenants.usersToBeDeleted": "将被删除的用户 ({{count}})：",
+  "tenantResources.tenants.noUsers": "该租户下没有用户",
+  "tenantResources.tenants.resourcesWillBeDeleted": "所有模型、知识库、智能体、用户组和其他资源也将被删除。",
+  "tenantResources.tenantDeleteFailed": "删除租户失败",
 
   "tenantResources.users.confirmDelete": "删除用户\"{{name}}\"？",
   "tenantResources.users.deleteUser": "删除用户",
@@ -1392,6 +1404,8 @@
   "tenantResources.users.editUser": "编辑用户",
   "tenantResources.users.enterEmail": "输入邮箱地址",
   "tenantResources.users.updated": "用户已更新",
+  "tenantResources.users.email": "邮箱",
+  "tenantResources.users.role": "角色",
 
   "tenantResources.contactAdmin": "请联系管理员为您分配租户。",
   "tenantResources.noTenantAssigned": "未分配租户",
@@ -1433,6 +1447,8 @@
   "tenantResources.invitation.status.IN_USE": "可用",
   "tenantResources.invitation.status.EXPIRE": "已过期",
   "tenantResources.invitation.status.RUN_OUT": "已用尽",
+  "tenantResources.invitation.loadDefaultGroupFailed": "无法加载默认用户组，您可以手动选择用户组。",
+  "common.noTenantSelected": "未选择租户",
 
   "market.comingSoon.title": "智能体市场即将推出",
   "market.comingSoon.description": "从我们的市场中发现并安装预构建的AI智能体。通过使用社区创建的解决方案节省时间。",

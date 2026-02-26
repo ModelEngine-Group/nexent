@@ -1,11 +1,14 @@
 """
 Database operations for user tenant relationship management
 """
+import logging
 from typing import Any, List, Dict, Optional
 
 from consts.const import DEFAULT_TENANT_ID
 from database.client import as_dict, get_db_session
 from database.db_models import UserTenant
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
@@ -163,4 +166,29 @@ def soft_delete_user_tenant_by_user_id(user_id: str, deleted_by: str) -> bool:
             "update_time": "NOW()"
         })
 
+        return result > 0
+
+
+def soft_delete_users_by_tenant_id(tenant_id: str, deleted_by: str) -> bool:
+    """
+    Soft delete all user tenant relationships for a tenant
+
+    Args:
+        tenant_id (str): Tenant ID to delete all users from
+        deleted_by (str): User who performed the deletion
+
+    Returns:
+        bool: True if any records were deleted
+    """
+    with get_db_session() as session:
+        result = session.query(UserTenant).filter(
+            UserTenant.tenant_id == tenant_id,
+            UserTenant.delete_flag == "N"
+        ).update({
+            "delete_flag": "Y",
+            "updated_by": deleted_by,
+            "update_time": "NOW()"
+        })
+
+        logger.info(f"Soft deleted {result} user-tenant relationships for tenant {tenant_id}")
         return result > 0

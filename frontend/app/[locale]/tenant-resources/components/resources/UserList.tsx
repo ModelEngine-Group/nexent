@@ -241,14 +241,14 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
         <Form layout="vertical" form={groupForm}>
           <Form.Item
             name="name"
-            label={t("tenantResources.tenants.name")}
-            rules={[{ required: true, message: "Please enter group name" }]}
+            label={t("tenantResources.groups.name")}
+            rules={[{ required: true, message: t("tenantResources.groups.enterName") }]}
           >
-            <Input placeholder="Enter group name" />
+            <Input placeholder={t("tenantResources.groups.enterName")} />
           </Form.Item>
-          <Form.Item name="description" label="Description">
+          <Form.Item name="description" label={t("common.description")}>
             <Input.TextArea
-              placeholder="Enter group description (optional)"
+              placeholder={t("tenantResources.groups.enterDescription")}
               rows={3}
             />
           </Form.Item>
