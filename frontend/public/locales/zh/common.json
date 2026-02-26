@@ -1010,6 +1010,8 @@
   "mcpConfig.editServer.serviceNamePlaceholder": "请输入服务名称",
   "mcpConfig.editServer.mcpUrl": "MCP URL",
   "mcpConfig.editServer.mcpUrlPlaceholder": "请输入MCP服务器URL",
+  "mcpConfig.editServer.authorizationToken": "Authorization Token",
+  "mcpConfig.editServer.authorizationTokenPlaceholder": "服务器Bearer Token（可选）",
   "mcpConfig.containerList.title": "已启动的容器化MCP服务",
   "mcpConfig.containerList.column.name": "名称",
   "mcpConfig.containerList.column.containerId": "容器ID",

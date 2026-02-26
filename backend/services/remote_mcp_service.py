@@ -3,6 +3,7 @@ import os
 import tempfile
 
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 
 from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
 from consts.exceptions import MCPConnectionError, MCPNameIllegal
@@ -14,6 +15,8 @@ from database.remote_mcp_db import (
     check_mcp_name_exists,
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
+    get_mcp_authorization_token_by_name_and_url,
+    get_mcp_record_by_id_and_tenant,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.mcp_container_service import MCPContainerManager
@@ -21,9 +24,30 @@ from services.mcp_container_service import MCPContainerManager
 logger = logging.getLogger("remote_mcp_service")
 
 
-async def mcp_server_health(remote_mcp_server: str) -> bool:
+async def mcp_server_health(remote_mcp_server: str, authorization_token: str | None = None) -> bool:
     try:
-        client = Client(remote_mcp_server)
+        # Select transport based on URL ending
+        url_stripped = remote_mcp_server.strip()
+        headers = {"Authorization": authorization_token} if authorization_token else {}
+
+        if url_stripped.endswith("/sse"):
+            transport = SSETransport(
+                url=url_stripped,
+                headers=headers
+            )
+        elif url_stripped.endswith("/mcp"):
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers
+            )
+        else:
+            # Default to StreamableHttpTransport for unrecognized formats
+            transport = StreamableHttpTransport(
+                url=url_stripped,
+                headers=headers
+            )
+
+        client = Client(transport=transport)
         async with client:
             connected = client.is_connected()
             return connected
@@ -40,6 +64,7 @@ async def add_remote_mcp_server_list(
     remote_mcp_server: str,
     remote_mcp_server_name: str,
     container_id: str | None = None,
+    authorization_token: str | None = None,
 ):
 
     # check if MCP name already exists
@@ -49,7 +74,7 @@ async def add_remote_mcp_server_list(
         raise MCPNameIllegal("MCP name already exists")
 
     # check if the address is available
-    if not await mcp_server_health(remote_mcp_server=remote_mcp_server):
+    if not await mcp_server_health(remote_mcp_server=remote_mcp_server, authorization_token=authorization_token):
         raise MCPConnectionError("MCP connection failed")
 
     # update the PG database record
@@ -58,6 +83,7 @@ async def add_remote_mcp_server_list(
         "mcp_server": remote_mcp_server,
         "status": True,
         "container_id": container_id,
+        "authorization_token": authorization_token,
     }
     create_mcp_record(mcp_data=insert_mcp_data,
                       tenant_id=tenant_id, user_id=user_id)
@@ -104,9 +130,21 @@ async def update_remote_mcp_server_list(
                 f"New MCP name already exists, tenant_id: {tenant_id}, new_mcp_server_name: {update_data.new_service_name}")
             raise MCPNameIllegal("New MCP name already exists")
 
+    # Get authorization token: use new one if provided, otherwise get existing from database
+    authorization_token = update_data.new_authorization_token
+    if authorization_token is None:
+        authorization_token = get_mcp_authorization_token_by_name_and_url(
+            mcp_name=update_data.current_service_name,
+            mcp_server=update_data.current_mcp_url,
+            tenant_id=tenant_id
+        )
+
     # Check if the new server URL is accessible
     try:
-        status = await mcp_server_health(remote_mcp_server=update_data.new_mcp_url)
+        status = await mcp_server_health(
+            remote_mcp_server=update_data.new_mcp_url,
+            authorization_token=authorization_token
+        )
     except BaseException:
         status = False
 
@@ -146,6 +184,7 @@ async def get_remote_mcp_server_list(tenant_id: str, user_id: str | None = None)
             "remote_mcp_server": record["mcp_server"],
             "status": record["status"],
             "permission": permission,
+            "mcp_id": record.get("mcp_id")
         })
     return mcp_records_list
 
@@ -202,9 +241,19 @@ def attach_mcp_container_permissions(
 
 
 async def check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_id):
+    # Get authorization token from database
+    authorization_token = get_mcp_authorization_token_by_name_and_url(
+        mcp_name=service_name,
+        mcp_server=mcp_url,
+        tenant_id=tenant_id
+    )
+
     # check the health of the MCP server
     try:
-        status = await mcp_server_health(remote_mcp_server=mcp_url)
+        status = await mcp_server_health(
+            remote_mcp_server=mcp_url,
+            authorization_token=authorization_token
+        )
     except BaseException:
         status = False
     # update the status of the MCP server in the database
@@ -230,6 +279,28 @@ async def delete_mcp_by_container_id(tenant_id: str, user_id: str, container_id:
         tenant_id=tenant_id,
         user_id=user_id,
     )
+
+
+async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
+    """
+    Get MCP record by ID
+
+    Args:
+        mcp_id: MCP record ID
+        tenant_id: Tenant ID
+
+    Returns:
+        Dictionary containing mcp_name, mcp_server, and authorization_token, or None if not found
+    """
+    mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
+    if not mcp_record:
+        return None
+
+    return {
+        "mcp_name": mcp_record.get("mcp_name"),
+        "mcp_server": mcp_record.get("mcp_server"),
+        "authorization_token": mcp_record.get("authorization_token"),
+    }
 
 
 async def upload_and_start_mcp_image(
@@ -320,6 +391,11 @@ async def upload_and_start_mcp_image(
             logger.warning(
                 f"Failed to clean up temporary file {temp_file_path}: {e}")
 
+    # Extract authorization_token from env_vars for database registration
+    authorization_token = None
+    if parsed_env_vars:
+        authorization_token = parsed_env_vars.get("authorization_token")
+
     # Register to remote MCP server list
     await add_remote_mcp_server_list(
         tenant_id=tenant_id,
@@ -327,6 +403,7 @@ async def upload_and_start_mcp_image(
         remote_mcp_server=container_info["mcp_url"],
         remote_mcp_server_name=final_service_name,
         container_id=container_info["container_id"],
+        authorization_token=authorization_token,
     )
 
     return {

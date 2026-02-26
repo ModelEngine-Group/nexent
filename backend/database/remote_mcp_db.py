@@ -114,6 +114,26 @@ def get_mcp_server_by_name_and_tenant(mcp_name: str, tenant_id: str) -> str:
         return mcp_record.mcp_server if mcp_record else ""
 
 
+def get_mcp_authorization_token_by_name_and_url(mcp_name: str, mcp_server: str, tenant_id: str) -> str | None:
+    """
+    Get MCP authorization token by name, URL and tenant ID
+
+    :param mcp_name: MCP name
+    :param mcp_server: MCP server URL
+    :param tenant_id: Tenant ID
+    :return: Authorization token, None if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_name == mcp_name,
+            McpRecord.mcp_server == mcp_server,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return mcp_record.authorization_token if mcp_record else None
+
+
 def update_mcp_record_by_name_and_url(
     update_data,
     tenant_id: str,
@@ -136,6 +156,10 @@ def update_mcp_record_by_name_and_url(
 
     if status is not None:
         update_fields["status"] = status
+
+    # Update authorization_token if provided
+    if hasattr(update_data, 'new_authorization_token') and update_data.new_authorization_token is not None:
+        update_fields["authorization_token"] = update_data.new_authorization_token
 
     with get_db_session() as session:
         session.query(McpRecord).filter(
@@ -161,3 +185,21 @@ def check_mcp_name_exists(mcp_name: str, tenant_id: str) -> bool:
             McpRecord.delete_flag != 'Y'
         ).first()
         return mcp_record is not None
+
+
+def get_mcp_record_by_id_and_tenant(mcp_id: int, tenant_id: str) -> Dict[str, Any] | None:
+    """
+    Get MCP record by ID and tenant ID
+
+    :param mcp_id: MCP record ID
+    :param tenant_id: Tenant ID
+    :return: MCP record as dictionary, or None if not found
+    """
+    with get_db_session() as session:
+        mcp_record = session.query(McpRecord).filter(
+            McpRecord.mcp_id == mcp_id,
+            McpRecord.tenant_id == tenant_id,
+            McpRecord.delete_flag != 'Y'
+        ).first()
+
+        return as_dict(mcp_record) if mcp_record else None

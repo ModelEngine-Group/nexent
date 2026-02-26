@@ -491,6 +491,8 @@ class MCPUpdateRequest(BaseModel):
     current_mcp_url: str = Field(..., description="Current MCP server URL")
     new_service_name: str = Field(..., description="New MCP service name")
     new_mcp_url: str = Field(..., description="New MCP server URL")
+    new_authorization_token: Optional[str] = Field(
+        None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
 
 
 # Tenant Management Data Models

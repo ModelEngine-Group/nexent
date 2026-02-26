@@ -351,6 +351,11 @@ def test_detect_transport():
     assert run_agent._detect_transport("http://server") == "streamable-http"
     assert run_agent._detect_transport("https://api.example.com") == "streamable-http"
     assert run_agent._detect_transport("http://server/other") == "streamable-http"
+    
+    # Test URLs with whitespace (should be stripped)
+    assert run_agent._detect_transport("  http://server/sse  ") == "sse"
+    assert run_agent._detect_transport("\thttp://server/mcp\n") == "streamable-http"
+    assert run_agent._detect_transport("  http://server  ") == "streamable-http"
 
 
 def test_normalize_mcp_config():
@@ -366,6 +371,10 @@ def test_normalize_mcp_config():
     result = run_agent._normalize_mcp_config("http://server")
     assert result == {"url": "http://server", "transport": "streamable-http"}
     
+    # Test string format with whitespace (should be preserved in url, but transport detection strips)
+    result = run_agent._normalize_mcp_config("  http://server/sse  ")
+    assert result == {"url": "  http://server/sse  ", "transport": "sse"}
+    
     # Test dict format with explicit transport
     result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": "sse"})
     assert result == {"url": "http://server/mcp", "transport": "sse"}
@@ -376,6 +385,85 @@ def test_normalize_mcp_config():
     
     result = run_agent._normalize_mcp_config({"url": "http://server/mcp"})
     assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+    
+    # Test dict format with empty string transport (should auto-detect)
+    result = run_agent._normalize_mcp_config({"url": "http://server/sse", "transport": ""})
+    assert result == {"url": "http://server/sse", "transport": "sse"}
+    
+    # Test dict format with None transport (should auto-detect)
+    result = run_agent._normalize_mcp_config({"url": "http://server/mcp", "transport": None})
+    assert result == {"url": "http://server/mcp", "transport": "streamable-http"}
+    
+    # Test dict format with only authorization
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token123"
+    })
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {"Authorization": "Bearer token123"}
+    }
+    
+    # Test dict format with only headers
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/sse",
+        "headers": {"Custom-Header": "value"}
+    })
+    assert result == {
+        "url": "http://server/sse",
+        "transport": "sse",
+        "headers": {"Custom-Header": "value"}
+    }
+    
+    # Test dict format with both authorization and headers (authorization should override/merge)
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token456",
+        "headers": {"Custom-Header": "value", "Other-Header": "other"}
+    })
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {
+            "Custom-Header": "value",
+            "Other-Header": "other",
+            "Authorization": "Bearer token456"
+        }
+    }
+    
+    # Test dict format with headers that is not a dict (should be handled gracefully)
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token789",
+        "headers": "not-a-dict"  # Not a dict, will be replaced with empty dict
+    })
+    # When headers is not a dict, it will be replaced with empty dict and then Authorization added
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {"Authorization": "Bearer token789"}
+    }
+    
+    # Test dict format with headers as list (not a dict)
+    result = run_agent._normalize_mcp_config({
+        "url": "http://server/mcp",
+        "authorization": "Bearer token999",
+        "headers": ["item1", "item2"]  # Not a dict, will be replaced with empty dict
+    })
+    assert result == {
+        "url": "http://server/mcp",
+        "transport": "streamable-http",
+        "headers": {"Authorization": "Bearer token999"}
+    }
+    
+    # Test dict format with empty url string
+    with pytest.raises(ValueError, match="must contain 'url' key"):
+        run_agent._normalize_mcp_config({"url": ""})
+    
+    # Test dict format with None url
+    with pytest.raises(ValueError, match="must contain 'url' key"):
+        run_agent._normalize_mcp_config({"url": None})
     
     # Test invalid dict (missing url)
     with pytest.raises(ValueError, match="must contain 'url' key"):
@@ -391,6 +479,12 @@ def test_normalize_mcp_config():
     # Test invalid type
     with pytest.raises(ValueError, match="Invalid MCP host item type"):
         run_agent._normalize_mcp_config(123)
+    
+    with pytest.raises(ValueError, match="Invalid MCP host item type"):
+        run_agent._normalize_mcp_config([])
+    
+    with pytest.raises(ValueError, match="Invalid MCP host item type"):
+        run_agent._normalize_mcp_config(None)
 
 
 def test_agent_run_thread_handles_internal_exception(basic_agent_run_info, mock_memory_context, monkeypatch):

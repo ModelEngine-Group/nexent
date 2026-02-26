@@ -212,6 +212,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/mcp/container/${containerId}/logs`,
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
+    record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------

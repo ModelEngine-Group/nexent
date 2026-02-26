@@ -1008,6 +1008,8 @@
   "mcpConfig.editServer.serviceNamePlaceholder": "Enter service name",
   "mcpConfig.editServer.mcpUrl": "MCP URL",
   "mcpConfig.editServer.mcpUrlPlaceholder": "Enter MCP server URL",
+  "mcpConfig.editServer.authorizationToken": "Authorization Token",
+  "mcpConfig.editServer.authorizationTokenPlaceholder": "Server Bearer Token (Optional)",
   "mcpConfig.containerList.title": "Running Containerized MCP Services",
   "mcpConfig.containerList.column.name": "Name",
   "mcpConfig.containerList.column.containerId": "Container ID",
