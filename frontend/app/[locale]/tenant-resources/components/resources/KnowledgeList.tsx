@@ -6,6 +6,7 @@ import { Table, Popconfirm, message, Button, Modal, Tag } from "antd";
 import { ColumnsType } from "antd/es/table";
 import { Edit, Trash2, BookOpen } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
+import { MarkdownRenderer } from "@/components/ui/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -289,7 +290,7 @@ export default function KnowledgeList({
         {summaryLoading ? (
           <div className="text-gray-400">{t("common.loading")}</div>
         ) : summaryContent ? (
-          <div className="text-gray-700 whitespace-pre-wrap">{summaryContent}</div>
+          <MarkdownRenderer content={summaryContent} />
         ) : (
           <div className="text-gray-400 italic">{t("tenantResources.knowledgeBase.noSummary")}</div>
         )}
