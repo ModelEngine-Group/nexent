@@ -26,10 +26,6 @@ import {
   Descriptions,
   DescriptionsProps,
   Modal,
-  Space,
-  Spin,
-  Empty,
-  Table,
   Dropdown,
   theme
 } from "antd";
@@ -48,18 +44,44 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import log from "@/lib/logger";
 import { message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
+import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
 
 const { Text } = Typography;
 
-const formatter = new Intl.DateTimeFormat('zh-CN', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false
+const formatter = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
 });
+
+/**
+ * Format UTC time string from backend to local time string based on user timezone
+ */
+function formatUtcToLocal(dateTimeStr?: string | null) {
+  if (!dateTimeStr) {
+    return "";
+  }
+
+  // Detect whether the string already contains timezone information
+  const hasTimezone = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(dateTimeStr);
+
+  let date: Date;
+  if (hasTimezone) {
+    // If timezone exists, use as is
+    date = new Date(dateTimeStr);
+  } else {
+    // Treat as UTC time from database, convert to local time
+    // Normalize space-separated format like "2025-02-25 08:00:00"
+    const normalized = dateTimeStr.replace(" ", "T");
+    date = new Date(`${normalized}Z`);
+  }
+
+  return formatter.format(date);
+}
 
 /**
  * Get status configuration based on isCurrentVersion flag
@@ -113,7 +135,7 @@ export function VersionCardItem({
   const queryClient = useQueryClient();
 
   // Get invalidate functions for refreshing data
-  const { invalidate: invalidateAgentVersionList } = useAgentVersionList(agentId);
+  const { agentVersionList, invalidate: invalidateAgentVersionList } = useAgentVersionList(agentId);
   const { invalidate: invalidateAgentInfo } = useAgentInfo(agentId);
 
   // Fetch version detail when expanded
@@ -132,13 +154,15 @@ export function VersionCardItem({
   const [rollbackLoading, setRollbackLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [compareData, setCompareData] = useState<VersionCompareResponse | null>(null);
+  const [selectedVersionNoA, setSelectedVersionNoA] = useState<number | null>(null);
+  const [selectedVersionNoB, setSelectedVersionNoB] = useState<number | null>(null);
 
   // Get theme token for styling
   const { token } = theme.useToken();
 
-  // Generate display date and operator from version data
+  // Generate display date from version data (convert from UTC to local time)
   const displayDate = useMemo(() => {
-    return formatter.format(new Date(version.create_time));
+    return formatUtcToLocal(version.create_time);
   }, [version.create_time]);
 
   /**
@@ -149,19 +173,20 @@ export function VersionCardItem({
       message.error(t("agent.error.agentNotFound"));
       return;
     }
+    const versionNoA = currentVersionNo || 0;
+    const versionNoB = version.version_no;
+    setSelectedVersionNoA(versionNoA);
+    setSelectedVersionNoB(versionNoB);
     setCompareModalOpen(true);
-    await loadComparison();
+    await loadComparison(versionNoA, versionNoB);
   };
 
   /**
    * Load version comparison data between current version and selected version
    */
-  const loadComparison = async () => {
+  const loadComparison = async (versionNoA: number, versionNoB: number) => {
     setLoading(true);
     try {
-      // Compare current version (currentVersionNo) with the version being rolled back to (version.version_no)
-      const versionNoA = currentVersionNo || 0; // Use current version, fallback to 0 (draft) if not available
-      const versionNoB = version.version_no;
       const result = await compareVersions(agentId, versionNoA, versionNoB);
       setCompareData(result);
     } catch (error) {
@@ -170,6 +195,30 @@ export function VersionCardItem({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleChangeVersionA = async (value: number) => {
+    setSelectedVersionNoA(value);
+    if (!selectedVersionNoB) {
+      return;
+    }
+    if (value === selectedVersionNoB) {
+      message.warning(t("agent.version.selectDifferentVersions"));
+      return;
+    }
+    await loadComparison(value, selectedVersionNoB);
+  };
+
+  const handleChangeVersionB = async (value: number) => {
+    setSelectedVersionNoB(value);
+    if (!selectedVersionNoA) {
+      return;
+    }
+    if (value === selectedVersionNoA) {
+      message.warning(t("agent.version.selectDifferentVersions"));
+      return;
+    }
+    await loadComparison(selectedVersionNoA, value);
   };
 
   /**
@@ -430,168 +479,21 @@ export function VersionCardItem({
         )}
       </Card>
 
-      {/* Version Comparison Modal */}
-      <Modal
-        title={
-          <Flex align="center" gap={8}>
-            <AlertTriangle className="text-orange-500" size={18} />
-            <span>{t("agent.version.rollbackCompareTitle")}</span>
-          </Flex>
-        }
+      <AgentVersionCompareModal
         open={compareModalOpen}
+        loading={loading}
+        versionList={agentVersionList || []}
+        currentVersionNo={currentVersionNo}
+        compareData={compareData}
         onCancel={() => setCompareModalOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setCompareModalOpen(false)}>
-            {t("common.cancel")}
-          </Button>,
-          <Button
-            key="confirm"
-            type="primary"
-            danger
-            icon={<RotateCcw size={14} />}
-            loading={rollbackLoading}
-            onClick={handleRollbackConfirm}
-          >
-            {t("agent.version.confirmRollback")}
-          </Button>,
-        ]}
-        width={800}
-        centered
-      >
-        <Spin spinning={loading}>
-          {compareData?.success && compareData?.data ? (
-            <Flex vertical gap={16}>
-              {/* Comparison Table */}
-              {(() => {
-                const { version_a, version_b } = compareData.data;
-
-                const columns = [
-                  {
-                    title: t("agent.version.versionName"),
-                    dataIndex: 'field',
-                    key: 'field',
-                    width: '25%',
-                    className: 'bg-gray-50 text-gray-600 font-medium',
-                  },
-                  {
-                    title: version_a.version.version_name,
-                    dataIndex: 'current',
-                    key: 'current',
-                    width: '37%',
-                  },
-                  {
-                    title: version_b.version.version_name,
-                    dataIndex: 'version',
-                    key: 'version',
-                    width: '38%',
-                  },
-                ];
-
-                const data = [
-                  {
-                    key: 'name',
-                    field: t("agent.version.field.name"),
-                    current: (
-                      <span className={version_a.name !== version_b.name ? "text-orange-500 font-medium" : "text-gray-600"}>
-                        {version_a.name}
-                      </span>
-                    ),
-                    version: (
-                      <span className={version_a.name !== version_b.name ? "text-green-500 font-medium" : "text-gray-600"}>
-                        {version_b.name}
-                      </span>
-                    ),
-                  },
-                  {
-                    key: 'model_name',
-                    field: t("agent.version.field.modelName"),
-                    current: (
-                      <span className={version_a.model_name !== version_b.model_name ? "text-orange-500 font-medium" : "text-gray-600"}>
-                        {version_a.model_name || '-'}
-                      </span>
-                    ),
-                    version: (
-                      <span className={version_a.model_name !== version_b.model_name ? "text-green-500 font-medium" : "text-gray-600"}>
-                        {version_b.model_name || '-'}
-                      </span>
-                    ),
-                  },
-                  {
-                    key: 'description',
-                    field: t("agent.version.field.description"),
-                    current: (
-                      <Text type="secondary" className={`text-xs ${version_a.description !== version_b.description ? "text-orange-500" : ""}`}>
-                        {version_a.description || '-'}
-                      </Text>
-                    ),
-                    version: (
-                      <Text type="secondary" className={`text-xs ${version_a.description !== version_b.description ? "text-green-500" : ""}`}>
-                        {version_b.description || '-'}
-                      </Text>
-                    ),
-                  },
-                  {
-                    key: 'duty_prompt',
-                    field: t("agent.version.field.dutyPrompt"),
-                    current: (
-                      <Text type="secondary" className={`text-xs ${version_a.duty_prompt !== version_b.duty_prompt ? "text-orange-500" : ""}`}>
-                        {version_a.duty_prompt?.slice(0, 100) || '-'}
-                        {version_a.duty_prompt && version_a.duty_prompt.length > 100 && '...'}
-                      </Text>
-                    ),
-                    version: (
-                      <Text type="secondary" className={`text-xs ${version_a.duty_prompt !== version_b.duty_prompt ? "text-green-500" : ""}`}>
-                        {version_b.duty_prompt?.slice(0, 100) || '-'}
-                        {version_b.duty_prompt && version_b.duty_prompt.length > 100 && '...'}
-                      </Text>
-                    ),
-                  },
-                  {
-                    key: 'tools',
-                    field: t("agent.version.field.tools"),
-                    current: (
-                      <Tag color={version_a.tools?.length !== version_b.tools?.length ? "orange" : "default"}>
-                        {version_a.tools?.length || 0}
-                      </Tag>
-                    ),
-                    version: (
-                      <Tag color={version_a.tools?.length !== version_b.tools?.length ? "green" : "default"}>
-                        {version_b.tools?.length || 0}
-                      </Tag>
-                    ),
-                  },
-                  {
-                    key: 'sub_agents',
-                    field: t("agent.version.field.subAgents"),
-                    current: (
-                      <Tag color={version_a.sub_agent_id_list?.length !== version_b.sub_agent_id_list?.length ? "orange" : "default"}>
-                        {version_a.sub_agent_id_list?.length || 0}
-                      </Tag>
-                    ),
-                    version: (
-                      <Tag color={version_a.sub_agent_id_list?.length !== version_b.sub_agent_id_list?.length ? "green" : "default"}>
-                        {version_b.sub_agent_id_list?.length || 0}
-                      </Tag>
-                    ),
-                  },
-                ];
-
-                return (
-                  <Table
-                    dataSource={data}
-                    columns={columns}
-                    pagination={false}
-                    size="small"
-                    bordered
-                  />
-                );
-              })()}
-            </Flex>
-          ) : (
-            <Empty description={t("agent.version.compareFailed")} />
-          )}
-        </Spin>
-      </Modal>
+        showRollback
+        rollbackLoading={rollbackLoading}
+        onRollbackConfirm={handleRollbackConfirm}
+        selectedVersionNoA={selectedVersionNoA}
+        selectedVersionNoB={selectedVersionNoB}
+        onChangeVersionA={handleChangeVersionA}
+        onChangeVersionB={handleChangeVersionB}
+      />
 
       {/* Delete Version Confirmation Modal */}
       <Modal

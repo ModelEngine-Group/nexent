@@ -1737,5 +1737,7 @@
   "agent.version.deleteWarning": "This action cannot be undone.",
   "agent.version.statusUpdateSuccess": "Version status updated successfully",
   "agent.version.statusUpdateError": "Failed to update version status",
+  "agent.version.needTwoVersions": "At least two versions are required to compare",
+  "agent.version.selectDifferentVersions": "Please select two different versions to compare",
   "agent.error.agentNotFound": "Agent not found"
 }
