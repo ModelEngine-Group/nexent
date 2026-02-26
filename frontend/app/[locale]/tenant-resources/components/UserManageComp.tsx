@@ -25,7 +25,7 @@ import {
   createTenant,
   updateTenant,
 } from "@/services/tenantService";
-import { createInvitation } from "@/services/invitationService";
+import { createInvitation, deleteInvitation } from "@/services/invitationService";
 import { authService } from "@/services/authService";
 import UserList from "./resources/UserList";
 import GroupList from "./resources/GroupList";
@@ -157,6 +157,13 @@ function TenantList({
               }
             } else {
               message.success(t("tenantResources.tenants.adminAccountCreated"));
+              // Delete the invitation code after successful admin registration
+              try {
+                await deleteInvitation(invitation.invitation_code);
+              } catch (deleteError) {
+                // Log error but don't block the success flow
+                console.warn("Failed to delete invitation code after admin registration:", deleteError);
+              }
               // Refresh user list and invitation list to show the newly created admin
               onUserListRefresh?.();
               onInvitationListRefresh?.();

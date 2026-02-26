@@ -34,11 +34,17 @@ import {
 import { Plus, Edit, Trash2, CheckCircle, Clock, XCircle, Copy, CircleSlash } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { formatDate } from "@/lib/date";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 
 const { Panel } = Collapse;
 
 export default function InvitationList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
   const { t } = useTranslation("common");
+  const { user } = useAuthorizationContext();
+  const userRole = user?.role;
+  const isAdminRole = userRole === USER_ROLES.ADMIN;
+
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [editingInvitation, setEditingInvitation] = useState<Invitation | null>(null);
@@ -431,7 +437,7 @@ export default function InvitationList({ tenantId, refreshKey }: { tenantId: str
               <Select
                 placeholder={t("tenantResources.invitation.codeType")}
                 options={[
-                  { value: "ADMIN_INVITE", label: t("tenantResources.invitation.codeType.ADMIN_INVITE") },
+                  ...(isAdminRole ? [] : [{ value: "ADMIN_INVITE", label: t("tenantResources.invitation.codeType.ADMIN_INVITE") }]),
                   { value: "DEV_INVITE", label: t("tenantResources.invitation.codeType.DEV_INVITE") },
                   { value: "USER_INVITE", label: t("tenantResources.invitation.codeType.USER_INVITE") },
                 ]}
