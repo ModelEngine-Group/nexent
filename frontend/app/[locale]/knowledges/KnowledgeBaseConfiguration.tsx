@@ -1048,6 +1048,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                   // Trigger knowledge base list update to refresh chunk count
                   knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
                 }}
+                  permission={kbState.activeKnowledgeBase?.permission}
                 // Upload related props
                 isDragging={uiState.isDragging}
                 onDragOver={handleDragOver}

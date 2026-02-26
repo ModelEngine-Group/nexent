@@ -477,8 +477,9 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         </div>
                           <div className="flex items-center ml-2">
                           <Can permission="kb:update">
-                            {/* Edit button - only show for Nexent (local) sources */}
-                            {(!kb.source || kb.source === "nexent" || kb.source === "elasticsearch") && (
+                            {/* Edit button - only show for Nexent (local) sources and when user has edit permission */}
+                            {(!kb.source || kb.source === "nexent" || kb.source === "elasticsearch") &&
+                              kb.permission !== "READ_ONLY" && (
                               <Tooltip title={t("common.edit")}>
                                 <Button
                                   type="text"
@@ -493,7 +494,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             )}
                             </Can>
                           <Can permission="kb:delete">
-                              {/* Delete button */}
+                            {/* Delete button - hide when user has READ_ONLY permission */}
+                            {kb.permission !== "READ_ONLY" && (
                               <Tooltip title={t("common.delete")}>
                                 <Button
                                   type="text"
@@ -506,6 +508,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                   size="small"
                                 />
                               </Tooltip>
+                            )}
                             </Can>
                           </div>
 
