@@ -372,12 +372,37 @@ async def create_agent_run_info(
     remote_mcp_list.append({
         "remote_mcp_server_name": "nexent",
         "remote_mcp_server": default_mcp_url,
-        "status": True
+        "status": True,
+        "authorization_token": None
     })
     remote_mcp_dict = {record["remote_mcp_server_name"]: record for record in remote_mcp_list if record["status"]}
 
-    # Filter MCP servers and tools
-    mcp_host = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+    # Filter MCP servers and tools, and build mcp_host with authorization
+    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+
+    # Build mcp_host list with authorization tokens
+    mcp_host = []
+    for url in used_mcp_urls:
+        # Find the MCP record for this URL
+        mcp_record = None
+        for record in remote_mcp_list:
+            if record.get("remote_mcp_server") == url and record.get("status"):
+                mcp_record = record
+                break
+
+        if mcp_record:
+            mcp_config = {
+                "url": url,
+                "transport": "sse" if url.endswith("/sse") else "streamable-http"
+            }
+            # Add authorization if present
+            auth_token = mcp_record.get("authorization_token")
+            if auth_token:
+                mcp_config["authorization"] = auth_token
+            mcp_host.append(mcp_config)
+        else:
+            # Fallback to string format if record not found
+            mcp_host.append(url)
 
     agent_run_info = AgentRunInfo(
         query=final_query,

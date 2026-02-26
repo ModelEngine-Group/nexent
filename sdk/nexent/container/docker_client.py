@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 import docker
 from docker.errors import APIError, DockerException, NotFound
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 
 from .container_client_base import ContainerClient, ContainerConfig
 from .docker_config import DockerContainerConfig
@@ -270,6 +271,11 @@ class DockerContainerClient(ContainerClient):
                     logger.error(f"Failed to find free port: {e}")
                     raise
 
+        # Extract authorization_token from env_vars if present (for health check)
+        authorization_token = None
+        if env_vars:
+            authorization_token = env_vars.get("authorization_token")
+
         # Prepare environment variables
         container_env = {
             "PORT": str(host_port),
@@ -326,7 +332,7 @@ class DockerContainerClient(ContainerClient):
             host = self._get_service_host(container_name)
             service_url = f"http://{host}:{host_port}/mcp"
             try:
-                await self._wait_for_service_ready(service_url, max_retries=30)
+                await self._wait_for_service_ready(service_url, max_retries=30, authorization_token=authorization_token)
             except ContainerConnectionError:
                 # If health check fails, log but don't fail immediately
                 logger.warning(
@@ -359,7 +365,7 @@ class DockerContainerClient(ContainerClient):
             raise ContainerError(f"Container startup failed: {e}")
 
     async def _wait_for_service_ready(
-        self, url: str, max_retries: int = 30, retry_delay: int = 5
+        self, url: str, max_retries: int = 30, retry_delay: int = 5, authorization_token: Optional[str] = None
     ):
         """
         Wait for service to be ready by checking connection
@@ -368,13 +374,35 @@ class DockerContainerClient(ContainerClient):
             url: Service URL
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
+            authorization_token: Optional authorization token for MCP server
 
         Raises:
             ContainerConnectionError: If service is not ready after max retries
         """
         for i in range(max_retries):
             try:
-                client = Client(url)
+                # Select transport based on URL ending and set headers
+                url_stripped = url.strip()
+                headers = {"Authorization": authorization_token} if authorization_token else {}
+
+                if url_stripped.endswith("/sse"):
+                    transport = SSETransport(
+                        url=url_stripped,
+                        headers=headers
+                    )
+                elif url_stripped.endswith("/mcp"):
+                    transport = StreamableHttpTransport(
+                        url=url_stripped,
+                        headers=headers
+                    )
+                else:
+                    # Default to StreamableHttpTransport for unrecognized formats
+                    transport = StreamableHttpTransport(
+                        url=url_stripped,
+                        headers=headers
+                    )
+
+                client = Client(transport=transport)
                 async with client:
                     if client.is_connected():
                         logger.info(f"Service ready at {url}")

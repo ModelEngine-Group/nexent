@@ -26,7 +26,7 @@ const getAuthHeaders = () => {
  */
 export const getMcpServerList = async (tenantId?: string | null) => {
   try {
-    const url = tenantId 
+    const url = tenantId
       ? `${API_ENDPOINTS.mcp.list}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.mcp.list;
     const response = await fetch(url, {
@@ -44,6 +44,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           mcp_url: server.remote_mcp_server,
           status: server.status || false,
           permission: server.permission,
+          mcp_id: server.mcp_id,
         };
       });
 
@@ -87,12 +88,15 @@ export const getMcpServerList = async (tenantId?: string | null) => {
 /**
  * Add MCP server
  */
-export const addMcpServer = async (mcpUrl: string, serviceName: string, tenantId?: string | null) => {
+export const addMcpServer = async (mcpUrl: string, serviceName: string, authorizationToken?: string | null, tenantId?: string | null) => {
   try {
     const params = new URLSearchParams({
       mcp_url: mcpUrl,
       service_name: serviceName,
     });
+    if (authorizationToken) {
+      params.append('authorization_token', authorizationToken);
+    }
     if (tenantId) {
       params.append('tenant_id', tenantId);
     }
@@ -148,21 +152,26 @@ export const updateMcpServer = async (
   currentMcpUrl: string,
   newServiceName: string,
   newMcpUrl: string,
+  newAuthorizationToken?: string | null,
   tenantId?: string | null
 ) => {
   try {
-    const url = tenantId 
+    const url = tenantId
       ? `${API_ENDPOINTS.mcp.update}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.mcp.update;
+    const body: any = {
+      current_service_name: currentServiceName,
+      current_mcp_url: currentMcpUrl,
+      new_service_name: newServiceName,
+      new_mcp_url: newMcpUrl,
+    };
+    if (newAuthorizationToken !== undefined) {
+      body.new_authorization_token = newAuthorizationToken;
+    }
     const response = await fetch(url, {
       method: "PUT",
       headers: getAuthHeaders(),
-      body: JSON.stringify({
-        current_service_name: currentServiceName,
-        current_mcp_url: currentMcpUrl,
-        new_service_name: newServiceName,
-        new_mcp_url: newMcpUrl,
-      }),
+      body: JSON.stringify(body),
     });
 
     const data = await response.json();
@@ -411,7 +420,7 @@ export const checkMcpServerHealth = async (mcpUrl: string, serviceName: string, 
  */
 export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string>; port?: number; image?: string }> }, tenantId?: string | null) => {
   try {
-    const url = tenantId 
+    const url = tenantId
       ? `${API_ENDPOINTS.mcp.addFromConfig}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.mcp.addFromConfig;
     const response = await fetch(url, {
@@ -458,7 +467,7 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
  */
 export const getMcpContainers = async (tenantId?: string | null) => {
   try {
-    const url = tenantId 
+    const url = tenantId
       ? `${API_ENDPOINTS.mcp.containers}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.mcp.containers;
     const response = await fetch(url, {
@@ -618,7 +627,7 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
  */
 export const deleteMcpContainer = async (containerId: string, tenantId?: string | null) => {
   try {
-    const url = tenantId 
+    const url = tenantId
       ? `${API_ENDPOINTS.mcp.deleteContainer(containerId)}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.mcp.deleteContainer(containerId);
     const response = await fetch(url, {
@@ -651,6 +660,55 @@ export const deleteMcpContainer = async (containerId: string, tenantId?: string 
     }
   } catch (error) {
     log.error(t('mcpService.debug.deleteContainerFailed'), error);
+    return {
+      success: false,
+      data: null,
+      message: t('mcpService.message.networkError')
+    };
+  }
+};
+
+/**
+ * Get single MCP record by ID
+ */
+export const getMcpRecord = async (mcpId: number, tenantId?: string | null) => {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.mcp.record(mcpId)}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.mcp.record(mcpId);
+    const response = await fetch(url, {
+      headers: getAuthHeaders(),
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.status === 'success') {
+      return {
+        success: true,
+        data: {
+          mcp_name: data.mcp_name,
+          mcp_server: data.mcp_server,
+          authorization_token: data.authorization_token,
+        },
+        message: ''
+      };
+    } else {
+      let errorMessage = data.detail || data.message || t('mcpService.message.getMcpRecordFailed');
+
+      if (response.status === 404) {
+        errorMessage = t('mcpService.message.mcpRecordNotFound');
+      } else if (response.status === 500) {
+        errorMessage = t('mcpService.message.getMcpRecordFailed');
+      }
+
+      return {
+        success: false,
+        data: null,
+        message: errorMessage
+      };
+    }
+  } catch (error) {
+    log.error(t('mcpService.debug.getMcpRecordFailed'), error);
     return {
       success: false,
       data: null,

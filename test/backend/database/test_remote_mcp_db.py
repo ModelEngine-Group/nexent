@@ -73,11 +73,14 @@ from backend.database.remote_mcp_db import (
     update_mcp_record_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
+    get_mcp_authorization_token_by_name_and_url,
+    get_mcp_record_by_id_and_tenant,
     check_mcp_name_exists,
 )
 
 class MockMcpRecord:
     def __init__(self):
+        self.mcp_id = 1
         self.mcp_name = "test_mcp"
         self.mcp_server = "http://test.server.com"
         self.tenant_id = "tenant1"
@@ -85,8 +88,10 @@ class MockMcpRecord:
         self.status = True
         self.delete_flag = "N"
         self.container_id = "container-1"
+        self.authorization_token = "test_token_123"
         self.create_time = "2024-01-01 00:00:00"
         self.__dict__ = {
+            "mcp_id": 1,
             "mcp_name": "test_mcp",
             "mcp_server": "http://test.server.com",
             "tenant_id": "tenant1",
@@ -94,6 +99,7 @@ class MockMcpRecord:
             "status": True,
             "delete_flag": "N",
             "container_id": "container-1",
+            "authorization_token": "test_token_123",
             "create_time": "2024-01-01 00:00:00"
         }
 
@@ -437,11 +443,12 @@ def test_check_mcp_name_exists_database_error(monkeypatch, mock_session):
 
 
 class MockMCPUpdateRequest:
-    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url):
+    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url, new_authorization_token=None):
         self.current_service_name = current_service_name
         self.current_mcp_url = current_mcp_url
         self.new_service_name = new_service_name
         self.new_mcp_url = new_mcp_url
+        self.new_authorization_token = new_authorization_token
 
 
 def test_update_mcp_record_by_name_and_url_success(monkeypatch, mock_session):
@@ -478,7 +485,8 @@ def test_update_mcp_record_by_name_and_url_success(monkeypatch, mock_session):
         "mcp_name": "new_name",
         "mcp_server": "http://new.url",
         "updated_by": "user1",
-        "status": True
+        "status": True,
+        "authorization_token": None
     })
 
 
@@ -514,7 +522,8 @@ def test_update_mcp_record_by_name_and_url_without_status(monkeypatch, mock_sess
     mock_update.assert_called_once_with({
         "mcp_name": "new_name",
         "mcp_server": "http://new.url",
-        "updated_by": "user1"
+        "updated_by": "user1",
+        "authorization_token": None
     })
 
 
@@ -609,3 +618,295 @@ def test_mcp_record_lifecycle(monkeypatch, mock_session):
 
     # 6. Delete MCP record by container_id - should not raise exception
     delete_mcp_record_by_container_id("container-1", "tenant1", "user1")
+
+
+def test_get_mcp_authorization_token_by_name_and_url_success(monkeypatch, mock_session):
+    """Test successful retrieval of MCP authorization token by name and URL"""
+    session, query = mock_session
+    mock_mcp = MockMcpRecord()
+    mock_mcp.authorization_token = "bearer_token_123"
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_mcp
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_authorization_token_by_name_and_url(
+        "test_mcp", "http://test.server.com", "tenant1")
+
+    assert result == "bearer_token_123"
+
+
+def test_get_mcp_authorization_token_by_name_and_url_not_found(monkeypatch, mock_session):
+    """Test retrieval of MCP authorization token when record does not exist"""
+    session, query = mock_session
+
+    mock_first = MagicMock()
+    mock_first.return_value = None
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_authorization_token_by_name_and_url(
+        "nonexistent_mcp", "http://test.server.com", "tenant1")
+
+    assert result is None
+
+
+def test_get_mcp_authorization_token_by_name_and_url_database_error(monkeypatch, mock_session):
+    """Test database error when retrieving MCP authorization token - exception should propagate"""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    session, query = mock_session
+    query.filter.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    # Should raise SQLAlchemyError
+    with pytest.raises(SQLAlchemyError):
+        get_mcp_authorization_token_by_name_and_url(
+            "test_mcp", "http://test.server.com", "tenant1")
+
+
+def test_update_mcp_record_by_name_and_url_with_authorization_token(monkeypatch, mock_session):
+    """Test update of MCP record with authorization token"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_data = MockMCPUpdateRequest(
+        current_service_name="old_name",
+        current_mcp_url="http://old.url",
+        new_service_name="new_name",
+        new_mcp_url="http://new.url",
+        new_authorization_token="new_token_456"
+    )
+
+    # Should not raise any exception
+    update_mcp_record_by_name_and_url(
+        update_data=update_data,
+        tenant_id="tenant1",
+        user_id="user1",
+        status=True
+    )
+
+    # Verify the update was called with authorization_token
+    mock_update.assert_called_once_with({
+        "mcp_name": "new_name",
+        "mcp_server": "http://new.url",
+        "updated_by": "user1",
+        "status": True,
+        "authorization_token": "new_token_456"
+    })
+
+
+def test_update_mcp_record_by_name_and_url_without_authorization_token(monkeypatch, mock_session):
+    """Test update of MCP record without authorization token (None will be included in update)"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_data = MockMCPUpdateRequest(
+        current_service_name="old_name",
+        current_mcp_url="http://old.url",
+        new_service_name="new_name",
+        new_mcp_url="http://new.url"
+        # new_authorization_token is None by default
+    )
+
+    # Should not raise any exception
+    update_mcp_record_by_name_and_url(
+        update_data=update_data,
+        tenant_id="tenant1",
+        user_id="user1",
+        status=True
+    )
+
+    # Verify the update was called with authorization_token as None
+    mock_update.assert_called_once_with({
+        "mcp_name": "new_name",
+        "mcp_server": "http://new.url",
+        "updated_by": "user1",
+        "status": True,
+        "authorization_token": None
+    })
+
+
+def test_update_mcp_record_by_name_and_url_with_none_authorization_token(monkeypatch, mock_session):
+    """Test update of MCP record with None authorization token (None will be included in update)"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    update_data = MockMCPUpdateRequest(
+        current_service_name="old_name",
+        current_mcp_url="http://old.url",
+        new_service_name="new_name",
+        new_mcp_url="http://new.url",
+        new_authorization_token=None  # Explicitly None
+    )
+
+    # Should not raise any exception
+    update_mcp_record_by_name_and_url(
+        update_data=update_data,
+        tenant_id="tenant1",
+        user_id="user1"
+    )
+
+    # Verify the update was called with authorization_token as None
+    mock_update.assert_called_once_with({
+        "mcp_name": "new_name",
+        "mcp_server": "http://new.url",
+        "updated_by": "user1",
+        "authorization_token": None
+    })
+
+
+def test_update_mcp_record_by_name_and_url_without_authorization_token_attribute(monkeypatch, mock_session):
+    """Test update of MCP record when object does not have new_authorization_token attribute"""
+    session, query = mock_session
+    mock_update = MagicMock()
+    mock_filter = MagicMock()
+    mock_filter.update = mock_update
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    # Create an object without new_authorization_token attribute
+    class UpdateDataWithoutToken:
+        def __init__(self):
+            self.current_service_name = "old_name"
+            self.current_mcp_url = "http://old.url"
+            self.new_service_name = "new_name"
+            self.new_mcp_url = "http://new.url"
+            # No new_authorization_token attribute
+
+    update_data = UpdateDataWithoutToken()
+
+    # Should not raise any exception
+    update_mcp_record_by_name_and_url(
+        update_data=update_data,
+        tenant_id="tenant1",
+        user_id="user1",
+        status=False
+    )
+
+    # Verify the update was called without authorization_token
+    mock_update.assert_called_once_with({
+        "mcp_name": "new_name",
+        "mcp_server": "http://new.url",
+        "updated_by": "user1",
+        "status": False
+    })
+
+
+def test_get_mcp_record_by_id_and_tenant_success(monkeypatch, mock_session):
+    """Test successful retrieval of MCP record by ID and tenant"""
+    session, query = mock_session
+    mock_mcp = MockMcpRecord()
+    mock_mcp.mcp_id = 123
+
+    mock_first = MagicMock()
+    mock_first.return_value = mock_mcp
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_mcp_record_by_id_and_tenant(123, "tenant1")
+
+    assert result is not None
+    assert result["mcp_id"] == 123
+    assert result["mcp_name"] == "test_mcp"
+    assert result["mcp_server"] == "http://test.server.com"
+
+
+def test_get_mcp_record_by_id_and_tenant_not_found(monkeypatch, mock_session):
+    """Test retrieval of MCP record by ID and tenant when record does not exist"""
+    session, query = mock_session
+
+    mock_first = MagicMock()
+    mock_first.return_value = None
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    result = get_mcp_record_by_id_and_tenant(999, "tenant1")
+
+    assert result is None
+
+
+def test_get_mcp_record_by_id_and_tenant_database_error(monkeypatch, mock_session):
+    """Test database error when retrieving MCP record by ID - exception should propagate"""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    session, query = mock_session
+    query.filter.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    # Should raise SQLAlchemyError
+    with pytest.raises(SQLAlchemyError):
+        get_mcp_record_by_id_and_tenant(123, "tenant1")
