@@ -89,6 +89,7 @@ sys.modules['database'] = database_module
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['database.tool_db'] = MagicMock()
 sys.modules['database.model_management_db'] = MagicMock()
+sys.modules['database.agent_version_db'] = MagicMock()
 sys.modules['services.vectordatabase_service'] = MagicMock()
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
@@ -1630,7 +1631,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading:
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
 
             # Set mock return values
             mock_join_query.return_value = "processed_query"
@@ -1647,6 +1649,7 @@ class TestCreateAgentRunInfo:
             mock_urljoin.return_value = "http://nexent.mcp/sse"
             mock_filter.return_value = ["http://test.server"]
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1  # Mock published version
 
             result = await create_agent_run_info(
                 agent_id="agent_1",
@@ -1684,6 +1687,7 @@ class TestCreateAgentRunInfo:
                 language="zh",
                 last_user_query="processed_query",
                 allow_memory_search=True,
+                version_no=1,
             )
             mock_get_mcp.assert_called_once_with(tenant_id="tenant_1")
             mock_filter.assert_called_once_with("agent_config", {
@@ -1711,7 +1715,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading:
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -1727,6 +1732,7 @@ class TestCreateAgentRunInfo:
             mock_urljoin.return_value = "http://nexent.mcp/sse"
             mock_filter.return_value = ["http://test.server"]
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
 
             await create_agent_run_info(
                 agent_id="agent_1",
@@ -1759,7 +1765,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading:
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -1775,6 +1782,7 @@ class TestCreateAgentRunInfo:
             mock_urljoin.return_value = "http://nexent.mcp/sse"
             mock_filter.return_value = ["http://sse.server/sse"]
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
 
             await create_agent_run_info(
                 agent_id="agent_1",
@@ -1806,7 +1814,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading:
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -1817,6 +1826,7 @@ class TestCreateAgentRunInfo:
             # Filter returns a URL that doesn't exist in remote_mcp_list
             mock_filter.return_value = ["http://unknown.server"]
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
 
             await create_agent_run_info(
                 agent_id="agent_1",
@@ -1845,7 +1855,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading:
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -1878,6 +1889,7 @@ class TestCreateAgentRunInfo:
                 "http://unknown.server"
             ]
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
 
             await create_agent_run_info(
                 agent_id="agent_1",
@@ -1918,7 +1930,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading:
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -1935,6 +1948,7 @@ class TestCreateAgentRunInfo:
             # Filter returns URL that exists but has status=False
             mock_filter.return_value = ["http://disabled.server"]
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
 
             await create_agent_run_info(
                 agent_id="agent_1",
@@ -1974,6 +1988,7 @@ class TestCreateAgentRunInfo:
             ) as mock_filter,
             patch("backend.agents.create_agent_info.urljoin") as mock_urljoin,
             patch("backend.agents.create_agent_info.threading") as mock_threading,
+            patch("backend.agents.create_agent_info.query_current_version_no") as mock_version_no,
         ):
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -1982,6 +1997,7 @@ class TestCreateAgentRunInfo:
             mock_urljoin.return_value = "http://nexent.mcp/sse"
             mock_filter.return_value = []
             mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
 
             await create_agent_run_info(
                 agent_id="agent_1",
@@ -2001,6 +2017,7 @@ class TestCreateAgentRunInfo:
                 language="zh",
                 last_user_query="processed_query",
                 allow_memory_search=False,
+                version_no=1,
             )
 
 
