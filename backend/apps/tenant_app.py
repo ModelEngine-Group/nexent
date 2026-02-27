@@ -250,7 +250,7 @@ async def delete_tenant_endpoint(
         user_id, _ = get_current_user_id(authorization)
 
         # Perform tenant deletion with all associated resources
-        delete_tenant(tenant_id, deleted_by=user_id)
+        await delete_tenant(tenant_id, deleted_by=user_id)
 
         logger.info(f"Deleted tenant {tenant_id} and all associated resources by user {user_id}")
 
