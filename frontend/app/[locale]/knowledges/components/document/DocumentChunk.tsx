@@ -60,6 +60,7 @@ interface DocumentChunkProps {
   currentEmbeddingModel?: string | null;
   knowledgeBaseEmbeddingModel?: string;
   onChunkCountChange?: () => void; // Callback when chunk count changes (for updating KnowledgeBaseList)
+  permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 }
 
 const PAGE_SIZE = 10;
@@ -76,6 +77,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   currentEmbeddingModel = null,
   knowledgeBaseEmbeddingModel = "",
   onChunkCountChange,
+  permission,
 }) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -137,9 +139,25 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
   }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel]);
 
-  // Determine if in read-only mode (embedding model mismatch OR other read-only reasons)
+  // Determine if in read-only mode (embedding model mismatch OR user has READ_ONLY permission)
   // Note: isReadOnlyMode is broader, includes model mismatch and other conditions
   const isReadOnlyMode = React.useMemo(() => {
+    // Check if user has READ_ONLY permission
+    if (permission === "READ_ONLY") {
+      return true;
+    }
+    if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
+      return false;
+    }
+    if (knowledgeBaseEmbeddingModel === "unknown") {
+      return false;
+    }
+    return currentEmbeddingModel !== knowledgeBaseEmbeddingModel;
+  }, [currentEmbeddingModel, knowledgeBaseEmbeddingModel, permission]);
+
+  // Determine if search should be disabled (only when embedding model mismatch, NOT for READ_ONLY permission)
+  // This allows READ_ONLY users to still perform search
+  const isSearchDisabled = React.useMemo(() => {
     if (!currentEmbeddingModel || !knowledgeBaseEmbeddingModel) {
       return false;
     }
@@ -403,8 +421,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     setChunkModalMode("create");
     setEditingChunk(null);
     chunkForm.resetFields();
+    const filenameValue = activeDocument?.name || "";
     chunkForm.setFieldsValue({
-      filename: activeDocument?.name || "",
+      filename: filenameValue,
       content: "",
     });
     setIsChunkModalOpen(true);
@@ -462,9 +481,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
       const values = await chunkForm.validateFields();
       setChunkSubmitting(true);
       if (chunkModalMode === "create") {
+        const filenamePayload = values.filename?.trim() || undefined;
         await knowledgeBaseService.createChunk(knowledgeBaseName, {
           content: values.content,
-          filename: values.filename?.trim() || undefined,
+          filename: filenamePayload,
           path_or_url: activeDocumentKey,
         });
         message.success(t("document.chunk.success.create"));
@@ -810,7 +830,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                     void handleSearch();
                   }}
                   style={{ width: 320 }}
-                  disabled={isReadOnlyMode}
+                  disabled={isSearchDisabled}
                   suffix={
                     <div className="flex items-center gap-1">
                       {searchValue && (
@@ -830,16 +850,16 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                         }}
                         size="small"
                         loading={chunkSearchLoading}
-                        disabled={isReadOnlyMode}
+                        disabled={isSearchDisabled}
                       />
                     </div>
                   }
                 />
             )}
           </div>
-          {/* Show Create Chunk button with tooltip only when model mismatch; hide in other read-only scenarios */}
-          {!isReadOnlyMode || isEmbeddingModelMismatch ? (
-            <Tooltip title={isEmbeddingModelMismatch ? disabledTooltipMessage : undefined}>
+          {/* Create Chunk button - hide when user has READ_ONLY permission */}
+          {!isReadOnlyMode && (
+            <Tooltip title={t("document.chunk.tooltip.create")}>
               <Button
                 type="text"
                 icon={<FilePlus2 size={16} />}
@@ -847,7 +867,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                 disabled={isEmbeddingModelMismatch}
               ></Button>
             </Tooltip>
-          ) : null}
+          )}
         </div>
 
         <Tabs
@@ -911,6 +931,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
             <div className="pl-4 text-gray-700">
               {getDisplayName(activeDocument?.name || "")}
             </div>
+          </Form.Item>
+          {/* Hidden field to preserve filename value for form submission */}
+          <Form.Item name="filename" hidden>
           </Form.Item>
           <Form.Item
             label={

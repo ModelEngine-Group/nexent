@@ -296,7 +296,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           setModalVisible(false);
           editGroupForm.resetFields();
         }}
-        destroyOnClose
+        destroyOnHidden
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}
