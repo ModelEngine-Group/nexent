@@ -1756,5 +1756,102 @@
   "agent.version.statusUpdateError": "更新版本状态失败",
   "agent.version.needTwoVersions": "至少需要两个版本才能进行对比",
   "agent.version.selectDifferentVersions": "请选择两个不同的版本进行对比",
-  "agent.error.agentNotFound": "未找到智能体"
+  "agent.error.agentNotFound": "未找到智能体",
+
+  "errorCode.101001": "发生未知错误，请稍后重试",
+  "errorCode.101002": "服务暂时不可用，请稍后重试",
+  "errorCode.101003": "数据库操作失败，请稍后重试",
+  "errorCode.101004": "操作超时，请稍后重试",
+  "errorCode.101005": "服务器内部错误，请稍后重试",
+
+  "errorCode.102001": "您没有执行此操作的权限",
+  "errorCode.102002": "您的登录已过期，请重新登录",
+  "errorCode.102003": "登录令牌无效，请重新登录",
+  "errorCode.102004": "请求签名验证失败",
+  "errorCode.102005": "禁止访问",
+
+  "errorCode.103001": "用户不存在",
+  "errorCode.103002": "用户注册失败，请稍后重试",
+  "errorCode.103003": "用户已存在",
+  "errorCode.103004": "用户名或密码错误",
+
+  "errorCode.104001": "租户不存在",
+  "errorCode.104002": "租户已被禁用",
+  "errorCode.104003": "租户配置错误",
+
+  "errorCode.105001": "智能体不存在",
+  "errorCode.105002": "运行智能体失败，请稍后重试",
+  "errorCode.105003": "智能体名称已存在",
+  "errorCode.105004": "智能体已被禁用",
+  "errorCode.105005": "智能体版本不存在",
+
+  "errorCode.106001": "工具不存在",
+  "errorCode.106002": "工具执行失败",
+  "errorCode.106003": "工具配置无效",
+  "errorCode.106101": "连接MCP服务失败",
+  "errorCode.106102": "MCP名称包含非法字符",
+  "errorCode.106103": "MCP容器操作失败",
+
+  "errorCode.107001": "对话不存在",
+  "errorCode.107002": "保存对话失败",
+  "errorCode.107003": "消息不存在",
+  "errorCode.107004": "生成对话标题失败",
+
+  "errorCode.108001": "记忆不存在",
+  "errorCode.108002": "准备记忆失败",
+  "errorCode.108003": "记忆配置无效",
+
+  "errorCode.109001": "知识库不存在",
+  "errorCode.109002": "同步知识库失败",
+  "errorCode.109003": "搜索索引不存在",
+  "errorCode.109004": "知识搜索失败",
+  "errorCode.109005": "上传知识失败",
+
+  "errorCode.110001": "模型不存在",
+  "errorCode.110002": "模型配置无效",
+  "errorCode.110003": "模型健康检查失败",
+  "errorCode.110004": "模型提供商错误",
+
+  "errorCode.111001": "语音服务错误",
+  "errorCode.111002": "连接语音识别服务失败",
+  "errorCode.111003": "连接语音合成服务失败",
+  "errorCode.111004": "语音配置无效",
+
+  "errorCode.112001": "文件不存在",
+  "errorCode.112002": "文件上传失败",
+  "errorCode.112003": "文件大小超出限制",
+  "errorCode.112004": "不支持的文件类型",
+  "errorCode.112005": "文件预处理失败",
+
+  "errorCode.113001": "邀请码不存在",
+  "errorCode.113002": "邀请码无效",
+  "errorCode.113003": "邀请码已过期",
+
+  "errorCode.114001": "群组不存在",
+  "errorCode.114002": "群组已存在",
+  "errorCode.114003": "成员不在群组中",
+
+  "errorCode.115001": "数据处理失败",
+  "errorCode.115002": "数据解析失败",
+
+  "errorCode.116001": "连接ME服务失败",
+  "errorCode.116002": "连接DataMate服务失败",
+  "errorCode.116003": "Dify服务错误",
+  "errorCode.116004": "外部API错误",
+
+  "errorCode.116101": "Dify配置无效，请检查URL和API Key格式",
+  "errorCode.116102": "连接Dify失败，请检查网络和URL",
+  "errorCode.116103": "Dify认证失败，请检查API Key",
+  "errorCode.116104": "Dify请求频率超限，请稍后重试",
+  "errorCode.116105": "Dify响应解析失败，请检查API URL",
+
+  "errorCode.120001": "验证失败",
+  "errorCode.120002": "参数无效",
+  "errorCode.120003": "缺少必填字段",
+
+  "errorCode.121001": "资源不存在",
+  "errorCode.121002": "资源已存在",
+  "errorCode.121003": "资源已被禁用",
+
+  "errorCode.122001": "请求过于频繁，请稍后重试"
 }

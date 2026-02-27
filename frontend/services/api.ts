@@ -343,12 +343,25 @@ export const fetchWithErrorHandling = async (
         );
       }
 
-      // Other HTTP errors
+      // Other HTTP errors - try to parse JSON response for error code
+      let errorCode = response.status;
+      let errorMessage = `Request failed: ${response.status}`;
       const errorText = await response.text();
-      throw new ApiError(
-        response.status,
-        errorText || `Request failed: ${response.status}`
-      );
+
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData && errorData.code) {
+          errorCode = errorData.code;
+          errorMessage = errorData.message || errorMessage;
+        } else {
+          errorMessage = errorText || errorMessage;
+        }
+      } catch {
+        // Not JSON, use text as message
+        errorMessage = errorText || errorMessage;
+      }
+
+      throw new ApiError(errorCode, errorMessage);
     }
 
     return response;

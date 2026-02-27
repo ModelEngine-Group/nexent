@@ -12,6 +12,9 @@ from apps.file_management_app import file_management_runtime_router as file_mana
 
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
+# Import exception handling
+from consts.exceptions import AppException
+from middleware.exception_handler import ExceptionHandlerMiddleware
 
 # Create logger instance
 logger = logging.getLogger("runtime_app")
@@ -25,6 +28,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add global exception handler middleware
+app.add_middleware(ExceptionHandlerMiddleware)
 
 app.include_router(agent_router)
 app.include_router(conversation_management_router)
@@ -46,13 +52,29 @@ async def http_exception_handler(request, exc):
     )
 
 
-# Global exception handler for all uncaught exceptions
+# Global exception handler for AppException
+@app.exception_handler(AppException)
+async def app_exception_handler(request, exc):
+    logger.error(f"AppException: {exc.error_code.value} - {exc.message}")
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "code": exc.error_code.value,
+            "message": exc.message,
+            "details": exc.details if exc.details else None
+        },
+    )
+
+
+# Global exception handler for all uncaught exceptions (excluding AppException)
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
+    # Don't catch AppException - it has its own handler
+    if isinstance(exc, AppException):
+        return await app_exception_handler(request, exc)
+
     logger.error(f"Generic Exception: {exc}")
     return JSONResponse(
         status_code=500,
         content={"message": "Internal server error, please try again later."},
     )
-
-

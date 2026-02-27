@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .northbound_app import router as northbound_router
-from consts.exceptions import LimitExceededError, UnauthorizedError, SignatureValidationError
+from consts.exceptions import AppException
 
 logger = logging.getLogger("northbound_base_app")
 
@@ -38,8 +38,25 @@ async def northbound_http_exception_handler(request, exc):
     )
 
 
+@northbound_app.exception_handler(AppException)
+async def northbound_app_exception_handler(request, exc):
+    logger.error(f"Northbound AppException: {exc.error_code.value} - {exc.message}")
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "code": exc.error_code.value,
+            "message": exc.message,
+            "details": exc.details if exc.details else None
+        },
+    )
+
+
 @northbound_app.exception_handler(Exception)
 async def northbound_generic_exception_handler(request, exc):
+    # Don't catch AppException - it has its own handler
+    if isinstance(exc, AppException):
+        return await northbound_app_exception_handler(request, exc)
+
     logger.error(f"Northbound Generic Exception: {exc}")
     return JSONResponse(
         status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

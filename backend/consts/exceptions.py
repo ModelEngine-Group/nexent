@@ -1,114 +1,113 @@
 """
 Custom exception classes for the application.
+
+This module provides a unified exception framework using ErrorCode enum.
+Use AppException directly with ErrorCode to create exceptions.
+
+Usage:
+    from consts.error_code import ErrorCode
+    from consts.exceptions import AppException
+    
+    raise AppException(ErrorCode.AGENT_NOT_FOUND)
+    raise AppException(ErrorCode.MCP_CONNECTION_FAILED, "Connection timeout", details={"host": "localhost"})
 """
 
-
-class AgentRunException(Exception):
-    """Exception raised when agent run fails."""
-    pass
+from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from .error_message import ErrorMessage
 
 
-class LimitExceededError(Exception):
-    """Raised when an outer platform calling too frequently"""
-    pass
+class AppException(Exception):
+    """Base application exception with error code."""
+
+    def __init__(self, error_code: ErrorCode, message: str = None, details: dict = None):
+        self.error_code = error_code
+        self.message = message or ErrorMessage.get_message(error_code)
+        self.details = details or {}
+        super().__init__(self.message)
+
+    def to_dict(self) -> dict:
+        return {
+            "code": self.error_code.value,
+            "message": self.message,
+            "details": self.details if self.details else None
+        }
+
+    @property
+    def http_status(self) -> int:
+        return ERROR_CODE_HTTP_STATUS.get(self.error_code, 500)
 
 
-class UnauthorizedError(Exception):
-    """Raised when a user from outer platform is unauthorized."""
-    pass
+# Backward compatible aliases - these are just AppException with different names
+# Usage: AppException(ErrorCode.NOT_FOUND) or NotFoundException(ErrorCode.NOT_FOUND)
+# ==================== Common Aliases ====================
+NotFoundException = AppException
+UnauthorizedError = AppException
+ValidationError = AppException
+ParameterInvalidError = AppException
+ForbiddenError = AppException
+ServiceUnavailableError = AppException
+DatabaseError = AppException
+TimeoutError = AppException
+UnknownError = AppException
+
+# ==================== Domain Specific Aliases ====================
+UserNotFoundError = AppException
+UserAlreadyExistsError = AppException
+InvalidCredentialsError = AppException
+
+TenantNotFoundError = AppException
+TenantDisabledError = AppException
+
+AgentNotFoundError = AppException
+AgentRunException = AppException
+AgentDisabledError = AppException
+
+ToolNotFoundError = AppException
+ToolExecutionException = AppException
+
+MCPConnectionError = AppException
+MCPNameIllegal = AppException
+MCPContainerError = AppException
+
+ConversationNotFoundError = AppException
+
+MemoryNotFoundError = AppException
+MemoryPreparationException = AppException
+
+KnowledgeNotFoundError = AppException
+KnowledgeSearchFailedError = AppException
+
+ModelNotFoundError = AppException
+
+# ==================== Voice Service Aliases ====================
+VoiceServiceException = AppException
+STTConnectionException = AppException
+TTSConnectionException = AppException
+VoiceConfigException = AppException
+
+FileNotFoundError = AppException
+FileUploadFailedError = AppException
+FileTooLargeError = AppException
+
+DifyServiceException = AppException
+MEConnectionException = AppException
+DataMateConnectionError = AppException
+ExternalAPIError = AppException
+
+LimitExceededError = AppException
+
+# ==================== User Management Aliases ====================
+NoInviteCodeException = AppException
+IncorrectInviteCodeException = AppException
+UserRegistrationException = AppException
+
+# ==================== Invitation Aliases ====================
+DuplicateError = AppException
+
+# ==================== Signature Aliases ====================
+SignatureValidationError = AppException
 
 
-class SignatureValidationError(Exception):
-    """Raised when X-Signature header is missing or does not match the expected HMAC value."""
-    pass
-
-
-class MemoryPreparationException(Exception):
-    """Raised when memory preprocessing or retrieval fails prior to agent run."""
-    pass
-
-
-class MCPConnectionError(Exception):
-    """Raised when MCP connection fails."""
-    pass
-
-
-class MCPNameIllegal(Exception):
-    """Raised when MCP name is illegal."""
-    pass
-
-
-class NoInviteCodeException(Exception):
-    """Raised when invite code is not found."""
-    pass
-
-
-class IncorrectInviteCodeException(Exception):
-    """Raised when invite code is incorrect."""
-    pass
-
-
-class UserRegistrationException(Exception):
-    """Raised when user registration fails."""
-    pass
-
-
-class TimeoutException(Exception):
-    """Raised when timeout occurs."""
-    pass
-
-
-
-class ValidationError(Exception):
-    """Raised when validation fails."""
-    pass
-
-
-class NotFoundException(Exception):
-    """Raised when not found exception occurs."""
-    pass
-
-
-class MEConnectionException(Exception):
-    """Raised when not found exception occurs."""
-    pass
-
-
-class VoiceServiceException(Exception):
-    """Raised when voice service fails."""
-    pass
-
-
-class STTConnectionException(Exception):
-    """Raised when STT service connection fails."""
-    pass
-
-
-class TTSConnectionException(Exception):
-    """Raised when TTS service connection fails."""
-    pass
-
-
-class VoiceConfigException(Exception):
-    """Raised when voice configuration is invalid."""
-    pass
-
-
-class ToolExecutionException(Exception):
-    """Raised when mcp tool execution failed."""
-    pass
-
-
-class MCPContainerError(Exception):
-    """Raised when MCP container operation fails."""
-    pass
-
-
-class DuplicateError(Exception):
-    """Raised when a duplicate resource already exists."""
-    pass
-
-
-class DataMateConnectionError(Exception):
-    """Raised when DataMate connection fails or URL is not configured."""
-    pass
+def raise_error(error_code: ErrorCode, message: str = None, details: dict = None):
+    """Raise an AppException with the given error code."""
+    raise AppException(error_code, message, details)

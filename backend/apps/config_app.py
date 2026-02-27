@@ -25,6 +25,7 @@ from apps.group_app import router as group_router
 from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
 from consts.const import IS_SPEED_MODE
+from consts.exceptions import AppException
 
 # Import monitoring utilities
 from utils.monitoring import monitoring_manager
@@ -84,9 +85,27 @@ async def http_exception_handler(request, exc):
     )
 
 
-# Global exception handler for all uncaught exceptions
+# Global exception handler for AppException
+@app.exception_handler(AppException)
+async def app_exception_handler(request, exc):
+    logger.error(f"AppException: {exc.error_code.value} - {exc.message}")
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "code": exc.error_code.value,
+            "message": exc.message,
+            "details": exc.details if exc.details else None
+        },
+    )
+
+
+# Global exception handler for all uncaught exceptions (excluding AppException)
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
+    # Don't catch AppException - it has its own handler
+    if isinstance(exc, AppException):
+        return await app_exception_handler(request, exc)
+
     logger.error(f"Generic Exception: {exc}")
     return JSONResponse(
         status_code=500,
