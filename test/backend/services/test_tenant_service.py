@@ -265,7 +265,7 @@ class TestGetTenantsPaginated:
         """Test get_tenants_paginated with custom page and page_size"""
         # Setup
         tenant_ids = ["tenant1", "tenant2", "tenant3", "tenant4", "tenant5"]
-        
+
         # Create a function that returns tenant info based on tenant_id
         def mock_get_tenant_info(tenant_id):
             idx = int(tenant_id.replace("tenant", ""))
@@ -291,7 +291,7 @@ class TestGetTenantsPaginated:
         """Test get_tenants_paginated on the last page with fewer items"""
         # Setup
         tenant_ids = ["tenant1", "tenant2", "tenant3", "tenant4", "tenant5"]
-        
+
         # Create a function that returns tenant info based on tenant_id
         def mock_get_tenant_info(tenant_id):
             idx = int(tenant_id.replace("tenant", ""))
@@ -603,7 +603,8 @@ class TestUpdateTenantInfo:
 class TestDeleteTenant:
     """Test cases for delete_tenant function"""
 
-    def test_delete_tenant_success(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_success(self):
         """Test successfully deleting a tenant and all associated resources"""
         # Setup
         tenant_id = "test_tenant"
@@ -611,7 +612,8 @@ class TestDeleteTenant:
 
         # Mock dependencies
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.delete_user_and_cleanup') as mock_delete_user, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -632,6 +634,9 @@ class TestDeleteTenant:
             # Configure mocks
             mock_get_config.return_value = {"tenant_config_id": 1, "config_value": "Test Tenant"}
 
+            # Empty user list
+            mock_get_users.return_value = {"users": [], "total": 0}
+
             # Empty lists for resources
             mock_query_groups.return_value = {"data": []}
             mock_get_models.return_value = []
@@ -647,18 +652,20 @@ class TestDeleteTenant:
             ]
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert
             assert result is True
 
-            # Verify soft delete of users was called
-            mock_soft_delete_users.assert_called_once_with(tenant_id, deleted_by)
+            # Verify user cleanup was called
+            mock_get_users.assert_called_once_with(tenant_id, page=1, page_size=10000)
+            mock_delete_user.assert_not_called()
 
             # Verify configs deletion was called
             mock_delete_config.assert_called()
 
-    def test_delete_tenant_not_found(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_not_found(self):
         """Test delete_tenant when tenant doesn't exist"""
         # Setup
         tenant_id = "nonexistent_tenant"
@@ -670,9 +677,10 @@ class TestDeleteTenant:
 
         # Execute & Assert
             with pytest.raises(NotFoundException, match="does not exist"):
-                delete_tenant(tenant_id, deleted_by)
+                await delete_tenant(tenant_id, deleted_by)
 
-    def test_delete_tenant_validation_error(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_validation_error(self):
         """Test delete_tenant when validation fails"""
         # Setup
         tenant_id = "test_tenant"
@@ -680,22 +688,23 @@ class TestDeleteTenant:
 
         # Mock dependencies to raise ValidationError during deletion
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users:
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users:
             mock_get_config.return_value = {"tenant_config_id": 1}
-            mock_soft_delete_users.side_effect = ValidationError("Database error")
+            mock_get_users.side_effect = ValidationError("Database error")
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="Failed to delete tenant"):
-                delete_tenant(tenant_id, deleted_by)
+                await delete_tenant(tenant_id, deleted_by)
 
-    def test_delete_tenant_with_groups(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_groups(self):
         """Test delete_tenant deletes all groups in the tenant"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -707,6 +716,9 @@ class TestDeleteTenant:
              patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
+
+            # Empty user list
+            mock_get_users.return_value = {"users": [], "total": 0}
 
             # Mock groups
             mock_query_groups.return_value = {
@@ -724,20 +736,21 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert
             assert result is True
             assert mock_remove_group.call_count == 2
 
-    def test_delete_tenant_with_group_deletion_error(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_group_deletion_error(self):
         """Test delete_tenant handles group deletion errors gracefully"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -749,6 +762,9 @@ class TestDeleteTenant:
              patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
+
+            # Empty user list
+            mock_get_users.return_value = {"users": [], "total": 0}
 
             # Mock groups - one group
             mock_query_groups.return_value = {
@@ -768,21 +784,22 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute - should not raise, should handle exception gracefully
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert - deletion should still succeed despite group deletion error
             assert result is True
             # Verify remove_group was called and exception was caught
             mock_remove_group.assert_called_once()
 
-    def test_delete_tenant_with_models(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_models(self):
         """Test delete_tenant deletes all models in the tenant"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -810,20 +827,21 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert
             assert result is True
             assert mock_delete_model.call_count == 2
 
-    def test_delete_tenant_with_model_deletion_error(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_model_deletion_error(self):
         """Test delete_tenant handles model deletion errors gracefully"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -851,19 +869,20 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert - should succeed despite error
             assert result is True
 
-    def test_delete_tenant_with_agents(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_agents(self):
         """Test delete_tenant deletes all agents in the tenant"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -892,7 +911,7 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert
             assert result is True
@@ -901,14 +920,15 @@ class TestDeleteTenant:
             mock_delete_rel.assert_called()
             mock_delete_agent.assert_called()
 
-    def test_delete_tenant_with_mcp_records(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_mcp_records(self):
         """Test delete_tenant deletes all MCP configurations in the tenant"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -936,20 +956,21 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert
             assert result is True
             assert mock_delete_mcp.call_count == 2
 
-    def test_delete_tenant_with_invitations(self):
+    @pytest.mark.asyncio
+    async def test_delete_tenant_with_invitations(self):
         """Test delete_tenant deletes all invitations in the tenant"""
         # Setup
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
         with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
-             patch('backend.services.tenant_service.soft_delete_users_by_tenant_id') as mock_soft_delete_users, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
              patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
              patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
              patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
@@ -977,7 +998,7 @@ class TestDeleteTenant:
             mock_get_all_configs.return_value = []
 
             # Execute
-            result = delete_tenant(tenant_id, deleted_by)
+            result = await delete_tenant(tenant_id, deleted_by)
 
             # Assert
             assert result is True
