@@ -322,7 +322,7 @@ export default function AgentGenerateDetail({
         icon={<Maximize2 size={12} />}
         size="small"
         type="text"
-        disabled={!editable}
+        disabled={!editable || isGenerating}
       />
     );
   };
@@ -349,7 +349,7 @@ export default function AgentGenerateDetail({
         <TextArea
           placeholder={placeholder}
           style={promptEditorStyle}
-          disabled={!editable}
+          disabled={!editable || isGenerating}
           onBlur={(e) => onBlurUpdate(e.target.value)}
         />
       </Form.Item>
@@ -570,7 +570,7 @@ export default function AgentGenerateDetail({
           <Row gutter={[16, 16]}>
             <Col span={24}>
               {wrapNoEditTooltipBlock(
-                <Form form={form} layout="vertical" disabled={!editable}>
+                <Form form={form} layout="vertical" disabled={!editable || isGenerating}>
                 <Form.Item
                   name="agentDisplayName"
                   label={t("agent.displayName")}
@@ -768,6 +768,7 @@ export default function AgentGenerateDetail({
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
+            disabled={isGenerating}
           >
             {renderPromptEditor(
               "dutyPrompt",
@@ -790,6 +791,7 @@ export default function AgentGenerateDetail({
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
+            disabled={isGenerating}
           >
             {renderPromptEditor(
               "constraintPrompt",
@@ -812,6 +814,7 @@ export default function AgentGenerateDetail({
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
+            disabled={isGenerating}
           >
             {renderPromptEditor(
               "fewShotsPrompt",
@@ -866,7 +869,7 @@ export default function AgentGenerateDetail({
                     overflowY: "auto",
                   }}
                   autoSize={false}
-                  disabled={!editable}
+                  disabled={!editable || isGenerating}
                 />
               )}
 
