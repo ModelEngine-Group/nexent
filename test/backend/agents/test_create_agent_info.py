@@ -2020,6 +2020,104 @@ class TestCreateAgentRunInfo:
                 version_no=1,
             )
 
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_is_debug_true(self):
+        """Test case for is_debug=True uses version_no=0 without calling query_current_version_no"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = []
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = []
+            mock_threading.Event.return_value = "stop_event"
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh",
+                is_debug=True,  # Enable debug mode
+            )
+
+            # Verify that query_current_version_no was NOT called (because is_debug=True)
+            mock_version_no.assert_not_called()
+
+            # Verify that create_agent_config was called with version_no=0 (draft version)
+            mock_create_agent.assert_called_once_with(
+                agent_id="agent_1",
+                tenant_id="tenant_1",
+                user_id="user_1",
+                language="zh",
+                last_user_query="processed_query",
+                allow_memory_search=True,
+                version_no=0,  # Debug mode uses draft version 0
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_no_published_version_fallback(self):
+        """Test case when query_current_version_no returns None, should fallback to version_no=0"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no, \
+                patch('backend.agents.create_agent_info.logger') as mock_logger:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            mock_get_mcp.return_value = []
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = []
+            mock_threading.Event.return_value = "stop_event"
+            # Simulate no published version exists
+            mock_version_no.return_value = None
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh",
+                is_debug=False,
+            )
+
+            # Verify that query_current_version_no was called
+            mock_version_no.assert_called_once_with(agent_id="agent_1", tenant_id="tenant_1")
+
+            # Verify that logger.info was called with fallback message
+            mock_logger.info.assert_called_once_with("Agent agent_1 has no published version, using draft version 0")
+
+            # Verify that create_agent_config was called with version_no=0 (fallback)
+            mock_create_agent.assert_called_once_with(
+                agent_id="agent_1",
+                tenant_id="tenant_1",
+                user_id="user_1",
+                language="zh",
+                last_user_query="processed_query",
+                allow_memory_search=True,
+                version_no=0,  # Fallback to draft version 0
+            )
+
 
 class TestJoinMinioFileDescriptionToQuery:
     """Tests for the join_minio_file_description_to_query function"""
