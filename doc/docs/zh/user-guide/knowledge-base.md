@@ -44,29 +44,34 @@ Nexent支持多种文件格式，包括：
 
 ![内容总结](./assets/knowledge-base/summary-knowledge-base.png)
 
+## 🔧 使用知识库
+
+Nexent支持知识库与智能体单独绑定，在创建智能体时，**启用knowledge_base_search工具**，并选择关联的知识库
+<img src="./assets/knowledge-base/knowledge-tool.png" alt="工具1" style="width:75%;">
+![工具2](./assets/knowledge-base/knowledge-tool2.png)
+
 ## 🔍 知识库管理
 
 ### 查看知识库
 
 1. **知识库列表**
    - 知识库页面左侧展示了所有已创建的知识库
-   - 显示知识库名称、文件数量、创建时间等信息
+   - 知识库列表处支持对知识库来源和向量模型的筛选
+   - 显示知识库名称、文件数量、创建时间、用户组等信息
+
+> 点击编辑，可管理知识库的名称、可见的用户组及组内权限
+
+<img src="./assets/knowledge-base/knowledge-base-permission.png" alt="知识库权限" style="width:50%;">
 
 2. **知识库详情**
    - 点击知识库名称，可查看知识库中全部文档信息
    - 点击“详细内容”，可查看知识库的内容总结
-
-<div style="display: flex; gap: 8px;">
-  <img src="./assets/knowledge-base/knowledge-base-file-list.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/knowledge-base/knowledge-base-summary.png" style="width: 50%; height: 100%;" />
-</div>
 
 ### 编辑知识库
 
 1. **删除知识库**
    - 点击知识库名称右侧“删除”按钮
    - 确认删除操作（此操作不可恢复）
-![删除知识库](./assets/knowledge-base/delete-knowledge-base.png)
 
 2. **删除或新增文件**
    - 点击知识库名称，在文件列表中点击“删除”按钮，可从知识库中删除文件
