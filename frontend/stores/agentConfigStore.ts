@@ -37,6 +37,7 @@ export type EditableAgent = Pick<
   | "business_logic_model_id"
   | "sub_agent_id_list"
   | "group_ids"
+  | "ingroup_permission"
 >;
 
 interface AgentConfigStoreState {
@@ -129,6 +130,7 @@ const emptyEditableAgent: EditableAgent = {
   business_logic_model_id: 0,
   sub_agent_id_list: [],
   group_ids: [],
+  ingroup_permission: "READ_ONLY",
 };
 
 const toEditable = (agent: Agent | null): EditableAgent =>
@@ -151,6 +153,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_id: agent.business_logic_model_id || 0,
         sub_agent_id_list: agent.sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
+        ingroup_permission: agent.ingroup_permission || "READ_ONLY",
       }
     : { ...emptyEditableAgent };
 
@@ -189,7 +192,8 @@ const isProfileInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
       editedAgent.few_shots_prompt !== "" ||
-      normalizeArray(editedAgent.group_ids || []).length > 0
+      normalizeArray(editedAgent.group_ids || []).length > 0 ||
+      editedAgent.ingroup_permission !== "READ_ONLY"
     );
   }
   return (
@@ -205,7 +209,8 @@ const isProfileInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
     baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
     JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
-      JSON.stringify(normalizeArray(editedAgent.group_ids ?? []))
+      JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
+    baselineAgent.ingroup_permission !== editedAgent.ingroup_permission
   );
 };
 
