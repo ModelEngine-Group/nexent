@@ -86,6 +86,9 @@ async def create_agent_config(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
     for sub_agent_id in sub_agent_id_list:
+        # Get the current published version for this sub-agent (from draft version 0)
+        sub_agent_version_no = query_current_version_no(
+            agent_id=sub_agent_id, tenant_id=tenant_id) or 0
         sub_agent_config = await create_agent_config(
             agent_id=sub_agent_id,
             tenant_id=tenant_id,
@@ -93,7 +96,7 @@ async def create_agent_config(
             language=language,
             last_user_query=last_user_query,
             allow_memory_search=allow_memory_search,
-            version_no=version_no,
+            version_no=sub_agent_version_no,
         )
         managed_agents.append(sub_agent_config)
 
