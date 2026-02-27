@@ -1,4 +1,5 @@
 import { STATUS_CODES } from "@/const/auth";
+import { ErrorCode } from "@/const/errorCode";
 import { handleSessionExpired } from "@/lib/session";
 import log from "@/lib/logger";
 import type { MarketAgentListParams } from "@/types/market";
@@ -319,40 +320,16 @@ export const fetchWithErrorHandling = async (
 
     // Handle HTTP errors
     if (!response.ok) {
-      // Check if it's a session expired error (401)
-      if (response.status === 401) {
-        handleSessionExpired();
-        throw new ApiError(
-          STATUS_CODES.TOKEN_EXPIRED,
-          "Login expired, please login again"
-        );
-      }
-
-      // Handle custom 499 error code (client closed connection)
-      if (response.status === 499) {
-        handleSessionExpired();
-        throw new ApiError(
-          STATUS_CODES.TOKEN_EXPIRED,
-          "Connection disconnected, session may have expired"
-        );
-      }
-
-      // Handle request entity too large error (413)
-      if (response.status === 413) {
-        throw new ApiError(
-          STATUS_CODES.REQUEST_ENTITY_TOO_LARGE,
-          "REQUEST_ENTITY_TOO_LARGE"
-        );
-      }
-
-      // Other HTTP errors - try to parse JSON response for error code
+      // Try to parse JSON response for business error code first
       let errorCode = response.status;
       let errorMessage = `Request failed: ${response.status}`;
       const errorText = await response.text();
 
+      let parsedErrorData = null;
       try {
         const errorData = JSON.parse(errorText);
         if (errorData && errorData.code) {
+          parsedErrorData = errorData;
           errorCode = errorData.code;
           errorMessage = errorData.message || errorMessage;
         } else {
@@ -361,6 +338,33 @@ export const fetchWithErrorHandling = async (
       } catch {
         // Not JSON, use text as message
         errorMessage = errorText || errorMessage;
+      }
+
+      // Check if it's a session expiration error based on business error code
+      // 102002 = TOKEN_EXPIRED, 102003 = TOKEN_INVALID
+      if (
+        errorCode === ErrorCode.TOKEN_EXPIRED ||
+        errorCode === ErrorCode.TOKEN_INVALID
+      ) {
+        handleSessionExpired();
+        throw new ApiError(errorCode, errorMessage);
+      }
+
+      // Handle custom 499 error code (client closed connection)
+      if (response.status === 499) {
+        handleSessionExpired();
+        throw new ApiError(
+          ErrorCode.TOKEN_EXPIRED,
+          "Connection disconnected, session may have expired"
+        );
+      }
+
+      // Handle request entity too large error (413)
+      if (response.status === 413) {
+        throw new ApiError(
+          ErrorCode.FILE_TOO_LARGE,
+          "File size exceeds limit."
+        );
       }
 
       throw new ApiError(errorCode, errorMessage);

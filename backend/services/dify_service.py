@@ -107,7 +107,7 @@ def fetch_dify_datasets_impl(
         # Use shared HttpClientManager for connection pooling
         client = http_client_manager.get_sync_client(
             base_url=api_base,
-            timeout=30.0,
+            timeout=5.0,
             verify_ssl=False
         )
         response = client.get(url, headers=headers)

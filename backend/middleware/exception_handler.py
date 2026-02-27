@@ -14,7 +14,7 @@ from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from consts.error_code import ErrorCode
+from consts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from consts.error_message import ErrorMessage
 from consts.exceptions import AppException
 
@@ -94,13 +94,15 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
                 extra={"trace_id": trace_id}
             )
 
-            # Return generic error response
+            # Return generic error response with proper HTTP 500 status
+            # Using mixed mode: HTTP status code + business error code
             return JSONResponse(
-                status_code=200,
+                status_code=500,
                 content={
-                    "code": ErrorCode.UNKNOWN_ERROR.value,
-                    "message": ErrorMessage.get_message(ErrorCode.UNKNOWN_ERROR),
-                    "trace_id": trace_id
+                    "code": ErrorCode.INTERNAL_ERROR.value,
+                    "message": ErrorMessage.get_message(ErrorCode.INTERNAL_ERROR),
+                    "trace_id": trace_id,
+                    "details": None
                 }
             )
 
@@ -109,22 +111,28 @@ def create_error_response(
     error_code: ErrorCode,
     message: str = None,
     trace_id: str = None,
-    details: dict = None
+    details: dict = None,
+    http_status: int = None
 ) -> JSONResponse:
     """
-    Create a standardized error response.
+    Create a standardized error response with mixed mode (HTTP status + business error code).
 
     Args:
         error_code: The error code
         message: Optional custom message (defaults to standard message)
         trace_id: Optional trace ID for tracking
         details: Optional additional details
+        http_status: Optional HTTP status code (defaults to mapping from error_code)
 
     Returns:
         JSONResponse with standardized error format
     """
+    # Use provided http_status or get from error code mapping
+    status = http_status if http_status else ERROR_CODE_HTTP_STATUS.get(
+        error_code, 500)
+
     return JSONResponse(
-        status_code=200,
+        status_code=status,
         content={
             "code": error_code.value,
             "message": message or ErrorMessage.get_message(error_code),
