@@ -97,7 +97,7 @@ class MCPContainerManager:
             service_name: Name of the MCP service
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
-            env_vars: Optional environment variables
+            env_vars: Optional environment variables (may contain authorization_token)
 
         Returns:
             Dictionary with container_id, mcp_url, host_port, and status
@@ -149,7 +149,7 @@ class MCPContainerManager:
             service_name: Name of the MCP service
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
-            env_vars: Optional environment variables
+            env_vars: Optional environment variables (may contain authorization_token)
             host_port: Optional host port to bind
             full_command: Optional command to run in container
 

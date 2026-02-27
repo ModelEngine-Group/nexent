@@ -97,6 +97,7 @@ from backend.services.agent_version_service import (
     get_version_detail_impl,
     rollback_version_impl,
     update_version_status_impl,
+    update_version_impl,
     delete_version_impl,
     get_current_version_impl,
     compare_versions_impl,
@@ -462,6 +463,60 @@ def test_update_version_status_impl_not_found(monkeypatch):
             user_id="user1",
             version_no=999,
             status="DISABLED",
+        )
+
+
+def test_update_version_impl_success(monkeypatch):
+    """Test successfully updating version metadata"""
+    mock_version = {"version_no": 1, "version_name": "v1.0"}
+    mock_search = MagicMock(return_value=mock_version)
+    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+    mock_update = MagicMock(return_value=1)
+    monkeypatch.setattr(agent_version_service_module, "update_version", mock_update)
+
+    result = update_version_impl(
+        agent_id=1,
+        tenant_id="tenant1",
+        user_id="user1",
+        version_no=1,
+        version_name="Updated Version Name",
+        release_note="Updated release note",
+    )
+
+    assert "message" in result
+    assert result["version_no"] == 1
+    mock_update.assert_called_once()
+
+
+def test_update_version_impl_version_not_found(monkeypatch):
+    """Test updating version when version doesn't exist"""
+    mock_search = MagicMock(return_value=None)
+    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+
+    with pytest.raises(ValueError, match="Version 999 not found"):
+        update_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+            version_no=999,
+            version_name="Non-existent version",
+        )
+
+
+def test_update_version_impl_no_changes(monkeypatch):
+    """Test updating version with no actual changes"""
+    mock_version = {"version_no": 1, "version_name": "v1.0"}
+    mock_search = MagicMock(return_value=mock_version)
+    monkeypatch.setattr(agent_version_service_module, "search_version_by_version_no", mock_search)
+    mock_update = MagicMock(return_value=0)
+    monkeypatch.setattr(agent_version_service_module, "update_version", mock_update)
+
+    with pytest.raises(ValueError, match="No changes to update"):
+        update_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+            version_no=1,
         )
 
 

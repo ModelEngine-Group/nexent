@@ -81,7 +81,24 @@ export default function KnowledgeBaseSelectorModal({
       setSelectedSources([]);
       setSelectedModels([]);
     }
+  }, [isOpen]);
+
+  // Sync tempSelectedIds whenever selectedIds changes while modal is open
+  // This ensures selected knowledge bases are always shown correctly
+  // especially when URL/API key changes in the parent component
+  useEffect(() => {
+    if (isOpen) {
+      setTempSelectedIds(selectedIds);
+    }
   }, [isOpen, selectedIds]);
+
+  // Clear selection when knowledge bases list becomes empty
+  // This handles cases where the URL/API key is changed and no knowledge bases are available
+  useEffect(() => {
+    if (isOpen && knowledgeBases.length === 0 && selectedIds.length > 0) {
+      setTempSelectedIds([]);
+    }
+  }, [isOpen, knowledgeBases, selectedIds]);
 
   // Get allowed sources for the tool type
   const allowedSources = useMemo(() => {
@@ -525,7 +542,11 @@ export default function KnowledgeBaseSelectorModal({
         ) : filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
             {filteredKnowledgeBases.map((kb, index) => {
-              const isSelected = tempSelectedIds.includes(kb.id);
+              // Use a more robust ID comparison to handle potential format differences
+              const isSelected = tempSelectedIds.some(
+                (selectedId) =>
+                  String(selectedId).trim() === String(kb.id).trim()
+              );
               const canSelect = checkCanSelect(kb);
               const hasModelMismatch = checkModelMismatch(kb);
 

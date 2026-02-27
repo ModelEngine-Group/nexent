@@ -242,6 +242,13 @@ export default function AgentGenerateDetail({
         model_id: defaultLlmModel.id || 0,
       });
     }
+    // Sync author to store if not already set (e.g., in create mode with default user email)
+    const defaultAuthor = editedAgent.author || user?.email || (isSpeedMode ? "Default User" : "");
+    if (!editedAgent.author && defaultAuthor) {
+      updateProfileInfo({
+        author: defaultAuthor,
+      });
+    }
 
   }, [currentAgentId, defaultLlmModel?.id, isCreatingMode]);
 

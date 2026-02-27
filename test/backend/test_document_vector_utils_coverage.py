@@ -45,14 +45,11 @@ patch('backend.database.client.MinioClient', return_value=minio_client_mock).sta
 from backend.utils.document_vector_utils import (
     get_documents_from_es,
     process_documents_for_clustering,
-    extract_cluster_content,
     extract_representative_chunks_smart,
     analyze_cluster_coherence,
     summarize_document,
     summarize_cluster,
-    summarize_cluster_legacy,
     summarize_clusters_map_reduce,
-    summarize_clusters,
     merge_cluster_summaries,
     calculate_document_embedding,
     auto_determine_k,
@@ -155,22 +152,6 @@ class TestProcessDocumentsForClustering:
 class TestExtractClusterContent:
     """Test cluster content extraction"""
     
-    def test_extract_cluster_content_basic(self):
-        """Test basic cluster content extraction"""
-        document_samples = {
-            'doc1': {
-                'chunks': [
-                    {'content': 'chunk 1'},
-                    {'content': 'chunk 2'}
-                ]
-            }
-        }
-        cluster_doc_ids = ['doc1']
-        
-        result = extract_cluster_content(document_samples, cluster_doc_ids)
-        assert isinstance(result, str)
-        assert len(result) > 0
-    
     def test_extract_representative_chunks_smart(self):
         """Test smart chunk extraction"""
         chunks = [
@@ -261,14 +242,6 @@ class TestSummarizeCluster:
         # The function returns an error or formatted text, just check it's a string
         assert len(result) > 0
     
-    def test_summarize_cluster_legacy(self):
-        """Test legacy cluster summarization"""
-        cluster_content = "Test cluster content"
-        
-        result = summarize_cluster_legacy(cluster_content)
-        assert isinstance(result, str)
-
-
 class TestSummarizeClustersMapReduce:
     """Test Map-Reduce cluster summarization"""
     
@@ -495,31 +468,6 @@ class TestAdditionalCoverage:
             assert isinstance(embeddings, dict)
             assert len(embeddings) == 0  # No successful embeddings
     
-    def test_extract_cluster_content_missing_doc(self):
-        """Test extract_cluster_content with missing document"""
-        document_samples = {
-            'doc1': {
-                'chunks': [{'content': 'test content'}]
-            }
-        }
-        cluster_doc_ids = ['doc1', 'missing_doc']
-        
-        result = extract_cluster_content(document_samples, cluster_doc_ids)
-        assert isinstance(result, str)
-        assert 'test content' in result
-    
-    def test_extract_cluster_content_no_chunks(self):
-        """Test extract_cluster_content with document having no chunks"""
-        document_samples = {
-            'doc1': {
-                'chunks': []
-            }
-        }
-        cluster_doc_ids = ['doc1']
-        
-        result = extract_cluster_content(document_samples, cluster_doc_ids)
-        assert isinstance(result, str)
-    
     def test_extract_representative_chunks_smart_import_error(self):
         """Test extract_representative_chunks_smart with ImportError"""
         chunks = [
@@ -667,13 +615,4 @@ class TestAdditionalCoverage:
                 result = summarize_clusters_map_reduce(document_samples, clusters)
                 assert isinstance(result, dict)
                 assert 0 in result
-    
-    def test_summarize_cluster_legacy_exception(self):
-        """Test summarize_cluster_legacy with exception"""
-        cluster_content = "Test cluster content"
-        
-        # Mock file operations to raise exception
-        with patch('builtins.open', side_effect=Exception("File error")):
-            result = summarize_cluster_legacy(cluster_content)
-            assert "Failed to generate summary" in result
 

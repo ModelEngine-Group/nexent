@@ -78,6 +78,7 @@ from backend.database.agent_version_db import (
     query_agent_draft,
     insert_version,
     update_version_status,
+    update_version,
     update_agent_current_version,
     insert_agent_snapshot,
     insert_tool_snapshot,
@@ -1178,5 +1179,136 @@ def test_delete_version_not_found(monkeypatch, mock_session):
         version_no=999,
         deleted_by="user1",
     )
-    
+
+    assert result == 0
+
+
+def test_update_version_success(monkeypatch, mock_session):
+    """Test successfully updating version metadata"""
+    session, query = mock_session
+
+    mock_result = MagicMock()
+    mock_result.rowcount = 1
+    session.execute.return_value = mock_result
+
+    # Mock SQLAlchemy update to avoid ArgumentError
+    mock_sqlalchemy_update(monkeypatch)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    # Mock the functions directly in the imported module
+    # This is needed because agent_version_db imports get_db_session and as_dict at module level
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    result = update_version(
+        agent_id=1,
+        tenant_id="tenant1",
+        version_no=1,
+        version_name="Updated Version Name",
+        release_note="Updated release note",
+        updated_by="user1",
+    )
+
+    assert result == 1
+    session.execute.assert_called_once()
+
+
+def test_update_version_only_version_name(monkeypatch, mock_session):
+    """Test updating version with only version_name"""
+    session, query = mock_session
+
+    mock_result = MagicMock()
+    mock_result.rowcount = 1
+    session.execute.return_value = mock_result
+
+    # Mock SQLAlchemy update to avoid ArgumentError
+    mock_sqlalchemy_update(monkeypatch)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    result = update_version(
+        agent_id=1,
+        tenant_id="tenant1",
+        version_no=1,
+        version_name="New Version Name",
+    )
+
+    assert result == 1
+    session.execute.assert_called_once()
+
+
+def test_update_version_only_release_note(monkeypatch, mock_session):
+    """Test updating version with only release_note"""
+    session, query = mock_session
+
+    mock_result = MagicMock()
+    mock_result.rowcount = 1
+    session.execute.return_value = mock_result
+
+    # Mock SQLAlchemy update to avoid ArgumentError
+    mock_sqlalchemy_update(monkeypatch)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    result = update_version(
+        agent_id=1,
+        tenant_id="tenant1",
+        version_no=1,
+        release_note="New release note",
+    )
+
+    assert result == 1
+    session.execute.assert_called_once()
+
+
+def test_update_version_no_changes(monkeypatch, mock_session):
+    """Test updating version with no changes (all None values)"""
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = MagicMock()
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+
+    result = update_version(
+        agent_id=1,
+        tenant_id="tenant1",
+        version_no=1,
+    )
+
+    assert result == 0
+
+
+def test_update_version_not_found(monkeypatch, mock_session):
+    """Test updating version that doesn't exist"""
+    session, query = mock_session
+
+    mock_result = MagicMock()
+    mock_result.rowcount = 0
+    session.execute.return_value = mock_result
+
+    # Mock SQLAlchemy update to avoid ArgumentError
+    mock_sqlalchemy_update(monkeypatch)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
+
+    result = update_version(
+        agent_id=999,
+        tenant_id="tenant1",
+        version_no=999,
+        version_name="Non-existent version",
+    )
+
     assert result == 0
