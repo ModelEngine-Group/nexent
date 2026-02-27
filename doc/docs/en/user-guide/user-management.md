@@ -2,6 +2,7 @@
 
 This page provides a detailed explanation of the Nexent platform's user role system, data visibility scope, operation permissions for various resources, and practical examples of permission configuration.
 
+⚠️ **Important Note**: When deploying v1.8.0 or later for the first time, please pay special attention to the `suadmin` super administrator account information output in the Docker logs. This account has the highest system privileges, and the password is only displayed upon first generation. It cannot be viewed again later, so please be sure to save it securely.
 
 ## 📋 Page Navigation
 
