@@ -1,10 +1,15 @@
+import atexit
+from apps.config_app import app
+from fastapi.testclient import TestClient
+from fastapi import HTTPException
 import unittest
 from unittest.mock import patch, MagicMock, Mock
 import sys
 import os
 
 # Add the backend directory to path so we can import modules
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend'))
+backend_path = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '../../../backend'))
 sys.path.insert(0, backend_path)
 
 # Apply patches before importing any app modules
@@ -23,8 +28,10 @@ minio_mock.client = MagicMock()
 # before any module imports that might trigger MinioClient initialization
 critical_patches = [
     # Patch storage factory and MinIO config validation FIRST
-    patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock),
-    patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None),
+    patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
+          return_value=storage_client_mock),
+    patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+          lambda self: None),
     # Mock boto3 client
     patch('boto3.client', return_value=Mock()),
     # Mock boto3 resource
@@ -55,26 +62,28 @@ all_patches = critical_patches + patches
 try:
     from backend.database import client as db_client_module
     # Patch get_db_session after module is imported
-    db_session_patch = patch.object(db_client_module, 'get_db_session', return_value=Mock())
+    db_session_patch = patch.object(
+        db_client_module, 'get_db_session', return_value=Mock())
     db_session_patch.start()
     all_patches.append(db_session_patch)
 except ImportError:
     # If import fails, try patching the path directly (may trigger import)
-    db_session_patch = patch('backend.database.client.get_db_session', return_value=Mock())
+    db_session_patch = patch(
+        'backend.database.client.get_db_session', return_value=Mock())
     db_session_patch.start()
     all_patches.append(db_session_patch)
 
 # Now safe to import app modules
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
-from apps.config_app import app
 
 
 # Stop all patches at the end of the module
-import atexit
+
+
 def stop_patches():
     for p in all_patches:
         p.stop()
+
+
 atexit.register(stop_patches)
 
 
@@ -94,9 +103,9 @@ class TestBaseApp(unittest.TestCase):
             if middleware.cls.__name__ == "CORSMiddleware":
                 cors_middleware = middleware
                 break
-        
+
         self.assertIsNotNone(cors_middleware)
-        
+
         # In FastAPI, middleware options are stored in 'middleware.kwargs'
         self.assertEqual(cors_middleware.kwargs.get("allow_origins"), ["*"])
         self.assertTrue(cors_middleware.kwargs.get("allow_credentials"))
@@ -107,7 +116,7 @@ class TestBaseApp(unittest.TestCase):
         """Test that all routers are included in the app."""
         # Get all routes in the app
         routes = [route.path for route in app.routes]
-        
+
         # Check if routes exist (at least some routes should be present)
         self.assertTrue(len(routes) > 0)
 
@@ -116,7 +125,7 @@ class TestBaseApp(unittest.TestCase):
         # Test that the exception handler is registered
         exception_handlers = app.exception_handlers
         self.assertIn(HTTPException, exception_handlers)
-        
+
         # Test that the handler function exists and is callable
         http_exception_handler = exception_handlers[HTTPException]
         self.assertIsNotNone(http_exception_handler)
@@ -127,7 +136,7 @@ class TestBaseApp(unittest.TestCase):
         # Test that the exception handler is registered
         exception_handlers = app.exception_handlers
         self.assertIn(Exception, exception_handlers)
-        
+
         # Test that the handler function exists and is callable
         generic_exception_handler = exception_handlers[Exception]
         self.assertTrue(callable(generic_exception_handler))
@@ -178,7 +187,8 @@ class TestBaseApp(unittest.TestCase):
             'file_manager_router',
             'proxy_router',
             'tool_config_router',
-            'mock_user_management_router',  # or 'user_management_router' depending on IS_SPEED_MODE
+            # or 'user_management_router' depending on IS_SPEED_MODE
+            'mock_user_management_router',
             'summary_router',
             'prompt_router',
             'tenant_config_router',
@@ -197,7 +207,8 @@ class TestBaseApp(unittest.TestCase):
 
         # Since it's hard to identify routers directly from routes,
         # we'll check that we have a reasonable number of routes
-        self.assertGreater(len(app.routes), 10)  # Should have many routes from all routers
+        # Should have many routes from all routers
+        self.assertGreater(len(app.routes), 10)
 
     def test_http_exception_handler_registration(self):
         """Test that HTTP exception handler is properly registered."""
@@ -211,6 +222,190 @@ class TestBaseApp(unittest.TestCase):
         exception_handlers = app.exception_handlers
         self.assertIn(Exception, exception_handlers)
 
+    def test_app_exception_handler_registration(self):
+        """Test that AppException handler is properly registered."""
+        from consts.exceptions import AppException
+        exception_handlers = app.exception_handlers
+        self.assertIn(AppException, exception_handlers)
 
-if __name__ == "__main__":
-    unittest.main()
+
+class TestExceptionHandlerResponses(unittest.TestCase):
+    """Test exception handler responses."""
+
+    def setUp(self):
+        # Use the actual config_app with exception handlers
+        from apps.config_app import app
+        from consts.const import IS_SPEED_MODE
+
+        self.test_app = app
+        # Use raise_server_exceptions=False to let exception handlers process the exceptions
+        self.client = TestClient(self.test_app, raise_server_exceptions=False)
+
+        # Also access the logger for testing
+        from apps import config_app as config_app_module
+        self.logger = config_app_module.logger
+
+    def test_http_exception_handler_logs_error(self):
+        """Test HTTPException handler logs the error."""
+        from fastapi import HTTPException
+
+        # Create a mock request
+        mock_request = MagicMock()
+        mock_request.url = "http://test.com/test"
+
+        # Call the exception handler directly
+        from apps.config_app import http_exception_handler
+        exc = HTTPException(status_code=400, detail="Bad request")
+
+        # Run the handler
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            response = loop.run_until_complete(
+                http_exception_handler(mock_request, exc))
+        finally:
+            loop.close()
+
+        # Verify response
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.body, b'{"message":"Bad request"}')
+
+    def test_app_exception_handler_logs_error(self):
+        """Test AppException handler logs the error and returns correct response."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        # Create a mock request
+        mock_request = MagicMock()
+        mock_request.url = "http://test.com/test"
+
+        # Call the exception handler directly
+        from apps.config_app import app_exception_handler
+        exc = AppException(ErrorCode.VALIDATION_ERROR, "Validation failed")
+
+        # Run the handler
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            response = loop.run_until_complete(
+                app_exception_handler(mock_request, exc))
+        finally:
+            loop.close()
+
+        # Verify response
+        self.assertEqual(response.status_code, 400)  # VALIDATION_ERROR -> 400
+        import json
+        body = json.loads(response.body)
+        self.assertEqual(body["code"], ErrorCode.VALIDATION_ERROR.value)
+        self.assertEqual(body["message"], "Validation failed")
+
+    def test_app_exception_handler_with_details(self):
+        """Test AppException handler with details field."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_request = MagicMock()
+        mock_request.url = "http://test.com/test"
+
+        from apps.config_app import app_exception_handler
+        exc = AppException(
+            ErrorCode.VALIDATION_ERROR,
+            "Validation failed",
+            details={"field": "email"}
+        )
+
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            response = loop.run_until_complete(
+                app_exception_handler(mock_request, exc))
+        finally:
+            loop.close()
+
+        self.assertEqual(response.status_code, 400)
+        import json
+        body = json.loads(response.body)
+        self.assertEqual(body["details"]["field"], "email")
+
+    def test_generic_exception_handler_logs_error(self):
+        """Test generic exception handler logs the error."""
+        # Create a mock request
+        mock_request = MagicMock()
+        mock_request.url = "http://test.com/test"
+
+        # Call the exception handler directly
+        from apps.config_app import generic_exception_handler
+        exc = ValueError("Something went wrong")
+
+        # Run the handler
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            response = loop.run_until_complete(
+                generic_exception_handler(mock_request, exc))
+        finally:
+            loop.close()
+
+        # Verify response
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.body, b'{"message":"Internal server error, please try again later."}')
+
+    def test_generic_exception_handler_delegates_to_app_exception_handler(self):
+        """Test generic exception handler delegates to AppException handler for AppException."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        # Create a mock request
+        mock_request = MagicMock()
+        mock_request.url = "http://test.com/test"
+
+        # Call the exception handler directly with an AppException
+        from apps.config_app import generic_exception_handler
+        exc = AppException(ErrorCode.FORBIDDEN, "Access denied")
+
+        # Run the handler
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            response = loop.run_until_complete(
+                generic_exception_handler(mock_request, exc))
+        finally:
+            loop.close()
+
+        # Verify it was delegated to app_exception_handler (returns 403 not 500)
+        self.assertEqual(response.status_code, 403)
+        import json
+        body = json.loads(response.body)
+        self.assertEqual(body["message"], "Access denied")
+
+    def test_different_app_exception_error_codes(self):
+        """Test AppException with different error codes."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        test_cases = [
+            (ErrorCode.TOKEN_EXPIRED, 401),
+            (ErrorCode.FORBIDDEN, 403),
+            (ErrorCode.RATE_LIMIT_EXCEEDED, 429),
+            (ErrorCode.FILE_TOO_LARGE, 413),
+        ]
+
+        mock_request = MagicMock()
+        mock_request.url = "http://test.com/test"
+
+        from apps.config_app import app_exception_handler
+
+        import asyncio
+        for error_code, expected_status in test_cases:
+            exc = AppException(error_code, "Test error")
+
+            loop = asyncio.new_event_loop()
+            try:
+                response = loop.run_until_complete(
+                    app_exception_handler(mock_request, exc))
+            finally:
+                loop.close()
+
+            self.assertEqual(response.status_code, expected_status,
+                             f"Expected {expected_status} for {error_code}, got {response.status_code}")
