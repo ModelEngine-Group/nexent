@@ -181,6 +181,7 @@ async def get_remote_proxies(
         remote_mcp_server_list = await get_remote_mcp_server_list(
             tenant_id=effective_tenant_id,
             user_id=user_id,
+            is_need_auth=False
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,

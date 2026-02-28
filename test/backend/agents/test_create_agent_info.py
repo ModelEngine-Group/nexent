@@ -1689,7 +1689,7 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=1,
             )
-            mock_get_mcp.assert_called_once_with(tenant_id="tenant_1")
+            mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
             mock_filter.assert_called_once_with("agent_config", {
                 "test_server": {
                     "remote_mcp_server_name": "test_server",
@@ -2117,6 +2117,55 @@ class TestCreateAgentRunInfo:
                 allow_memory_search=True,
                 version_no=0,  # Fallback to draft version 0
             )
+            # Verify that get_remote_mcp_server_list was called with is_need_auth=True
+            mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_is_need_auth_true_includes_token(self):
+        """Test that get_remote_mcp_server_list is called with is_need_auth=True and returns authorization_token"""
+        mock_agent_run_info.reset_mock()
+        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
+                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
+                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
+                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
+                patch('backend.agents.create_agent_info.threading') as mock_threading, \
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+
+            mock_join_query.return_value = "processed_query"
+            mock_create_models.return_value = ["model_config"]
+            # Mock return value with authorization_token (when is_need_auth=True)
+            mock_get_mcp.return_value = [
+                {
+                    "remote_mcp_server_name": "test_server",
+                    "remote_mcp_server": "http://test.server",
+                    "status": True,
+                    "authorization_token": "secret_token_123",
+                    "mcp_id": 1
+                }
+            ]
+            mock_create_agent.return_value = "agent_config"
+            mock_urljoin.return_value = "http://nexent.mcp/sse"
+            mock_filter.return_value = ["http://test.server"]
+            mock_threading.Event.return_value = "stop_event"
+            mock_version_no.return_value = 1
+
+            await create_agent_run_info(
+                agent_id="agent_1",
+                minio_files=[],
+                query="test query",
+                history=[],
+                user_id="user_1",
+                tenant_id="tenant_1",
+                language="zh"
+            )
+
+            # Verify that get_remote_mcp_server_list was called with is_need_auth=True
+            mock_get_mcp.assert_called_once_with(tenant_id="tenant_1", is_need_auth=True)
+            
+            # Verify that the returned data includes authorization_token (used in mcp_host construction)
+            assert mock_get_mcp.return_value[0]["authorization_token"] == "secret_token_123"
 
 
 class TestJoinMinioFileDescriptionToQuery:

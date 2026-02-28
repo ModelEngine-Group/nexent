@@ -156,7 +156,7 @@ async def update_remote_mcp_server_list(
     )
 
 
-async def get_remote_mcp_server_list(tenant_id: str, user_id: str | None = None) -> list[dict]:
+async def get_remote_mcp_server_list(tenant_id: str, user_id: str | None = None, is_need_auth: bool = True) -> list[dict]:
     mcp_records = get_mcp_records_by_tenant(tenant_id=tenant_id)
     mcp_records_list = []
     can_edit_all = False
@@ -173,13 +173,16 @@ async def get_remote_mcp_server_list(tenant_id: str, user_id: str | None = None)
             permission = PERMISSION_EDIT if can_edit_all or str(
                 created_by) == str(user_id) else PERMISSION_READ
 
-        mcp_records_list.append({
+        record_dict = {
             "remote_mcp_server_name": record["mcp_name"],
             "remote_mcp_server": record["mcp_server"],
             "status": record["status"],
             "permission": permission,
-            "mcp_id": record.get("mcp_id")
-        })
+            "mcp_id": record.get("mcp_id"),
+        }
+        if is_need_auth:
+            record_dict["authorization_token"] = record.get("authorization_token")
+        mcp_records_list.append(record_dict)
     return mcp_records_list
 
 

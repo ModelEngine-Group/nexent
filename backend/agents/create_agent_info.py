@@ -388,7 +388,7 @@ async def create_agent_run_info(
         version_no=version_no,
     )
 
-    remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
+    remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     remote_mcp_list.append({
         "remote_mcp_server_name": "nexent",
