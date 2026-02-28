@@ -412,7 +412,7 @@ class TestGetRemoteProxies:
         assert data["remote_mcp_server_list"][1]["permission"] == "READ_ONLY"
 
         mock_get_user_info.assert_called_once()
-        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123")
+        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123", is_need_auth=False)
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
@@ -428,8 +428,8 @@ class TestGetRemoteProxies:
         )
 
         assert response.status_code == HTTPStatus.OK
-        # Verify that explicit tenant_id is used
-        mock_get_list.assert_called_once_with(tenant_id="explicit_tenant789", user_id="user123")
+        # Verify that explicit tenant_id is used and is_need_auth=False
+        mock_get_list.assert_called_once_with(tenant_id="explicit_tenant789", user_id="user123", is_need_auth=False)
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
@@ -446,6 +446,51 @@ class TestGetRemoteProxies:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
         assert "Failed to get remote MCP proxy" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
+    def test_get_remote_proxies_is_need_auth_false_excludes_token(self, mock_get_list, mock_get_user_info):
+        """Test that get_remote_mcp_server_list is called with is_need_auth=False and excludes authorization_token"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        # Mock return value without authorization_token (when is_need_auth=False)
+        mock_server_list = [
+            {
+                "remote_mcp_server_name": "server1",
+                "remote_mcp_server": "http://server1.com",
+                "status": True,
+                "permission": "EDIT",
+                "mcp_id": 1
+            },
+            {
+                "remote_mcp_server_name": "server2",
+                "remote_mcp_server": "http://server2.com",
+                "status": False,
+                "permission": "READ_ONLY",
+                "mcp_id": 2
+            }
+        ]
+        mock_get_list.return_value = mock_server_list
+
+        response = client.get(
+            "/mcp/list",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert "remote_mcp_server_list" in data
+        assert len(data["remote_mcp_server_list"]) == 2
+        
+        # Verify that authorization_token is not present in the response
+        assert "authorization_token" not in data["remote_mcp_server_list"][0]
+        assert "authorization_token" not in data["remote_mcp_server_list"][1]
+        
+        # Verify that other fields are present
+        assert data["remote_mcp_server_list"][0]["mcp_id"] == 1
+        assert data["remote_mcp_server_list"][1]["mcp_id"] == 2
+        
+        # Verify that get_remote_mcp_server_list was called with is_need_auth=False
+        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123", is_need_auth=False)
 
 
 class TestGetMCPRecord:
