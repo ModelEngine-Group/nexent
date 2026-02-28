@@ -95,6 +95,8 @@ export default function ToolConfigModal({
   // DataMate URL from knowledge base configuration
   const [knowledgeBaseDataMateUrl, setKnowledgeBaseDataMateUrl] =
     useState<string>("");
+  // Track if knowledge base config has changed (server_url or api_key changed)
+  const [hasKbConfigChanged, setHasKbConfigChanged] = useState(false);
   // Track if user has manually modified the datamate URL field
   const [hasUserModifiedDatamateUrl, setHasUserModifiedDatamateUrl] =
     useState(false);
@@ -206,12 +208,31 @@ export default function ToolConfigModal({
   // Handle config change: clear knowledge base selection and refetch
   // Uses shared hook for both Dify and DataMate tools
   const handleKbConfigChange = useCallback(() => {
+    // Mark that config has changed - this prevents restoring from initialParams
+    setHasKbConfigChanged(true);
+
     // Clear previous knowledge base selection
     setSelectedKbIds([]);
     setSelectedKbDisplayNames([]);
+
+    // Clear form value for knowledge base field (index_names or dataset_ids)
+    const kbFieldIndex = currentParams.findIndex(
+      (p) => p.name === "index_names" || p.name === "dataset_ids"
+    );
+    if (kbFieldIndex >= 0) {
+      form.setFieldValue(`param_${kbFieldIndex}`, []);
+      // Also clear the value in currentParams
+      const updatedParams = [...currentParams];
+      updatedParams[kbFieldIndex] = {
+        ...updatedParams[kbFieldIndex],
+        value: [],
+      };
+      setCurrentParams(updatedParams);
+    }
+
     // Refetch knowledge bases with new config
     refetchKnowledgeBases();
-  }, [refetchKnowledgeBases]);
+  }, [refetchKnowledgeBases, currentParams, form]);
 
   useKnowledgeBaseConfigChangeHandler({
     toolKbType,
@@ -274,6 +295,7 @@ export default function ToolConfigModal({
     if (!isOpen) {
       setModalOpened(false);
       setKnowledgeBaseDataMateUrl("");
+      setHasKbConfigChanged(false);
     }
   }, [isOpen]);
 
@@ -542,6 +564,11 @@ export default function ToolConfigModal({
   // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
   // This ensures the modal receives the correct selected IDs
   useEffect(() => {
+    // Skip if config has changed - don't restore from initialParams after server_url/api_key change
+    if (hasKbConfigChanged) {
+      return;
+    }
+
     if (kbSelectorVisible && selectedKbIds.length === 0 && initialParams.length > 0) {
       // Parse initial index_names/dataset_ids value for knowledge base selection
       if (toolRequiresKbSelection) {
@@ -568,11 +595,34 @@ export default function ToolConfigModal({
         }
       }
     }
-  }, [kbSelectorVisible, initialParams, toolRequiresKbSelection]);
+  }, [kbSelectorVisible, initialParams, toolRequiresKbSelection, hasKbConfigChanged]);
 
   // Trigger refetch when opening for knowledge base tools (with loading state support)
   // Skip if initial load was already done to avoid duplicate API calls
+  // Reset when currentAgentId changes (i.e., when switching agents)
   const hasTriggeredInitialRefetch = useRef(false);
+  const prevAgentIdRef = useRef<number | undefined>(undefined);
+
+  // Reset refetch flag when switching agents and invalidate cache to force fresh fetch
+  useEffect(() => {
+    if (currentAgentId !== prevAgentIdRef.current) {
+      prevAgentIdRef.current = currentAgentId;
+      hasTriggeredInitialRefetch.current = false;
+
+      // Invalidate knowledge base cache when switching agents to force fresh fetch
+      // This ensures we get the correct knowledge bases for the new agent's config
+      if (toolKbType === "dify_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "dify_search"],
+        });
+      } else if (toolKbType === "datamate_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "datamate_search"],
+        });
+      }
+    }
+  }, [currentAgentId, toolKbType, queryClient]);
+
   useEffect(() => {
     if (toolRequiresKbSelection && isOpen && !hasTriggeredInitialRefetch.current) {
       hasTriggeredInitialRefetch.current = true;
