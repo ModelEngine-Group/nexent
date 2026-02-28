@@ -9,6 +9,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 import httpx
 
+from backend.consts.error_code import ErrorCode
+
 
 def _create_mock_client(mock_response):
     """
@@ -695,3 +697,152 @@ class TestFetchDifyDatasetsImpl:
         assert "/v1/v1" not in called_url, f"URL duplication detected: {called_url}"
         # Verify URL ends with /v1/datasets
         assert called_url.endswith("/v1/datasets")
+
+    def test_fetch_dify_datasets_impl_url_without_protocol(self):
+        """Test ValueError when dify_api_base doesn't start with http:// or https://."""
+        from backend.services.dify_service import fetch_dify_datasets_impl
+
+        with pytest.raises(Exception) as excinfo:
+            fetch_dify_datasets_impl(
+                dify_api_base="dify.example.com",
+                api_key="test-api-key"
+            )
+
+        assert "must start with http:// or https://" in str(excinfo.value)
+
+    def test_fetch_dify_datasets_impl_url_with_ftp_protocol(self):
+        """Test ValueError when dify_api_base uses unsupported protocol."""
+        from backend.services.dify_service import fetch_dify_datasets_impl
+
+        with pytest.raises(Exception) as excinfo:
+            fetch_dify_datasets_impl(
+                dify_api_base="ftp://dify.example.com",
+                api_key="test-api-key"
+            )
+
+        assert "must start with http:// or https://" in str(excinfo.value)
+
+    def test_fetch_dify_datasets_impl_http_401_auth_error(self):
+        """Test that HTTP 401 maps to DIFY_AUTH_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401 Unauthorized",
+            request=MagicMock(),
+            response=MagicMock(status_code=401)
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+            from backend.consts.exceptions import AppException
+
+            with pytest.raises(AppException) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert excinfo.value.error_code == ErrorCode.DIFY_AUTH_ERROR
+
+    def test_fetch_dify_datasets_impl_http_403_auth_error(self):
+        """Test that HTTP 403 maps to DIFY_AUTH_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "403 Forbidden",
+            request=MagicMock(),
+            response=MagicMock(status_code=403)
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+            from backend.consts.exceptions import AppException
+
+            with pytest.raises(AppException) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert excinfo.value.error_code == ErrorCode.DIFY_AUTH_ERROR
+
+    def test_fetch_dify_datasets_impl_http_429_rate_limit(self):
+        """Test that HTTP 429 maps to DIFY_RATE_LIMIT."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429 Too Many Requests",
+            request=MagicMock(),
+            response=MagicMock(status_code=429)
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+            from backend.consts.exceptions import AppException
+
+            with pytest.raises(AppException) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert excinfo.value.error_code == ErrorCode.DIFY_RATE_LIMIT
+
+    def test_fetch_dify_datasets_impl_http_500_service_error(self):
+        """Test that HTTP 500 maps to DIFY_SERVICE_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500 Internal Server Error",
+            request=MagicMock(),
+            response=MagicMock(status_code=500)
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+            from backend.consts.exceptions import AppException
+
+            with pytest.raises(AppException) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert excinfo.value.error_code == ErrorCode.DIFY_SERVICE_ERROR
+
+    def test_fetch_dify_datasets_impl_http_404_service_error(self):
+        """Test that HTTP 404 maps to DIFY_SERVICE_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404 Not Found",
+            request=MagicMock(),
+            response=MagicMock(status_code=404)
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+            from backend.consts.exceptions import AppException
+
+            with pytest.raises(AppException) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert excinfo.value.error_code == ErrorCode.DIFY_SERVICE_ERROR
