@@ -1,6 +1,7 @@
 """
 Tenant service for managing tenant operations
 """
+import asyncio
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -14,6 +15,7 @@ from database.tenant_config_db import (
     get_all_configs_by_tenant_id,
 )
 from database.user_tenant_db import get_users_by_tenant_id, soft_delete_users_by_tenant_id
+from services.user_service import delete_user_and_cleanup
 from database.group_db import add_group, query_groups_by_tenant, remove_group
 from database.model_management_db import get_model_records, delete_model_record
 from database.knowledge_db import get_knowledge_info_by_tenant_id, delete_knowledge_record
@@ -300,7 +302,7 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
     return updated_tenant
 
 
-def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
+async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
     """
     Delete tenant and all associated resources
 
@@ -333,9 +335,23 @@ def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
     logger.info(f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
 
     try:
-        # 1. Delete all users in the tenant (soft delete)
-        logger.info(f"Deleting users for tenant {tenant_id}")
-        soft_delete_users_by_tenant_id(tenant_id, deleted_by or "system")
+        # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
+        logger.info(f"Deactivating users for tenant {tenant_id}")
+        users_result = get_users_by_tenant_id(tenant_id, page=1, page_size=10000)
+        users = users_result.get("users", [])
+
+        if users:
+            async def delete_single_user(user: Dict[str, Any]) -> None:
+                user_id = user.get("user_id")
+                if user_id:
+                    try:
+                        await delete_user_and_cleanup(user_id, tenant_id)
+                        logger.info(f"Deactivated user {user_id} for tenant {tenant_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to deactivate user {user_id}: {str(e)}")
+
+            # Concurrently delete all users
+            await asyncio.gather(*[delete_single_user(user) for user in users])
 
         # 2. Delete all groups in the tenant
         logger.info(f"Deleting groups for tenant {tenant_id}")

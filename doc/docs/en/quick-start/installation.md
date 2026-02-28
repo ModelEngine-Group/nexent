@@ -44,6 +44,8 @@ After executing this command, the system will provide two different versions for
 - **Terminal Tool**: Enables openssh-server for AI agent shell command execution
 - **Regional optimization**: Mainland China users can use optimized image sources
 
+>⚠️ **Important Note**: When deploying v1.8.0 or later for the first time, please pay special attention to the `suadmin` super administrator account information output in the Docker logs. This account has the highest system privileges, and the password is only displayed upon first generation. It cannot be viewed again later, so please be sure to save it securely.
+
 ### 3. Access Your Installation
 
 When deployment completes successfully:

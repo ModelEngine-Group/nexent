@@ -19,6 +19,7 @@ from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_config_service import build_memory_context
 from services.image_service import get_vlm_model
 from database.agent_db import search_agent_info_by_agent_id, query_sub_agents_id_list
+from database.agent_version_db import query_current_version_no
 from database.tool_db import search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
 from database.client import minio_client
@@ -75,15 +76,19 @@ async def create_agent_config(
     language: str = LANGUAGE["ZH"],
     last_user_query: str = None,
     allow_memory_search: bool = True,
+    version_no: int = 0,
 ):
     agent_info = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id)
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
     sub_agent_id_list = query_sub_agents_id_list(
-        main_agent_id=agent_id, tenant_id=tenant_id)
+        main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
     for sub_agent_id in sub_agent_id_list:
+        # Get the current published version for this sub-agent (from draft version 0)
+        sub_agent_version_no = query_current_version_no(
+            agent_id=sub_agent_id, tenant_id=tenant_id) or 0
         sub_agent_config = await create_agent_config(
             agent_id=sub_agent_id,
             tenant_id=tenant_id,
@@ -91,10 +96,11 @@ async def create_agent_config(
             language=language,
             last_user_query=last_user_query,
             allow_memory_search=allow_memory_search,
+            version_no=sub_agent_version_no,
         )
         managed_agents.append(sub_agent_config)
 
-    tool_list = await create_tool_config_list(agent_id, tenant_id, user_id)
+    tool_list = await create_tool_config_list(agent_id, tenant_id, user_id, version_no=version_no)
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
@@ -202,13 +208,13 @@ async def create_agent_config(
     return agent_config
 
 
-async def create_tool_config_list(agent_id, tenant_id, user_id):
+async def create_tool_config_list(agent_id, tenant_id, user_id, version_no: int = 0):
     # create tool
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
 
     # now only admin can modify the agent, user_id is not used
-    tools_list = search_tools_for_sub_agent(agent_id, tenant_id)
+    tools_list = search_tools_for_sub_agent(agent_id, tenant_id, version_no=version_no)
     for tool in tools_list:
         param_dict = {}
         for param in tool.get("params", []):
@@ -355,7 +361,21 @@ async def create_agent_run_info(
     user_id: str,
     language: str = "zh",
     allow_memory_search: bool = True,
+    is_debug: bool = False,
 ):
+    # Determine which version_no to use based on is_debug flag
+    # If is_debug=false, use the current published version (current_version_no)
+    # If is_debug=true, use version 0 (draft/editing state)
+    if is_debug:
+        version_no = 0
+    else:
+        # Get current published version number
+        version_no = query_current_version_no(agent_id=agent_id, tenant_id=tenant_id)
+        # Fallback to 0 if no published version exists
+        if version_no is None:
+            version_no = 0
+            logger.info(f"Agent {agent_id} has no published version, using draft version 0")
+
     final_query = await join_minio_file_description_to_query(minio_files=minio_files, query=query)
     model_list = await create_model_config_list(tenant_id)
     agent_config = await create_agent_config(
@@ -365,6 +385,7 @@ async def create_agent_run_info(
         language=language,
         last_user_query=final_query,
         allow_memory_search=allow_memory_search,
+        version_no=version_no,
     )
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id)
