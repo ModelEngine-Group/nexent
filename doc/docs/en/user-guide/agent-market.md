@@ -38,11 +38,15 @@ Select your preferred agent, download with one click, and add it to your agent s
 
 ![Agent Market Download](./assets/agent-market/agent-market-download.png)
 
-### 2️⃣ Configure Fields
+### 2️⃣ Configure Local Tools
 
-🔑 Fill in tool permissions as prompted
+🔑 Fill in local tool permissions as prompted
 
 ![Agent Market Download 2](./assets/agent-market/agent-market-download2.png)
+
+### 3️⃣ Configure External MCP Tools
+
+🔑 Fill in MCP tool permissions as prompted
 
 After installation, your agent will be ready in **[Agent Space](./agent-space)**
 

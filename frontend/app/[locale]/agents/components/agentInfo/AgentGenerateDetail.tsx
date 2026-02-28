@@ -40,26 +40,20 @@ import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { USER_ROLES } from "@/const/auth";
 import { Can } from "@/components/permission/Can";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import ExpandEditModal from "./ExpandEditModal";
 
 const { TextArea } = Input;
 
 export interface AgentGenerateDetailProps {
   editable: boolean;
-  editedAgent: EditableAgent;
   currentAgentId?: number | null;
-  onUpdateProfile: (updates: AgentProfileInfo) => void;
-  onUpdateBusinessInfo: (updates: AgentBusinessInfo) => void;
   isGenerating: boolean;
   setIsGenerating: (value: boolean) => void;
 }
 
 export default function AgentGenerateDetail({
   editable = false,
-  editedAgent,
-  currentAgentId,
-  onUpdateProfile,
-  onUpdateBusinessInfo,
   isGenerating,
   setIsGenerating,
 }: AgentGenerateDetailProps) {
@@ -69,12 +63,18 @@ export default function AgentGenerateDetail({
   const { isSpeedMode } = useDeployment();
   const [form] = Form.useForm();
 
+  const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
+  const editedAgent = useAgentConfigStore((state) => state.editedAgent);
+  const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
+  const updateBusinessInfo = useAgentConfigStore((state) => state.updateBusinessInfo);
+  const updateProfileInfo = useAgentConfigStore((state) => state.updateProfileInfo);
+
   // Model data from React Query
   const { availableLlmModels, defaultLlmModel, isLoading: loadingModels } = useModelList();
 
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
-  const tenantId = user?.tenantId ?? tenantData?.[0]?.tenant_id ?? null;
+  const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
   const { data: groupData } = useGroupList(tenantId, 1, 100);
   const groups = groupData?.groups || [];
 
@@ -203,12 +203,7 @@ export default function AgentGenerateDetail({
 
   // Initialize form values when component mounts or currentAgentId changes
   useEffect(() => {
-    const isCreateMode = editable && (currentAgentId === null || currentAgentId === undefined);
 
-    // Note:
-    // In create mode, do not set group_ids here. Otherwise, when switching from an existing
-    // agent to create mode (currentAgentId changes to null), this initializer can overwrite
-    // the default-group selection effect and leave group_ids empty.
     const initialAgentInfo: Record<string, any> = {
       agentName: editedAgent.name || "",
       agentDisplayName: editedAgent.display_name || "",
@@ -223,7 +218,7 @@ export default function AgentGenerateDetail({
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
     };
 
-    if (isCreateMode) {
+    if (isCreatingMode) {
       delete initialAgentInfo.group_ids;
     }
 
@@ -241,16 +236,21 @@ export default function AgentGenerateDetail({
 
     form.setFieldsValue(initialAgentInfo);
     // Sync model to store if not already set (e.g., in create mode with default model)
-    if ((isCreateMode || !editedAgent.model) && defaultLlmModel) {
-      onUpdateProfile({
+    if (isCreatingMode && defaultLlmModel) {
+      updateProfileInfo({
         model: defaultLlmModel.displayName || "",
         model_id: defaultLlmModel.id || 0,
       });
     }
-    // We intentionally initialize the form only when switching agent (or when default model becomes available),
-    // otherwise it can create update loops with Form-controlled fields updating the store.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentAgentId, defaultLlmModel?.id]);
+    // Sync author to store if not already set (e.g., in create mode with default user email)
+    const defaultAuthor = editedAgent.author || user?.email || (isSpeedMode ? "Default User" : "");
+    if (!editedAgent.author && defaultAuthor) {
+      updateProfileInfo({
+        author: defaultAuthor,
+      });
+    }
+
+  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
@@ -275,13 +275,14 @@ export default function AgentGenerateDetail({
     if (allGroupIds.length === 0) return;
 
     form.setFieldsValue({ group_ids: allGroupIds });
-    onUpdateProfile({ group_ids: allGroupIds });
+    updateProfileInfo
+    ({ group_ids: allGroupIds });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editable, currentAgentId, groups, allowedGroupIds, user?.role]);
 
   // Handle business description change
   const handleBusinessDescriptionChange = (value: string) => {
-    onUpdateBusinessInfo({
+    updateBusinessInfo({
       business_description: value,
       business_logic_model_id: businessInfo.businessLogicModelId,
       business_logic_model_name: businessInfo.businessLogicModelName,
@@ -299,7 +300,7 @@ export default function AgentGenerateDetail({
       businessLogicModelName: modelName,
       businessLogicModelId: selectedModel?.id || 0,
     }));
-    onUpdateBusinessInfo({
+    updateBusinessInfo({
       business_description: businessInfo.businessDescription || "",
       business_logic_model_id: selectedModel?.id || 0,
       business_logic_model_name: modelName,
@@ -321,7 +322,7 @@ export default function AgentGenerateDetail({
         icon={<Maximize2 size={12} />}
         size="small"
         type="text"
-        disabled={!editable}
+        disabled={!editable || isGenerating}
       />
     );
   };
@@ -348,7 +349,7 @@ export default function AgentGenerateDetail({
         <TextArea
           placeholder={placeholder}
           style={promptEditorStyle}
-          disabled={!editable}
+          disabled={!editable || isGenerating}
           onBlur={(e) => onBlurUpdate(e.target.value)}
         />
       </Form.Item>
@@ -372,15 +373,15 @@ export default function AgentGenerateDetail({
     switch (expandModalType) {
       case 'duty':
         form.setFieldsValue({ dutyPrompt: content });
-        onUpdateProfile({ duty_prompt: content });
+        updateProfileInfo({ duty_prompt: content });
         break;
       case 'constraint':
         form.setFieldsValue({ constraintPrompt: content });
-        onUpdateProfile({ constraint_prompt: content });
+        updateProfileInfo({ constraint_prompt: content });
         break;
       case 'few-shots':
         form.setFieldsValue({ fewShotsPrompt: content });
-        onUpdateProfile({ few_shots_prompt: content });
+        updateProfileInfo({ few_shots_prompt: content });
         break;
     }
     handleCloseExpandModal();
@@ -538,8 +539,8 @@ export default function AgentGenerateDetail({
             few_shots_prompt: formValues.fewShotsPrompt,
           };
 
-          // Update parent component state
-          onUpdateProfile(profileUpdates);
+          // Update profile info in global agent config store
+          updateProfileInfo(profileUpdates);
 
           message.success(t("businessLogic.config.message.generateSuccess"));
           setIsGenerating(false);
@@ -569,7 +570,7 @@ export default function AgentGenerateDetail({
           <Row gutter={[16, 16]}>
             <Col span={24}>
               {wrapNoEditTooltipBlock(
-                <Form form={form} layout="vertical" disabled={!editable}>
+                <Form form={form} layout="vertical" disabled={!editable || isGenerating}>
                 <Form.Item
                   name="agentDisplayName"
                   label={t("agent.displayName")}
@@ -590,7 +591,7 @@ export default function AgentGenerateDetail({
                   <Input
                     placeholder={t("agent.displayNamePlaceholder")}
                     onBlur={(e) =>
-                      onUpdateProfile({ display_name: e.target.value })
+                      updateProfileInfo({ display_name: e.target.value })
                     }
                   />
                 </Form.Item>
@@ -614,7 +615,9 @@ export default function AgentGenerateDetail({
                 >
                   <Input
                     placeholder={t("agent.namePlaceholder")}
-                    onChange={(e) => onUpdateProfile({ name: e.target.value })}
+                    onChange={(e) =>
+                      updateProfileInfo({ name: e.target.value })
+                    }
                   />
                 </Form.Item>
 
@@ -640,7 +643,7 @@ export default function AgentGenerateDetail({
                         ) {
                           return;
                         }
-                        onUpdateProfile({ group_ids: nextGroupIds });
+                        updateProfileInfo({ group_ids: nextGroupIds });
                       }}
                     />
                   </Form.Item>
@@ -659,7 +662,9 @@ export default function AgentGenerateDetail({
                 >
                   <Input
                     placeholder={t("agent.authorPlaceholder")}
-                    onBlur={(e) => onUpdateProfile({ author: e.target.value })}
+                    onBlur={(e) =>
+                      updateProfileInfo({ author: e.target.value })
+                    }
                   />
                 </Form.Item>
 
@@ -684,7 +689,7 @@ export default function AgentGenerateDetail({
                       const selectedModel = availableLlmModels.find(
                         (m) => m.displayName === value
                       );
-                      onUpdateProfile({
+                      updateProfileInfo({
                         model: value,
                         model_id: selectedModel?.id || 0,
                       });
@@ -725,7 +730,7 @@ export default function AgentGenerateDetail({
                     style={{ width: "100%" }}
                     onBlur={() => {
                       const value = form.getFieldValue("mainAgentMaxStep");
-                      onUpdateProfile({ max_step: value || 1 });
+                      updateProfileInfo({ max_step: value || 1 });
                     }}
                   />
                 </Form.Item>
@@ -740,7 +745,7 @@ export default function AgentGenerateDetail({
                     rows={6}
                     style={{ minHeight: "150px" }}
                     onBlur={(e) =>
-                      onUpdateProfile({ description: e.target.value })
+                      updateProfileInfo({ description: e.target.value })
                     }
                   />
                 </Form.Item>
@@ -763,11 +768,12 @@ export default function AgentGenerateDetail({
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
+            disabled={isGenerating}
           >
             {renderPromptEditor(
               "dutyPrompt",
               t("systemPrompt.card.duty.title"),
-              (value) => onUpdateProfile({ duty_prompt: value })
+              (value) => updateProfileInfo({ duty_prompt: value })
             )}
           </Form>
         </div>
@@ -785,11 +791,12 @@ export default function AgentGenerateDetail({
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
+            disabled={isGenerating}
           >
             {renderPromptEditor(
               "constraintPrompt",
               t("systemPrompt.card.constraint.title"),
-              (value) => onUpdateProfile({ constraint_prompt: value })
+              (value) => updateProfileInfo({ constraint_prompt: value })
             )}
           </Form>
         </div>
@@ -807,11 +814,12 @@ export default function AgentGenerateDetail({
             form={form}
             layout="vertical"
             className="h-full agent-config-form"
+            disabled={isGenerating}
           >
             {renderPromptEditor(
               "fewShotsPrompt",
               t("systemPrompt.card.fewShots.title"),
-              (value) => onUpdateProfile({ few_shots_prompt: value })
+              (value) => updateProfileInfo({ few_shots_prompt: value })
             )}
           </Form>
         </div>
@@ -861,7 +869,7 @@ export default function AgentGenerateDetail({
                     overflowY: "auto",
                   }}
                   autoSize={false}
-                  disabled={!editable}
+                  disabled={!editable || isGenerating}
                 />
               )}
 

@@ -70,7 +70,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   const handleDelete = async (displayName: string, _provider?: string) => {
     if (!tenantId) {
-      message.error("Tenant ID is required");
+      message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
     }
     try {
@@ -92,7 +92,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   // Handle checking model connectivity
   const handleCheckConnectivity = async (displayName: string) => {
     if (!tenantId) {
-      message.error("Tenant ID is required");
+      message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
     }
 

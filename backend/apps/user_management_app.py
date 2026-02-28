@@ -10,7 +10,7 @@ from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
-    check_auth_service_health, signup_user, signup_user_with_invitation, signin_user, refresh_user_token, \
+    check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info
 from services.user_service import delete_user_and_cleanup
 from consts.exceptions import UnauthorizedError
@@ -42,19 +42,10 @@ async def service_health():
 async def signup(request: UserSignUpRequest):
     """User registration"""
     try:
-        if request.with_new_invitation:
-            user_data = await signup_user_with_invitation(email=request.email,
-                                                          password=request.password,
-                                                          invite_code=request.invite_code)
-        else:
-            user_data = await signup_user(email=request.email,
-                                          password=request.password,
-                                          is_admin=request.is_admin,
-                                          invite_code=request.invite_code)
-        if request.is_admin:
-            success_message = "🎉 Admin account registered successfully! You now have system management permissions."
-        else:
-            success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        user_data = await signup_user_with_invitation(email=request.email,
+                                                      password=request.password,
+                                                      invite_code=request.invite_code)
+        success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message":success_message, "data":user_data})
     except NoInviteCodeException as e:

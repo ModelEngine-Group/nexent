@@ -44,7 +44,6 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         validate_token,
         extend_session,
         check_auth_service_health,
-        signup_user,
         signup_user_with_invitation,
         parse_supabase_response,
         generate_tts_stt_4_admin,
@@ -53,11 +52,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         get_user_info,
-        format_role_permissions,
-        init_tool_list_for_tenant
+        format_role_permissions
     )
-
-# Functions to test
 
 
 class TestSetAuthTokenToClient(unittest.TestCase):
@@ -535,76 +531,8 @@ class TestCheckAuthServiceHealth(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Auth service is unavailable", str(context.exception))
 
 
-class TestSignupUser(unittest.IsolatedAsyncioTestCase):
-    """Test signup_user"""
-
-    @patch('backend.services.user_management_service.parse_supabase_response')
-    @patch('backend.services.user_management_service.generate_tts_stt_4_admin')
-    @patch('backend.services.user_management_service.insert_user_tenant')
-    @patch('backend.services.user_management_service.verify_invite_code')
-    @patch('backend.services.user_management_service.get_supabase_client')
-    async def test_signup_user_regular_user(self, mock_get_client, mock_verify_code,
-                                          mock_insert_tenant, mock_generate_tts, mock_parse_response):
-        """Test regular user signup"""
-        mock_client = MagicMock()
-        mock_user = MagicMock()
-        mock_user.id = "user-123"
-        mock_response = MagicMock()
-        mock_response.user = mock_user
-        mock_client.auth.sign_up.return_value = mock_response
-        mock_get_client.return_value = mock_client
-        mock_parse_response.return_value = {"user": "data"}
-
-        # Mock init_tool_list_for_tenant as async function
-        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
-            result = await signup_user("test@example.com", "password123")
-
-            self.assertEqual(result, {"user": "data"})
-            mock_verify_code.assert_not_called()
-            mock_generate_tts.assert_not_called()
-            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="test@example.com")
-            mock_parse_response.assert_called_once_with(False, mock_response, "user")
-            # Verify init_tool_list_for_tenant was called for new tenant
-            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
-
-    @patch('backend.services.user_management_service.parse_supabase_response')
-    @patch('backend.services.user_management_service.insert_user_tenant')
-    @patch('backend.services.user_management_service.get_supabase_client')
-    async def test_signup_user_regular_without_invite_code(self, mock_get_client,
-                                                          mock_insert_tenant, mock_parse_response):
-        """Test regular user signup without invitation code"""
-        mock_client = MagicMock()
-        mock_user = MagicMock()
-        mock_user.id = "user-123"
-        mock_response = MagicMock()
-        mock_response.user = mock_user
-        mock_client.auth.sign_up.return_value = mock_response
-        mock_get_client.return_value = mock_client
-        mock_parse_response.return_value = {"user": "data"}
-
-        # Mock init_tool_list_for_tenant as async function
-        with patch('backend.services.user_management_service.init_tool_list_for_tenant', new_callable=AsyncMock) as mock_init_tools:
-            result = await signup_user("user@example.com", "password123")
-
-            self.assertEqual(result, {"user": "data"})
-            mock_insert_tenant.assert_called_once_with(user_id="user-123", tenant_id="tenant_id", user_email="user@example.com")
-            mock_parse_response.assert_called_once_with(False, mock_response, "user")
-            # Verify init_tool_list_for_tenant was called
-            mock_init_tools.assert_called_once_with("tenant_id", "user-123")
-
-    @patch('backend.services.user_management_service.get_supabase_client')
-    async def test_signup_user_no_user_returned(self, mock_get_client):
-        """Test signup when no user is returned"""
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.user = None
-        mock_client.auth.sign_up.return_value = mock_response
-        mock_get_client.return_value = mock_client
-
-        with self.assertRaises(UserRegistrationException) as context:
-            await signup_user("test@example.com", "password123")
-
-        self.assertIn("Registration service is temporarily unavailable", str(context.exception))
+class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
+    """Test signup_user_with_invitation"""
 
     @patch('backend.services.user_management_service.add_user_to_groups')
     @patch('backend.services.user_management_service.parse_supabase_response')

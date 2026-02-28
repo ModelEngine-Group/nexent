@@ -30,9 +30,7 @@ class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
     password: str = Field(..., min_length=6)
-    is_admin: Optional[bool] = False
     invite_code: Optional[str] = None
-    with_new_invitation: Optional[bool] = False
 
 
 class UserSignInRequest(BaseModel):
@@ -255,7 +253,7 @@ class GeneratePromptRequest(BaseModel):
 
 class GenerateTitleRequest(BaseModel):
     conversation_id: int
-    history: List[Dict[str, str]]
+    question: str
 
 
 # used in agent/search agent/update for save agent info
@@ -491,6 +489,8 @@ class MCPUpdateRequest(BaseModel):
     current_mcp_url: str = Field(..., description="Current MCP server URL")
     new_service_name: str = Field(..., description="New MCP service name")
     new_mcp_url: str = Field(..., description="New MCP server URL")
+    new_authorization_token: Optional[str] = Field(
+        None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
 
 
 # Tenant Management Data Models
@@ -507,12 +507,11 @@ class TenantUpdateRequest(BaseModel):
                              description="New tenant display name")
 
 
-class TenantResponse(BaseModel):
-    """Response model for tenant information"""
-    tenant_id: str = Field(..., description="Tenant identifier")
-    tenant_name: str = Field(..., description="Tenant display name")
-    default_group_id: Optional[int] = Field(
-        None, description="Default group ID for the tenant")
+# Pagination request model
+class PaginationRequest(BaseModel):
+    """Request model for pagination parameters"""
+    page: int = Field(1, ge=1, description="Page number")
+    page_size: int = Field(20, ge=1, le=100, description="Items per page")
 
 
 # Group Management Data Models
@@ -780,6 +779,12 @@ class VersionRollbackRequest(BaseModel):
 class VersionStatusRequest(BaseModel):
     """Request model for updating version status"""
     status: str = Field(..., description="New status: DISABLED / ARCHIVED")
+
+
+class VersionUpdateRequest(BaseModel):
+    """Request model for updating version metadata (name and description)"""
+    version_name: Optional[str] = Field(None, description="User-defined version name for display")
+    release_note: Optional[str] = Field(None, description="Release notes / version description")
 
 
 class VersionCompareRequest(BaseModel):

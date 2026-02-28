@@ -296,7 +296,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.delete_flag IS 'Whether it is deleted. O
 
 -- Create the ag_tenant_agent_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
-    agent_id INTEGER NOT NULL,
+    agent_id SERIAL NOT NULL,
     name VARCHAR(100),
     display_name VARCHAR(100),
     description VARCHAR,
@@ -487,6 +487,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     mcp_server VARCHAR(500),
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
+    authorization_token VARCHAR(500) DEFAULT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -505,6 +506,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.mcp_name IS 'MCP name';
 COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
+COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
@@ -996,7 +998,7 @@ INSERT INTO nexent.role_permission_t (role_permission_id, user_role, permission_
 (184, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'CREATE'),
 (185, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'READ'),
 (186, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'UPDATE'),
-(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE'),
+(187, 'SPEED', 'RESOURCE', 'TENANT.INVITE', 'DELETE');
 
 -- Insert SPEED role user into user_tenant_t table if not exists
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, user_role, user_email, created_by, updated_by)
