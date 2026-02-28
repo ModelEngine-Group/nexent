@@ -483,6 +483,107 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["permission"], "EDIT")
         self.assertEqual(result[1]["permission"], "EDIT")
 
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_with_is_need_auth_true(self, mock_get):
+        """Test getting server list with is_need_auth=True (default) includes authorization_token"""
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "authorization_token": "token123",
+                "mcp_id": 1
+            },
+            {
+                "mcp_name": "n2",
+                "mcp_server": "u2",
+                "status": False,
+                "authorization_token": None,
+                "mcp_id": 2
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid', is_need_auth=True)
+
+        self.assertEqual(len(result), 2)
+        self.assertIn("authorization_token", result[0])
+        self.assertEqual(result[0]["authorization_token"], "token123")
+        self.assertIn("authorization_token", result[1])
+        self.assertIsNone(result[1]["authorization_token"])
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_with_is_need_auth_false(self, mock_get):
+        """Test getting server list with is_need_auth=False excludes authorization_token"""
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "authorization_token": "token123",
+                "mcp_id": 1
+            },
+            {
+                "mcp_name": "n2",
+                "mcp_server": "u2",
+                "status": False,
+                "authorization_token": "token456",
+                "mcp_id": 2
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid', is_need_auth=False)
+
+        self.assertEqual(len(result), 2)
+        self.assertNotIn("authorization_token", result[0])
+        self.assertNotIn("authorization_token", result[1])
+        # Verify other fields are still present
+        self.assertEqual(result[0]["remote_mcp_server_name"], "n1")
+        self.assertEqual(result[0]["mcp_id"], 1)
+        self.assertEqual(result[1]["remote_mcp_server_name"], "n2")
+        self.assertEqual(result[1]["mcp_id"], 2)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_default_is_need_auth_true(self, mock_get):
+        """Test that default behavior (is_need_auth not specified) includes authorization_token"""
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "authorization_token": "token123",
+                "mcp_id": 1
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid')
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("authorization_token", result[0])
+        self.assertEqual(result[0]["authorization_token"], "token123")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_with_user_id_and_is_need_auth_false(self, mock_get, mock_get_user_tenant):
+        """Test getting server list with user_id and is_need_auth=False"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "created_by": "user123",
+                "authorization_token": "token123",
+                "mcp_id": 1
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid', user_id="user123", is_need_auth=False)
+
+        self.assertEqual(len(result), 1)
+        self.assertNotIn("authorization_token", result[0])
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[0]["mcp_id"], 1)
+
 
 class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
     """Test check_mcp_health_and_update_db"""
