@@ -38,11 +38,17 @@
 
 ![智能体市场下载](./assets/agent-market/agent-market-download.png)
 
-### 2️⃣ 配置字段
+### 2️⃣ 配置本地工具
 
-🔑 依据提示补充工具许可
+🔑 依据提示补充本地工具的许可
 
 ![智能体市场下载2](./assets/agent-market/agent-market-download2.png)
+
+### 3️⃣ 配置外部 MCP 工具
+
+🔑 依据提示补充 MCP 工具的许可
+
+![智能体市场下载3](./assets/agent-market/agent-market-download3.png)
 
 安装完成后，您的智能体会在 **[智能体空间](./agent-space)** 准备好
 
