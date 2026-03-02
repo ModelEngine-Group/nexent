@@ -506,7 +506,13 @@ export default function AgentList({
                       </span>
                     </Tooltip>
 
-                    <Tooltip title={t("agent.contextMenu.delete")}>
+                    <Tooltip
+                      title={
+                        agent.permission === "READ_ONLY"
+                          ? t("agent.noEditPermission")
+                          : t("agent.contextMenu.delete")
+                      }
+                    >
                       <span>
                         <Button
                           type="text"
@@ -514,7 +520,12 @@ export default function AgentList({
                           icon={
                             <Trash2
                               className="w-4 h-4"
-                              style={{ color: token.colorError }}
+                              style={{
+                                color:
+                                  agent.permission === "READ_ONLY"
+                                    ? token.colorTextDisabled
+                                    : token.colorError,
+                              }}
                             />
                           }
                           onClick={(e) => {
@@ -522,6 +533,7 @@ export default function AgentList({
                             e.stopPropagation();
                             handleDeleteAgentWithConfirm(agent);
                           }}
+                          disabled={agent.permission === "READ_ONLY"}
                           className="agent-action-button agent-action-button-red"
                         />
                       </span>

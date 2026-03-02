@@ -28,6 +28,7 @@ import {
   DescriptionsProps,
   Modal,
   Dropdown,
+  Tooltip,
   theme
 } from "antd";
 import { ExclamationCircleFilled } from '@ant-design/icons';
@@ -148,6 +149,13 @@ export function VersionCardItem({
 
   const { tools: toolList } = useToolList();
   const { agents: agentList } = useAgentList(user?.tenantId ?? null);
+
+  // Get current agent's permission from agent list
+  const currentAgent = useMemo(() => {
+    return agentList.find((a: Agent) => a.id === String(agentId));
+  }, [agentList, agentId]);
+
+  const isReadOnly = currentAgent?.permission === "READ_ONLY";
 
   // Modal state
   const [compareModalOpen, setCompareModalOpen] = useState(false);
@@ -366,15 +374,28 @@ export function VersionCardItem({
                 items: [
                   {
                     key: 'edit',
-                    label: t("common.edit"),
+                    label: isReadOnly ? (
+                      <Tooltip title={t("agent.noEditPermission")}>
+                        <span>{t("common.edit")}</span>
+                      </Tooltip>
+                    ) : (
+                      t("common.edit")
+                    ),
                     icon: <Edit size={14} />,
+                    disabled: isReadOnly,
                     onClick: () => setEditModalOpen(true)
                   },
                   {
                     key: 'rollback',
-                    label: t("agent.version.rollback"),
+                    label: isReadOnly ? (
+                      <Tooltip title={t("agent.noEditPermission")}>
+                        <span>{t("agent.version.rollback")}</span>
+                      </Tooltip>
+                    ) : (
+                      t("agent.version.rollback")
+                    ),
                     icon: <RotateCcw size={14} />,
-                    disabled: isCurrentVersion || version.status.toLowerCase() === "disabled",
+                    disabled: isReadOnly || isCurrentVersion || version.status.toLowerCase() === "disabled",
                     onClick: handleRollbackClick
                   },
                   {
@@ -382,9 +403,15 @@ export function VersionCardItem({
                   },
                   {
                     key: 'delete',
-                    label: t("common.delete"),
+                    label: isReadOnly ? (
+                      <Tooltip title={t("agent.noEditPermission")}>
+                        <span>{t("common.delete")}</span>
+                      </Tooltip>
+                    ) : (
+                      t("common.delete")
+                    ),
                     icon: <Trash2 size={14} />,
-                    disabled: isCurrentVersion,
+                    disabled: isReadOnly || isCurrentVersion,
                     danger: true,
                     onClick: handleDeleteClick,
                   },
