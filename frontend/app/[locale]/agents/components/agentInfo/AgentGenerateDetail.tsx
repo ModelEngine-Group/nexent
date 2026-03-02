@@ -81,6 +81,16 @@ export default function AgentGenerateDetail({
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
 
+  // Local state to track generated content (fix for stream data not syncing with form state)
+  const [generatedContent, setGeneratedContent] = useState({
+    dutyPrompt: "",
+    constraintPrompt: "",
+    fewShotsPrompt: "",
+    agentName: "",
+    agentDescription: "",
+    agentDisplayName: "",
+  });
+
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
@@ -484,10 +494,10 @@ export default function AgentGenerateDetail({
           sub_agent_ids: editedAgent.sub_agent_id_list,
           tool_ids: Array.isArray(editedAgent.tools)
             ? editedAgent.tools.map((tool: any) =>
-                typeof tool === "object" && tool.id !== undefined
-                  ? tool.id
-                  : tool
-              )
+              typeof tool === "object" && tool.id !== undefined
+                ? tool.id
+                : tool
+            )
             : [],
         },
         (data) => {
@@ -496,27 +506,50 @@ export default function AgentGenerateDetail({
           switch (data.type) {
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
               form.setFieldsValue({ dutyPrompt: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                dutyPrompt: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT:
               form.setFieldsValue({ constraintPrompt: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                constraintPrompt: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-
               form.setFieldsValue({ fewShotsPrompt: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                fewShotsPrompt: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
               if (!form.getFieldValue("agentName")?.trim()) {
                 form.setFieldsValue({ agentName: data.content });
               }
+              setGeneratedContent((prev) => ({
+                ...prev,
+                agentName: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
               form.setFieldsValue({ agentDescription: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                agentDescription: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
               // Only update if current agent display name is empty
               if (!form.getFieldValue("agentDisplayName")?.trim()) {
                 form.setFieldsValue({ agentDisplayName: data.content });
               }
+              setGeneratedContent((prev) => ({
+                ...prev,
+                agentDisplayName: data.content,
+              }));
               break;
           }
         },
@@ -527,22 +560,33 @@ export default function AgentGenerateDetail({
         },
         () => {
           // After generation completes, get all form values and update parent component state
+          // Use generatedContent state as fallback to ensure we get the streamed data
           const formValues = form.getFieldsValue();
           const profileUpdates: AgentProfileInfo = {
-            name: formValues.agentName,
-            display_name: formValues.agentDisplayName,
+            name: generatedContent.agentName || formValues.agentName,
+            display_name: generatedContent.agentDisplayName || formValues.agentDisplayName,
             author: formValues.agentAuthor,
             model: formValues.mainAgentModel,
             max_step: formValues.mainAgentMaxStep,
-            description: formValues.agentDescription,
-            duty_prompt: formValues.dutyPrompt,
-            constraint_prompt: formValues.constraintPrompt,
-            few_shots_prompt: formValues.fewShotsPrompt,
+            description: generatedContent.agentDescription || formValues.agentDescription,
+            duty_prompt: generatedContent.dutyPrompt || formValues.dutyPrompt,
+            constraint_prompt: generatedContent.constraintPrompt || formValues.constraintPrompt,
+            few_shots_prompt: generatedContent.fewShotsPrompt || formValues.fewShotsPrompt,
             ingroup_permission: formValues.ingroup_permission || "READ_ONLY",
           };
 
           // Update profile info in global agent config store
           updateProfileInfo(profileUpdates);
+
+          // Reset generated content state after updating
+          setGeneratedContent({
+            dutyPrompt: "",
+            constraintPrompt: "",
+            fewShotsPrompt: "",
+            agentName: "",
+            agentDescription: "",
+            agentDisplayName: "",
+          });
 
           message.success(t("businessLogic.config.message.generateSuccess"));
           setIsGenerating(false);
