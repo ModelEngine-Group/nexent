@@ -175,7 +175,8 @@ class KnowledgeBasePollingService {
       let count = 0;
       const checkForStats = async () => {
         try {
-          const kbs = await knowledgeBaseService.getKnowledgeBasesInfo(true) as KnowledgeBase[];
+          const result = await knowledgeBaseService.getKnowledgeBasesInfo(true);
+          const kbs = result.knowledgeBases;
           const kb = kbs.find(k => k.id === kbId || k.name === kbName);
 
           // Check if KB exists and its stats are populated

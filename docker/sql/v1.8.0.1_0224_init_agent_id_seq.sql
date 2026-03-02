@@ -1,0 +1,6 @@
+CREATE SEQUENCE IF NOT EXISTS "nexent"."ag_tenant_agent_t_agent_id_seq" 
+INCREMENT 1
+MINVALUE  1
+MAXVALUE 2147483647
+START 1
+CACHE 1;

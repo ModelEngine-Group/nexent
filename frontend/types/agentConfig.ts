@@ -5,21 +5,11 @@ import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 
-// ========== Core Interfaces ==========
-
-/**
- * Business info fields for agent configuration.
- * Used by agentConfigStore for business info updates.
- * Supports partial updates like AgentProfileInfo.
- */
 export type AgentBusinessInfo = Partial<Pick<
   Agent,
   "business_description" | "business_logic_model_id" | "business_logic_model_name"
 >>;
 
-/**
- * Profile info fields for agent configuration.
- */
 export type AgentProfileInfo = Partial<
   Pick<
     Agent,
@@ -34,6 +24,7 @@ export type AgentProfileInfo = Partial<
     | "constraint_prompt"
     | "few_shots_prompt"
     | "group_ids"
+    | "ingroup_permission"
   >
 >;
 
@@ -61,11 +52,13 @@ export interface Agent {
   is_new?: boolean;
   sub_agent_id_list?: number[];
   group_ids?: number[];
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   /**
    * Per-agent permission returned by /agent/list.
    * EDIT: editable, READ_ONLY: read-only.
    */
   permission?: "EDIT" | "READ_ONLY";
+  current_version_no?: number;
 }
 
 export interface Tool {
@@ -90,9 +83,10 @@ export interface ToolParam {
   description?: string;
 }
 
+
+
 // ========== Data Interfaces ==========
 
-// Agent configuration data response interface
 export interface AgentConfigDataResponse {
   businessLogic: string;
   systemPrompt: string;
@@ -344,6 +338,8 @@ export interface McpServer {
   status: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
+  authorization_token?: string | null;
+  mcp_id?: number;
   /**
    * Per-item permission returned by /mcp/list.
    * EDIT: editable, READ_ONLY: read-only.

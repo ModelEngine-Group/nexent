@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
+import log from "@/lib/logger";
+
 import { Button, Input, Select } from "antd";
 import {
   SyncOutlined,
@@ -18,6 +20,7 @@ import {
   CircleOff,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
@@ -122,11 +125,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     return `knowledgeBase.ingroup.permission.${permission || "DEFAULT"}`;
   };
 
-  // Check if knowledge base allows edit/delete actions based on permission
-  const canEditOrDelete = (permission: string) => {
-    return permission === "EDIT" || permission === "CREATOR";
-  };
-
   // Search and filter states
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
@@ -134,7 +132,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Edit modal states
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingKnowledge, setEditingKnowledge] = useState<KnowledgeBase | null>(null);
+  const [editingKnowledge, setEditingKnowledge] =
+    useState<KnowledgeBase | null>(null);
 
   // Open edit modal
   const openEditModal = (kb: KnowledgeBase) => {
@@ -231,16 +230,25 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Filter knowledge bases based on search and filters
   const filteredKnowledgeBases = useMemo(() => {
-    return sortedKnowledgeBases.filter((kb) => {
+    log.log("Filtering knowledge bases:", {
+      totalCount: knowledgeBases.length,
+      searchKeyword: effectiveSearchKeyword,
+      sourceFilter: effectiveSelectedSources,
+      modelFilter: effectiveSelectedModels,
+    });
+
+    const result = sortedKnowledgeBases.filter((kb) => {
       // Keyword search: match name, description, or nickname
       const keyword = effectiveSearchKeyword || "";
+      const kbName = kb.name || "";
+      const kbDescription = kb.description || "";
+      const kbNickname = kb.nickname || "";
+
       const matchesSearch =
         !keyword ||
-        kb.name.toLowerCase().includes(keyword.toLowerCase()) ||
-        (kb.description &&
-          kb.description.toLowerCase().includes(keyword.toLowerCase())) ||
-        (kb.nickname &&
-          kb.nickname.toLowerCase().includes(keyword.toLowerCase()));
+        kbName.toLowerCase().includes(keyword.toLowerCase()) ||
+        kbDescription.toLowerCase().includes(keyword.toLowerCase()) ||
+        kbNickname.toLowerCase().includes(keyword.toLowerCase());
 
       // Source filter
       const matchesSource =
@@ -252,8 +260,24 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         effectiveSelectedModels.length === 0 ||
         effectiveSelectedModels.includes(kb.embeddingModel);
 
-      return matchesSearch && matchesSource && matchesModel;
+      const matches = matchesSearch && matchesSource && matchesModel;
+
+      if (!matches) {
+        log.log("KB filtered out:", {
+          name: kb.name,
+          source: kb.source,
+          embeddingModel: kb.embeddingModel,
+          matchesSearch,
+          matchesSource,
+          matchesModel,
+        });
+      }
+
+      return matches;
     });
+
+    log.log("Filtered result:", result.length, "items");
+    return result;
   }, [
     sortedKnowledgeBases,
     effectiveSearchKeyword,
@@ -438,46 +462,56 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             {kb.name}
                           </p>
                           {/* Permission icon with tooltip */}
-                          <Tooltip
-                            title={t(getPermissionTooltipKey(kb.ingroup_permission || ""))}
-                            placement="top"
-                          >
-                            <div className="ml-3 flex-shrink-0 cursor-pointer">
-                              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 hover:bg-gray-200 transition-all duration-200 hover:shadow-sm">
-                                {getPermissionIcon(kb.ingroup_permission || "")}
+                          <Can permission="kb.groups:read">
+                            <Tooltip
+                              title={t(getPermissionTooltipKey(kb.ingroup_permission || ""))}
+                              placement="top"
+                            >
+                              <div className="ml-3 flex-shrink-0 cursor-pointer">
+                                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 hover:bg-gray-300 transition-all duration-200 hover:shadow-sm">
+                                  {getPermissionIcon(kb.ingroup_permission || "")}
+                                </div>
                               </div>
-                            </div>
-                          </Tooltip>
+                            </Tooltip>
+                          </Can>
                         </div>
-                        {canEditOrDelete(kb.permission) && (
                           <div className="flex items-center ml-2">
-                            {/* Edit button */}
-                            <Tooltip title={t("common.edit")}>
-                              <Button
-                                type="text"
-                                icon={<SquarePen className="h-4 w-4" />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditModal(kb);
-                                }}
-                                size="small"
-                              />
-                            </Tooltip>
-                            {/* Delete button */}
-                            <Tooltip title={t("common.delete")}>
-                              <Button
-                                type="text"
-                                danger
-                                icon={<Trash2 className="h-4 w-4" />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDelete(kb.id);
-                                }}
-                                size="small"
-                              />
-                            </Tooltip>
+                          <Can permission="kb:update">
+                            {/* Edit button - only show for Nexent (local) sources and when user has edit permission */}
+                            {(!kb.source || kb.source === "nexent" || kb.source === "elasticsearch") &&
+                              kb.permission !== "READ_ONLY" && (
+                              <Tooltip title={t("common.edit")}>
+                                <Button
+                                  type="text"
+                                  icon={<SquarePen className="h-4 w-4" />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditModal(kb);
+                                  }}
+                                  size="small"
+                                />
+                              </Tooltip>
+                            )}
+                            </Can>
+                          <Can permission="kb:delete">
+                            {/* Delete button - hide when user has READ_ONLY permission */}
+                            {kb.permission !== "READ_ONLY" && (
+                              <Tooltip title={t("common.delete")}>
+                                <Button
+                                  type="text"
+                                  danger
+                                  icon={<Trash2 className="h-4 w-4" />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(kb.id);
+                                  }}
+                                  size="small"
+                                />
+                              </Tooltip>
+                            )}
+                            </Can>
                           </div>
-                        )}
+
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
@@ -547,15 +581,17 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 </span>
                               )}
 
-                            {/* User group tags - show after model tag */}
-                            {getGroupNames(kb.group_ids).map((groupName, idx) => (
-                              <span
-                                key={idx}
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                              >
-                                {groupName}
-                              </span>
-                            ))}
+                            {/* User group tags */}
+                            <Can permission="group:read">
+                              {getGroupNames(kb.group_ids).map((groupName, idx) => (
+                                <span
+                                  key={idx}
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                                >
+                                  {groupName}
+                                </span>
+                              ))}
+                            </Can>
                           </>
                         )}
                       </div>

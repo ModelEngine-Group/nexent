@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Tag, App, Card, Flex, Dropdown, Space, Col } from "antd";
-import { Plus, X } from "lucide-react";
+import { Tag, App, Card, Flex, Dropdown, Col } from "antd";
+import { Plus } from "lucide-react";
 import { Agent } from "@/types/agentConfig";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import { useAgentList } from "@/hooks/agent/useAgentList";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 interface CollaborativeAgentProps {}
 
@@ -25,7 +23,7 @@ export default function CollaborativeAgent({}: CollaborativeAgentProps) {
     (state) => state.updateSubAgentIds
   );
 
-  const { availableAgents } = useAgentList();
+  const { availableAgents } = usePublishedAgentList();
 
   const editable =
     !!isCreatingMode ||

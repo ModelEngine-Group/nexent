@@ -34,29 +34,20 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     if (isSpeedMode) {
       // In speed mode, user is considered authenticated without session
       setIsAuthenticated(true);
-      setIsAuthChecking(false);
-    }
-  }, [isSpeedMode]);
-
-  // Initialize authentication state based on session
-  useEffect(() => {
-    if (isSpeedMode) return;
-    // Check session validity directly
-    if (checkSessionValid()) {
-      // Session is valid, restore it to state
-      const storedSession = getSessionFromStorage();
-      if (storedSession) {
-        setSession(storedSession);
-      }
-      setIsAuthenticated(true);
     } else {
-      // No valid session
-      setSession(null);
-      setIsAuthenticated(false);
+      if (checkSessionValid()) {
+        const storedSession = getSessionFromStorage();
+        if (storedSession) {
+          setSession(storedSession);
+        }
+        setIsAuthenticated(true);
+      } else {
+        setSession(null);
+        setIsAuthenticated(false);
+      }
     }
     setIsAuthChecking(false);
   }, [isSpeedMode]);
-
 
   const clearLocalSession = useCallback(() => {
     removeSessionFromStorage();
@@ -124,8 +115,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     async (
       email: string,
       password: string,
-      inviteCode?: string,
-      withNewInvitation?: boolean
+      inviteCode?: string
     ) => {
       setIsLoading(true);
 
@@ -133,8 +123,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
         const { data, error } = await authService.signUp(
           email,
           password,
-          inviteCode,
-          withNewInvitation
+          inviteCode
         );
 
         if (error) {

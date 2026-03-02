@@ -46,6 +46,14 @@ Give every knowledge base a clear summary so agents can pick the right source du
 
 ![Content Summary](./assets/knowledge-base/summary-knowledge-base.png)
 
+## 🔧 Using Knowledge Bases
+
+Nexent supports binding knowledge bases to agents individually. When creating an agent, **enable the knowledge_base_search tool** and select the associated knowledge base.
+
+<img src="./assets/knowledge-base/knowledge-tool.png" alt="Tool 1" style="width:75%;">
+
+![Tool 2](./assets/knowledge-base/knowledge-tool2.png)
+
 ## 🔍 Knowledge Base Management
 
 ### View Knowledge Bases
@@ -57,18 +65,11 @@ Give every knowledge base a clear summary so agents can pick the right source du
    - Click a knowledge base to see all documents
    - Click **Details** to view or edit the summary
 
-<div style="display: flex; gap: 8px;">
-  <img src="./assets/knowledge-base/knowledge-base-file-list.png" style="width: 50%; height: 100%;" />
-  <img src="./assets/knowledge-base/knowledge-base-summary.png" style="width: 50%; height: 100%;" />
-</div>
-
 ### Edit Knowledge Bases
 
 1. **Delete Knowledge Base**
    - Click **Delete** to the right of the knowledge base row
    - Confirm the deletion (irreversible)
-
-![Delete Knowledge Base](./assets/knowledge-base/delete-knowledge-base.png)
 
 2. **Delete or Add Files**
    - Inside the file list, click **Delete** to remove a document

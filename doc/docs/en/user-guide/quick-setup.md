@@ -33,6 +33,11 @@ Create and configure agents:
 - **Configure capabilities:** Add collaborative agents and tools.
 - **Describe logic:** Tell Nexent how the agent should work.
 
+Publish agent:
+
+- **Publish agent:** Published agents will be visible to selected user groups and listed in Agent Space and the Start Chat selection box.
+- **Version management:** Track iteration history of agents, support viewing, rolling back to historical versions, and creating new versions.
+
 Learn more: [Agent Development](./agent-development)
 
 ## 🎯 Tips

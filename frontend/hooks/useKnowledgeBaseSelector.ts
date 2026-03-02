@@ -29,11 +29,14 @@ export function useKnowledgeBasesForToolConfig(
     | "dify_search"
     | "datamate_search"
     | null = null,
-  difyConfig?: {
+  config?: {
     serverUrl?: string;
     apiKey?: string;
   }
 ) {
+  // Support both difyConfig and datamateConfig naming conventions
+  const difyConfig = config;
+  const datamateConfig = config;
 
   const query = useQuery({
     queryKey: knowledgeBaseKeys.list(
@@ -45,9 +48,11 @@ export function useKnowledgeBasesForToolConfig(
 
       // Fetch knowledge bases based on tool type
       if (toolType === "datamate_search") {
-        // Only sync DataMate knowledge bases
+        // Sync DataMate knowledge bases with optional URL from config
         const syncResult =
-          await knowledgeBaseService.syncDataMateAndCreateRecords();
+          await knowledgeBaseService.syncDataMateAndCreateRecords(
+            datamateConfig?.serverUrl
+          );
         if (syncResult.indices_info) {
           kbs = syncResult.indices_info.map((indexInfo: any) => {
             const stats = indexInfo.stats?.base_info || {};
@@ -99,7 +104,8 @@ export function useKnowledgeBasesForToolConfig(
         }
       } else {
         // Default: knowledge_base_search or unknown - only get Nexent knowledge bases
-        kbs = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+        const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+        kbs = result.knowledgeBases;
       }
 
       // Sort by updatedAt descending
@@ -196,7 +202,8 @@ export function usePrefetchKnowledgeBases() {
               kbs = [];
             }
           } else {
-            kbs = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+            const result = await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
+            kbs = result.knowledgeBases;
           }
 
           return kbs.sort((a, b) => {
@@ -223,7 +230,7 @@ export function useSyncKnowledgeBases() {
   const syncKnowledgeBases = useCallback(
     async (
       toolType: string,
-      difyConfig?: {
+      config?: {
         serverUrl?: string;
         apiKey?: string;
       }
@@ -236,15 +243,17 @@ export function useSyncKnowledgeBases() {
             await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
             break;
           case "datamate_search":
-            // Sync only DataMate knowledge bases
-            await knowledgeBaseService.syncDataMateAndCreateRecords();
+            // Sync only DataMate knowledge bases with optional URL from config
+            await knowledgeBaseService.syncDataMateAndCreateRecords(
+              config?.serverUrl
+            );
             break;
           case "dify_search":
             // Dify sync requires API credentials
-            if (difyConfig?.serverUrl && difyConfig?.apiKey) {
+            if (config?.serverUrl && config?.apiKey) {
               await knowledgeBaseService.getDifyKnowledgeBases(
-                difyConfig.serverUrl,
-                difyConfig.apiKey
+                config.serverUrl,
+                config.apiKey
               );
             }
             break;

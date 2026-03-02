@@ -26,8 +26,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_document_summary_prompt_template,
-    get_cluster_summary_reduce_prompt_template,
-    get_cluster_summary_agent_prompt_template
+    get_cluster_summary_reduce_prompt_template
 )
 
 logger = logging.getLogger("document_vector_utils")
@@ -492,54 +491,6 @@ def process_documents_for_clustering(index_name: str, vdb_core, sample_doc_count
         raise Exception(f"Failed to process documents: {str(e)}")
 
 
-def extract_cluster_content(document_samples: Dict[str, Dict], cluster_doc_ids: List[str], max_chunks_per_doc: int = 3) -> str:
-    """
-    Extract representative content from a cluster for summarization
-    
-    Args:
-        document_samples: Dictionary mapping doc_id to document info
-        cluster_doc_ids: List of document IDs in the cluster
-        max_chunks_per_doc: Maximum number of chunks to include per document
-        
-    Returns:
-        Formatted string containing cluster content
-    """
-    cluster_content_parts = []
-    
-    for doc_id in cluster_doc_ids:
-        if doc_id not in document_samples:
-            continue
-            
-        doc_info = document_samples[doc_id]
-        chunks = doc_info.get('chunks', [])
-        filename = doc_info.get('filename', 'unknown')
-        
-        # Extract representative chunks
-        representative_chunks = []
-        if len(chunks) <= max_chunks_per_doc:
-            representative_chunks = chunks
-        else:
-            # Take first, middle, and last chunks
-            representative_chunks = (
-                chunks[:1] + 
-                chunks[len(chunks)//2:len(chunks)//2+1] + 
-                chunks[-1:]
-            )
-        
-        # Format document content
-        doc_content = f"\n--- Document: {filename} ---\n"
-        for chunk in representative_chunks:
-            content = chunk.get('content', '')
-            # Limit chunk content length
-            if len(content) > 500:
-                content = content[:500] + "..."
-            doc_content += f"{content}\n"
-        
-        cluster_content_parts.append(doc_content)
-    
-    return "\n".join(cluster_content_parts)
-
-
 def summarize_document(document_content: str, filename: str, language: str = LANGUAGE["ZH"], max_words: int = 100, model_id: Optional[int] = None, tenant_id: Optional[str] = None) -> str:
     """
     Summarize a single document using LLM (Map stage)
@@ -861,68 +812,4 @@ def summarize_clusters_map_reduce(document_samples: Dict[str, Dict], clusters: D
     return cluster_summaries
 
 
-def summarize_clusters(document_samples: Dict[str, Dict], clusters: Dict[int, List[str]], 
-                       language: str = LANGUAGE["ZH"], max_words: int = 150) -> Dict[int, str]:
-    """
-    Summarize all clusters (legacy method - kept for backward compatibility)
-    
-    Note: This method uses the old approach. Use summarize_clusters_map_reduce for better results.
-    
-    Args:
-        document_samples: Dictionary mapping doc_id to document info
-        clusters: Dictionary mapping cluster_id to list of doc_ids
-        language: Language code ('zh' or 'en')
-        max_words: Maximum words per cluster summary
-        
-    Returns:
-        Dictionary mapping cluster_id to summary text
-    """
-    cluster_summaries = {}
-    
-    for cluster_id, doc_ids in clusters.items():
-        logger.info(f"Summarizing cluster {cluster_id} with {len(doc_ids)} documents")
-        
-        # Extract cluster content
-        cluster_content = extract_cluster_content(document_samples, doc_ids, max_chunks_per_doc=3)
-        
-        # Generate summary using old method
-        summary = summarize_cluster_legacy(cluster_content, language, max_words)
-        cluster_summaries[cluster_id] = summary
-    
-    return cluster_summaries
-
-
-def summarize_cluster_legacy(cluster_content: str, language: str = LANGUAGE["ZH"], max_words: int = 150) -> str:
-    """
-    Legacy cluster summarization method (single-stage)
-    
-    Args:
-        cluster_content: Formatted content from the cluster
-        language: Language code ('zh' or 'en')
-        max_words: Maximum words in the summary
-        
-    Returns:
-        Cluster summary text
-    """
-    try:
-        # Get prompt template from prompt_template_utils
-        prompts = get_cluster_summary_agent_prompt_template(language)
-        
-        system_prompt = prompts.get('system_prompt', '')
-        user_prompt_template = prompts.get('user_prompt', '')
-        
-        user_prompt = Template(user_prompt_template, undefined=StrictUndefined).render(
-            cluster_content=cluster_content,
-            max_words=max_words
-        )
-        
-        logger.info(f"Cluster summary prompt generated (language: {language}, max_words: {max_words})")
-        
-        # Note: This is a legacy function, using placeholder summary
-        # The main summarization uses summarize_cluster() with LLM integration
-        return f"[Cluster Summary] (max {max_words} words) - Content preview: {cluster_content[:200]}..."
-        
-    except Exception as e:
-        logger.error(f"Error generating cluster summary: {str(e)}", exc_info=True)
-        return f"Failed to generate summary: {str(e)}"
 

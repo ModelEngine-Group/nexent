@@ -162,11 +162,79 @@ async def test_create_new_index_success(vdb_core_mock, auth_data):
         assert response.json() == expected_response
         # vdb_core is constructed inside router; accept ANY for instance
         mock_create.assert_called_once()
-        called_args = mock_create.call_args[0]
-        assert called_args[0] == auth_data["index_name"]
-        assert called_args[1] == 768
-        assert called_args[3] == auth_data["user_id"]
-        assert called_args[4] == auth_data["tenant_id"]
+        # Function is called with keyword arguments, so use call_args[1]
+        called_kwargs = mock_create.call_args[1]
+        assert called_kwargs["knowledge_name"] == auth_data["index_name"]
+        assert called_kwargs["embedding_dim"] == 768
+        assert called_kwargs["user_id"] == auth_data["user_id"]
+        assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_new_index_with_group_permissions(vdb_core_mock, auth_data):
+    """
+    Test creating a new index with group permissions.
+    Verifies that ingroup_permission and group_ids are correctly passed to the service.
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
+
+        expected_response = {"status": "success",
+                             "index_name": auth_data["index_name"]}
+        mock_create.return_value = expected_response
+
+        # Execute request with group permissions in body
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            params={"embedding_dim": 768},
+            json={"ingroup_permission": "EDIT", "group_ids": [1, 2, 3]},
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+        assert response.json() == expected_response
+        mock_create.assert_called_once()
+        # Function is called with keyword arguments, so use call_args[1]
+        called_kwargs = mock_create.call_args[1]
+        assert called_kwargs["knowledge_name"] == auth_data["index_name"]
+        assert called_kwargs["embedding_dim"] == 768
+        assert called_kwargs["user_id"] == auth_data["user_id"]
+        assert called_kwargs["tenant_id"] == auth_data["tenant_id"]
+        # Verify group permissions were passed
+        assert called_kwargs["ingroup_permission"] == "EDIT"
+        assert called_kwargs["group_ids"] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_create_new_index_with_partial_group_permissions(vdb_core_mock, auth_data):
+    """
+    Test creating a new index with only ingroup_permission (no group_ids).
+    """
+    # Setup mocks
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id", return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
+
+        expected_response = {"status": "success",
+                             "index_name": auth_data["index_name"]}
+        mock_create.return_value = expected_response
+
+        # Execute request with only ingroup_permission
+        response = client.post(
+            f"/indices/{auth_data['index_name']}",
+            json={"ingroup_permission": "READ_ONLY"},
+            headers=auth_data["auth_header"]
+        )
+
+        # Verify
+        assert response.status_code == 200
+        mock_create.assert_called_once()
+        called_kwargs = mock_create.call_args[1]
+        assert called_kwargs["ingroup_permission"] == "READ_ONLY"
+        assert called_kwargs["group_ids"] is None
 
 
 @pytest.mark.asyncio
@@ -966,6 +1034,48 @@ async def test_create_chunk_success(vdb_core_mock, auth_data):
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_create.assert_called_once()
+
+        # Verify that tenant_id was passed to the service
+        call_kwargs = mock_create.call_args[1]
+        assert "tenant_id" in call_kwargs
+        assert call_kwargs["tenant_id"] == auth_data["tenant_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_chunk_passes_tenant_id_to_service(vdb_core_mock, auth_data):
+    """
+    Test that create_chunk endpoint passes tenant_id to the service method.
+    This is critical for the service to fetch the correct embedding model.
+    """
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.get_index_name_by_knowledge_name", return_value=auth_data["index_name"]), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.create_chunk") as mock_create:
+
+        mock_create.return_value = {"status": "success", "chunk_id": "chunk-1"}
+
+        payload = {
+            "content": "Test content for embedding",
+            "path_or_url": "doc-123",
+            "title": "Test Title"
+        }
+
+        response = client.post(
+            f"/indices/{auth_data['index_name']}/chunk",
+            json=payload,
+            headers=auth_data["auth_header"],
+        )
+
+        assert response.status_code == 200
+
+        # Verify tenant_id was passed
+        mock_create.assert_called_once()
+        call_args = mock_create.call_args
+        # Check both args and kwargs for tenant_id
+        assert ("tenant_id" in call_args.kwargs and call_args.kwargs["tenant_id"] == auth_data["tenant_id"]) or \
+               (len(call_args[0]) >= 4 and call_args[0][3] == auth_data["tenant_id"]), \
+            "tenant_id should be passed to the service method"
 
 
 @pytest.mark.asyncio

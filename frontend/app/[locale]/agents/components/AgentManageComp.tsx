@@ -10,6 +10,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { importAgent } from "@/services/agentConfigService";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { useState } from "react";
 import { ImportAgentData } from "@/hooks/useAgentImport";
@@ -19,6 +20,7 @@ import AgentImportWizard from "@/components/agent/AgentImportWizard";
 export default function AgentManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
 
   // Get state from store
   const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
@@ -31,7 +33,7 @@ export default function AgentManageComp() {
     useState<ImportAgentData | null>(null);
 
   // Shared agent list via React Query
-  const { agents: agentList, isLoading: loading, refetch } = useAgentList();
+  const { agents: agentList, isLoading: loading, refetch } = useAgentList(user?.tenantId ?? null);
 
   // Handle import agent for space view - open wizard instead of direct import
   const handleImportAgent = () => {

@@ -19,7 +19,7 @@ from database.invitation_db import (
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.group_db import query_group_ids_by_user
-from consts.exceptions import NotFoundException, UnauthorizedError
+from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from services.group_service import get_tenant_default_group_id
 from utils.str_utils import convert_string_to_list
 
@@ -92,6 +92,10 @@ def create_invitation_code(
     else:
         # Change to upper case by default
         invitation_code = invitation_code.upper()
+
+    # Check if invitation code already exists
+    if query_invitation_by_code(invitation_code):
+        raise DuplicateError(f"Invitation code '{invitation_code}' already exists")
 
     # Create invitation (status will be set automatically)
     invitation_id = add_invitation(
@@ -298,7 +302,8 @@ def _calculate_current_status(invitation_data: Dict[str, Any]) -> Dict[str, Any]
             else:
                 expiry_datetime = datetime.fromisoformat(
                     str(expiry_date).replace('Z', '+00:00'))
-            if current_time > expiry_datetime:
+            # Treat same date as not expired - only expire when current date is strictly after expiry date
+            if current_time.date() > expiry_datetime.date():
                 new_status = "EXPIRE"
         except (ValueError, AttributeError, TypeError):
             logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
@@ -417,7 +422,8 @@ def update_invitation_code_status(invitation_id: int) -> bool:
             else:
                 expiry_datetime = datetime.fromisoformat(
                     str(expiry_date).replace('Z', '+00:00'))
-            if current_time > expiry_datetime:
+            # Treat same date as not expired - only expire when current date is strictly after expiry date
+            if current_time.date() > expiry_datetime.date():
                 new_status = "EXPIRE"
         except (ValueError, AttributeError, TypeError):
             logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")

@@ -6,11 +6,9 @@ import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { App } from "antd";
 import { Plus, RefreshCw, Upload } from "lucide-react";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { useDeployment } from "@/components/providers/deploymentProvider";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useAgentList } from "@/hooks/agent/useAgentList";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { Agent } from "@/types/agentConfig";
 import AgentCard from "./components/AgentCard";
 import { ImportAgentData } from "@/hooks/useAgentImport";
@@ -26,11 +24,9 @@ export default function SpacePage() {
 
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { pageVariants, pageTransition } = useSetupFlow({
-    requireAdmin: false,
-  });
+  const { pageVariants, pageTransition } = useSetupFlow();
   const [isImporting, setIsImporting] = useState(false);
-  const { agents, isLoading, invalidate } = useAgentList();
+  const { agents, isLoading, invalidate } = usePublishedAgentList();
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);

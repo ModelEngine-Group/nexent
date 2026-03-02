@@ -10,7 +10,7 @@ import log from "@/lib/logger";
 import { ChatAgentSelectorProps } from "@/types/chat";
 import { Agent } from "@/types/agentConfig";
 import { clearAgentNewMark } from "@/services/agentConfigService";
-import { useAgentList } from "@/hooks/agent/useAgentList";
+import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 
 export function ChatAgentSelector({
   selectedAgentId,
@@ -28,7 +28,7 @@ export function ChatAgentSelector({
   const [isAutoSelectInit, setIsAutoSelectInit] = useState(false);
   const { t } = useTranslation("common");
   const buttonRef = useRef<HTMLDivElement>(null);
-  const { agents, invalidate, isLoading } = useAgentList();
+  const { agents, invalidate, isLoading } = usePublishedAgentList();
 
   const selectedAgent = agents.find(
     (agent: Agent) => agent.id === String(selectedAgentId)
@@ -39,7 +39,7 @@ export function ChatAgentSelector({
   const duplicateAgentInfo = useMemo(() => {
     // Create a map to track agents by name
     const nameToAgents = new Map<string, Agent[]>();
-    
+
     agents.forEach((agent: Agent) => {
       const agentName = agent.name;
       if (!nameToAgents.has(agentName)) {

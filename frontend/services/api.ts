@@ -34,6 +34,7 @@ export const API_ENDPOINTS = {
     run: `${API_BASE_URL}/agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
     stop: (conversationId: number) =>
@@ -44,8 +45,18 @@ export const API_ENDPOINTS = {
     regenerateNameBatch: `${API_BASE_URL}/agent/regenerate_name`,
     searchInfo: `${API_BASE_URL}/agent/search_info`,
     callRelationship: `${API_BASE_URL}/agent/call_relationship`,
-    clearNew: (agentId: string | number) =>
-      `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    clearNew: (agentId: string | number) => `${API_BASE_URL}/agent/clear_new/${agentId}`,
+    publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
+    versions: {
+      version: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      detail: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/detail`,
+      list: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions`,
+      current: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/current_version`,
+      rollback: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
+      compare: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions/compare`,
+      delete: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      update: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+    },
   },
   tool: {
     list: `${API_BASE_URL}/tool/list`,
@@ -125,7 +136,17 @@ export const API_ENDPOINTS = {
     updateBatchModel: `${API_BASE_URL}/model/batch_update`,
     // LLM model list for generation
     llmModelList: `${API_BASE_URL}/model/llm_list`,
-    adminModelList: `${API_BASE_URL}/model/admin/list`,
+    // Manage tenant model operations
+    manageModelList: `${API_BASE_URL}/model/manage/list`,
+    manageModelCreate: `${API_BASE_URL}/model/manage/create`,
+    manageModelBatchCreate: `${API_BASE_URL}/model/manage/batch_create`,
+    manageModelHealthcheck: `${API_BASE_URL}/model/manage/healthcheck`,
+    manageModelUpdate: (displayName: string) =>
+      `${API_BASE_URL}/model/manage/update?display_name=${encodeURIComponent(displayName)}`,
+    manageModelDelete: (displayName: string) =>
+      `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
+    manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
+    manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -164,6 +185,7 @@ export const API_ENDPOINTS = {
   },
   datamate: {
     syncDatamateKnowledges: `${API_BASE_URL}/datamate/sync_datamate_knowledges`,
+    testConnection: `${API_BASE_URL}/datamate/test_connection`,
     files: (knowledgeBaseId: string) =>
       `${API_BASE_URL}/datamate/${knowledgeBaseId}/files`,
   },
@@ -191,6 +213,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/mcp/container/${containerId}/logs`,
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
+    record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -237,7 +260,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
   },
   tenant: {
-    list: `${API_BASE_URL}/tenants`,
+    list: `${API_BASE_URL}/tenants/tenant-list`,
     create: `${API_BASE_URL}/tenants`,
     detail: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
@@ -270,6 +293,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/invitations/${invitationCode}`,
     delete: (invitationCode: string) =>
       `${API_BASE_URL}/invitations/${invitationCode}`,
+    check: (invitationCode: string) =>
+      `${API_BASE_URL}/invitations/${invitationCode}/check`,
   },
 };
 

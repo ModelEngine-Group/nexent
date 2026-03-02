@@ -56,7 +56,7 @@ def _parse_timestamp(timestamp: Any, default: int = 0) -> int:
 class DataMateCore(VectorDatabaseCore):
     """VectorDatabaseCore implementation backed by the DataMate REST API."""
 
-    def __init__(self, base_url: str, timeout: float = 30.0, verify_ssl: bool = True):
+    def __init__(self, base_url: str, timeout: float = 5.0, verify_ssl: bool = True):
         self.client = DataMateClient(
             base_url=base_url, timeout=timeout, verify_ssl=verify_ssl)
 
@@ -64,11 +64,13 @@ class DataMateCore(VectorDatabaseCore):
     def create_index(self, index_name: str, embedding_dim: Optional[int] = None) -> bool:
         """DataMate API does not support index creation via SDK."""
         _ = embedding_dim
-        raise NotImplementedError("DataMate SDK does not support creating indices.")
+        raise NotImplementedError(
+            "DataMate SDK does not support creating indices.")
 
     def delete_index(self, index_name: str) -> bool:
         """DataMate API does not support deleting indices via SDK."""
-        raise NotImplementedError("DataMate SDK does not support deleting indices.")
+        raise NotImplementedError(
+            "DataMate SDK does not support deleting indices.")
 
     def get_user_indices(self, index_pattern: str = "*") -> List[str]:
         """Return DataMate knowledge base IDs as index identifiers."""
@@ -100,11 +102,13 @@ class DataMateCore(VectorDatabaseCore):
             embedding_batch_size,
             progress_callback,
         )
-        raise NotImplementedError("DataMate SDK does not support direct document ingestion.")
+        raise NotImplementedError(
+            "DataMate SDK does not support direct document ingestion.")
 
     def delete_documents(self, index_name: str, path_or_url: str) -> int:
         _ = (index_name, path_or_url)
-        raise NotImplementedError("DataMate SDK does not support deleting documents.")
+        raise NotImplementedError(
+            "DataMate SDK does not support deleting documents.")
 
     def get_index_chunks(
             self,
@@ -124,15 +128,18 @@ class DataMateCore(VectorDatabaseCore):
 
     def create_chunk(self, index_name: str, chunk: Dict[str, Any]) -> Dict[str, Any]:
         _ = (index_name, chunk)
-        raise NotImplementedError("DataMate SDK does not support creating individual chunks.")
+        raise NotImplementedError(
+            "DataMate SDK does not support creating individual chunks.")
 
     def update_chunk(self, index_name: str, chunk_id: str, chunk_updates: Dict[str, Any]) -> Dict[str, Any]:
         _ = (index_name, chunk_id, chunk_updates)
-        raise NotImplementedError("DataMate SDK does not support updating chunks.")
+        raise NotImplementedError(
+            "DataMate SDK does not support updating chunks.")
 
     def delete_chunk(self, index_name: str, chunk_id: str) -> bool:
         _ = (index_name, chunk_id)
-        raise NotImplementedError("DataMate SDK does not support deleting chunks.")
+        raise NotImplementedError(
+            "DataMate SDK does not support deleting chunks.")
 
     def count_documents(self, index_name: str) -> int:
         files = self.client.get_knowledge_base_files(index_name)
@@ -141,21 +148,25 @@ class DataMateCore(VectorDatabaseCore):
     # ---- SEARCH OPERATIONS ----
     def search(self, index_name: str, query: Dict[str, Any]) -> Dict[str, Any]:
         _ = (index_name, query)
-        raise NotImplementedError("DataMate SDK does not support raw search API.")
+        raise NotImplementedError(
+            "DataMate SDK does not support raw search API.")
 
     def multi_search(self, body: List[Dict[str, Any]], index_name: str) -> Dict[str, Any]:
         _ = (body, index_name)
-        raise NotImplementedError("DataMate SDK does not support multi search API.")
+        raise NotImplementedError(
+            "DataMate SDK does not support multi search API.")
 
     def accurate_search(self, index_names: List[str], query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
         _ = (index_names, query_text, top_k)
-        raise NotImplementedError("DataMate SDK does not support accurate search API.")
+        raise NotImplementedError(
+            "DataMate SDK does not support accurate search API.")
 
     def semantic_search(
             self, index_names: List[str], query_text: str, embedding_model: BaseEmbedding, top_k: int = 5
     ) -> List[Dict[str, Any]]:
         _ = (index_names, query_text, embedding_model, top_k)
-        raise NotImplementedError("DataMate SDK does not support semantic search API.")
+        raise NotImplementedError(
+            "DataMate SDK does not support semantic search API.")
 
     # ---- SEARCH OPERATIONS ----
     def hybrid_search(
@@ -183,7 +194,8 @@ class DataMateCore(VectorDatabaseCore):
             RuntimeError: If the API request fails
         """
         _ = embedding_model  # Explicitly ignored
-        retrieve_knowledge = self.client.retrieve_knowledge_base(query_text, index_names, top_k, weight_accurate)
+        retrieve_knowledge = self.client.retrieve_knowledge_base(
+            query_text, index_names, top_k, weight_accurate)
         return retrieve_knowledge
 
     # ---- STATISTICS AND MONITORING ----
@@ -209,7 +221,7 @@ class DataMateCore(VectorDatabaseCore):
         return results
 
     def get_indices_detail(self, index_names: List[str], embedding_dim: Optional[int] = None) -> Tuple[Dict[
-        str, Dict[str, Any]], List[str]]:
+            str, Dict[str, Any]], List[str]]:
         details: Dict[str, Dict[str, Any]] = {}
         knowledge_base_names = []
         for kb_id in index_names:
@@ -218,7 +230,8 @@ class DataMateCore(VectorDatabaseCore):
                 kb_info = self.client.get_knowledge_base_info(kb_id)
 
                 # Extract data from knowledge base info
-                doc_count = kb_info.get("fileCount")  # Number of unique documents (files)
+                # Number of unique documents (files)
+                doc_count = kb_info.get("fileCount")
                 knowledge_base_name = kb_info.get("name")
                 knowledge_base_names.append(knowledge_base_name)
                 chunk_count = kb_info.get("chunkCount")
@@ -245,8 +258,10 @@ class DataMateCore(VectorDatabaseCore):
                 # Build performance dict (DataMate API may not provide search stats)
                 performance = {"total_search_count": 0, "hit_count": 0}
 
-                details[kb_id] = {"base_info": base_info, "search_performance": performance}
+                details[kb_id] = {"base_info": base_info,
+                                  "search_performance": performance}
             except Exception as exc:
-                logger.error(f"Error getting stats for knowledge base {kb_id}: {str(exc)}")
+                logger.error(
+                    f"Error getting stats for knowledge base {kb_id}: {str(exc)}")
                 details[kb_id] = {"error": str(exc)}
         return details, knowledge_base_names

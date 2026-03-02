@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
 
-export interface AdminTenantModelResult {
+export interface ManageTenantModelResult {
   models: ModelOption[];
   total: number;
   page: number;
@@ -15,17 +15,17 @@ export interface AdminTenantModelResult {
   refetch: () => Promise<void>;
 }
 
-export function useAdminTenantModels(options: {
+export function useManageTenantModels(options: {
   tenantId: string;
   modelType?: string;
   page?: number;
   pageSize?: number;
   enabled?: boolean;
-}): AdminTenantModelResult {
+}): ManageTenantModelResult {
   const { tenantId, modelType, page = 1, pageSize = 20, enabled = true } = options;
 
   const query = useQuery({
-    queryKey: ["admin-tenant-models", tenantId, modelType, page, pageSize],
+    queryKey: ["manage-tenant-models", tenantId, modelType, page, pageSize],
     queryFn: async (): Promise<{
       models: ModelOption[];
       total: number;
@@ -34,7 +34,7 @@ export function useAdminTenantModels(options: {
       totalPages: number;
       tenantName: string;
     }> => {
-      const result = await modelService.getAdminTenantModels({
+      const result = await modelService.getManageTenantModels({
         tenantId,
         modelType,
         page,

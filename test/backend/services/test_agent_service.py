@@ -325,7 +325,66 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "unavailable_reasons": []
     }
     assert result == expected_result
-    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
+    mock_search_tools.assert_called_once_with(
+        agent_id=123, tenant_id="test_tenant")
+    mock_query_sub_agents_id.assert_called_once_with(
+        main_agent_id=123, tenant_id="test_tenant")
+    mock_check_availability.assert_called_once()
+
+
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
+    """
+    Test get_agent_info_impl with explicit version_no parameter.
+
+    This test verifies that:
+    1. The function correctly passes version_no to search_agent_info_by_agent_id
+    2. It works correctly when version_no is explicitly provided
+    """
+    # Setup
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent"
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+
+    mock_tools = [{"tool_id": 1, "name": "Tool 1"}]
+    mock_search_tools.return_value = mock_tools
+
+    mock_sub_agent_ids = [456, 789]
+    mock_query_sub_agents_id.return_value = mock_sub_agent_ids
+
+    # Mock get_model_by_model_id - return None for model_id=None
+    mock_get_model_by_model_id.return_value = None
+
+    # Mock check_agent_availability - agent is available
+    mock_check_availability.return_value = (True, [])
+
+    # Execute with explicit version_no
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant", version_no=5)
+
+    # Assert
+    expected_result = {
+        "agent_id": 123,
+        "model_id": None,
+        "business_description": "Test agent",
+        "tools": mock_tools,
+        "sub_agent_id_list": mock_sub_agent_ids,
+        "model_name": None,
+        "business_logic_model_name": None,
+        "is_available": True,
+        "unavailable_reasons": []
+    }
+    assert result == expected_result
+    # Verify version_no is passed correctly
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 5)
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
@@ -431,30 +490,25 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
 
     # Assert
     mock_update_agent.assert_called_once_with(
-        123, request, "test_tenant", "test_user")
+        123, request, "test_user")
 
 
 @patch('backend.services.agent_service.delete_tools_by_agent_id')
 @patch('backend.services.agent_service.delete_agent_relationship')
 @patch('backend.services.agent_service.delete_agent_by_id')
-@patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_success(mock_get_current_user_info, mock_delete_agent, mock_delete_related,
+async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
                                          mock_delete_tools):
     """
     Test successful deletion of an agent.
 
     This test verifies that:
-    1. The function correctly gets the current user and tenant IDs
-    2. It calls the delete_agent_by_id function with the correct parameters
-    3. It also deletes all related agent relationships
+    1. It calls the delete_agent_by_id function with the correct parameters
+    2. It also deletes all related agent relationships
+    3. It deletes all tools associated with the agent
     """
-    # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
-
     # Execute
-    await delete_agent_impl(123, authorization="Bearer token")
+    await delete_agent_impl(123, "test_tenant", "test_user")
 
     # Assert
     mock_delete_agent.assert_called_once_with(123, "test_tenant", "test_user")
@@ -481,6 +535,8 @@ async def test_get_agent_info_impl_exception_handling(mock_search_agent_info):
         await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
 
     assert "Failed to get agent info" in str(context.value)
+    # Verify version_no parameter is passed (default value 0)
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
 @patch('backend.services.agent_service.update_agent')
@@ -939,9 +995,8 @@ def test_resolve_user_tenant_language_partial_override(mock_get_current_user_inf
 
 
 @patch('backend.services.agent_service.delete_agent_by_id')
-@patch('backend.services.agent_service.get_current_user_info')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, mock_delete_agent):
+async def test_delete_agent_impl_exception_handling(mock_delete_agent):
     """
     Test exception handling in delete_agent_impl function.
 
@@ -950,13 +1005,11 @@ async def test_delete_agent_impl_exception_handling(mock_get_current_user_info, 
     2. The function raises a ValueError with an appropriate message
     """
     # Setup
-    mock_get_current_user_info.return_value = (
-        "test_user", "test_tenant", "en")
     mock_delete_agent.side_effect = Exception("Delete failed")
 
     # Execute & Assert
     with pytest.raises(ValueError) as context:
-        await delete_agent_impl(123, authorization="Bearer token")
+        await delete_agent_impl(123, "test_tenant", "test_user")
 
     assert "Failed to delete agent" in str(context.value)
 
@@ -1308,7 +1361,7 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
         assert result["model_name"] is None
         assert result["is_available"] == True
         assert result["unavailable_reasons"] == []
-        mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+        mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
 @patch('backend.services.agent_service.check_agent_availability')
@@ -1352,7 +1405,7 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
     assert result["model_name"] is None
     assert result["is_available"] == True
     assert result["unavailable_reasons"] == []
-    mock_search_agent_info.assert_called_once_with(123, "test_tenant")
+    mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
     mock_search_tools.assert_called_once_with(
         agent_id=123, tenant_id="test_tenant")
     mock_query_sub_agents_id.assert_called_once_with(
@@ -1819,6 +1872,7 @@ async def test_list_all_agent_info_impl_success(
             "group_ids": "",
             "created_by": "user1",
             "create_time": 1,
+            "current_version_no": None,  # Not published
         },
         {
             "agent_id": 2,
@@ -1829,6 +1883,7 @@ async def test_list_all_agent_info_impl_success(
             "group_ids": "1,2,3",
             "created_by": "user2",
             "create_time": 2,
+            "current_version_no": 1,  # Published
         }
     ]
 
@@ -1852,6 +1907,7 @@ async def test_list_all_agent_info_impl_success(
     assert result[0]["unavailable_reasons"] == []
     assert result[0]["group_ids"] == []
     assert result[0]["permission"] == "EDIT"  # Admin can edit all
+    assert result[0]["is_published"] == False  # current_version_no is None
     assert result[1]["agent_id"] == 2
     assert result[1]["name"] == "Agent 2"
     assert result[1]["display_name"] == "Display Agent 2"
@@ -1859,6 +1915,95 @@ async def test_list_all_agent_info_impl_success(
     assert result[1]["unavailable_reasons"] == []
     assert result[1]["group_ids"] == [1, 2, 3]
     assert result[1]["permission"] == "EDIT"  # Admin can edit all
+    assert result[1]["is_published"] == True  # current_version_no is not None
+
+    # Verify mock calls
+    mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
+    mock_get_user_tenant.assert_called_once_with("admin_user")
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_is_published_field(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """
+    Test that is_published field is correctly set based on current_version_no.
+
+    This test verifies that:
+    1. is_published is False when current_version_no is None
+    2. is_published is False when current_version_no field is missing
+    3. is_published is True when current_version_no is not None
+    """
+    # Setup mock agents with different current_version_no values
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Unpublished agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user1",
+            "create_time": 1,
+            "current_version_no": None,  # Not published
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Published agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user2",
+            "create_time": 2,
+            "current_version_no": 1,  # Published
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent without current_version_no field",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "user3",
+            "create_time": 3,
+            # current_version_no field is missing
+        }
+    ]
+
+    # Configure mocks
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: [] if not x else [int(i) for i in x.split(",")]
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
+
+    # Execute
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    # Assert
+    assert len(result) == 3
+    # Agent 1: current_version_no is None -> is_published should be False
+    assert result[0]["agent_id"] == 1
+    assert result[0]["is_published"] == False
+    # Agent 2: current_version_no is 1 -> is_published should be True
+    assert result[1]["agent_id"] == 2
+    assert result[1]["is_published"] == True
+    # Agent 3: current_version_no field is missing -> is_published should be False
+    assert result[2]["agent_id"] == 3
+    assert result[2]["is_published"] == False
 
     # Verify mock calls
     mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
@@ -2036,6 +2181,7 @@ async def test_list_all_agent_info_impl_model_unavailable(
             "group_ids": "7,8,9",
             "created_by": "user1",
             "create_time": 1,
+            "current_version_no": None,
         }
     ]
 
@@ -2052,6 +2198,7 @@ async def test_list_all_agent_info_impl_model_unavailable(
     assert result[0]["is_available"] is False
     assert result[0]["unavailable_reasons"] == ["model_unavailable"]
     assert result[0]["group_ids"] == [7, 8, 9]
+    assert result[0]["is_published"] == False  # current_version_no is None
 
 
 @pytest.mark.asyncio
@@ -2108,12 +2255,14 @@ async def test_list_all_agent_info_impl_duplicate_names(
     assert agent1["is_available"] is True
     assert "duplicate_name" not in agent1["unavailable_reasons"]
     assert agent1["group_ids"] == [10]
+    assert agent1["is_published"] == False  # current_version_no is missing/None
 
     # The later created agent (agent_id=2) should be unavailable due to duplication
     agent2 = next(a for a in result if a["agent_id"] == 2)
     assert agent2["is_available"] is False
     assert "duplicate_name" in agent2["unavailable_reasons"]
     assert agent2["group_ids"] == [10, 11]
+    assert agent2["is_published"] == False  # current_version_no is missing/None
 
 
 @pytest.mark.asyncio
@@ -2158,7 +2307,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_agents.return_value = mock_agents
     mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user, not admin
     mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
-    
+
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
     # This should match the actual implementation in utils.str_utils
     def convert_side_effect(x):
@@ -2173,7 +2322,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
                 result.append(int(stripped))
         return result
     mock_convert_list.side_effect = convert_side_effect
-    
+
     # Mock check_agent_availability to return (is_available, unavailable_reasons)
     mock_check_availability.return_value = (True, [])
     mock_get_model.return_value = None
@@ -2241,7 +2390,7 @@ async def test_list_all_agent_info_impl_group_filtering(
     mock_query_agents.return_value = mock_agents
     mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user
     mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
-    
+
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
     # This should match the actual implementation in utils.str_utils
     def convert_side_effect(x):
@@ -2256,7 +2405,7 @@ async def test_list_all_agent_info_impl_group_filtering(
                 result.append(int(stripped))
         return result
     mock_convert_list.side_effect = convert_side_effect
-    
+
     # Mock check_agent_availability to return (is_available, unavailable_reasons)
     mock_check_availability.return_value = (True, [])
     mock_get_model.return_value = None
@@ -2270,6 +2419,90 @@ async def test_list_all_agent_info_impl_group_filtering(
     assert 1 in agent_ids
     assert 3 in agent_ids
     assert 2 not in agent_ids
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_creator_can_see_own_agent_without_group_overlap(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that users can see agents they created even if group_ids don't overlap."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent created by current_user, but in different groups",
+            "enabled": True,
+            "group_ids": "5,6",  # Different groups from user's groups [1, 2]
+            "created_by": "current_user",  # User is the creator
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Agent not created by current_user, no group overlap",
+            "enabled": True,
+            "group_ids": "7,8",  # Different groups from user's groups [1, 2]
+            "created_by": "other_user",  # User is NOT the creator
+            "create_time": 2,
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent with group overlap",
+            "enabled": True,
+            "group_ids": "1,9",  # Overlaps with user's group 1
+            "created_by": "another_user",
+            "create_time": 3,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user
+    mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
+
+    # Mock convert_string_to_list to handle both empty strings and comma-separated values
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Should see:
+    # - Agent 3: groups overlap (1 is in both user's groups and agent's groups)
+    # Should NOT see:
+    # - Agent 1: created by current_user but groups don't overlap (no group overlap hides it regardless of creator)
+    # - Agent 2: not created by current_user AND groups don't overlap
+    assert len(result) == 1
+    agent_ids = [a["agent_id"] for a in result]
+    assert 3 in agent_ids, "Agent 3 should be visible because groups overlap"
+    assert 1 not in agent_ids, "Agent 1 should be filtered out (no group overlap, even though user is creator)"
+    assert 2 not in agent_ids, "Agent 2 should be filtered out (not creator and no group overlap)"
 
 
 @pytest.mark.asyncio
@@ -2401,7 +2634,7 @@ async def test_list_all_agent_info_impl_group_query_error_for_user_role(
             "description": "Test agent",
             "enabled": True,
             "group_ids": "1,2",
-            "created_by": "user1",
+            "created_by": "other_user",  # Different from user_id to test filtering logic
             "create_time": 1,
         }
     ]
@@ -2411,17 +2644,31 @@ async def test_list_all_agent_info_impl_group_query_error_for_user_role(
     mock_get_user_tenant.return_value = {"user_role": "USER"}
     # Simulate exception when querying group IDs - this should trigger lines 1274-1278
     mock_query_groups.side_effect = Exception("Database connection error")
-    mock_convert_list.return_value = []
+
+    # Mock convert_string_to_list to handle comma-separated values
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
     # Mock check_agent_availability to return (is_available, unavailable_reasons)
     mock_check_availability.return_value = (True, [])
     mock_get_model.return_value = None
 
     # Should not raise exception, but should handle gracefully
-    # When group query fails, user_group_ids is set to empty set, so no agents match
+    # When group query fails, user_group_ids is set to empty set
+    # Agent is not created by user1, so it should be filtered out (no group overlap and not creator)
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="user1")
 
-    # Since user_group_ids is empty set (due to exception), no agents should match group filter
-    # So result should be empty
+    # Since user_group_ids is empty set (due to exception) and user is not the creator,
+    # agent should be filtered out according to line 1328 logic
     assert len(result) == 0
     # Verify that query_group_ids_by_user was called (to trigger the exception)
     mock_query_groups.assert_called_once_with("user1")
@@ -7619,5 +7866,590 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
         mock_logger.info.assert_called_once_with(
             "clear_agent_new_mark_impl called for agent_id=789, tenant_id=tenant-with-dashes_and_underscores, user_id=user@domain.com, affected_rows=1"
         )
+
+# Tests for ingroup_permission and group_ids functionality
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.query_tool_instances_by_id')
+@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.create_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@patch('backend.services.agent_service.convert_list_to_string')
+@patch('backend.services.agent_service._get_user_group_ids')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_create_agent_with_ingroup_permission(
+    mock_get_user_group_ids,
+    mock_convert_list_to_string,
+    mock_get_current_user_info,
+    mock_create_agent,
+    mock_query_all_tools,
+    mock_query_tool_instances_by_id,
+    mock_create_or_update_tool
+):
+    """Test creating agent with ingroup_permission set."""
+    from consts.const import PERMISSION_READ, PERMISSION_EDIT, PERMISSION_PRIVATE
+
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_get_user_group_ids.return_value = "1,2,3"
+    mock_convert_list_to_string.return_value = "1,2"
+    mock_create_agent.return_value = {"agent_id": 123}
+
+    request = MagicMock()
+    request.agent_id = None
+    request.name = "Test Agent"
+    request.display_name = "Test Display"
+    request.description = "Test description"
+    request.business_description = None
+    request.author = None
+    request.model_id = None
+    request.model_name = None
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = None
+    request.provide_run_summary = None
+    request.duty_prompt = None
+    request.constraint_prompt = None
+    request.few_shots_prompt = None
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.group_ids = [1, 2]
+    request.ingroup_permission = PERMISSION_READ
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 123
+    call_args = mock_create_agent.call_args[1]["agent_info"]
+    assert call_args["ingroup_permission"] == PERMISSION_READ
+    assert call_args["group_ids"] == "1,2"
+
+
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.query_tool_instances_by_id')
+@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service.create_agent')
+@patch('backend.services.agent_service.get_current_user_info')
+@patch('backend.services.agent_service._get_user_group_ids')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_create_agent_with_ingroup_permission_none(
+    mock_get_user_group_ids,
+    mock_get_current_user_info,
+    mock_create_agent,
+    mock_query_all_tools,
+    mock_query_tool_instances_by_id,
+    mock_create_or_update_tool
+):
+    """Test creating agent with ingroup_permission None."""
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_get_user_group_ids.return_value = "1,2,3"
+    mock_create_agent.return_value = {"agent_id": 456}
+
+    request = MagicMock()
+    request.agent_id = None
+    request.name = "Test Agent"
+    request.display_name = "Test Display"
+    request.description = "Test description"
+    request.business_description = None
+    request.author = None
+    request.model_id = None
+    request.model_name = None
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = None
+    request.provide_run_summary = None
+    request.duty_prompt = None
+    request.constraint_prompt = None
+    request.few_shots_prompt = None
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.group_ids = None
+    request.ingroup_permission = None
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 456
+    call_args = mock_create_agent.call_args[1]["agent_info"]
+    assert call_args["ingroup_permission"] is None
+    assert call_args["group_ids"] == "1,2,3"  # Should use user's groups
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_creator_with_private_permission_no_group_overlap(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that creators cannot see their own agents if no group overlap, even with PRIVATE permission."""
+    from consts.const import PERMISSION_PRIVATE
+
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent with PRIVATE permission, created by current_user, but no group overlap",
+            "enabled": True,
+            "group_ids": "5,6",  # No overlap with user's groups [1, 2]
+            "ingroup_permission": PERMISSION_PRIVATE,
+            "created_by": "current_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Creator cannot see their own agent if no group overlap (no group overlap hides it regardless of creator)
+    assert len(result) == 0
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_creator_with_private_permission_with_group_overlap(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that creators can see their own agents with PRIVATE permission if there is group overlap."""
+    from consts.const import PERMISSION_PRIVATE
+
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent with PRIVATE permission, created by current_user, with group overlap",
+            "enabled": True,
+            "group_ids": "1,6",  # Overlaps with user's group 1
+            "ingroup_permission": PERMISSION_PRIVATE,
+            "created_by": "current_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Creator can see their own agent with PRIVATE permission if there is group overlap
+    assert len(result) == 1
+    assert result[0]["agent_id"] == 1
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_non_creator_with_private_permission_hidden(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that non-creators cannot see agents with PRIVATE permission even with group overlap."""
+    from consts.const import PERMISSION_PRIVATE
+
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent with PRIVATE permission, not created by current_user",
+            "enabled": True,
+            "group_ids": "1,2",  # Overlaps with user's groups [1, 2]
+            "ingroup_permission": PERMISSION_PRIVATE,
+            "created_by": "other_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Non-creator should NOT see agent with PRIVATE permission even with group overlap
+    assert len(result) == 0
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_permission_assignment_creator_gets_edit(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that creators get PERMISSION_EDIT regardless of ingroup_permission."""
+    from consts.const import PERMISSION_READ, PERMISSION_EDIT
+
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent created by current_user",
+            "enabled": True,
+            "group_ids": "1,2",
+            "ingroup_permission": PERMISSION_READ,  # Even with READ permission
+            "created_by": "current_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    assert len(result) == 1
+    assert result[0]["permission"] == PERMISSION_EDIT  # Creator gets EDIT
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_permission_assignment_non_creator_uses_ingroup_permission(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that non-creators use ingroup_permission when set."""
+    from consts.const import PERMISSION_READ, PERMISSION_EDIT
+
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent not created by current_user",
+            "enabled": True,
+            "group_ids": "1,2",
+            "ingroup_permission": PERMISSION_EDIT,  # Set to EDIT
+            "created_by": "other_user",
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Agent with READ permission",
+            "enabled": True,
+            "group_ids": "1,2",
+            "ingroup_permission": PERMISSION_READ,  # Set to READ
+            "created_by": "other_user",
+            "create_time": 2,
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent with None permission",
+            "enabled": True,
+            "group_ids": "1,2",
+            "ingroup_permission": None,  # None should default to READ
+            "created_by": "other_user",
+            "create_time": 3,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    assert len(result) == 3
+    agent1 = next(a for a in result if a["agent_id"] == 1)
+    agent2 = next(a for a in result if a["agent_id"] == 2)
+    agent3 = next(a for a in result if a["agent_id"] == 3)
+    assert agent1["permission"] == PERMISSION_EDIT
+    assert agent2["permission"] == PERMISSION_READ
+    assert agent3["permission"] == PERMISSION_READ  # None defaults to READ
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_admin_gets_edit_permission(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that admin users (can_edit_all) get PERMISSION_EDIT regardless of ingroup_permission."""
+    from consts.const import PERMISSION_READ, PERMISSION_EDIT
+
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent with READ permission",
+            "enabled": True,
+            "group_ids": "1,2",
+            "ingroup_permission": PERMISSION_READ,
+            "created_by": "other_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}  # Admin role
+    mock_query_groups.return_value = []
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
+
+    assert len(result) == 1
+    assert result[0]["permission"] == PERMISSION_EDIT  # Admin gets EDIT
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_non_creator_no_group_overlap_hidden(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that non-creators without group overlap are hidden."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent not created by current_user, no group overlap",
+            "enabled": True,
+            "group_ids": "5,6",  # No overlap with user's groups [1, 2]
+            "ingroup_permission": None,
+            "created_by": "other_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Non-creator without group overlap should be hidden (no group overlap hides it)
+    assert len(result) == 0
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that creators cannot see their own agents if no group overlap."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent created by current_user, but no group overlap",
+            "enabled": True,
+            "group_ids": "5,6",  # No overlap with user's groups [1, 2]
+            "ingroup_permission": None,
+            "created_by": "current_user",
+            "create_time": 1,
+        },
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}
+    mock_query_groups.return_value = [1, 2]
+
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Creator cannot see their own agent if no group overlap (no group overlap hides it regardless of creator)
+    assert len(result) == 0
 
 # Deprecated tests for mark_agents_as_new_impl have been removed as the API is cleaned up.

@@ -175,12 +175,15 @@ async def generate_conversation_title_endpoint(
         authorization: Optional[str] = Header(None)
 ):
     """
-    Generate conversation title
+    Generate conversation title from user question
+
+    This endpoint generates title immediately after user sends a message,
+    using only the question content instead of waiting for full conversation.
 
     Args:
         request: GenerateTitleRequest object containing:
             - conversation_id: Conversation ID
-            - history: Conversation history list
+            - question: User's question content
         http_request: http request containing language info
         authorization: Authorization header
 
@@ -190,7 +193,8 @@ async def generate_conversation_title_endpoint(
     try:
         user_id, tenant_id, language = get_current_user_info(
             authorization=authorization, request=http_request)
-        title = await generate_conversation_title_service(request.conversation_id, request.history, user_id, tenant_id=tenant_id, language=language)
+        title = await generate_conversation_title_service(
+            request.conversation_id, request.question, user_id, tenant_id=tenant_id, language=language)
         return ConversationResponse(code=0, message="success", data=title)
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")

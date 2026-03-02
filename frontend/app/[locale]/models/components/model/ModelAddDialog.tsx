@@ -7,7 +7,7 @@ import {
   LoaderCircle,
   ChevronRight,
   ChevronDown,
-  Settings
+  Settings,
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
@@ -38,7 +38,28 @@ interface ModelAddDialogProps {
   onSuccess: (model?: AddedModel) => Promise<void>;
   defaultProvider?: string; // Default provider to select when dialog opens
   defaultIsBatchImport?: boolean;
+  tenantId?: string; // Optional tenant ID for manage operations
 }
+
+// Default form state for resetting
+const DEFAULT_FORM_STATE = {
+  type: MODEL_TYPES.LLM as ModelType,
+  name: "",
+  displayName: "",
+  url: "",
+  apiKey: "",
+  maxTokens: "4096",
+  isMultimodal: false,
+  isBatchImport: false,
+  provider: "modelengine",
+  modelEngineUrl: "",
+  vectorDimension: "1024",
+  chunkSizeRange: [DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE] as [
+    number,
+    number,
+  ],
+  chunkingBatchSize: "10",
+};
 
 // Connectivity status type comes from utils
 
@@ -123,6 +144,39 @@ const translateError = (
     return t("model.dialog.error.invalidConfiguration", { error: configError });
   }
 
+  // ModelEngine specific errors
+  if (
+    errorLower.includes("authentication failed") ||
+    errorLower.includes("invalid api key")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (
+    errorLower.includes("access forbidden") ||
+    errorLower.includes("insufficient permissions")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (
+    errorLower.includes("endpoint not found") ||
+    errorLower.includes("url may be incorrect")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (errorLower.includes("server error") || errorLower.includes("http 5")) {
+    return t("model.dialog.error.serverError");
+  }
+  if (
+    errorLower.includes("connection failed") ||
+    errorLower.includes("network") ||
+    errorLower.includes("timeout")
+  ) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+  if (errorLower.includes("ssl certificate")) {
+    return t("model.dialog.error.apiConnectionFailed");
+  }
+
   // Return original error if no pattern matches
   return errorMessage;
 };
@@ -133,6 +187,7 @@ export const ModelAddDialog = ({
   onSuccess,
   defaultProvider,
   defaultIsBatchImport,
+  tenantId,
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -160,26 +215,8 @@ export const ModelAddDialog = ({
     // For other errors, return generic error key without showing backend details
     return { key: "model.dialog.error.addFailed" };
   };
-  const [form, setForm] = useState({
-    type: MODEL_TYPES.LLM as ModelType,
-    name: "",
-    displayName: "",
-    url: "",
-    apiKey: "",
-    maxTokens: "4096",
-    isMultimodal: false,
-    // Whether to import multiple models at once
-    isBatchImport: false,
-    provider: "modelengine",
-    modelEngineUrl: "",
-    vectorDimension: "1024",
-    // Default chunk size range for embedding models
-    chunkSizeRange: [
-      DEFAULT_EXPECTED_CHUNK_SIZE,
-      DEFAULT_MAXIMUM_CHUNK_SIZE,
-    ] as [number, number],
-    chunkingBatchSize: "10",
-  });
+  // Form state - initialize with default values
+  const [form, setForm] = useState(DEFAULT_FORM_STATE);
   const [loading, setLoading] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
   const [connectivityStatus, setConnectivityStatus] = useState<{
@@ -223,7 +260,24 @@ export const ModelAddDialog = ({
     setSelectedModelIds,
     setShowModelList,
     setLoadingModelList,
+    tenantId,
   });
+
+  // Reset form to default state
+  const resetForm = useCallback(() => {
+    setForm(DEFAULT_FORM_STATE);
+    setConnectivityStatus({ status: null, message: "" });
+    setModelList([]);
+    setModelSearchTerm("");
+    setSelectedModelIds(new Set());
+    setShowModelList(false);
+  }, []);
+
+  // Wrap onClose to reset form before closing
+  const handleClose = useCallback(() => {
+    resetForm();
+    onClose();
+  }, [onClose, resetForm]);
 
   // When dialog opens, apply default provider and optional default batch mode
   useEffect(() => {
@@ -289,16 +343,32 @@ export const ModelAddDialog = ({
     setForm((prev) => ({
       ...prev,
       [field]: value,
+      // When provider changes, clear provider-related fields
+      ...(field === "provider"
+        ? {
+            url: "",
+            apiKey: "",
+            modelEngineUrl: "",
+          }
+        : {}),
     }));
     // If the key configuration item changes, clear the verification status
     if (
-      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(field)
+      ["type", "url", "apiKey", "maxTokens", "vectorDimension"].includes(
+        field
+      ) ||
+      field === "provider"
     ) {
       setConnectivityStatus({ status: null, message: "" });
     }
     // Clear model search term when model type changes
     if (field === "type") {
       setModelSearchTerm("");
+    }
+    // Clear model list when provider changes
+    if (field === "provider") {
+      setModelList([]);
+      setSelectedModelIds(new Set());
     }
   };
 
@@ -354,46 +424,69 @@ export const ModelAddDialog = ({
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
           : form.type;
 
-      const config = {
-        modelName: form.name,
-        modelType: modelType,
-        baseUrl: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : parseInt(form.maxTokens),
-        embeddingDim:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : undefined,
-      };
+      // Use manage interface if tenantId is provided
+      if (tenantId) {
+        // Call backend healthcheck API for tenant management
+        const result = await modelService.checkManageTenantModelConnectivity(
+          tenantId,
+          form.displayName || form.name
+        );
 
-      const result = await modelService.verifyModelConfigConnectivity(config);
-
-      // Set connectivity status
-      if (result.connectivity) {
-        setConnectivityStatus({
-          status: "available",
-          message: t("model.dialog.connectivity.status.available"),
-        });
+        // Set connectivity status
+        if (result) {
+          setConnectivityStatus({
+            status: "available",
+            message: t("model.dialog.connectivity.status.available"),
+          });
+        } else {
+          setConnectivityStatus({
+            status: "unavailable",
+            message: t("model.dialog.connectivity.status.unavailable"),
+          });
+        }
       } else {
-        // Set status to unavailable
-        setConnectivityStatus({
-          status: "unavailable",
-          message: t("model.dialog.connectivity.status.unavailable"),
-        });
-        // Show detailed error message using internationalized component (same as add failure)
-        if (result.error) {
-          const translatedError = translateError(result.error, t);
-          // Ensure translatedError is a valid string, fallback to original error if needed
-          const errorText =
-            translatedError && translatedError.length > 0
-              ? translatedError
-              : result.error || "Unknown error";
-          message.error(
-            t("model.dialog.error.connectivityFailed", { error: errorText })
-          );
+        // Use local config verification for non-tenant operations
+        const config = {
+          modelName: form.name,
+          modelType: modelType,
+          baseUrl: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : parseInt(form.maxTokens),
+          embeddingDim:
+            form.type === MODEL_TYPES.EMBEDDING
+              ? parseInt(form.vectorDimension)
+              : undefined,
+        };
+
+        const result = await modelService.verifyModelConfigConnectivity(config);
+
+        // Set connectivity status
+        if (result.connectivity) {
+          setConnectivityStatus({
+            status: "available",
+            message: t("model.dialog.connectivity.status.available"),
+          });
+        } else {
+          // Set status to unavailable
+          setConnectivityStatus({
+            status: "unavailable",
+            message: t("model.dialog.connectivity.status.unavailable"),
+          });
+          // Show detailed error message using internationalized component (same as add failure)
+          if (result.error) {
+            const translatedError = translateError(result.error, t);
+            // Ensure translatedError is a valid string, fallback to original error if needed
+            const errorText =
+              translatedError && translatedError.length > 0
+                ? translatedError
+                : result.error || "Unknown error";
+            message.error(
+              t("model.dialog.error.connectivityFailed", { error: errorText })
+            );
+          }
         }
       }
     } catch (error) {
@@ -434,36 +527,59 @@ export const ModelAddDialog = ({
       const isEmbeddingType =
         modelType === MODEL_TYPES.EMBEDDING ||
         modelType === MODEL_TYPES.MULTI_EMBEDDING;
-      const result = await modelService.addBatchCustomModel({
-        api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        provider: form.provider,
-        type: modelType,
-        models: enabledModels.map((model: any) => {
-          // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
-          if (isEmbeddingType) {
-            const { max_tokens, ...modelWithoutMaxTokens } = model;
-            return {
-              ...modelWithoutMaxTokens,
-              // Add chunk size range for embedding models
-              ...(isEmbeddingModel
-                ? {
-                    expected_chunk_size: form.chunkSizeRange[0],
-                    maximum_chunk_size: form.chunkSizeRange[1],
-                    chunk_batch: parseInt(form.chunkingBatchSize) || 10,
-                  }
-                : {}),
-            };
-          } else {
-            return {
-              ...model,
-              max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
-            };
-          }
-        }),
+
+      // Prepare the model data
+      const modelsData = enabledModels.map((model: any) => {
+        // For embedding/multi_embedding models, explicitly exclude max_tokens as backend will set it via connectivity check
+        if (isEmbeddingType) {
+          const { max_tokens, ...modelWithoutMaxTokens } = model;
+          return {
+            ...modelWithoutMaxTokens,
+            // Add chunk size range for embedding models
+            ...(isEmbeddingModel
+              ? {
+                  expected_chunk_size: form.chunkSizeRange[0],
+                  maximum_chunk_size: form.chunkSizeRange[1],
+                  chunk_batch: parseInt(form.chunkingBatchSize) || 10,
+                }
+              : {}),
+          };
+        } else {
+          return {
+            ...model,
+            max_tokens: model.max_tokens || parseInt(form.maxTokens) || 4096,
+          };
+        }
       });
-      if (result === 200) {
-        onSuccess();
+
+      // Use manage interface if tenantId is provided (for super admin), otherwise use current tenant
+      if (tenantId) {
+        await modelService.batchCreateManageTenantModels({
+          tenantId,
+          provider: form.provider,
+          type: modelType,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          models: modelsData,
+        });
+      } else {
+        await modelService.addBatchCustomModel({
+          api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          provider: form.provider,
+          type: modelType,
+          models: modelsData,
+        });
       }
+
+      // Reset form state and close dialog on success
+      resetForm();
+      handleClose();
+
+      // Notify parent to refresh model list - batch add returns all added models
+      const addedModels: AddedModel[] = enabledModels.map((model: any) => ({
+        name: model.displayName || model.id,
+        type: modelType,
+      }));
+      await onSuccess(addedModels.length > 0 ? addedModels[0] : undefined);
     } catch (error: any) {
       const errorMessage =
         error?.message || t("model.dialog.error.addFailedLog");
@@ -472,13 +588,6 @@ export const ModelAddDialog = ({
         t("model.dialog.error.addFailed", { error: translatedError })
       );
     }
-
-    setForm((prev) => ({
-      ...prev,
-      isBatchImport: false,
-    }));
-
-    onClose();
   };
 
   // Handle settings button click
@@ -534,23 +643,44 @@ export const ModelAddDialog = ({
         maxTokensValue = 0;
       }
 
-      // Add to the backend service
-      await modelService.addCustomModel({
-        name: form.name,
-        type: modelType,
-        url: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens: maxTokensValue,
-        displayName: form.displayName || form.name,
-        // Send chunk size range for embedding models
-        ...(isEmbeddingModel
-          ? {
-              expectedChunkSize: form.chunkSizeRange[0],
-              maximumChunkSize: form.chunkSizeRange[1],
-              chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
-            }
-          : {}),
-      });
+      // Add to the backend service - use manage interface if tenantId is provided
+      if (tenantId) {
+        await modelService.createManageTenantModel({
+          tenantId,
+          name: form.name,
+          type: modelType,
+          url: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens: maxTokensValue,
+          displayName: form.displayName || form.name,
+          expectedChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[0]
+            : undefined,
+          maximumChunkSize: isEmbeddingModel
+            ? form.chunkSizeRange[1]
+            : undefined,
+          chunkingBatchSize: isEmbeddingModel
+            ? parseInt(form.chunkingBatchSize) || 10
+            : undefined,
+        });
+      } else {
+        await modelService.addCustomModel({
+          name: form.name,
+          type: modelType,
+          url: form.url,
+          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          maxTokens: maxTokensValue,
+          displayName: form.displayName || form.name,
+          // Send chunk size range for embedding models
+          ...(isEmbeddingModel
+            ? {
+                expectedChunkSize: form.chunkSizeRange[0],
+                maximumChunkSize: form.chunkSizeRange[1],
+                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+              }
+            : {}),
+        });
+      }
 
       // Create the model configuration object
       const modelConfig: SingleModelConfig = {
@@ -604,34 +734,14 @@ export const ModelAddDialog = ({
         type: modelType,
       };
 
-      // Reset the form
-      setForm({
-        type: form.type,
-        name: "",
-        displayName: "",
-        url: "",
-        apiKey: "",
-        maxTokens: "4096",
-        isMultimodal: false,
-        isBatchImport: false,
-        provider: "silicon",
-        modelEngineUrl: "",
-        vectorDimension: "1024",
-        chunkSizeRange: [
-          DEFAULT_EXPECTED_CHUNK_SIZE,
-          DEFAULT_MAXIMUM_CHUNK_SIZE,
-        ],
-        chunkingBatchSize: "10",
-      });
-
-      // Reset the connectivity status
-      setConnectivityStatus({ status: null, message: "" });
+      // Reset form state
+      resetForm();
 
       // Call the success callback, pass the new added model information
       await onSuccess(addedModel);
 
       // Close the dialog
-      onClose();
+      handleClose();
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -651,7 +761,7 @@ export const ModelAddDialog = ({
     <Modal
       title={t("model.dialog.title")}
       open={isOpen}
-      onCancel={onClose}
+      onCancel={handleClose}
       footer={null}
       destroyOnHidden
     >
@@ -686,7 +796,9 @@ export const ModelAddDialog = ({
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
             >
-              <Option value="modelengine">{t("model.provider.modelengine")}</Option>
+              <Option value="modelengine">
+                {t("model.provider.modelengine")}
+              </Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
             </Select>
             {/* ModelEngine URL input (only when provider is ModelEngine) */}
@@ -868,7 +980,9 @@ export const ModelAddDialog = ({
               min="1"
               placeholder="10"
               value={form.chunkingBatchSize}
-              onChange={(e) => handleFormChange("chunkingBatchSize", e.target.value)}
+              onChange={(e) =>
+                handleFormChange("chunkingBatchSize", e.target.value)
+              }
             />
           </div>
         )}
@@ -953,9 +1067,15 @@ export const ModelAddDialog = ({
                 className="flex items-center focus:outline-none"
               >
                 {showModelList ? (
-                  <ChevronDown className="text-sm text-gray-700 mr-1" size={14} />
+                  <ChevronDown
+                    className="text-sm text-gray-700 mr-1"
+                    size={14}
+                  />
                 ) : (
-                  <ChevronRight className="text-sm text-gray-700 mr-1" size={14} />
+                  <ChevronRight
+                    className="text-sm text-gray-700 mr-1"
+                    size={14}
+                  />
                 )}
                 <span className="text-sm font-medium text-gray-700">
                   {t("model.dialog.modelList.title")}
@@ -1173,7 +1293,11 @@ export const ModelAddDialog = ({
               {form.type === "llm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <a href={PROVIDER_LINKS.openai} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.openai}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/openai.png"
                         alt="OpenAI"
@@ -1182,12 +1306,24 @@ export const ModelAddDialog = ({
                     </a>
                   </Tooltip>
                   <Tooltip title="Kimi">
-                    <a href={PROVIDER_LINKS.kimi} target="_blank" rel="noopener noreferrer">
-                      <img src="/kimi.png" alt="Kimi" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.kimi}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/kimi.png"
+                        alt="Kimi"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <a href={PROVIDER_LINKS.deepseek} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.deepseek}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/deepseek.png"
                         alt="Deepseek"
@@ -1196,8 +1332,16 @@ export const ModelAddDialog = ({
                     </a>
                   </Tooltip>
                   <Tooltip title="Qwen">
-                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
-                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.qwen}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/qwen.png"
+                        alt="Qwen"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
@@ -1206,7 +1350,11 @@ export const ModelAddDialog = ({
               {form.type === "embedding" && !form.isBatchImport && (
                 <>
                   <Tooltip title="OpenAI">
-                    <a href={PROVIDER_LINKS.openai} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.openai}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/openai.png"
                         alt="OpenAI"
@@ -1215,18 +1363,42 @@ export const ModelAddDialog = ({
                     </a>
                   </Tooltip>
                   <Tooltip title="Qwen">
-                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
-                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.qwen}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/qwen.png"
+                        alt="Qwen"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Jina">
-                    <a href={PROVIDER_LINKS.jina} target="_blank" rel="noopener noreferrer">
-                      <img src="/jina.png" alt="Jina" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.jina}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/jina.png"
+                        alt="Jina"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Baai">
-                    <a href={PROVIDER_LINKS.baai} target="_blank" rel="noopener noreferrer">
-                      <img src="/baai.png" alt="Baai" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.baai}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/baai.png"
+                        alt="Baai"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <span className="ml-1.5">...</span>
@@ -1235,12 +1407,24 @@ export const ModelAddDialog = ({
               {form.type === "vlm" && !form.isBatchImport && (
                 <>
                   <Tooltip title="Qwen">
-                    <a href={PROVIDER_LINKS.qwen} target="_blank" rel="noopener noreferrer">
-                      <img src="/qwen.png" alt="Qwen" className="h-4 ml-1.5 cursor-pointer" />
+                    <a
+                      href={PROVIDER_LINKS.qwen}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <img
+                        src="/qwen.png"
+                        alt="Qwen"
+                        className="h-4 ml-1.5 cursor-pointer"
+                      />
                     </a>
                   </Tooltip>
                   <Tooltip title="Deepseek">
-                    <a href={PROVIDER_LINKS.deepseek} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={PROVIDER_LINKS.deepseek}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <img
                         src="/deepseek.png"
                         alt="Deepseek"
@@ -1257,7 +1441,7 @@ export const ModelAddDialog = ({
 
         {/* Footer Buttons */}
         <div className="flex justify-end space-x-3">
-          <Button onClick={onClose}>{t("common.button.cancel")}</Button>
+          <Button onClick={handleClose}>{t("common.button.cancel")}</Button>
           <Button
             type="primary"
             onClick={handleAddModel}

@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, func, insert, select, update
+from sqlalchemy import and_, desc, func, insert, select, update
 
 from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from .client import as_dict, db_client, get_db_session
@@ -146,6 +146,9 @@ def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List
                 else:
                     conditions.append(getattr(ModelRecord, key) == value)
             stmt = stmt.where(and_(*conditions))
+
+        # Order by creation time descending (newest first)
+        stmt = stmt.order_by(desc(ModelRecord.create_time))
 
         # Execute the query
         records = session.scalars(stmt).all()

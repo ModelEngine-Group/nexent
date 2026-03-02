@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from consts.model import (
     InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 )
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
 from services.invitation_service import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,
     check_invitation_available, use_invitation_code, update_invitation_code_status,
@@ -129,6 +129,12 @@ async def create_invitation_endpoint(
         logger.warning(f"Invalid invitation creation parameters: {str(exc)}")
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
+            detail=str(exc)
+        )
+    except DuplicateError as exc:
+        logger.warning(f"Duplicate invitation code: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
             detail=str(exc)
         )
     except NotFoundException as exc:
@@ -276,6 +282,40 @@ async def get_invitation_endpoint(invitation_code: str) -> JSONResponse:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve invitation code"
+        )
+
+
+@router.get("/{invitation_code}/check")
+async def check_invitation_code_endpoint(invitation_code: str) -> JSONResponse:
+    """
+    Check if invitation code already exists
+
+    Args:
+        invitation_code: Invitation code to check
+
+    Returns:
+        JSONResponse: Check result with exists flag
+    """
+    try:
+        invitation_info = get_invitation_by_code(invitation_code)
+        exists = invitation_info is not None
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "Invitation code check completed",
+                "data": {
+                    "invitation_code": invitation_code,
+                    "exists": exists
+                }
+            }
+        )
+
+    except Exception as exc:
+        logger.error(f"Unexpected error checking invitation code {invitation_code}: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to check invitation code"
         )
 
 

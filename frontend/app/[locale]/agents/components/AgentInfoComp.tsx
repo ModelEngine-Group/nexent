@@ -2,36 +2,46 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Row, Col, Flex, Badge, Divider, Button, Drawer, Tooltip } from "antd";
-import { Bug, Save, Info } from "lucide-react";
+import { Row, Col, Flex, Badge, Divider, Button, Drawer, Tooltip, Tag } from "antd";
+import { Bug, Save, Info, GitBranch, History, Rocket } from "lucide-react";
 
 import { AGENT_SETUP_LAYOUT_DEFAULT } from "@/const/agentConfig";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
-import { AgentBusinessInfo, AgentProfileInfo } from "@/types/agentConfig";
 
 import AgentGenerateDetail from "./agentInfo/AgentGenerateDetail";
 import DebugConfig from "./agentInfo/DebugConfig";
+import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
+import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
+import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
 
-export interface AgentInfoCompProps {}
+export interface AgentInfoCompProps {
+  isShowVersionManagePanel: boolean;
+  openVersionManagePanel: () => void;
+  closeVersionManagementPanel: () => void;
+}
 
-export default function AgentInfoComp({}: AgentInfoCompProps) {
+export default function AgentInfoComp({
+  isShowVersionManagePanel,
+  openVersionManagePanel,
+  closeVersionManagementPanel,
+}: AgentInfoCompProps) {
   const { t } = useTranslation("common");
 
-  // Get data from store
-  const {
-    editedAgent,
-    updateBusinessInfo,
-    updateProfileInfo,
-    isCreatingMode,
-    currentAgentPermission,
-  } = useAgentConfigStore();
-
-  // Get state from store
+  const isCreatingMode = useAgentConfigStore((state) => state.isCreatingMode);
+  const currentAgentPermission = useAgentConfigStore((state) => state.currentAgentPermission);
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
-  const isPanelActive =
-    (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
+  const isPanelActive = (currentAgentId != null && currentAgentId != undefined) || isCreatingMode;
+  const { agentVersionList, total, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
+
+  const { agentInfo, invalidate: invalidateAgentInfo } = useAgentInfo(currentAgentId);
+
+  const { agentVersionDetail } = useAgentVersionDetail(
+    currentAgentId, agentInfo?.current_version_no
+  );
+    
   const isReadOnly = isPanelActive && !isCreatingMode && currentAgentPermission === "READ_ONLY";
   const isEditable = isPanelActive && !isReadOnly;
 
@@ -44,14 +54,15 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
   // Generation state shared with AgentGenerateDetail
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Handle business info updates
-  const handleUpdateBusinessInfo = (updates: AgentBusinessInfo) => {
-    updateBusinessInfo(updates);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+
+  const handlePublishClick = () => {
+    setIsPublishModalOpen(true);
   };
 
-  // Handle profile info updates
-  const handleUpdateProfile = (updates: AgentProfileInfo) => {
-    updateProfileInfo(updates);
+  const handlePublished = () => {
+    invalidateAgentVersionList();
+    invalidateAgentInfo();
   };
 
   return (
@@ -59,32 +70,60 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
       {
         <Flex vertical className="h-full overflow-hidden">
           <Row>
-            <Col>
+            <Col className="w-full">
               <Flex
-                justify="flex-start"
+                justify="space-between"
                 align="center"
                 gap={8}
                 style={{ marginBottom: "4px" }}
+                className="w-full"
               >
-                <Badge count={3} color="blue" />
-                <h2 className="text-lg font-medium">
-                  {t("guide.steps.describeBusinessLogic.title")}
-                </h2>
+                <Flex justify="flex-start" align="center" gap={8}>
+                  <Badge count={3} color="blue" />
+                  <h2 className="text-lg font-medium">
+                    {t("guide.steps.describeBusinessLogic.title")}
+                  </h2>
+                </Flex>
+                <Button
+                  icon={<GitBranch size={16} />}
+                  onClick={isShowVersionManagePanel ? closeVersionManagementPanel : openVersionManagePanel}
+                  type={isShowVersionManagePanel ? "primary" : "default"}
+                >
+                  {t("agent.version.manage")}
+                </Button>
               </Flex>
             </Col>
           </Row>
 
           <Divider style={{ margin: "10px 0" }} />
+          {!isCreatingMode && agentInfo?.current_version_no !== 0 && total > 0 && (
+            <Row style={{ marginBottom: "8px" }}>
+              <Col className="w-full">
+                <Flex
+                  justify="space-between"
+                  align="center"
+                  className="w-full py-2 px-4 bg-gray-100 rounded-lg text-gray-700"
+                >
+                  <Flex justify="start" align="center" gap={4}>
+                    <History size={16} />
+                    <span className="text-sm">
+                      {t("agent.version.currentVersion")} :
+                    </span>
+                    <Tag color="cyan" variant="outlined" className="rounded-md font-mono text-sm"> {agentVersionDetail?.version.version_name}</Tag>
+                  </Flex>
+                  <Flex justify="end" align="center" gap={8} >
+                    {t("agent.version.totalVersions", { count: total ?? 0 })}
+                  </Flex>
+                </Flex>
+              </Col>
+            </Row>
+          )}
 
           <Row className="flex-1 min-h-0 h-full">
             <Col xs={24} className="h-full">
               <Flex vertical className="h-full min-h-0 w-full min-w-0">
                 <AgentGenerateDetail
                   editable={isEditable}
-                  editedAgent={editedAgent}
-                  currentAgentId={currentAgentId}
-                  onUpdateProfile={handleUpdateProfile}
-                  onUpdateBusinessInfo={handleUpdateBusinessInfo}
                   isGenerating={isGenerating}
                   setIsGenerating={setIsGenerating}
                 />
@@ -92,39 +131,54 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
             </Col>
           </Row>
 
-          <Row className="justify-evenly align-center mt-3">
-            <Col className="flex gap-4">
-              <Button
-                type="primary"
-                icon={<Bug size={16} />}
-                onClick={() =>
-                  saveGuard.saveWithModal().then((success) => {
-                    if (success) {
-                      setIsDebugDrawerOpen(true);
-                    }
-                  })
-                }
-                size="middle"
-                disabled={isGenerating}
-              >
-                {t("systemPrompt.button.debug")}
-              </Button>
+          <Row className="mt-3">
+            <Col span={24}>
+              <Flex justify="center" align="center" gap={16}>
+                <Button
+                  type="primary"
+                  icon={<Bug size={16} />}
+                  onClick={() =>
+                    saveGuard.saveWithModal().then((success) => {
+                      if (success) {
+                        setIsDebugDrawerOpen(true);
+                      }
+                    })
+                  }
+                  size="middle"
+                  disabled={isGenerating}
+                >
+                  {t("systemPrompt.button.debug")}
+                </Button>
 
-              <Tooltip title={isReadOnly ? t("agent.noEditPermission") : undefined}>
-                <span>
-                  <Button
-                    icon={<Save size={16} />}
-                    color="green"
-                    variant="solid"
-                    onClick={saveGuard.save}
-                    size="middle"
-                    title={t("common.save")}
-                    disabled={isGenerating || isReadOnly}
-                  >
-                    {t("common.save")}
-                  </Button>
-                </span>
-              </Tooltip>
+                <Tooltip title={isReadOnly ? t("agent.noEditPermission") : undefined}>
+                  <span>
+                    <Button
+                      icon={<Save size={16} />}
+                      color="green"
+                      variant="solid"
+                      onClick={saveGuard.save}
+                      size="middle"
+                      title={t("common.save")}
+                      disabled={isGenerating || isReadOnly}
+                    >
+                      {t("common.save")}
+                    </Button>
+                  </span>
+                </Tooltip>
+
+                <Tooltip title={isReadOnly ? t("agent.noEditPermission") : undefined}>
+                  <span>
+                    <Button
+                      type="primary"
+                      icon={<Rocket size={16} />}
+                      onClick={handlePublishClick}
+                      disabled={isGenerating || isReadOnly}
+                    >
+                      {t("agent.version.publish")}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Flex>
             </Col>
           </Row>
         </Flex>
@@ -172,6 +226,13 @@ export default function AgentInfoComp({}: AgentInfoCompProps) {
           <DebugConfig agentId={currentAgentId} />
         </div>
       </Drawer>
+
+      <AgentVersionPubulishModal
+        open={isPublishModalOpen}
+        onClose={() => setIsPublishModalOpen(false)}
+        agentId={currentAgentId}
+        onPublished={handlePublished}
+      />
     </>
   );
 }

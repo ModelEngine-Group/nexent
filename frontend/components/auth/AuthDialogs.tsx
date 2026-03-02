@@ -62,7 +62,9 @@ export function AuthDialogs() {
 
           {/* Subtitle */}
           <p className="text-center text-gray-500 mb-8 mt-4 ml-10 mr-10 text-sm">
-            {t("A powerful AI agent platform for intelligent conversations and automation")}
+            {t(
+              "A powerful AI agent platform for intelligent conversations and automation"
+            )}
           </p>
 
           {/* Action buttons */}
@@ -113,18 +115,22 @@ export function AuthDialogs() {
 
       {/* Permission denied dialog - shown when user is not authorized */}
       <Modal
-        title={t("无权限访问")}
+        title={t("page.permissionDenied.title")}
         open={isAuthzPromptModalOpen}
         onCancel={closeAuthzPromptModal}
         footer={[
-          <Button key="confirm" onClick={closeAuthzPromptModal}>
-            {t("page.permissionDenied.confirm")}
+          <Button key="confirm" onClick={closeAuthzPromptModal} type="primary">
+            {t("common.confirm")}
           </Button>,
         ]}
         centered
+        closable={false}
       >
-        <div className="py-2">
-          <p className="text-gray-600">{t("暂时没有该页面权限，请咨询管理员提升相应权限!")}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <ExclamationCircleOutlined
+            style={{ color: "#faad14", fontSize: "20px" }}
+          />
+          <span>{t("page.permissionDenied.content")}</span>
         </div>
       </Modal>
 

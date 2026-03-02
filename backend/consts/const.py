@@ -71,6 +71,7 @@ CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"
 PERMISSION_EDIT = "EDIT"
+PERMISSION_PRIVATE = "PRIVATE"
 
 
 # Deployment Version Configuration
@@ -192,7 +193,8 @@ INVITE_CODE = os.getenv("INVITE_CODE")
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
 # User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
-USER_INFO_QUERY_SOURCE = os.getenv('USER_INFO_QUERY_SOURCE', 'supabase').lower()
+USER_INFO_QUERY_SOURCE = os.getenv(
+    'USER_INFO_QUERY_SOURCE', 'supabase').lower()
 
 # Memory Search Status Messages (for i18n placeholders)
 MEMORY_SEARCH_START_MSG = "<MEM_START>"
@@ -302,4 +304,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
-APP_VERSION = "v1.8.0"
+APP_VERSION = "v1.8.0.1"

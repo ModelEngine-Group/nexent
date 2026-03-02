@@ -24,13 +24,13 @@ class DataMateClient:
     and port conflicts on Windows systems.
     """
 
-    def __init__(self, base_url: str, timeout: float = 30.0, verify_ssl: bool = True):
+    def __init__(self, base_url: str, timeout: float = 5.0, verify_ssl: bool = True):
         """
         Initialize DataMate client.
 
         Args:
             base_url: Base URL of DataMate server (e.g., "http://jasonwang.site:30000")
-            timeout: Request timeout in seconds (default: 30.0)
+            timeout: Request timeout in seconds (default: 5.0)
             verify_ssl: Whether to verify SSL certificates (default: True)
         """
         self.base_url = base_url.rstrip("/")

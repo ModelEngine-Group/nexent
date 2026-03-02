@@ -6,21 +6,21 @@ import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
 import { UserRound, LogOut, LogIn, UserRoundPlus, UserCircle, Power } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
-import { App } from "antd";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
+import { DeleteAccountModal } from "./DeleteAccountModal";
 
 export function AvatarDropdown() {
   const { user, isAuthzReady } = useAuthorizationContext();
   const { isLoading, logout, revoke, openLoginModal, openRegisterModal } =
     useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const { t } = useTranslation("common");
-  const { modal } = App.useApp();
   const { confirm } = useConfirmModal();
 
   // Show loading while authentication is in progress
@@ -142,22 +142,7 @@ export function AvatarDropdown() {
       // danger: true,
       className: "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
       onClick: () => {
-        if (user.role === USER_ROLES.ADMIN) {
-          modal.error({
-            title: t("auth.refuseRevoke"),
-            content: t("auth.refuseRevokePrompt"),
-            okText: t("auth.confirm"),
-          });
-        } else {
-          confirm({
-            title: t("auth.confirmRevoke"),
-            content: t("auth.confirmRevokePrompt"),
-            okText: t("auth.confirmRevokeOk"),
-            onOk: () => {
-              revoke();
-            },
-          });
-        }
+        setIsDeleteModalOpen(true);
       },
     },
   ];
@@ -181,6 +166,18 @@ export function AvatarDropdown() {
           icon={<UserRound size={18} />}
         />
       </Dropdown>
+
+      {/* Delete Account Confirmation Modal */}
+      <DeleteAccountModal
+        open={isDeleteModalOpen}
+        onOk={() => {
+          revoke();
+          setIsDeleteModalOpen(false);
+        }}
+        onCancel={() => setIsDeleteModalOpen(false)}
+        loading={isLoading}
+        disabled={user.role === USER_ROLES.ADMIN || user.role === USER_ROLES.SU}
+      />
     </ConfigProvider>
   );
 }

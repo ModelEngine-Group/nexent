@@ -66,11 +66,16 @@ class AnalyzeImageTool(Tool):
         self.observer = observer
         self.vlm_model = vlm_model
         self.storage_client = storage_client
+
+        # Determine if the language is Chinese for internationalization
+        self._is_chinese = bool(observer and observer.lang == "zh")
+
         # Create LoadSaveObjectManager with the storage client
         self.mm = LoadSaveObjectManager(storage_client=self.storage_client)
 
         # Dynamically apply the load_object decorator to forward method
-        self.forward = self.mm.load_object(input_names=["image_urls_list"])(self._forward_impl)
+        self.forward = self.mm.load_object(
+            input_names=["image_urls_list"])(self._forward_impl)
 
         self.running_prompt_zh = "正在分析图片..."
         self.running_prompt_en = "Analyzing image..."
@@ -94,9 +99,17 @@ class AnalyzeImageTool(Tool):
         Raises:
             Exception: If the image cannot be downloaded or analyzed.
         """
+        # Check if VLM model is available
+        if self.vlm_model is None:
+            error_msg_zh = "视觉语言模型(VLM)未配置，请联系管理员配置VLM模型后重试"
+            error_msg_en = "Vision Language Model (VLM) is not configured. Please contact your administrator to configure the VLM model and try again."
+            error_msg = error_msg_zh if self._is_chinese else error_msg_en
+            logger.error(error_msg)
+            raise Exception(error_msg)
+
         # Send tool run message
         if self.observer:
-            running_prompt = self.running_prompt_zh if self.observer.lang == "zh" else self.running_prompt_en
+            running_prompt = self.running_prompt_zh if self._is_chinese else self.running_prompt_en
             self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
         if image_urls_list is None:
@@ -110,8 +123,10 @@ class AnalyzeImageTool(Tool):
 
         # Load prompts from yaml file
         language = self.observer.lang if self.observer else "en"
-        prompts = get_prompt_template(template_type='analyze_image', language=language)
-        system_prompt = Template(prompts['system_prompt'], undefined=StrictUndefined).render({'query': query})
+        prompts = get_prompt_template(
+            template_type='analyze_image', language=language)
+        system_prompt = Template(
+            prompts['system_prompt'], undefined=StrictUndefined).render({'query': query})
 
         try:
             analysis_results: List[str] = []
@@ -124,7 +139,10 @@ class AnalyzeImageTool(Tool):
                         system_prompt=system_prompt
                     )
                 except Exception as e:
-                    raise Exception(f"Error understanding image {index}: {str(e)}")
+                    error_msg_zh = f"图片{index}分析失败: {str(e)}。请检查VLM模型配置是否正确。"
+                    error_msg_en = f"Failed to analyze image {index}: {str(e)}. Please check if the VLM model is configured correctly."
+                    error_msg = error_msg_zh if self._is_chinese else error_msg_en
+                    raise Exception(error_msg)
 
                 analysis_results.append(response.content)
 

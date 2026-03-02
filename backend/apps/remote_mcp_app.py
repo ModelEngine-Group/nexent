@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
@@ -17,11 +17,12 @@ from services.remote_mcp_service import (
     upload_and_start_mcp_image,
     update_remote_mcp_server_list,
     attach_mcp_container_permissions,
+    get_mcp_record_by_id,
 )
 from database.remote_mcp_db import check_mcp_name_exists
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from services.mcp_container_service import MCPContainerManager
-from utils.auth_utils import get_current_user_id
+from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")
@@ -31,11 +32,17 @@ logger = logging.getLogger("remote_mcp_app")
 async def get_tools_from_remote_mcp(
     service_name: str,
     mcp_url: str,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Used to list tool information from the remote MCP server """
     try:
-        tools_info = await get_tool_from_remote_mcp_server(mcp_server_name=service_name, remote_mcp_server=mcp_url)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        tools_info = await get_tool_from_remote_mcp_server(
+            mcp_server_name=service_name,
+            remote_mcp_server=mcp_url,
+            tenant_id=tenant_id
+        )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -55,16 +62,24 @@ async def get_tools_from_remote_mcp(
 async def add_remote_proxies(
     mcp_url: str,
     service_name: str,
-    authorization: Optional[str] = Header(None)
+    authorization_token: Optional[str] = Query(
+        None, description="Authorization token for MCP server authentication (e.g., Bearer token)"),
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Used to add a remote MCP server """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        await add_remote_mcp_server_list(tenant_id=tenant_id,
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        await add_remote_mcp_server_list(tenant_id=effective_tenant_id,
                                          user_id=user_id,
                                          remote_mcp_server=mcp_url,
                                          remote_mcp_server_name=service_name,
-                                         container_id=None)
+                                         container_id=None,
+                                         authorization_token=authorization_token)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully added remote MCP proxy",
@@ -89,12 +104,17 @@ async def add_remote_proxies(
 async def delete_remote_proxies(
     service_name: str,
     mcp_url: str,
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Used to delete a remote MCP server """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        await delete_remote_mcp_server_list(tenant_id=tenant_id,
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        await delete_remote_mcp_server_list(tenant_id=effective_tenant_id,
                                             user_id=user_id,
                                             remote_mcp_server=mcp_url,
                                             remote_mcp_server_name=service_name)
@@ -112,14 +132,19 @@ async def delete_remote_proxies(
 @router.put("/update")
 async def update_remote_proxy(
     update_data: MCPUpdateRequest,
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Used to update an existing remote MCP server """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
         await update_remote_mcp_server_list(
             update_data=update_data,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             user_id=user_id
         )
         return JSONResponse(
@@ -143,14 +168,20 @@ async def update_remote_proxy(
 
 @router.get("/list")
 async def get_remote_proxies(
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Used to get the list of remote MCP servers """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
         remote_mcp_server_list = await get_remote_mcp_server_list(
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             user_id=user_id,
+            is_need_auth=False
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -164,13 +195,66 @@ async def get_remote_proxies(
                             detail="Failed to get remote MCP proxy")
 
 
+@router.get("/record/{mcp_id}")
+async def get_mcp_record(
+    mcp_id: int,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
+    """ Get single MCP record by ID """
+    try:
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+
+        mcp_record = await get_mcp_record_by_id(
+            mcp_id=mcp_id,
+            tenant_id=effective_tenant_id
+        )
+
+        if not mcp_record:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="MCP record not found"
+            )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "mcp_name": mcp_record.get("mcp_name"),
+                "mcp_server": mcp_record.get("mcp_server"),
+                "authorization_token": mcp_record.get("authorization_token"),
+                "status": "success"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get MCP record: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to get MCP record"
+        )
+
+
 @router.get("/healthcheck")
-async def check_mcp_health(mcp_url: str, service_name: str, authorization: Optional[str] = Header(None)):
+async def check_mcp_health(
+    mcp_url: str,
+    service_name: str,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
     """ Used to check the health of the MCP server, the front end can call it,
     and automatically update the database status """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        await check_mcp_health_and_update_db(mcp_url, service_name, tenant_id, user_id)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+        await check_mcp_health_and_update_db(mcp_url, service_name, effective_tenant_id, user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"status": "success"}
@@ -188,7 +272,10 @@ async def check_mcp_health(mcp_url: str, service_name: str, authorization: Optio
 @router.post("/add-from-config")
 async def add_mcp_from_config(
     mcp_config: MCPConfigRequest,
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """
     Add MCP server by starting a container with command+args config.
@@ -206,7 +293,9 @@ async def add_mcp_from_config(
     }
     """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
 
         # Initialize container manager
         try:
@@ -237,7 +326,7 @@ async def add_mcp_from_config(
                     continue
 
                 # Check if MCP service name already exists before starting container
-                if check_mcp_name_exists(mcp_name=service_name, tenant_id=tenant_id):
+                if check_mcp_name_exists(mcp_name=service_name, tenant_id=effective_tenant_id):
                     errors.append(f"{service_name}: MCP name already exists")
                     continue
 
@@ -260,7 +349,7 @@ async def add_mcp_from_config(
                 # Start container
                 container_info = await container_manager.start_mcp_container(
                     service_name=service_name,
-                    tenant_id=tenant_id,
+                    tenant_id=effective_tenant_id,
                     user_id=user_id,
                     env_vars=env_vars,
                     host_port=port,
@@ -270,7 +359,7 @@ async def add_mcp_from_config(
 
                 # Register to remote MCP server list
                 await add_remote_mcp_server_list(
-                    tenant_id=tenant_id,
+                    tenant_id=effective_tenant_id,
                     user_id=user_id,
                     remote_mcp_server=container_info["mcp_url"],
                     remote_mcp_server_name=service_name,
@@ -324,11 +413,16 @@ async def add_mcp_from_config(
 @router.delete("/container/{container_id}")
 async def stop_mcp_container(
     container_id: str,
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Stop and remove MCP container """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
@@ -344,7 +438,7 @@ async def stop_mcp_container(
         if success:
             # Soft delete the corresponding MCP record (if any) by container ID
             await delete_mcp_by_container_id(
-                tenant_id=tenant_id,
+                tenant_id=effective_tenant_id,
                 user_id=user_id,
                 container_id=container_id,
             )
@@ -372,11 +466,16 @@ async def stop_mcp_container(
 
 @router.get("/containers")
 async def list_mcp_containers(
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ List all MCP containers for the current tenant """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
@@ -387,10 +486,10 @@ async def list_mcp_containers(
                 detail="Docker service unavailable"
             )
 
-        containers = container_manager.list_mcp_containers(tenant_id=tenant_id)
+        containers = container_manager.list_mcp_containers(tenant_id=effective_tenant_id)
         containers = attach_mcp_container_permissions(
             containers=containers,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             user_id=user_id,
         )
 
@@ -415,11 +514,16 @@ async def list_mcp_containers(
 async def get_container_logs(
     container_id: str,
     tail: int = 100,
-    authorization: Optional[str] = Header(None)
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Get logs from MCP container """
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
@@ -460,7 +564,10 @@ if ENABLE_UPLOAD_IMAGE:
             None, description="Name for the MCP service (auto-generated if not provided)"),
         env_vars: Optional[str] = Form(
             None, description="Environment variables as JSON string"),
-        authorization: Optional[str] = Header(None)
+        tenant_id: Optional[str] = Form(
+            None, description="Tenant ID for filtering (uses auth if not provided)"),
+        authorization: Optional[str] = Header(None),
+        http_request: Request = None
     ):
         """
         Upload Docker image tar file and start MCP container.
@@ -468,14 +575,16 @@ if ENABLE_UPLOAD_IMAGE:
         Container naming: {filename-without-extension}-{tenant-id[:8]}-{user-id[:8]}
         """
         try:
-            user_id, tenant_id = get_current_user_id(authorization)
+            user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+            # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+            effective_tenant_id = tenant_id or auth_tenant_id
 
             # Read file content
             content = await file.read()
 
             # Call service layer to handle the business logic
             result = await upload_and_start_mcp_image(
-                tenant_id=tenant_id,
+                tenant_id=effective_tenant_id,
                 user_id=user_id,
                 file_content=content,
                 filename=file.filename,
