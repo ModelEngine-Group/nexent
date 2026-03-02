@@ -6535,8 +6535,8 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 
     relationships = []
 
-    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id):
-        relationships.append((parent_agent_id, child_agent_id, tenant_id))
+    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id):
+        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id))
 
     async def fake_update_tool_list(tenant_id, user_id):
         return None
@@ -6563,7 +6563,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Child (2) must be imported before parent (1)
     assert imported_ids == [2, 1]
     # Relationship should be created between new IDs 101 (child) and 100 (parent)
-    assert relationships == [(100 + 1, 100 + 2, "tenant1")]
+    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1")]
 
 
 # =====================================================================
