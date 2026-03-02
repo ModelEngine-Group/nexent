@@ -3370,6 +3370,7 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         parent_agent_id=202,
         child_agent_id=101,
         tenant_id="test_tenant",
+        user_id="test_user",
     )
 
 
