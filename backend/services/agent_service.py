@@ -1140,7 +1140,8 @@ async def import_agent_impl(
             for sub_agent_id in managed_agents:
                 insert_related_agent(parent_agent_id=mapping_agent_id[need_import_agent_id],
                                      child_agent_id=mapping_agent_id[sub_agent_id],
-                                     tenant_id=tenant_id)
+                                     tenant_id=tenant_id,
+                                     user_id=user_id)
         else:
             # Current agent still has sub-agents that haven't been imported
             agent_stack.append(need_import_agent_id)
