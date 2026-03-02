@@ -380,7 +380,7 @@ WHERE delete_flag = 'N';
 
 -- Create the ag_tool_instance_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_instance_t (
-    tool_instance_id INTEGER NOT NULL,
+    tool_instance_id SERIAL NOT NULL,
     tool_id INTEGER,
     agent_id INTEGER,
     params JSON,
@@ -564,7 +564,7 @@ COMMENT ON COLUMN nexent.user_tenant_t.delete_flag IS 'Delete flag, Y/N';
 
 -- Create the ag_agent_relation_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
-    relation_id INTEGER NOT NULL,
+    relation_id SERIAL NOT NULL,
     selected_agent_id INTEGER,
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),
