@@ -20,16 +20,11 @@ import type { TabsProps } from "antd";
 import { Zap, Maximize2 } from "lucide-react";
 
 import log from "@/lib/logger";
-import { EditableAgent } from "@/stores/agentConfigStore";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
 import { configService } from "@/services/configService";
 import { ConfigStore } from "@/lib/config";
+import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
-  checkAgentName,
-  checkAgentDisplayName,
-} from "@/services/agentConfigService";
-import {
-  NAME_CHECK_STATUS,
   GENERATE_PROMPT_STREAM_TYPES,
 } from "@/const/agentConfig";
 import { generatePromptStream } from "@/services/promptService";
@@ -76,6 +71,9 @@ export default function AgentGenerateDetail({
   const { data: tenantData } = useTenantList();
   const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
   const { data: groupData } = useGroupList(tenantId, 1, 100);
+
+  // Agent list for name uniqueness validation (use local data instead of API call)
+  const { agents: agentList } = useAgentList(tenantId);
   const groups = groupData?.groups || [];
 
   // State management
@@ -424,45 +422,38 @@ export default function AgentGenerateDetail({
     }
   };
 
-  // Custom validator for agent name uniqueness
-  const validateAgentNameUnique = async (_: any, value: string) => {
+  // Generic validator for agent field uniqueness - use local agent list instead of API call
+  const validateAgentFieldUnique = async (
+    _: any,
+    value: string,
+    fieldName: "name" | "display_name",
+    errorKey: "nameExists" | "displayNameExists"
+  ) => {
     if (!value) return Promise.resolve();
 
-    try {
-      const result = await checkAgentName(value, currentAgentId || undefined);
-      if (result.status === NAME_CHECK_STATUS.EXISTS_IN_TENANT) {
-        return Promise.reject(
-          new Error(t("agent.error.nameExists", { name: value }))
-        );
-      }
-      return Promise.resolve();
-    } catch (error) {
+    // Check if field value already exists in local agent list (excluding current agent)
+    const isDuplicated = agentList?.some(
+      (agent: { name?: string; display_name?: string; id?: string | number }) =>
+        (agent as any)[fieldName] === value &&
+        Number(agent.id) !== currentAgentId
+    );
+
+    if (isDuplicated) {
       return Promise.reject(
-        new Error(t("agent.error.displayNameExists", value))
+        new Error(t(`agent.error.${errorKey}`, { [fieldName]: value }))
       );
     }
+    return Promise.resolve();
+  };
+
+  // Custom validator for agent name uniqueness
+  const validateAgentNameUnique = async (_: any, value: string) => {
+    return validateAgentFieldUnique(_, value, "name", "nameExists");
   };
 
   // Custom validator for agent display name uniqueness
   const validateAgentDisplayNameUnique = async (_: any, value: string) => {
-    if (!value) return Promise.resolve();
-
-    try {
-      const result = await checkAgentDisplayName(
-        value,
-        currentAgentId || undefined
-      );
-      if (result.status === NAME_CHECK_STATUS.EXISTS_IN_TENANT) {
-        return Promise.reject(
-          new Error(t("agent.error.displayNameExists", { displayName: value }))
-        );
-      }
-      return Promise.resolve();
-    } catch (error) {
-      return Promise.reject(
-        new Error(t("agent.error.displayNameExists", value))
-      );
-    }
+    return validateAgentFieldUnique(_, value, "display_name", "displayNameExists");
   };
 
   const handleGenerateAgent = async () => {
@@ -657,6 +648,7 @@ export default function AgentGenerateDetail({
                     },
                     { validator: validateAgentNameUnique },
                   ]}
+                  validateTrigger={["onBlur"]}
                   className="mb-3"
                 >
                   <Input
