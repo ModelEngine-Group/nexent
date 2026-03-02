@@ -213,6 +213,7 @@ export default function AgentGenerateDetail({
       mainAgentMaxStep: editedAgent.max_step || 5,
       agentDescription: editedAgent.description || "",
       group_ids: normalizeNumberArray(editedAgent.group_ids || []),
+      ingroup_permission: editedAgent.ingroup_permission || "READ_ONLY",
       dutyPrompt: editedAgent.duty_prompt || "",
       constraintPrompt: editedAgent.constraint_prompt || "",
       fewShotsPrompt: editedAgent.few_shots_prompt || "",
@@ -250,7 +251,7 @@ export default function AgentGenerateDetail({
       });
     }
 
-  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode]);
+  }, [currentAgentId, defaultLlmModel?.id, isCreatingMode, editedAgent.ingroup_permission]);
 
   // Default to selecting all groups when creating a new agent.
   // Only applies when groups are loaded and no group is selected yet.
@@ -537,6 +538,7 @@ export default function AgentGenerateDetail({
             duty_prompt: formValues.dutyPrompt,
             constraint_prompt: formValues.constraintPrompt,
             few_shots_prompt: formValues.fewShotsPrompt,
+            ingroup_permission: formValues.ingroup_permission || "READ_ONLY",
           };
 
           // Update profile info in global agent config store
@@ -644,6 +646,26 @@ export default function AgentGenerateDetail({
                           return;
                         }
                         updateProfileInfo({ group_ids: nextGroupIds });
+                      }}
+                    />
+                  </Form.Item>
+                </Can>
+
+                <Can permission="group:read">
+                  <Form.Item
+                    name="ingroup_permission"
+                    label={t("tenantResources.knowledgeBase.permission")}
+                    className="mb-3"
+                  >
+                    <Select
+                      placeholder={t("tenantResources.knowledgeBase.permission")}
+                      options={[
+                        { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
+                        { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
+                        { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+                      ]}
+                      onChange={(value) => {
+                        updateProfileInfo({ ingroup_permission: value });
                       }}
                     />
                   </Form.Item>
