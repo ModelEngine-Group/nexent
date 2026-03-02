@@ -300,6 +300,8 @@
   "agent.llmModel": "大语言模型",
   "agent.version": "版本",
   "agent.version.current": "当前版本",
+  "agent.version.select": "选择版本",
+  "agent.version.noPublished": "无已发布版本",
   "agent.status.unpublished": "未发布",
   "agent.unavailableReasons.duplicate_name": "智能体变量名重复",
   "agent.unavailableReasons.duplicate_display_name": "智能体名称重复",
