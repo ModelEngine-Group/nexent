@@ -17,6 +17,8 @@ export type ModelSource =
   | "openai"
   | "custom"
   | "silicon"
+  | "dashscope"
+  | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine";
 
