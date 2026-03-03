@@ -18,6 +18,7 @@ export interface UpdateUserRequest {
 
 export interface UserListResponse {
   data: User[];
+  total?: number; // Root-level total for non-paginated responses
   pagination?: {
     page: number;
     page_size: number;
@@ -69,7 +70,8 @@ export async function listUsers(
     const result: UserListResponse = await response.json();
     return {
       users: result.data,
-      total: result.pagination?.total || result.total || 0,
+      // Support both paginated (pagination.total) and non-paginated (root total) responses
+      total: result.pagination?.total ?? result.total ?? 0,
       totalPages: result.pagination?.total_pages,
     };
   } catch (error) {
