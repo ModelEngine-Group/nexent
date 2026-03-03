@@ -7,6 +7,7 @@ import { formatDate, formatUrl } from "@/lib/utils";
 import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 
 export function ChatRightPanel({
@@ -18,7 +19,7 @@ export function ChatRightPanel({
   selectedMessageId,
 }: ChatRightPanelProps) {
   const { t } = useTranslation("common");
-  // Local state
+  const { appConfig } = useConfig();
   const [expandedImages, setExpandedImages] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [processedImages, setProcessedImages] = useState<string[]>([]);
@@ -254,6 +255,7 @@ export function ChatRightPanel({
             datasetId: datamateDatasetId,
             fileId: datamateFileId,
             filename: filename || undefined,
+            modelEngineEnabled: appConfig?.modelEngineEnabled,
           });
           message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
           return;

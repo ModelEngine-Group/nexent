@@ -27,6 +27,7 @@ import {
   extractObjectNameFromUrl,
 } from "@/services/storageService";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 /**
  * Extract code content and language from model_output_code content
@@ -397,6 +398,7 @@ const messageHandlers: MessageHandler[] = [
               datasetId: site.datamateDatasetId,
               fileId: site.datamateFileId,
               filename: site.filename || undefined,
+              modelEngineEnabled: appConfig?.modelEngineEnabled,
             });
           } else {
             // Check if URL is a direct http/https URL that can be accessed directly
@@ -1104,6 +1106,7 @@ interface TaskWindowProps {
 
 export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
   const { t } = useTranslation("common");
+  const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [isExpanded, setIsExpanded] = useState(true); // default expand task details interface

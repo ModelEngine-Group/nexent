@@ -14,7 +14,6 @@ import {
   DataMateSyncError,
 } from "@/types/knowledgeBase";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
-import { configStore } from "@/lib/config";
 import log from "@/lib/logger";
 
 // @ts-ignore
@@ -286,7 +285,8 @@ class KnowledgeBaseService {
   async getKnowledgeBasesInfo(
     skipHealthCheck = false,
     includeDataMateSync = true,
-    tenantId: string | null = null
+    tenantId: string | null = null,
+    datamateUrl: string | null = null
   ): Promise<KnowledgeBasesWithDataMateStatus> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
@@ -388,11 +388,7 @@ class KnowledgeBaseService {
 
       // Sync DataMate knowledge bases and get the synced data (only if enabled and URL is configured)
       if (includeDataMateSync) {
-        // Check if DataMate URL is configured before attempting sync
-        const config = configStore.getConfig();
-        const currentDataMateUrl = config.app?.datamateUrl;
-
-        if (!currentDataMateUrl || currentDataMateUrl.trim() === "") {
+        if (!datamateUrl || datamateUrl.trim() === "") {
           // Skip DataMate sync if URL is not configured
           log.info(
             "DataMate URL not configured, skipping DataMate knowledge base sync"

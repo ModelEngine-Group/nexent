@@ -2,7 +2,6 @@ import { API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 
 import { fetchWithAuth } from "@/lib/auth";
-import { configStore } from "@/lib/config";
 // @ts-ignore
 const fetch = fetchWithAuth;
 
@@ -299,11 +298,9 @@ export const storageService = {
     datasetId?: string;
     fileId?: string;
     filename?: string;
+    modelEngineEnabled?: boolean;
   }): Promise<void> {
-    // Check if ModelEngine is enabled before calling DataMate APIs
-    const modelEngineEnabled = configStore.getAppConfig().modelEngineEnabled;
-
-    if (!modelEngineEnabled) {
+    if (!options.modelEngineEnabled) {
       throw new Error(
         "DataMate download not available: MODEL_ENGINE_ENABLED is not true"
       );
