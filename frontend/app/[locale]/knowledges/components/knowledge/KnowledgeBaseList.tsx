@@ -291,15 +291,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
       <div
         className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}
       >
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="shrink-0">
             <h3
               className={`${KB_LAYOUT.TITLE_MARGIN} ${KB_LAYOUT.TITLE_TEXT} text-gray-800`}
             >
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center" style={{ gap: "6px" }}>
+          <div className="flex items-center min-w-0" style={{ gap: "6px" }}>
             <Button
               style={{
                 padding: "4px 15px",
@@ -310,6 +310,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 backgroundColor: "#1677ff",
                 color: "white",
                 border: "none",
+                flexShrink: 0,
               }}
               className="hover:!bg-blue-600"
               type="primary"
@@ -328,6 +329,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 backgroundColor: "#1677ff",
                 color: "white",
                 border: "none",
+                flexShrink: 0,
               }}
               className="hover:!bg-blue-600"
               type="primary"
@@ -352,18 +354,22 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   padding: "4px 15px",
                   display: "inline-flex",
                   alignItems: "center",
-                  justifyContent: "center",
                   gap: "8px",
                   backgroundColor: "#1677ff",
                   color: "white",
                   border: "none",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  minWidth: 0,
                 }}
                 className="hover:!bg-blue-600"
                 type="primary"
                 onClick={onDataMateConfig}
                 icon={<SettingOutlined />}
               >
-                {t("knowledgeBase.button.dataMateConfig")}
+                <span className="overflow-hidden text-ellipsis">
+                  {t("knowledgeBase.button.dataMateConfig")}
+                </span>
               </Button>
             )}
           </div>
