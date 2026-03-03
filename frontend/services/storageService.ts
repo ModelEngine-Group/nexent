@@ -298,14 +298,7 @@ export const storageService = {
     datasetId?: string;
     fileId?: string;
     filename?: string;
-    modelEngineEnabled?: boolean;
   }): Promise<void> {
-    if (!options.modelEngineEnabled) {
-      throw new Error(
-        "DataMate download not available: MODEL_ENGINE_ENABLED is not true"
-      );
-    }
-
     try {
       const downloadUrl = API_ENDPOINTS.storage.datamateDownload(options);
       const link = document.createElement("a");

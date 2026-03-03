@@ -249,7 +249,7 @@ const messageHandlers: MessageHandler[] = [
   {
     canHandle: (message) =>
       message.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER,
-    render: (message, t) => {
+    render: (message, t, context) => {
       // Find search results in the message context
       const messageContainer = message._messageContainer;
       if (
@@ -378,6 +378,10 @@ const messageHandlers: MessageHandler[] = [
       ): Promise<void> => {
         try {
           if (site.sourceType === "datamate") {
+            if (!context?.appConfig?.modelEngineEnabled) {
+              message.error("DataMate download not available: ModelEngine is not enabled");
+              return;
+            }
             if (
               !site.datamateDatasetId &&
               !site.datamateFileId &&
@@ -398,7 +402,6 @@ const messageHandlers: MessageHandler[] = [
               datasetId: site.datamateDatasetId,
               fileId: site.datamateFileId,
               filename: site.filename || undefined,
-              modelEngineEnabled: appConfig?.modelEngineEnabled,
             });
           } else {
             // Check if URL is a direct http/https URL that can be accessed directly
@@ -1275,7 +1278,7 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
 
     const handler = messageHandlers.find((h) => h.canHandle(message));
     if (handler) {
-      return handler.render(message, t);
+      return handler.render(message, t, { appConfig });
     }
 
     // Fallback processing, normally not executed here

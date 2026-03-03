@@ -243,6 +243,10 @@ export function ChatRightPanel({
       try {
         // Handle datamate source type
         if (source_type === "datamate") {
+          if (!appConfig?.modelEngineEnabled) {
+            message.error("DataMate download not available: ModelEngine is not enabled");
+            return;
+          }
           if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
             if (!url || url === "#") {
               message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
@@ -255,7 +259,6 @@ export function ChatRightPanel({
             datasetId: datamateDatasetId,
             fileId: datamateFileId,
             filename: filename || undefined,
-            modelEngineEnabled: appConfig?.modelEngineEnabled,
           });
           message.success(t("chatRightPanel.fileDownloadSuccess", "File download started"));
           return;
