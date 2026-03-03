@@ -236,7 +236,12 @@ class ToolInstance(TableBase):
     __table_args__ = {"schema": SCHEMA}
 
     tool_instance_id = Column(
-        Integer, primary_key=True, nullable=False, doc="ID")
+        Integer,
+        Sequence("ag_tool_instance_t_tool_instance_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="ID"
+    )
     tool_id = Column(Integer, doc="Tenant tool ID")
     agent_id = Column(Integer, doc="Agent ID")
     params = Column(JSON, doc="Parameter configuration")
@@ -351,7 +356,7 @@ class AgentRelation(TableBase):
     __tablename__ = "ag_agent_relation_t"
     __table_args__ = {"schema": SCHEMA}
 
-    relation_id = Column(Integer, primary_key=True, autoincrement=True, nullable=False, doc="Relationship ID, primary key")
+    relation_id = Column(Integer, Sequence("ag_agent_relation_t_relation_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="Relationship ID, primary key")
     selected_agent_id = Column(Integer, primary_key=True, doc="Selected agent ID")
     parent_agent_id = Column(Integer, doc="Parent agent ID")
     tenant_id = Column(String(100), doc="Tenant ID")
