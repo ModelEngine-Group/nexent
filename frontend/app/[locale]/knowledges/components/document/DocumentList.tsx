@@ -133,7 +133,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const tenantId = user?.tenantId || null;
 
     // Fetch groups for group selection
-    const { data: groupData } = useGroupList(tenantId, 1, 100);
+    const { data: groupData } = useGroupList(tenantId);
     const groups = groupData?.groups || [];
 
     // Create group name mapping

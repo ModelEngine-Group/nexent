@@ -75,7 +75,7 @@ export default function AgentGenerateDetail({
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
   const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // State management
