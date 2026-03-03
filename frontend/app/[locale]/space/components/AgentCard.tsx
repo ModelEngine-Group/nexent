@@ -239,7 +239,7 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
             <div className="h-4 mb-2" aria-hidden />
           )}
           <div className="flex-1 overflow-hidden">
-            <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               {agent.description || t("space.noDescription", "No description")}
             </p>
           </div>
