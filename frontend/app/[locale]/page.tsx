@@ -55,27 +55,24 @@ export default function Homepage() {
   const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center">
+    <div className="w-full min-h-full flex flex-col items-center justify-start">
       {/* Hero area */}
-      <section className="relative w-full py-4 flex flex-col items-center justify-center text-center">
+      <section className="relative w-full pt-8 pb-4 flex flex-col items-center justify-center text-center">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight"
+          className="hero-art-title max-w-5xl text-3xl md:text-4xl lg:text-[3.25rem] font-bold mb-4 px-4"
         >
-          {t("page.title")}
-          <span className="text-blue-600 dark:text-blue-500">
-            {" "}
-            {t("page.subtitle")}
-          </span>
+          <span className="hero-art-title-main block">{t("page.title")}</span>
+          <span className="hero-art-title-accent block mt-1">{t("page.subtitle")}</span>
         </motion.h2>
         <motion.p
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.3 }}
-          className="max-w-2xl text-slate-600 dark:text-slate-300 text-lg md:text-xl mb-8"
+          className="max-w-3xl text-slate-600 dark:text-slate-300 text-base md:text-lg mb-7 px-4"
         >
           {t("page.description")}
         </motion.p>
