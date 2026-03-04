@@ -71,6 +71,27 @@ sys.modules['consts.model'] = consts_model_module
 # Provide 'consts.exceptions' stub so that northbound_base_app import succeeds
 # ---------------------------------------------------------------------------
 consts_exceptions_module = types.ModuleType("consts.exceptions")
+
+
+class AppException(Exception):
+    """Dummy AppException for testing purposes."""
+    pass
+
+
+class LimitExceededError(Exception):
+    """Dummy rate-limit exception for testing purposes."""
+    pass
+
+class UnauthorizedError(Exception):
+    """Dummy unauthorized exception for testing purposes."""
+    pass
+
+class SignatureValidationError(Exception):
+    """Dummy signature validation exception for testing purposes."""
+    pass
+
+
+consts_exceptions_module.AppException = AppException
 consts_exceptions_module.LimitExceededError = LimitExceededError
 consts_exceptions_module.UnauthorizedError = UnauthorizedError
 consts_exceptions_module.SignatureValidationError = SignatureValidationError

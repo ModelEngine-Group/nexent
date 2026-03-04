@@ -883,6 +883,12 @@ function DataConfig({ isActive }: DataConfigProps) {
               getModelDisplayName={(modelId) => modelId}
               containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
               onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
+              onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
+                // Update active knowledge base in context when it's updated
+                if (kbState.activeKnowledgeBase && kbState.activeKnowledgeBase.id === updatedKnowledgeBase.id) {
+                  setActiveKnowledgeBase(updatedKnowledgeBase);
+                }
+              }}
               // Search and filter props
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
