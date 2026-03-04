@@ -125,7 +125,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
         if provider != ProviderEnum.MODELENGINE.value:
-            model_dict["base_url"] = f"{model_url}embeddings"
+            # Ensure proper slash between base URL and endpoint
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         else:
             # For ModelEngine embedding models, append the embeddings path
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"

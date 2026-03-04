@@ -35,16 +35,16 @@ class DashScopeModelProvider(AbstractModelProvider):
                 while True:
                     params = {"page_size": 100, "page_no": current_page}
                     response = await client.get(base_url, headers=headers, params=params)
-                    response.raise_for_status()
-
-                    data = response.json()
-                    models = data.get("output", {}).get("models", [])
-
                     if response.status_code == 429:
                         await asyncio.sleep(2)
                         continue
                     if not models :  # Break loop if no more models on the current page
                         break
+                    response.raise_for_status()
+
+                    data = response.json()
+                    models = data.get("output", {}).get("models", [])
+
 
                     all_models.extend(models)
                     if(len(models)<100):
