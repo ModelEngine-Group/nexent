@@ -249,6 +249,7 @@ export function useConfig() {
       return frontendConfig;
     },
     initialData: loadConfigFromStorage() ?? undefined,
+    initialDataUpdatedAt: 0,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     retry: 2,
