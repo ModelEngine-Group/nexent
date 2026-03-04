@@ -72,16 +72,14 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     "model_type": "",
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
-                # 1. Embedding
-                if 'embedding' in m_id or m_id.startswith('bge-'):
-                    cleaned_model.update({"model_tag": "embedding", "model_type": "embedding", "max_tokens": 0})
-                    categorized_models['embedding'].append(cleaned_model)
-
-                # 2. Reranker
-                elif 'rerank' in m_id:
+                # 1. reranker
+                if 'rerank' in m_id:
                     cleaned_model.update({"model_tag": "reranker", "model_type": "reranker"})
                     categorized_models['reranker'].append(cleaned_model)
-
+                #2. embedding
+                elif 'embedding' in m_id or m_id.startswith('bge-'):
+                    cleaned_model.update({"model_tag": "embedding", "model_type": "embedding", "max_tokens": 0})
+                    categorized_models['embedding'].append(cleaned_model)
 
                 # 3. STT (Speech-to-Text / Audio understanding)
                 elif 'stt' in m_id:
