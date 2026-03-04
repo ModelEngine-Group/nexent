@@ -565,7 +565,7 @@ async def get_container_logs(
                 logger.error(f"Error in log stream: {stream_error}")
                 error_payload = json.dumps(
                     {
-                        "logs": f"Error: {str(stream_error)}",
+                        "logs": f"An error occurred while streaming container logs.",
                         "status": "error"
                     },
                     ensure_ascii=False
@@ -587,7 +587,7 @@ async def get_container_logs(
         logger.error(f"Failed to get container logs: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get container logs: {str(e)}"
+            detail=f"Failed to get container logs."
         )
 
 

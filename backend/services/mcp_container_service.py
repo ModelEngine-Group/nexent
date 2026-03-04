@@ -7,6 +7,7 @@ interface while using the standardized SDK container management module.
 
 import logging
 import asyncio
+import threading
 from typing import Dict, List, Optional, AsyncGenerator
 
 from consts.exceptions import MCPConnectionError, MCPContainerError
@@ -321,7 +322,6 @@ class MCPContainerManager:
                         )
 
                 # Start streaming in background thread
-                import threading
                 stream_thread = threading.Thread(
                     target=_stream_logs_sync, daemon=True)
                 stream_thread.start()
