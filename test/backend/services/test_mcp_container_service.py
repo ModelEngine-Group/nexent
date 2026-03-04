@@ -642,8 +642,10 @@ class TestStreamContainerLogs:
         initial_logs_bytes = b"Log line 1\n"
         mock_container.logs.return_value = initial_logs_bytes
 
-        # Mock follow stream to raise exception in thread
+        # Mock follow stream to raise exception during iteration in thread
+        # The exception should be raised inside the for loop (line 307), not at container.logs() call
         call_count = [0]
+        iteration_count = [0]
 
         def logs_side_effect(*args, **kwargs):
             call_count[0] += 1
@@ -651,8 +653,14 @@ class TestStreamContainerLogs:
                 # First call: initial logs
                 return initial_logs_bytes
             elif call_count[0] == 2:
-                # Second call: follow stream raises exception
-                raise Exception("Stream error in thread")
+                # Second call: follow stream - raise exception during iteration
+                def exception_stream():
+                    iteration_count[0] += 1
+                    yield b"First chunk\n"
+                    iteration_count[0] += 1
+                    # Raise exception during iteration (inside for loop at line 307)
+                    raise Exception("Stream error during iteration")
+                return exception_stream()
             else:
                 return iter([])
 
@@ -664,15 +672,59 @@ class TestStreamContainerLogs:
             "container-123", tail=100, follow=True
         ):
             logs.append(log_line)
-            # Break after initial log and wait for thread exception
-            if len(logs) >= 1:
-                # Give thread time to raise exception and put None
-                await asyncio.sleep(0.2)
-                break
+            # Wait for thread to process chunks and raise exception
+            await asyncio.sleep(0.2)
+            # After exception, None should be put in queue (line 320-321)
+            # This will break the while loop (line 333-334)
+            break
 
         # Should have initial log
         assert len(logs) >= 1
         assert "Log line 1" in logs[0]
+        # Exception should be caught at line 318, None put in queue at line 320-321
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_exception_in_logs_call(self, mock_manager):
+        """Test exception when container.logs() raises exception (covers lines 318-322)"""
+        import asyncio
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs to succeed
+        initial_logs_bytes = b"Log line 1\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Mock follow stream - container.logs() call itself raises exception
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: initial logs
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                # Second call: container.logs() raises exception (before iteration)
+                raise Exception("Error calling container.logs()")
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        # Collect logs from async generator
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # Wait for thread exception handling
+            await asyncio.sleep(0.2)
+            break
+
+        # Should have initial log
+        assert len(logs) >= 1
+        assert "Log line 1" in logs[0]
+        # Exception should be caught at line 318, None put in queue at line 320-321
 
     @pytest.mark.asyncio
     async def test_stream_container_logs_follow_with_multiple_chunks(self, mock_manager):
@@ -773,6 +825,7 @@ class TestStreamContainerLogs:
         """Test that stop_flag stops the thread loop (covers lines 308-309, 341)"""
         import asyncio
         import threading
+        import time
 
         mock_container = MagicMock()
         mock_manager.client.client.containers.get.return_value = mock_container
@@ -781,13 +834,17 @@ class TestStreamContainerLogs:
         initial_logs_bytes = b"Initial log\n"
         mock_container.logs.return_value = initial_logs_bytes
 
-        # Mock follow stream that yields many chunks
-        def infinite_stream():
-            count = 0
+        # Mock follow stream that yields chunks slowly
+        # This allows stop_flag to be checked during iteration at line 308
+        chunk_count = [0]
+
+        def slow_stream():
             while True:
-                yield f"Log chunk {count}\n".encode()
-                count += 1
-                if count > 100:  # Safety limit
+                chunk_count[0] += 1
+                yield f"Log chunk {chunk_count[0]}\n".encode()
+                # Small delay to allow stop_flag to be set and checked
+                time.sleep(0.05)
+                if chunk_count[0] > 20:  # Safety limit
                     break
 
         call_count = [0]
@@ -797,7 +854,7 @@ class TestStreamContainerLogs:
             if call_count[0] == 1:
                 return initial_logs_bytes
             elif call_count[0] == 2:
-                return infinite_stream()
+                return slow_stream()
             else:
                 return iter([])
 
@@ -808,13 +865,18 @@ class TestStreamContainerLogs:
             "container-123", tail=100, follow=True
         ):
             logs.append(log_line)
-            # Break early to trigger stop_flag
+            # Break early to trigger stop_flag in finally block (line 341)
+            # This will set stop_flag[0] = True, which thread checks at line 308
             if len(logs) >= 2:
                 break
+
+        # Give thread time to check stop_flag[0] at line 308 and break at line 309
+        await asyncio.sleep(0.2)
 
         # Should have at least initial log
         assert len(logs) >= 1
         # stop_flag should be set in finally block (line 341)
+        # Thread should check stop_flag[0] at line 308 and break at line 309
 
     @pytest.mark.asyncio
     async def test_stream_container_logs_follow_queue_none_signal(self, mock_manager):
@@ -857,6 +919,64 @@ class TestStreamContainerLogs:
         # Should have initial log and follow log before None signal
         assert len(logs) >= 1
         assert "Initial log" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_stream_container_logs_follow_stop_flag_during_iteration(self, mock_manager):
+        """Test stop_flag check during log stream iteration (covers lines 308-309)"""
+        import asyncio
+        import time
+
+        mock_container = MagicMock()
+        mock_manager.client.client.containers.get.return_value = mock_container
+
+        # Mock initial logs
+        initial_logs_bytes = b"Initial log\n"
+        mock_container.logs.return_value = initial_logs_bytes
+
+        # Create a stream that yields multiple chunks with delays
+        # This ensures the thread will be in the for loop (line 307) when stop_flag is checked
+        chunk_yielded = [False]
+
+        def stream_with_delay():
+            chunk_yielded[0] = True
+            yield b"Chunk 1\n"
+            time.sleep(0.1)  # Delay to allow stop_flag to be set
+            yield b"Chunk 2\n"
+            time.sleep(0.1)
+            yield b"Chunk 3\n"
+
+        call_count = [0]
+
+        def logs_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return initial_logs_bytes
+            elif call_count[0] == 2:
+                return stream_with_delay()
+            else:
+                return iter([])
+
+        mock_container.logs.side_effect = logs_side_effect
+
+        logs = []
+        async for log_line in mock_manager.stream_container_logs(
+            "container-123", tail=100, follow=True
+        ):
+            logs.append(log_line)
+            # After getting initial log, break to set stop_flag[0] = True in finally (line 341)
+            # Thread should check stop_flag[0] at line 308 during next iteration
+            if len(logs) >= 1:
+                # Small delay to let thread start processing
+                await asyncio.sleep(0.05)
+                break
+
+        # Wait for thread to check stop_flag and break
+        await asyncio.sleep(0.2)
+
+        # Should have initial log
+        assert len(logs) >= 1
+        # stop_flag[0] is set to True in finally block (line 341)
+        # Thread checks stop_flag[0] at line 308 and breaks at line 309
 
     @pytest.mark.asyncio
     async def test_stream_container_logs_follow_decode_errors(self, mock_manager):
