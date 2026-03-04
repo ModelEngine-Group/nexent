@@ -22,6 +22,8 @@ export const MODEL_SOURCES = {
   MODELENGINE: "modelengine",
   OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
   CUSTOM: "custom",
+  DASHSCOPE: "dashscope",
+  TOKENPONY: "tokenpony",
 } as const;
 
 // Model status constants
