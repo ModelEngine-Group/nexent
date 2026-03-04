@@ -43,7 +43,7 @@ class AppException(Exception):
 
     def to_dict(self) -> dict:
         return {
-            "code": int(self.error_code.value),
+            "code": str(self.error_code.value),  # Keep as string to preserve leading zeros
             "message": self.message,
             "details": self.details if self.details else None
         }
