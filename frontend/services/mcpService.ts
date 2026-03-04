@@ -8,16 +8,10 @@ const t = (key: string, options?: any): string => {
   return i18n.t(key, options) as string;
 };
 
-// TODO: Use fetchWithAuth instead
-// Get authorization headers helper function
 const getAuthHeaders = () => {
-  const session = typeof window !== "undefined" ? localStorage.getItem("session") : null;
-  const sessionObj = session ? JSON.parse(session) : null;
-
   return {
     'Content-Type': 'application/json',
     'User-Agent': 'AgentFrontEnd/1.0',
-    ...(sessionObj?.access_token && { "Authorization": `Bearer ${sessionObj.access_token}` }),
   };
 };
 
@@ -679,10 +673,7 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
       formData.append('tenant_id', tenantId);
     }
 
-    const authHeaders = getAuthHeaders();
-    // Remove Content-Type header for FormData - let browser set it with boundary
-    const headers = { ...authHeaders };
-    delete headers['Content-Type'];
+    const { 'Content-Type': _, ...headers } = getAuthHeaders();
 
     const response = await fetch(API_ENDPOINTS.mcp.uploadImage, {
       method: 'POST',
