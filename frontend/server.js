@@ -56,11 +56,15 @@ function buildCookieOptions(httpOnly) {
 function setAuthCookies(res, session) {
   const cookies = [];
 
+  const expiresInSeconds = session.expires_in_seconds || 3600;
+  
+  const refreshTokenMaxAge = expiresInSeconds * 10;
+
   if (session.access_token) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, session.access_token, {
         ...buildCookieOptions(true),
-        maxAge: 60 * 60 * 24 * 7, // 7 days
+        maxAge: expiresInSeconds, // Use backend-provided value
       })
     );
   }
@@ -69,7 +73,7 @@ function setAuthCookies(res, session) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, session.refresh_token, {
         ...buildCookieOptions(true),
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        maxAge: refreshTokenMaxAge, // 10x access token lifetime
       })
     );
   }
@@ -81,7 +85,7 @@ function setAuthCookies(res, session) {
         String(session.expires_at),
         {
           ...buildCookieOptions(false), // readable by frontend JS
-          maxAge: 60 * 60 * 24 * 7,
+          maxAge: expiresInSeconds, // Same as access token
         }
       )
     );
