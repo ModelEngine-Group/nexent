@@ -93,9 +93,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [containerConfigJson, setContainerConfigJson] = useState("");
   const [containerPort, setContainerPort] = useState<number | undefined>(undefined);
   const [logsModalVisible, setLogsModalVisible] = useState(false);
-  const [currentContainerLogs, setCurrentContainerLogs] = useState("");
   const [currentContainerId, setCurrentContainerId] = useState("");
-  const [loadingLogs, setLoadingLogs] = useState(false);
 
   // Upload State
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -349,18 +347,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
 
   const onViewLogs = async (containerId: string) => {
     setCurrentContainerId(containerId);
-    setLoadingLogs(true);
     setLogsModalVisible(true);
-    setCurrentContainerLogs("");
-
-    const result = await handleViewLogs(containerId, 500);
-    if (result.success) {
-      setCurrentContainerLogs(result.data);
-    } else {
-      message.error(result.messageKey ? t(result.messageKey) : t("mcpConfig.message.getContainerLogsFailed"));
-      setCurrentContainerLogs(t("mcpConfig.message.getContainerLogsFailed"));
-    }
-    setLoadingLogs(false);
   };
 
   // Columns for Server Table
@@ -804,9 +791,9 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       <McpContainerLogsModal
         open={logsModalVisible}
         onCancel={() => setLogsModalVisible(false)}
-        loading={loadingLogs}
-        logs={currentContainerLogs}
         containerId={currentContainerId}
+        tenantId={tenantId}
+        tail={500}
       />
     </div>
   );
