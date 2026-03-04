@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Button } from "antd";
+import { Button, message as antdMessage } from "antd";
 import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
@@ -379,7 +379,7 @@ const messageHandlers: MessageHandler[] = [
         try {
           if (site.sourceType === "datamate") {
             if (!context?.appConfig?.modelEngineEnabled) {
-              message.error("DataMate download not available: ModelEngine is not enabled");
+              antdMessage.error("DataMate download not available: ModelEngine is not enabled");
               return;
             }
             if (
@@ -387,7 +387,7 @@ const messageHandlers: MessageHandler[] = [
               !site.datamateFileId &&
               (!site.url || site.url === "#")
             ) {
-              message.error(
+              antdMessage.error(
                 t(
                   "taskWindow.downloadError",
                   "Missing Datamate dataset or file information"
@@ -423,7 +423,7 @@ const messageHandlers: MessageHandler[] = [
               setTimeout(() => {
                 document.body.removeChild(link);
               }, 100);
-              message.success(
+              antdMessage.success(
                 t("taskWindow.downloadSuccess", "File download started")
               );
               return;
@@ -439,7 +439,7 @@ const messageHandlers: MessageHandler[] = [
                 : `attachments/${site.filename}`;
             }
             if (!objectName) {
-              message.error(
+              antdMessage.error(
                 t(
                   "taskWindow.downloadError",
                   "Failed to download file. Please try again."
@@ -453,12 +453,12 @@ const messageHandlers: MessageHandler[] = [
             );
           }
 
-          message.success(
+          antdMessage.success(
             t("taskWindow.downloadSuccess", "File download started")
           );
         } catch (error) {
           log.error("Failed to download knowledge file:", error);
-          message.error(
+          antdMessage.error(
             t(
               "taskWindow.downloadError",
               "Failed to download file. Please try again."
