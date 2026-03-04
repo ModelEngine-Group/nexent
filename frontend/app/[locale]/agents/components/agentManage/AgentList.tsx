@@ -97,6 +97,12 @@ export default function AgentList({
       return;
     }
 
+    // First check if there are unsaved changes BEFORE switching to new agent
+    const canSwitch = await checkUnsavedChanges.saveWithModal();
+    if (!canSwitch) {
+      return;
+    }
+
     // Load agent detail and set as current
     try {
       const result = await searchAgentInfo(Number(agent.id));
@@ -114,12 +120,6 @@ export default function AgentList({
     } catch (error) {
       log.error("Failed to load agent detail:", error);
       message.error(t("agentConfig.agents.detailsLoadFailed"));
-    }
-
-    // Check if can switch (has unsaved changes)
-    const canSwitch = await checkUnsavedChanges.saveWithModal();
-    if (!canSwitch) {
-      return;
     }
   };
 
@@ -506,7 +506,13 @@ export default function AgentList({
                       </span>
                     </Tooltip>
 
-                    <Tooltip title={t("agent.contextMenu.delete")}>
+                    <Tooltip
+                      title={
+                        agent.permission === "READ_ONLY"
+                          ? t("agent.noEditPermission")
+                          : t("agent.contextMenu.delete")
+                      }
+                    >
                       <span>
                         <Button
                           type="text"
@@ -514,7 +520,12 @@ export default function AgentList({
                           icon={
                             <Trash2
                               className="w-4 h-4"
-                              style={{ color: token.colorError }}
+                              style={{
+                                color:
+                                  agent.permission === "READ_ONLY"
+                                    ? token.colorTextDisabled
+                                    : token.colorError,
+                              }}
                             />
                           }
                           onClick={(e) => {
@@ -522,6 +533,7 @@ export default function AgentList({
                             e.stopPropagation();
                             handleDeleteAgentWithConfirm(agent);
                           }}
+                          disabled={agent.permission === "READ_ONLY"}
                           className="agent-action-button agent-action-button-red"
                         />
                       </span>

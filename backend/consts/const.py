@@ -71,6 +71,7 @@ CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"
 PERMISSION_EDIT = "EDIT"
+PERMISSION_PRIVATE = "PRIVATE"
 
 
 # Deployment Version Configuration
