@@ -272,13 +272,16 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
 
 def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
     """
-    Extract user ID from JWT token
+    Extract user ID from JWT token and validate expiration
 
     Args:
         authorization: Authorization header value
 
     Returns:
         Optional[str]: User ID, return None if parsing fails
+
+    Raises:
+        UnauthorizedError: If token is invalid or expired
     """
     try:
         # Format authorization header
@@ -288,10 +291,25 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
         # Decode JWT token (without signature verification, only parse content)
         decoded = jwt.decode(token, options={"verify_signature": False})
 
+        # Validate token expiration
+        exp = decoded.get("exp")
+        if exp is not None:
+            import time
+            current_time = int(time.time())
+            if current_time >= exp:
+                logging.warning(f"Token expired: exp={exp}, current={current_time}, diff={current_time - exp}s")
+                raise UnauthorizedError("Token has expired")
+
         # Extract user ID from JWT claims
         user_id = decoded.get("sub")
 
         return user_id
+    except jwt.ExpiredSignatureError:
+        logging.error("Token signature has expired")
+        raise UnauthorizedError("Token has expired")
+    except UnauthorizedError:
+        # Re-raise Unaut horizedError without wrapping
+        raise
     except Exception as e:
         logging.error(f"Failed to extract user ID from token: {str(e)}")
         raise UnauthorizedError("Invalid or expired authentication token")
