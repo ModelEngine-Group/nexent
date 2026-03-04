@@ -2,7 +2,7 @@
 
 import i18n from "i18next";
 
-import { API_ENDPOINTS } from "./api";
+import { API_ENDPOINTS, ApiError } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { FILE_TYPES, EXTENSION_TO_TYPE_MAP } from "@/const/knowledgeBase";
@@ -53,32 +53,35 @@ class KnowledgeBaseService {
     count: number;
     indices_info: any[];
   }> {
-    try {
-      // Call backend proxy endpoint to avoid CORS issues
-      const url = new URL(API_ENDPOINTS.dify.datasets, window.location.origin);
-      url.searchParams.set("dify_api_base", difyApiBase);
-      url.searchParams.set("api_key", apiKey);
+    // Call backend proxy endpoint to avoid CORS issues
+    const url = new URL(API_ENDPOINTS.dify.datasets, window.location.origin);
+    url.searchParams.set("dify_api_base", difyApiBase);
+    url.searchParams.set("api_key", apiKey);
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Failed to fetch Dify datasets");
-      }
+    const result = await response.json();
 
-      const result = await response.json();
-      return {
-        indices: result.indices || [],
-        count: result.count || 0,
-        indices_info: result.indices_info || [],
-      };
-    } catch (error) {
-      log.error("Failed to sync Dify knowledge bases:", error);
-      throw error;
+    // Check for error response from middleware (has code field)
+    if (result.code !== undefined && result.code !== 0) {
+      // Use backend error code and message
+      const errorCode = result.code || response.status;
+      const errorMessage = result.message || "Failed to fetch Dify datasets";
+      log.error("Dify API error:", { code: errorCode, message: errorMessage });
+
+      // Use ApiError for proper error handling with i18n support
+      throw new ApiError(errorCode, errorMessage);
     }
+
+    // Success: result is directly the data (indices, count, indices_info)
+    return {
+      indices: result.indices || [],
+      count: result.count || 0,
+      indices_info: result.indices_info || [],
+    };
   }
 
   // Get Dify knowledge bases as KnowledgeBase array
