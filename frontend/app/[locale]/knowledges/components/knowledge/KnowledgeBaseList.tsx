@@ -42,7 +42,8 @@ interface KnowledgeBaseListProps {
   showDataMateConfig?: boolean; // Control whether to show DataMate config button
   getModelDisplayName: (modelId: string) => string;
   containerHeight?: string; // Container total height, consistent with DocumentList
-  onKnowledgeBaseChange?: () => void; // New: callback function when knowledge base switches
+  onKnowledgeBaseChange?: () => void; // Callback when knowledge base switches
+  onKnowledgeBaseUpdate?: (updatedKnowledgeBase: KnowledgeBase) => void; // Callback when knowledge base is updated
   // Optional controlled search / filter props (if parent wants to control filters)
   searchQuery?: string;
   onSearchChange?: (value: string) => void;
@@ -67,6 +68,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   getModelDisplayName,
   containerHeight = "70vh", // Default container height consistent with DocumentList
   onKnowledgeBaseChange, // New: callback function when knowledge base switches
+  onKnowledgeBaseUpdate, // Callback when knowledge base is updated
   searchQuery,
   onSearchChange,
   sourceFilter,
@@ -620,7 +622,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         knowledgeBase={editingKnowledge}
         tenantId={tenantId}
         onCancel={closeEditModal}
-        onSuccess={() => {}}
+        onSuccess={(updatedKnowledgeBase) => {
+          if (onKnowledgeBaseUpdate) {
+            onKnowledgeBaseUpdate(updatedKnowledgeBase);
+          }
+        }}
       />
     </div>
   );
