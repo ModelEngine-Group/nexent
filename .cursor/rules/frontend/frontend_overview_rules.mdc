@@ -49,6 +49,10 @@ frontend/
 | `const/` | Runtime constants | Literals, enums, config objects, status codes; do not store `interface`/`type` |
 | `styles/` | Global styles | Theme vars, reset, AntD overrides only; component-specific CSS: colocate in component (e.g. `*.module.css`) |
 
+## General Principles
+
+- **Avoid over-engineering**: Before abstracting code (extracting hooks, components, utils), confirm there is a concrete need (reuse, testability, or complexity). Prefer simple, inline solutions until the need is clear.
+
 ## Dependency Rules
 
 - **No cross-feature imports**: Feature-level code (`components/` under a feature) must not import from other features. Use shared `components/` for cross-feature reuse.
