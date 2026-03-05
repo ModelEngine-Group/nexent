@@ -78,7 +78,7 @@ class TestGetUsers:
         (2, 10, 2, 10),  # Custom pagination
         (5, 50, 5, 50),  # Large page size
     ])
-    def test_get_users_success(self, page, page_size, expected_page, expected_page_size):
+    def test_get_users_success_with_pagination(self, page, page_size, expected_page, expected_page_size):
         """Test successfully retrieving users with various pagination settings"""
         from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
@@ -91,14 +91,11 @@ class TestGetUsers:
 
         mock_db.return_value = {
             "users": mock_relationships,
-            "total": 2,
-            "total_pages": 1,
-            "page": expected_page,
-            "page_size": expected_page_size
+            "total": 2
         }
 
         # Execute
-        result = get_users(tenant_id, page, page_size)
+        result = get_users(tenant_id, page, page_size, "created_at", "desc")
 
         # Assert
         assert len(result["users"]) == 2
@@ -111,10 +108,107 @@ class TestGetUsers:
         assert result["total"] == 2
         assert result["page"] == expected_page
         assert result["page_size"] == expected_page_size
-        assert result["total_pages"] == 1
+        assert result["total_pages"] == 1  # Calculated: ceil(2/page_size)
 
         # Verify database call
         mock_db.assert_called_once_with(tenant_id, page, page_size, "created_at", "desc")
+
+    def test_get_users_success_without_pagination(self):
+        """Test successfully retrieving users without pagination (returns all data)"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        tenant_id = "tenant123"
+
+        mock_relationships = [
+            {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": tenant_id},
+            {"user_id": "user2", "user_email": "user2@example.com", "user_role": "ADMIN", "tenant_id": tenant_id},
+            {"user_id": "user3", "user_email": "user3@example.com", "user_role": "USER", "tenant_id": tenant_id}
+        ]
+
+        mock_db.return_value = {
+            "users": mock_relationships,
+            "total": 3
+        }
+
+        # Execute
+        result = get_users(tenant_id, None, None, "created_at", "desc")
+
+        # Assert
+        assert len(result["users"]) == 3
+        assert result["total"] == 3
+        assert "page" not in result
+        assert "page_size" not in result
+        assert "total_pages" not in result
+
+        # Verify database call
+        mock_db.assert_called_once_with(tenant_id, None, None, "created_at", "desc")
+
+    def test_get_users_success_with_only_page(self):
+        """Test retrieving users with only page parameter (no pagination info in result)"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        tenant_id = "tenant123"
+
+        mock_relationships = [
+            {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": tenant_id}
+        ]
+
+        mock_db.return_value = {
+            "users": mock_relationships,
+            "total": 1
+        }
+
+        result = get_users(tenant_id, 1, None, "created_at", "desc")
+
+        assert len(result["users"]) == 1
+        assert result["total"] == 1
+        assert "page" not in result
+        assert "page_size" not in result
+        assert "total_pages" not in result
+
+    def test_get_users_success_with_only_page_size(self):
+        """Test retrieving users with only page_size parameter (no pagination info in result)"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        tenant_id = "tenant123"
+
+        mock_relationships = [
+            {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": tenant_id}
+        ]
+
+        mock_db.return_value = {
+            "users": mock_relationships,
+            "total": 1
+        }
+
+        result = get_users(tenant_id, None, 20, "created_at", "desc")
+
+        assert len(result["users"]) == 1
+        assert result["total"] == 1
+        assert "page" not in result
+        assert "page_size" not in result
+        assert "total_pages" not in result
+
+    def test_get_users_success_with_asc_sort(self):
+        """Test successfully retrieving users with ascending sort order"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        tenant_id = "tenant123"
+
+        mock_relationships = [
+            {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": tenant_id}
+        ]
+
+        mock_db.return_value = {
+            "users": mock_relationships,
+            "total": 1
+        }
+
+        result = get_users(tenant_id, 1, 20, "created_at", "asc")
+
+        assert len(result["users"]) == 1
+        assert result["total"] == 1
+        mock_db.assert_called_once_with(tenant_id, 1, 20, "created_at", "asc")
 
     def test_get_users_empty_result(self):
         """Test retrieving users when no users exist"""
@@ -122,10 +216,7 @@ class TestGetUsers:
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [],
-            "total": 0,
-            "total_pages": 0,
-            "page": 1,
-            "page_size": 20
+            "total": 0
         }
 
         result = get_users("tenant123", 1, 20)
@@ -144,10 +235,7 @@ class TestGetUsers:
 
         mock_db.return_value = {
             "users": mock_relationships,
-            "total": 1,
-            "total_pages": 1,
-            "page": 1,
-            "page_size": 20
+            "total": 1
         }
 
         result = get_users("tenant123", 1, 20)
@@ -161,17 +249,31 @@ class TestGetUsers:
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [],
-            "total": 0,
-            "total_pages": 0,
-            "page": 1,
-            "page_size": 20
+            "total": 0
         }
 
-        result = get_users("tenant123")  # No page/page_size specified
+        result = get_users("tenant123")  # No page/page_size specified, uses defaults
 
         assert result["page"] == 1
         assert result["page_size"] == 20
+        assert result["total_pages"] == 0
         mock_db.assert_called_once_with("tenant123", 1, 20, 'created_at', 'desc')
+
+    def test_get_users_calculates_total_pages_correctly(self):
+        """Test that total_pages is calculated correctly for pagination"""
+        from backend.services import user_service
+        mock_db = user_service.get_users_by_tenant_id
+        mock_db.return_value = {
+            "users": [
+                {"user_id": "user1", "user_email": "user1@example.com", "user_role": "USER", "tenant_id": "tenant123"}
+            ],
+            "total": 25
+        }
+
+        result = get_users("tenant123", 2, 10)
+
+        assert result["total"] == 25
+        assert result["total_pages"] == 3  # Calculated: ceil(25/10) = 3
 
 
 @pytest.mark.asyncio

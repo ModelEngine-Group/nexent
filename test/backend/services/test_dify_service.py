@@ -9,6 +9,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 import httpx
 
+from backend.consts.error_code import ErrorCode
+from backend.consts.exceptions import AppException
+
 
 def _create_mock_client(mock_response):
     """
@@ -145,82 +148,84 @@ class TestFetchDifyDatasetsImpl:
         assert result["pagination"]["embedding_available"] is False
 
     def test_fetch_dify_datasets_impl_invalid_api_base_none(self):
-        """Test ValueError when dify_api_base is None."""
+        """Test AppException when dify_api_base is None."""
         from backend.services.dify_service import fetch_dify_datasets_impl
 
-        with pytest.raises(ValueError) as excinfo:
+        # Catch Exception and verify it's an AppException with expected error code
+        with pytest.raises(Exception) as excinfo:
             fetch_dify_datasets_impl(
                 dify_api_base=None,
                 api_key="test-api-key"
             )
 
-        assert "dify_api_base is required and must be a non-empty string" in str(
-            excinfo.value)
+        # Verify it's an AppException with the correct error code
+        assert hasattr(excinfo.value, 'error_code')
+        assert excinfo.value.error_code.value == ErrorCode.DIFY_CONFIG_INVALID.value
 
     def test_fetch_dify_datasets_impl_invalid_api_base_empty_string(self):
-        """Test ValueError when dify_api_base is empty string."""
+        """Test AppException when dify_api_base is empty string."""
         from backend.services.dify_service import fetch_dify_datasets_impl
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(Exception) as excinfo:
             fetch_dify_datasets_impl(
                 dify_api_base="",
                 api_key="test-api-key"
             )
 
-        assert "dify_api_base is required and must be a non-empty string" in str(
-            excinfo.value)
+        assert hasattr(excinfo.value, 'error_code')
+        assert excinfo.value.error_code.value == ErrorCode.DIFY_CONFIG_INVALID.value
 
     def test_fetch_dify_datasets_impl_invalid_api_base_not_string(self):
-        """Test ValueError when dify_api_base is not a string."""
+        """Test AppException when dify_api_base is not a string."""
         from backend.services.dify_service import fetch_dify_datasets_impl
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(Exception) as excinfo:
             fetch_dify_datasets_impl(
                 dify_api_base=12345,
                 api_key="test-api-key"
             )
 
-        assert "dify_api_base is required and must be a non-empty string" in str(
-            excinfo.value)
+        assert hasattr(excinfo.value, 'error_code')
+        assert excinfo.value.error_code.value == ErrorCode.DIFY_CONFIG_INVALID.value
 
     def test_fetch_dify_datasets_impl_invalid_api_key_none(self):
-        """Test ValueError when api_key is None."""
+        """Test AppException when api_key is None."""
         from backend.services.dify_service import fetch_dify_datasets_impl
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(Exception) as excinfo:
             fetch_dify_datasets_impl(
                 dify_api_base="https://dify.example.com",
                 api_key=None
             )
 
-        assert "api_key is required and must be a non-empty string" in str(
-            excinfo.value)
+        assert hasattr(excinfo.value, 'error_code')
+        assert excinfo.value.error_code.value == ErrorCode.DIFY_CONFIG_INVALID.value
 
     def test_fetch_dify_datasets_impl_invalid_api_key_empty_string(self):
-        """Test ValueError when api_key is empty string."""
+        """Test AppException when api_key is empty string."""
         from backend.services.dify_service import fetch_dify_datasets_impl
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(Exception) as excinfo:
             fetch_dify_datasets_impl(
                 dify_api_base="https://dify.example.com",
                 api_key=""
             )
 
-        assert "api_key is required and must be a non-empty string" in str(
-            excinfo.value)
+        assert hasattr(excinfo.value, 'error_code')
+        assert excinfo.value.error_code.value == ErrorCode.DIFY_CONFIG_INVALID.value
 
     def test_fetch_dify_datasets_impl_invalid_api_key_not_string(self):
-        """Test ValueError when api_key is not a string."""
+        """Test AppException when api_key is not a string."""
         from backend.services.dify_service import fetch_dify_datasets_impl
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(Exception) as excinfo:
             fetch_dify_datasets_impl(
                 dify_api_base="https://dify.example.com",
                 api_key=[]  # list is not a string
             )
 
-        assert "api_key is required and must be a non-empty string" in str(
-            excinfo.value)
+        assert hasattr(excinfo.value, 'error_code')
+        assert excinfo.value.error_code.value == ErrorCode.DIFY_CONFIG_INVALID.value
 
     def test_fetch_dify_datasets_impl_url_normalization_trailing_slash(self):
         """Test that trailing slash is removed from API base URL."""
@@ -695,3 +700,154 @@ class TestFetchDifyDatasetsImpl:
         assert "/v1/v1" not in called_url, f"URL duplication detected: {called_url}"
         # Verify URL ends with /v1/datasets
         assert called_url.endswith("/v1/datasets")
+
+    def test_fetch_dify_datasets_impl_url_without_protocol(self):
+        """Test ValueError when dify_api_base doesn't start with http:// or https://."""
+        from backend.services.dify_service import fetch_dify_datasets_impl
+
+        with pytest.raises(Exception) as excinfo:
+            fetch_dify_datasets_impl(
+                dify_api_base="dify.example.com",
+                api_key="test-api-key"
+            )
+
+        assert "must start with http:// or https://" in str(excinfo.value)
+
+    def test_fetch_dify_datasets_impl_url_with_ftp_protocol(self):
+        """Test ValueError when dify_api_base uses unsupported protocol."""
+        from backend.services.dify_service import fetch_dify_datasets_impl
+
+        with pytest.raises(Exception) as excinfo:
+            fetch_dify_datasets_impl(
+                dify_api_base="ftp://dify.example.com",
+                api_key="test-api-key"
+            )
+
+        assert "must start with http:// or https://" in str(excinfo.value)
+
+    def test_fetch_dify_datasets_impl_http_401_auth_error(self):
+        """Test that HTTP 401 maps to DIFY_AUTH_ERROR."""
+        mock_response = MagicMock()
+        # Create a proper mock response object with status_code as a real integer
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401 Unauthorized",
+            request=MagicMock(),
+            response=type('MockResponse', (), {'status_code': 401})()
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            # Catch Exception and verify it's an AppException with DIFY_AUTH_ERROR
+            with pytest.raises(Exception) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert hasattr(excinfo.value, 'error_code')
+            assert excinfo.value.error_code.value == ErrorCode.DIFY_AUTH_ERROR.value
+
+    def test_fetch_dify_datasets_impl_http_403_auth_error(self):
+        """Test that HTTP 403 maps to DIFY_AUTH_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "403 Forbidden",
+            request=MagicMock(),
+            response=type('MockResponse', (), {'status_code': 403})()
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            with pytest.raises(Exception) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert hasattr(excinfo.value, 'error_code')
+            assert excinfo.value.error_code.value == ErrorCode.DIFY_AUTH_ERROR.value
+
+    def test_fetch_dify_datasets_impl_http_429_rate_limit(self):
+        """Test that HTTP 429 maps to DIFY_RATE_LIMIT."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "429 Too Many Requests",
+            request=MagicMock(),
+            response=type('MockResponse', (), {'status_code': 429})()
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            with pytest.raises(Exception) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert hasattr(excinfo.value, 'error_code')
+            assert excinfo.value.error_code.value == ErrorCode.DIFY_RATE_LIMIT.value
+
+    def test_fetch_dify_datasets_impl_http_500_service_error(self):
+        """Test that HTTP 500 maps to DIFY_SERVICE_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500 Internal Server Error",
+            request=MagicMock(),
+            response=type('MockResponse', (), {'status_code': 500})()
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            with pytest.raises(Exception) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert hasattr(excinfo.value, 'error_code')
+            assert excinfo.value.error_code.value == ErrorCode.DIFY_SERVICE_ERROR.value
+
+    def test_fetch_dify_datasets_impl_http_404_service_error(self):
+        """Test that HTTP 404 maps to DIFY_SERVICE_ERROR."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404 Not Found",
+            request=MagicMock(),
+            response=type('MockResponse', (), {'status_code': 404})()
+        )
+
+        mock_client = _create_mock_client(mock_response)
+
+        with patch('backend.services.dify_service.http_client_manager') as mock_manager:
+            mock_manager.get_sync_client.return_value = mock_client
+
+            from backend.services.dify_service import fetch_dify_datasets_impl
+
+            with pytest.raises(Exception) as excinfo:
+                fetch_dify_datasets_impl(
+                    dify_api_base="https://dify.example.com",
+                    api_key="test-api-key"
+                )
+
+            assert hasattr(excinfo.value, 'error_code')
+            assert excinfo.value.error_code.value == ErrorCode.DIFY_SERVICE_ERROR.value
