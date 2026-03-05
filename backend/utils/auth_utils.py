@@ -9,7 +9,17 @@ import jwt
 from fastapi import Request
 from supabase import create_client
 
-from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_URL, SUPABASE_KEY, SERVICE_ROLE_KEY, DEBUG_JWT_EXPIRE_SECONDS, LANGUAGE
+from consts.const import (
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    IS_SPEED_MODE,
+    SUPABASE_JWT_SECRET,
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    SERVICE_ROLE_KEY,
+    DEBUG_JWT_EXPIRE_SECONDS,
+    LANGUAGE,
+)
 from consts.exceptions import LimitExceededError, SignatureValidationError, UnauthorizedError
 from database.user_tenant_db import get_user_tenant_by_user_id
 
@@ -272,7 +282,7 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
 
 def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
     """
-    Extract user ID from JWT token and validate expiration
+    Extract user ID from JWT token after verifying signature and expiration.
 
     Args:
         authorization: Authorization header value
@@ -281,34 +291,39 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
         Optional[str]: User ID, return None if parsing fails
 
     Raises:
-        UnauthorizedError: If token is invalid or expired
+        UnauthorizedError: If token is invalid, expired, or signature verification fails
     """
+    if not SUPABASE_JWT_SECRET:
+        logging.error("SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT")
+        raise UnauthorizedError("JWT verification is not configured")
+
     try:
         # Format authorization header
         token = authorization.replace("Bearer ", "") if authorization.startswith(
             "Bearer ") else authorization
 
-        # Decode JWT token (without signature verification, only parse content)
-        decoded = jwt.decode(token, options={"verify_signature": False})
-
-        # Validate token expiration
-        exp = decoded.get("exp")
-        if exp is not None:
-            import time
-            current_time = int(time.time())
-            if current_time >= exp:
-                logging.warning(f"Token expired: exp={exp}, current={current_time}, diff={current_time - exp}s")
-                raise UnauthorizedError("Token has expired")
+        # Decode and verify JWT (signature + expiration)
+        decoded = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_exp": True},
+        )
 
         # Extract user ID from JWT claims
         user_id = decoded.get("sub")
 
         return user_id
     except jwt.ExpiredSignatureError:
-        logging.error("Token signature has expired")
+        logging.warning("Token expired")
         raise UnauthorizedError("Token has expired")
+    except jwt.InvalidSignatureError:
+        logging.warning("JWT signature verification failed")
+        raise UnauthorizedError("Invalid or expired authentication token")
+    except jwt.InvalidTokenError as e:
+        logging.warning(f"Invalid JWT: {e}")
+        raise UnauthorizedError("Invalid or expired authentication token")
     except UnauthorizedError:
-        # Re-raise Unaut horizedError without wrapping
         raise
     except Exception as e:
         logging.error(f"Failed to extract user ID from token: {str(e)}")
