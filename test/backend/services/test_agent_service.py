@@ -2494,14 +2494,14 @@ async def test_list_all_agent_info_impl_creator_can_see_own_agent_without_group_
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
 
     # Should see:
+    # - Agent 1: created by current_user (creators can always see their own agents, even without group overlap)
     # - Agent 3: groups overlap (1 is in both user's groups and agent's groups)
     # Should NOT see:
-    # - Agent 1: created by current_user but groups don't overlap (no group overlap hides it regardless of creator)
     # - Agent 2: not created by current_user AND groups don't overlap
-    assert len(result) == 1
+    assert len(result) == 2
     agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
     assert 3 in agent_ids, "Agent 3 should be visible because groups overlap"
-    assert 1 not in agent_ids, "Agent 1 should be filtered out (no group overlap, even though user is creator)"
     assert 2 not in agent_ids, "Agent 2 should be filtered out (not creator and no group overlap)"
 
 
@@ -8027,8 +8027,10 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_no_group
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
 
-    # Creator cannot see their own agent if no group overlap (no group overlap hides it regardless of creator)
-    assert len(result) == 0
+    # Creator can see their own agent even if no group overlap and permission is PRIVATE
+    assert len(result) == 1
+    agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
 
 
 @pytest.mark.asyncio
@@ -8450,7 +8452,9 @@ async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
 
-    # Creator cannot see their own agent if no group overlap (no group overlap hides it regardless of creator)
-    assert len(result) == 0
+    # Creator can see their own agent even if no group overlap
+    assert len(result) == 1
+    agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
 
 # Deprecated tests for mark_agents_as_new_impl have been removed as the API is cleaned up.
