@@ -35,13 +35,7 @@ class TokenPonyModelProvider(AbstractModelProvider):
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
             ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
-            # response = requests.get(url, headers=headers)
-            # all_models=[]
-            # if response.status_code == 200:
-            #     data = response.json()
-            #     # 注意：OpenAI 标准返回是在 "data" 字段下
-            #     all_models=data.get("data", [])
-            # Fetch all models asynchronously
+
             async with httpx.AsyncClient(http2=True) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
