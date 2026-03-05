@@ -78,7 +78,7 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     categorized_models['reranker'].append(cleaned_model)
                 #2. embedding
                 elif 'embedding' in m_id or m_id.startswith('bge-'):
-                    cleaned_model.update({"model_tag": "embedding", "model_type": "embedding", "max_tokens": 0})
+                    cleaned_model.update({"model_tag": "embedding", "model_type": "embedding"})
                     categorized_models['embedding'].append(cleaned_model)
 
                 # 3. STT (Speech-to-Text / Audio understanding)
