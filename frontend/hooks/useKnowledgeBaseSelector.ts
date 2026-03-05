@@ -2,10 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import log from "@/lib/logger";
+import { showErrorToUser } from "@/const/errorMessageI18n";
 
 /**
  * Query key factory for knowledge bases
@@ -34,6 +36,8 @@ export function useKnowledgeBasesForToolConfig(
     apiKey?: string;
   }
 ) {
+  const { t } = useTranslation();
+
   // Support both difyConfig and datamateConfig naming conventions
   const difyConfig = config;
   const datamateConfig = config;
@@ -94,8 +98,10 @@ export function useKnowledgeBasesForToolConfig(
               difyConfig.serverUrl,
               difyConfig.apiKey
             );
-          } catch (error) {
+          } catch (error: any) {
             log.error("Failed to fetch Dify knowledge bases:", error);
+            // Show i18n error message to user
+            showErrorToUser(error, t);
             kbs = [];
           }
         } else {
@@ -130,6 +136,7 @@ export function useKnowledgeBasesForToolConfig(
  * Call this when the user navigates to the agent config page
  */
 export function usePrefetchKnowledgeBases() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const prefetchKnowledgeBases = useCallback(
@@ -194,8 +201,10 @@ export function usePrefetchKnowledgeBases() {
                   difyConfig.serverUrl,
                   difyConfig.apiKey
                 );
-              } catch (error) {
+              } catch (error: any) {
                 log.error("Failed to prefetch Dify knowledge bases:", error);
+                // Show i18n error message to user
+                showErrorToUser(error, t);
                 kbs = [];
               }
             } else {
@@ -225,6 +234,7 @@ export function usePrefetchKnowledgeBases() {
  * Hook for syncing knowledge bases by tool type
  */
 export function useSyncKnowledgeBases() {
+  const { t } = useTranslation();
   const [isSyncing, setIsSyncing] = useState<string | null>(null);
 
   const syncKnowledgeBases = useCallback(
@@ -261,6 +271,10 @@ export function useSyncKnowledgeBases() {
             // Default sync behavior - sync Nexent only
             await knowledgeBaseService.getKnowledgeBasesInfo(false, false);
         }
+      } catch (error: any) {
+        log.error("Failed to sync knowledge bases:", error);
+        // Show i18n error message to user
+        showErrorToUser(error, t);
       } finally {
         setIsSyncing(null);
       }

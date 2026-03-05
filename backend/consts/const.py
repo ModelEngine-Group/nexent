@@ -40,6 +40,9 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
+# JWT secret for verifying Supabase-signed access tokens.
+# GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
+SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
 # ===== To be migrated to frontend configuration =====
@@ -71,6 +74,7 @@ CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"
 PERMISSION_EDIT = "EDIT"
+PERMISSION_PRIVATE = "PRIVATE"
 
 
 # Deployment Version Configuration
