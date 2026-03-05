@@ -209,6 +209,54 @@ def test_extract_user_id_invalid_signature_raises(monkeypatch):
         au._extract_user_id_from_jwt_token("Bearer " + token)
 
 
+def test_extract_user_id_expired_token_raises(monkeypatch):
+    """Test that expired token raises UnauthorizedError (ExpiredSignatureError path)"""
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    # Token expired 1 hour ago
+    token = au.generate_test_jwt("user-xyz", expires_in=-3600)
+
+    with pytest.raises(UnauthorizedError, match="Token has expired"):
+        au._extract_user_id_from_jwt_token("Bearer " + token)
+
+
+def test_extract_user_id_malformed_token_raises(monkeypatch):
+    """Test that malformed JWT raises UnauthorizedError (InvalidTokenError path)"""
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    with pytest.raises(UnauthorizedError, match="Invalid or expired"):
+        au._extract_user_id_from_jwt_token("Bearer invalid.jwt.here")
+
+
+def test_extract_user_id_unauthorized_error_re_raised(monkeypatch):
+    """Test that UnauthorizedError from inner code is re-raised without wrapping"""
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "any-secret")
+
+    def mock_decode_raises_unauthorized(*args, **kwargs):
+        raise UnauthorizedError("Inner auth error")
+
+    # Patch only jwt.decode to preserve real exception classes for except clauses
+    monkeypatch.setattr(au.jwt, "decode", mock_decode_raises_unauthorized)
+
+    with pytest.raises(UnauthorizedError, match="Inner auth error"):
+        au._extract_user_id_from_jwt_token("Bearer fake-token")
+
+
+def test_extract_user_id_generic_exception_raises(monkeypatch):
+    """Test that generic Exception during decode raises UnauthorizedError"""
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    def mock_decode_raises_value_error(*args, **kwargs):
+        raise ValueError("Unexpected decode error")
+
+    # Patch only jwt.decode to preserve real exception classes for except clauses
+    monkeypatch.setattr(au.jwt, "decode", mock_decode_raises_value_error)
+
+    with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
+        au._extract_user_id_from_jwt_token("Bearer any-token")
+
+
 def test_get_current_user_id_speed_mode(monkeypatch):
     monkeypatch.setattr(au, "IS_SPEED_MODE", True)
     uid, tid = au.get_current_user_id("Bearer anything")
