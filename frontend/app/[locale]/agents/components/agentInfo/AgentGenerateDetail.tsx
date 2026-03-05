@@ -68,7 +68,7 @@ export default function AgentGenerateDetail({
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
   const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
 
   // Agent list for name uniqueness validation (use local data instead of API call)
   const { agents: agentList } = useAgentList(tenantId);

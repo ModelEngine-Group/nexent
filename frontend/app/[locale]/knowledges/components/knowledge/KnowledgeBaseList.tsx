@@ -83,7 +83,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const tenantId = user?.tenantId || null;
 
   // Fetch groups for group name mapping
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // Create group name mapping from group_id to group_name

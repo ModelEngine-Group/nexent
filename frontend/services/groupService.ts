@@ -26,12 +26,13 @@ export interface UpdateGroupRequest {
 
 export interface GroupListResponse {
   data: Group[];
-  pagination: {
+  pagination?: {
     page: number;
     page_size: number;
     total: number;
     total_pages: number;
   };
+  total?: number;
   message: string;
 }
 
@@ -51,30 +52,37 @@ export interface CreateGroupResponse {
 
 /**
  * List groups for a specific tenant with pagination
+ * If page and pageSize are not provided, returns all groups
  */
 export async function listGroups(
   tenantId: string,
-  page: number = 1,
-  pageSize: number = 20
-): Promise<{ groups: Group[]; total: number; totalPages: number }> {
+  page?: number,
+  pageSize?: number
+): Promise<{ groups: Group[]; total: number; totalPages?: number }> {
   try {
+    const requestBody: any = {
+      tenant_id: tenantId,
+      sort_by: "created_at",
+      sort_order: "desc",
+    };
+
+    // Only include pagination parameters if both are provided
+    if (page !== undefined && pageSize !== undefined) {
+      requestBody.page = page;
+      requestBody.page_size = pageSize;
+    }
+
     // Use backend's /groups/list endpoint with tenant_id in request body
     const response = await fetchWithAuth(API_ENDPOINTS.groups.list, {
       method: "POST",
-      body: JSON.stringify({
-        tenant_id: tenantId,
-        page,
-        page_size: pageSize,
-        sort_by: "created_at",
-        sort_order: "desc",
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const result: GroupListResponse = await response.json();
     return {
       groups: result.data,
-      total: result.pagination.total,
-      totalPages: result.pagination.total_pages,
+      total: result.pagination?.total || result.total || 0,
+      totalPages: result.pagination?.total_pages,
     };
   } catch (error) {
     if (error instanceof ApiError) {
