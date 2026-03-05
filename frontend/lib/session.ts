@@ -1,10 +1,16 @@
 /**
  * Session utilities
  * Pure functions for session management - no React dependencies
+ *
+ * After HttpOnly cookie migration:
+ * - Tokens (access_token, refresh_token) are stored in HttpOnly cookies by server.js
+ * - expires_at is stored in a non-HttpOnly cookie readable by frontend JS
+ * - User info is stored in localStorage (non-sensitive display data)
  */
 
-import { STORAGE_KEYS } from "@/const/auth";
+import { COOKIE_NAMES, STORAGE_KEYS } from "@/const/auth";
 import { Session } from "@/types/auth";
+import { User } from "@/types/auth";
 import { authEventUtils } from "@/lib/authEvents";
 import log from "@/lib/logger";
 
@@ -12,52 +18,114 @@ import log from "@/lib/logger";
 let isHandlingSessionExpired = false;
 
 /**
- * Save session to local storage
+ * Read a cookie value by name from document.cookie
  */
-export const saveSessionToStorage = (session: Session): void => {
+function getCookieValue(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.split("=")[1]) : null;
+}
+
+/**
+ * Clear a cookie by setting it to expire immediately
+ */
+function clearCookie(name: string): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=; path=/; max-age=0`;
+}
+
+/**
+ * Get token expiry timestamp from the non-HttpOnly cookie
+ */
+export const getTokenExpiresAt = (): number | null => {
+  const value = getCookieValue(COOKIE_NAMES.EXPIRES_AT);
+  if (!value) return null;
+  const num = Number(value);
+  return isNaN(num) ? null : num;
+};
+
+/**
+ * Check if an authenticated session exists (cookie-based)
+ */
+export const hasAuthCookies = (): boolean => {
+  return getTokenExpiresAt() !== null;
+};
+
+/**
+ * Save user info to localStorage (non-sensitive display data only)
+ */
+export const saveUserToStorage = (user: User): void => {
   if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+    localStorage.setItem(STORAGE_KEYS.USER_INFO, JSON.stringify(user));
   }
 };
 
 /**
- * Remove session from local storage
+ * Get user info from localStorage
  */
-export const removeSessionFromStorage = (): void => {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem(STORAGE_KEYS.SESSION);
-  }
-};
-
-/**
- * Get session from local storage
- */
-export const getSessionFromStorage = (): Session | null => {
+export const getUserFromStorage = (): User | null => {
   try {
-    const storedSession =
+    const stored =
       typeof window !== "undefined"
-        ? localStorage.getItem(STORAGE_KEYS.SESSION)
+        ? localStorage.getItem(STORAGE_KEYS.USER_INFO)
         : null;
-    if (!storedSession) return null;
-
-    return JSON.parse(storedSession);
+    if (!stored) return null;
+    return JSON.parse(stored);
   } catch (error) {
-    log.error("Failed to parse session info:", error);
+    log.error("Failed to parse user info:", error);
     return null;
   }
 };
 
 /**
- * Check if session is valid (exists and not expired)
+ * Remove user info from localStorage
+ */
+export const removeUserFromStorage = (): void => {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem(STORAGE_KEYS.USER_INFO);
+    localStorage.removeItem(STORAGE_KEYS.SESSION); // clean up legacy key
+  }
+};
+
+/**
+ * Build a Session object from available sources.
+ * Tokens are no longer accessible; only expires_at is available from cookie.
+ */
+export const getSessionFromStorage = (): Session | null => {
+  const expiresAt = getTokenExpiresAt();
+  if (expiresAt === null) return null;
+  return { expires_at: expiresAt };
+};
+
+/**
+ * Save session to storage — kept for backward compatibility.
+ * In the new model only expires_at is meaningful, and it's set via cookie by server.js.
+ * This function now saves user info if provided on the session object.
+ */
+export const saveSessionToStorage = (session: Session): void => {
+  // No-op for tokens — they are managed by server.js HttpOnly cookies.
+  // The expires_at cookie is also set by server.js.
+};
+
+/**
+ * Remove session (clear the non-HttpOnly expires_at cookie and localStorage user info)
+ */
+export const removeSessionFromStorage = (): void => {
+  clearCookie(COOKIE_NAMES.EXPIRES_AT);
+  removeUserFromStorage();
+};
+
+/**
+ * Check if session is valid (cookie exists and not expired)
  */
 export const checkSessionValid = (): boolean => {
-  const session = getSessionFromStorage();
-  if (!session?.access_token || !session?.expires_at) {
-    return false;
-  }
+  const expiresAt = getTokenExpiresAt();
+  if (expiresAt === null) return false;
 
   const now = Date.now();
-  return session.expires_at * 1000 > now;
+  return expiresAt * 1000 > now;
 };
 
 /**
@@ -72,7 +140,6 @@ export const checkSessionExpired = (): boolean => {
  * Unified handling for session expiration with duplicate prevention
  */
 export const handleSessionExpired = (): void => {
-  // Prevent duplicate triggers
   if (isHandlingSessionExpired) {
     return;
   }
@@ -81,13 +148,10 @@ export const handleSessionExpired = (): void => {
   log.info("Session expired, clearing and emitting event");
   removeSessionFromStorage();
 
-  // Emit event asynchronously to ensure isAuthenticated state has been updated
-  // This fixes the closure trap where showSessionExpiredModal captures stale isAuthenticated value
   setTimeout(() => {
     authEventUtils.emitSessionExpired();
   }, 0);
 
-  // Reset flag after 300ms to allow future triggers
   setTimeout(() => {
     isHandlingSessionExpired = false;
   }, 300);
