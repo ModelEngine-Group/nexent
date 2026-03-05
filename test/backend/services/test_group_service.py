@@ -122,7 +122,7 @@ def test_get_group_info_string_group_ids(mock_query_groups):
 
 @patch('backend.services.group_service.count_group_users')
 @patch('backend.services.group_service.query_groups_by_tenant')
-def test_get_groups_by_tenant_success(mock_query_groups_by_tenant, mock_count_users):
+def test_get_groups_by_tenant_success_with_pagination(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant with pagination"""
     mock_result = {
         "groups": [
@@ -132,17 +132,17 @@ def test_get_groups_by_tenant_success(mock_query_groups_by_tenant, mock_count_us
         "total": 2
     }
     mock_query_groups_by_tenant.return_value = mock_result
-    # Mock count_group_users to return 3 for each group
-    mock_count_users.return_value = 3
+    # Mock count_group_users to return different counts for each group
+    mock_count_users.side_effect = [5, 3]
 
-    result = get_groups_by_tenant("test_tenant", page=1, page_size=10)
+    result = get_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="desc")
 
     assert result["total"] == 2
     assert len(result["groups"]) == 2
     assert result["groups"][0]["group_id"] == 1
     assert result["groups"][0]["group_name"] == "Group 1"
     assert result["groups"][0]["group_description"] == "Desc 1"
-    assert result["groups"][0]["user_count"] == 3  # Check user count
+    assert result["groups"][0]["user_count"] == 5  # Check user count
     assert result["groups"][1]["group_id"] == 2
     assert result["groups"][1]["group_name"] == "Group 2"
     assert result["groups"][1]["group_description"] == "Desc 2"
@@ -150,6 +150,93 @@ def test_get_groups_by_tenant_success(mock_query_groups_by_tenant, mock_count_us
     mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10, "created_at", "desc")
     # count_group_users should be called for each group
     assert mock_count_users.call_count == 2
+
+
+@patch('backend.services.group_service.count_group_users')
+@patch('backend.services.group_service.query_groups_by_tenant')
+def test_get_groups_by_tenant_success_without_pagination(mock_query_groups_by_tenant, mock_count_users):
+    """Test getting groups by tenant without pagination (returns all data)"""
+    mock_result = {
+        "groups": [
+            {"group_id": 1, "group_name": "Group 1", "group_description": "Desc 1"},
+            {"group_id": 2, "group_name": "Group 2", "group_description": "Desc 2"},
+            {"group_id": 3, "group_name": "Group 3", "group_description": "Desc 3"}
+        ],
+        "total": 3
+    }
+    mock_query_groups_by_tenant.return_value = mock_result
+    mock_count_users.side_effect = [5, 3, 7]
+
+    result = get_groups_by_tenant("test_tenant", page=None, page_size=None)
+
+    assert result["total"] == 3
+    assert len(result["groups"]) == 3
+    assert result["groups"][0]["user_count"] == 5
+    assert result["groups"][1]["user_count"] == 3
+    assert result["groups"][2]["user_count"] == 7
+    mock_query_groups_by_tenant.assert_called_once_with("test_tenant", None, None, "created_at", "desc")
+    assert mock_count_users.call_count == 3
+
+
+@patch('backend.services.group_service.count_group_users')
+@patch('backend.services.group_service.query_groups_by_tenant')
+def test_get_groups_by_tenant_success_with_asc_sort(mock_query_groups_by_tenant, mock_count_users):
+    """Test getting groups by tenant with ascending sort order"""
+    mock_result = {
+        "groups": [
+            {"group_id": 1, "group_name": "Group 1", "group_description": "Desc 1"}
+        ],
+        "total": 1
+    }
+    mock_query_groups_by_tenant.return_value = mock_result
+    mock_count_users.return_value = 5
+
+    result = get_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="asc")
+
+    assert result["total"] == 1
+    assert len(result["groups"]) == 1
+    assert result["groups"][0]["user_count"] == 5
+    mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10, "created_at", "asc")
+    assert mock_count_users.call_count == 1
+
+
+@patch('backend.services.group_service.count_group_users')
+@patch('backend.services.group_service.query_groups_by_tenant')
+def test_get_groups_by_tenant_empty_list(mock_query_groups_by_tenant, mock_count_users):
+    """Test getting groups by tenant when no groups exist"""
+    mock_result = {
+        "groups": [],
+        "total": 0
+    }
+    mock_query_groups_by_tenant.return_value = mock_result
+
+    result = get_groups_by_tenant("test_tenant", page=1, page_size=10)
+
+    assert result["total"] == 0
+    assert len(result["groups"]) == 0
+    mock_query_groups_by_tenant.assert_called_once_with("test_tenant", 1, 10, "created_at", "desc")
+    # count_group_users should not be called when there are no groups
+    assert mock_count_users.call_count == 0
+
+
+@patch('backend.services.group_service.count_group_users')
+@patch('backend.services.group_service.query_groups_by_tenant')
+def test_get_groups_by_tenant_with_missing_group_id(mock_query_groups_by_tenant, mock_count_users):
+    """Test getting groups by tenant when group_id is missing in result"""
+    mock_result = {
+        "groups": [
+            {"group_name": "Group 1", "group_description": "Desc 1"}  # Missing group_id
+        ],
+        "total": 1
+    }
+    mock_query_groups_by_tenant.return_value = mock_result
+
+    result = get_groups_by_tenant("test_tenant", page=1, page_size=10)
+
+    assert result["total"] == 1
+    assert len(result["groups"]) == 1
+    assert result["groups"][0]["user_count"] == 0  # Should default to 0 when group_id is missing
+    assert mock_count_users.call_count == 0  # Should not be called when group_id is missing
 
 
 

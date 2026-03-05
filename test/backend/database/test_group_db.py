@@ -276,8 +276,8 @@ def test_get_group_by_id_invalid_type():
         query_groups(1.5)  # float is not supported
 
 
-def test_get_groups_by_tenant_success(monkeypatch, mock_session):
-    """Test retrieving groups by tenant"""
+def test_get_groups_by_tenant_success_with_pagination(monkeypatch, mock_session):
+    """Test retrieving groups by tenant with pagination"""
     session, query = mock_session
 
     mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
@@ -319,12 +319,253 @@ def test_get_groups_by_tenant_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
 
-    result = query_groups_by_tenant("test_tenant")
+    result = query_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="desc")
 
     assert result["total"] == 2
     assert len(result["groups"]) == 2
     assert result["groups"][0]["group_name"] == "group1"
     assert result["groups"][1]["group_name"] == "group2"
+    # Verify pagination was applied
+    mock_paginated_order_by.offset.assert_called_once_with(0)  # (page-1) * page_size = (1-1) * 10 = 0
+    mock_paginated_offset.limit.assert_called_once_with(10)
+
+
+def test_get_groups_by_tenant_success_without_pagination(monkeypatch, mock_session):
+    """Test retrieving groups by tenant without pagination (returns all data)"""
+    session, query = mock_session
+
+    mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
+    mock_group2 = MockTenantGroupInfo(group_id=2, group_name="group2")
+    mock_group3 = MockTenantGroupInfo(group_id=3, group_name="group3")
+
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 3
+
+    # Mock the query chain without pagination
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = [mock_group1, mock_group2, mock_group3]
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", page=None, page_size=None)
+
+    assert result["total"] == 3
+    assert len(result["groups"]) == 3
+    assert result["groups"][0]["group_name"] == "group1"
+    assert result["groups"][1]["group_name"] == "group2"
+    assert result["groups"][2]["group_name"] == "group3"
+    # Verify .all() was called (no pagination)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_groups_by_tenant_with_asc_sort(monkeypatch, mock_session):
+    """Test retrieving groups by tenant with ascending sort order"""
+    session, query = mock_session
+
+    mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
+    mock_group2 = MockTenantGroupInfo(group_id=2, group_name="group2")
+
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 2
+
+    # Mock the paginated query chain
+    mock_paginated_filter = MagicMock()
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = [mock_group1, mock_group2]
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="asc")
+
+    assert result["total"] == 2
+    assert len(result["groups"]) == 2
+    # Verify order_by was called with asc
+    mock_paginated_filter.order_by.assert_called_once()
+
+
+def test_get_groups_by_tenant_with_only_page_none(monkeypatch, mock_session):
+    """Test retrieving groups by tenant when page is None but page_size is provided"""
+    session, query = mock_session
+
+    mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
+    mock_group2 = MockTenantGroupInfo(group_id=2, group_name="group2")
+
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 2
+
+    # Mock the query chain without pagination (since page is None)
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = [mock_group1, mock_group2]
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", page=None, page_size=10)
+
+    assert result["total"] == 2
+    assert len(result["groups"]) == 2
+    # Verify .all() was called (no pagination when page is None)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_groups_by_tenant_with_only_page_size_none(monkeypatch, mock_session):
+    """Test retrieving groups by tenant when page_size is None but page is provided"""
+    session, query = mock_session
+
+    mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
+    mock_group2 = MockTenantGroupInfo(group_id=2, group_name="group2")
+
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 2
+
+    # Mock the query chain without pagination (since page_size is None)
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = [mock_group1, mock_group2]
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", page=1, page_size=None)
+
+    assert result["total"] == 2
+    assert len(result["groups"]) == 2
+    # Verify .all() was called (no pagination when page_size is None)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_groups_by_tenant_with_empty_result(monkeypatch, mock_session):
+    """Test retrieving groups by tenant when no groups exist"""
+    session, query = mock_session
+
+    # Mock the count query
+    mock_count_filter = MagicMock()
+    mock_count_filter.count.return_value = 0
+
+    # Mock the query chain
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = []
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", page=1, page_size=10)
+
+    assert result["total"] == 0
+    assert len(result["groups"]) == 0
 
 
 def test_create_group_success(monkeypatch, mock_session):
@@ -591,8 +832,8 @@ def test_get_group_user_count_success(monkeypatch, mock_session):
     assert result == 5
 
 
-def test_query_groups_by_tenant_with_pagination(monkeypatch, mock_session):
-    """Test retrieving groups by tenant with pagination"""
+def test_query_groups_by_tenant_with_pagination_page_2(monkeypatch, mock_session):
+    """Test retrieving groups by tenant with pagination (page 2)"""
     session, query = mock_session
 
     mock_group1 = MockTenantGroupInfo(group_id=1, group_name="group1")
@@ -634,7 +875,7 @@ def test_query_groups_by_tenant_with_pagination(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
 
-    result = query_groups_by_tenant("test_tenant", page=2, page_size=10)
+    result = query_groups_by_tenant("test_tenant", page=2, page_size=10, sort_by="created_at", sort_order="desc")
 
     # Verify pagination parameters were used correctly
     mock_paginated_order_by.offset.assert_called_with(10)  # (page-1) * page_size = (2-1) * 10 = 10

@@ -18,6 +18,7 @@ export interface UpdateUserRequest {
 
 export interface UserListResponse {
   data: User[];
+  total?: number; // Root-level total for non-paginated responses
   pagination?: {
     page: number;
     page_size: number;
@@ -39,31 +40,39 @@ export interface CreateUserResponse {
 
 /**
  * List users for a specific tenant
+ * If page and pageSize are not provided, returns all users
  */
 export async function listUsers(
   tenantId: string | null,
-  page: number = 1,
-  pageSize: number = 20
-): Promise<{ users: User[]; total: number; totalPages: number }> {
-  if (!tenantId) return { users: [], total: 0, totalPages: 0 };
+  page?: number,
+  pageSize?: number
+): Promise<{ users: User[]; total: number; totalPages?: number }> {
+  if (!tenantId) return { users: [], total: 0 };
 
   try {
+    const requestBody: any = {
+      tenant_id: tenantId,
+      sort_by: "created_at",
+      sort_order: "desc",
+    };
+
+    // Only include pagination parameters if both are provided
+    if (page !== undefined && pageSize !== undefined) {
+      requestBody.page = page;
+      requestBody.page_size = pageSize;
+    }
+
     const response = await fetchWithAuth(API_ENDPOINTS.users.list, {
       method: "POST",
-      body: JSON.stringify({
-        tenant_id: tenantId,
-        page,
-        page_size: pageSize,
-        sort_by: "created_at",
-        sort_order: "desc",
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const result: UserListResponse = await response.json();
     return {
       users: result.data,
-      total: result.pagination?.total || 0,
-      totalPages: result.pagination?.total_pages || 0,
+      // Support both paginated (pagination.total) and non-paginated (root total) responses
+      total: result.pagination?.total ?? result.total ?? 0,
+      totalPages: result.pagination?.total_pages,
     };
   } catch (error) {
     if (error instanceof ApiError) {

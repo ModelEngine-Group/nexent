@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { modelService } from "@/services/modelService";
 import { ModelOption } from "@/types/modelConfig";
 import { useMemo } from "react";
-import { ConfigStore } from "@/lib/config";
+import { useConfig } from "@/hooks/useConfig";
 
 export function useModelList(options?: { enabled?: boolean; staleTime?: number }) {
 	const queryClient = useQueryClient();
@@ -48,12 +48,12 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
 		return models.filter((model) => model.type === "vlm" && model.connect_status === "available");
 	}, [models]);
 
+  const { modelConfig: tenantModelConfig } = useConfig();
+
   // Get default LLM model from tenant configuration
   const defaultLlmModel = useMemo(() => {
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
-      const defaultModelName = modelConfig.llm?.modelName || modelConfig.llm?.displayName;
+      const defaultModelName = tenantModelConfig?.llm?.modelName || tenantModelConfig?.llm?.displayName;
 
       if (defaultModelName) {
         // First try to find by name in available LLM models (should be available)
@@ -78,10 +78,9 @@ export function useModelList(options?: { enabled?: boolean; staleTime?: number }
       // If no default configured, return undefined
       return undefined;
     } catch (error) {
-      // Return undefined if config access fails
       return undefined;
     }
-  }, [models, availableLlmModels]);
+  }, [models, availableLlmModels, tenantModelConfig]);
 
 
 	return {
