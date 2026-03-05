@@ -120,10 +120,14 @@ consts_provider_mod = types.ModuleType("consts.provider")
 class _ProviderEnum:
     SILICON = _EnumItem("silicon")
     MODELENGINE = _EnumItem("modelengine")
+    DASHSCOPE = _EnumItem("dashscope")
+    TOKENPONY = _EnumItem("tokenpony")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
 consts_provider_mod.SILICON_BASE_URL = "http://silicon.test"
+consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 sys.modules["consts.provider"] = consts_provider_mod
 
 # Stub services.model_provider_service used by service
