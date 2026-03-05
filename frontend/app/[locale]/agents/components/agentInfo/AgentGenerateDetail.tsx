@@ -20,16 +20,9 @@ import type { TabsProps } from "antd";
 import { Zap, Maximize2 } from "lucide-react";
 
 import log from "@/lib/logger";
-import { EditableAgent } from "@/stores/agentConfigStore";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
-import { configService } from "@/services/configService";
-import { ConfigStore } from "@/lib/config";
+import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
-  checkAgentName,
-  checkAgentDisplayName,
-} from "@/services/agentConfigService";
-import {
-  NAME_CHECK_STATUS,
   GENERATE_PROMPT_STREAM_TYPES,
 } from "@/const/agentConfig";
 import { generatePromptStream } from "@/services/promptService";
@@ -75,11 +68,24 @@ export default function AgentGenerateDetail({
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
   const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
+
+  // Agent list for name uniqueness validation (use local data instead of API call)
+  const { agents: agentList } = useAgentList(tenantId);
   const groups = groupData?.groups || [];
 
   // State management
   const [activeTab, setActiveTab] = useState<string>("agent-info");
+
+  // Local state to track generated content (fix for stream data not syncing with form state)
+  const [generatedContent, setGeneratedContent] = useState({
+    dutyPrompt: "",
+    constraintPrompt: "",
+    fewShotsPrompt: "",
+    agentName: "",
+    agentDescription: "",
+    agentDisplayName: "",
+  });
 
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
@@ -111,26 +117,6 @@ export default function AgentGenerateDetail({
     );
   };
 
-
-  // Ensure tenant config is loaded for default model selection
-  useEffect(() => {
-    const loadConfigIfNeeded = async () => {
-      try {
-        // Check if config is already loaded
-        const configStore = ConfigStore.getInstance();
-        const modelConfig = configStore.getModelConfig();
-
-        // If no LLM model is configured, try to load config from backend
-        if (!modelConfig.llm?.modelName && !modelConfig.llm?.displayName) {
-          await configService.loadConfigToFrontend();
-        }
-      } catch (error) {
-        log.warn("Failed to load tenant config:", error);
-      }
-    };
-
-    loadConfigIfNeeded();
-  }, []);
 
   const stylesObject: TabsProps["styles"] = {
     root: {},
@@ -414,45 +400,38 @@ export default function AgentGenerateDetail({
     }
   };
 
-  // Custom validator for agent name uniqueness
-  const validateAgentNameUnique = async (_: any, value: string) => {
+  // Generic validator for agent field uniqueness - use local agent list instead of API call
+  const validateAgentFieldUnique = async (
+    _: any,
+    value: string,
+    fieldName: "name" | "display_name",
+    errorKey: "nameExists" | "displayNameExists"
+  ) => {
     if (!value) return Promise.resolve();
 
-    try {
-      const result = await checkAgentName(value, currentAgentId || undefined);
-      if (result.status === NAME_CHECK_STATUS.EXISTS_IN_TENANT) {
-        return Promise.reject(
-          new Error(t("agent.error.nameExists", { name: value }))
-        );
-      }
-      return Promise.resolve();
-    } catch (error) {
+    // Check if field value already exists in local agent list (excluding current agent)
+    const isDuplicated = agentList?.some(
+      (agent: { name?: string; display_name?: string; id?: string | number }) =>
+        (agent as any)[fieldName] === value &&
+        Number(agent.id) !== currentAgentId
+    );
+
+    if (isDuplicated) {
       return Promise.reject(
-        new Error(t("agent.error.displayNameExists", value))
+        new Error(t(`agent.error.${errorKey}`, { [fieldName]: value }))
       );
     }
+    return Promise.resolve();
+  };
+
+  // Custom validator for agent name uniqueness
+  const validateAgentNameUnique = async (_: any, value: string) => {
+    return validateAgentFieldUnique(_, value, "name", "nameExists");
   };
 
   // Custom validator for agent display name uniqueness
   const validateAgentDisplayNameUnique = async (_: any, value: string) => {
-    if (!value) return Promise.resolve();
-
-    try {
-      const result = await checkAgentDisplayName(
-        value,
-        currentAgentId || undefined
-      );
-      if (result.status === NAME_CHECK_STATUS.EXISTS_IN_TENANT) {
-        return Promise.reject(
-          new Error(t("agent.error.displayNameExists", { displayName: value }))
-        );
-      }
-      return Promise.resolve();
-    } catch (error) {
-      return Promise.reject(
-        new Error(t("agent.error.displayNameExists", value))
-      );
-    }
+    return validateAgentFieldUnique(_, value, "display_name", "displayNameExists");
   };
 
   const handleGenerateAgent = async () => {
@@ -484,10 +463,10 @@ export default function AgentGenerateDetail({
           sub_agent_ids: editedAgent.sub_agent_id_list,
           tool_ids: Array.isArray(editedAgent.tools)
             ? editedAgent.tools.map((tool: any) =>
-                typeof tool === "object" && tool.id !== undefined
-                  ? tool.id
-                  : tool
-              )
+              typeof tool === "object" && tool.id !== undefined
+                ? tool.id
+                : tool
+            )
             : [],
         },
         (data) => {
@@ -496,27 +475,50 @@ export default function AgentGenerateDetail({
           switch (data.type) {
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
               form.setFieldsValue({ dutyPrompt: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                dutyPrompt: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT:
               form.setFieldsValue({ constraintPrompt: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                constraintPrompt: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-
               form.setFieldsValue({ fewShotsPrompt: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                fewShotsPrompt: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
               if (!form.getFieldValue("agentName")?.trim()) {
                 form.setFieldsValue({ agentName: data.content });
               }
+              setGeneratedContent((prev) => ({
+                ...prev,
+                agentName: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DESCRIPTION:
               form.setFieldsValue({ agentDescription: data.content });
+              setGeneratedContent((prev) => ({
+                ...prev,
+                agentDescription: data.content,
+              }));
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_DISPLAY_NAME:
               // Only update if current agent display name is empty
               if (!form.getFieldValue("agentDisplayName")?.trim()) {
                 form.setFieldsValue({ agentDisplayName: data.content });
               }
+              setGeneratedContent((prev) => ({
+                ...prev,
+                agentDisplayName: data.content,
+              }));
               break;
           }
         },
@@ -527,22 +529,33 @@ export default function AgentGenerateDetail({
         },
         () => {
           // After generation completes, get all form values and update parent component state
+          // Use generatedContent state as fallback to ensure we get the streamed data
           const formValues = form.getFieldsValue();
           const profileUpdates: AgentProfileInfo = {
-            name: formValues.agentName,
-            display_name: formValues.agentDisplayName,
+            name: generatedContent.agentName || formValues.agentName,
+            display_name: generatedContent.agentDisplayName || formValues.agentDisplayName,
             author: formValues.agentAuthor,
             model: formValues.mainAgentModel,
             max_step: formValues.mainAgentMaxStep,
-            description: formValues.agentDescription,
-            duty_prompt: formValues.dutyPrompt,
-            constraint_prompt: formValues.constraintPrompt,
-            few_shots_prompt: formValues.fewShotsPrompt,
+            description: generatedContent.agentDescription || formValues.agentDescription,
+            duty_prompt: generatedContent.dutyPrompt || formValues.dutyPrompt,
+            constraint_prompt: generatedContent.constraintPrompt || formValues.constraintPrompt,
+            few_shots_prompt: generatedContent.fewShotsPrompt || formValues.fewShotsPrompt,
             ingroup_permission: formValues.ingroup_permission || "READ_ONLY",
           };
 
           // Update profile info in global agent config store
           updateProfileInfo(profileUpdates);
+
+          // Reset generated content state after updating
+          setGeneratedContent({
+            dutyPrompt: "",
+            constraintPrompt: "",
+            fewShotsPrompt: "",
+            agentName: "",
+            agentDescription: "",
+            agentDisplayName: "",
+          });
 
           message.success(t("businessLogic.config.message.generateSuccess"));
           setIsGenerating(false);
@@ -613,6 +626,7 @@ export default function AgentGenerateDetail({
                     },
                     { validator: validateAgentNameUnique },
                   ]}
+                  validateTrigger={["onBlur"]}
                   className="mb-3"
                 >
                   <Input

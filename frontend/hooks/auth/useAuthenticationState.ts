@@ -5,9 +5,10 @@ import { useTranslation } from "react-i18next";
 import { App } from "antd";
 
 import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useQueryClient } from "@tanstack/react-query";
 import { authService } from "@/services/authService";
-import { getSessionFromStorage, removeSessionFromStorage, checkSessionValid } from "@/lib/session";
-import { Session, AuthenticationStateReturn, AuthenticationContextType } from "@/types/auth";
+import { getSessionFromStorage, removeSessionFromStorage, checkSessionValid, hasAuthCookies } from "@/lib/session";
+import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 import { authEventUtils } from "@/lib/authEvents";
 import log from "@/lib/logger";
@@ -20,6 +21,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { isSpeedMode } = useDeployment();
+  const queryClient = useQueryClient();
 
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -172,6 +174,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
         setSession(null);
         setIsAuthenticated(false);
 
+        queryClient.clear();
         if (!silent) {
           message.success(t("auth.logoutSuccess"));
         }
@@ -185,6 +188,7 @@ export function useAuthenticationState(): AuthenticationStateReturn {
         setSession(null);
         setIsAuthenticated(false);
 
+        queryClient.clear();
         if (!silent) {
           message.error(t("auth.logoutFailed"));
         }
@@ -204,11 +208,13 @@ export function useAuthenticationState(): AuthenticationStateReturn {
 
       clearLocalSession();
       message.success(t("auth.revokeSuccess"));
+      queryClient.clear();
 
       authEventUtils.emitLogout();
     } catch (error: any) {
       log.error("Revoke failed:", error?.message || error);
       message.error(t("auth.revokeFailed"));
+      queryClient.clear();
     } finally {
       setIsLoading(false);
     }

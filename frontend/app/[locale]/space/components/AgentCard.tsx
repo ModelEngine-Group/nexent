@@ -153,7 +153,7 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
       try {
         const result = await clearAgentNewMark(agent.id);
         if (result?.success) {
-          setIsNewAgent(false); 
+          setIsNewAgent(false);
           queryClient.invalidateQueries({ queryKey: ["agents"] });
         } else {
           log.warn("Failed to clear NEW mark for agent", agent.id, result);
@@ -239,7 +239,7 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
             <div className="h-4 mb-2" aria-hidden />
           )}
           <div className="flex-1 overflow-hidden">
-            <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               {agent.description || t("space.noDescription", "No description")}
             </p>
           </div>
@@ -266,9 +266,13 @@ export default function AgentCard({ agent, onRefresh }: AgentCardProps) {
                 e.stopPropagation();
                 handleDelete();
               }}
-              disabled={isDeleting}
+              disabled={isDeleting || agent.permission === "READ_ONLY"}
               className="p-2 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
-              title={t("space.actions.delete", "Delete")}
+              title={
+                agent.permission === "READ_ONLY"
+                  ? t("agent.noEditPermission")
+                  : t("space.actions.delete", "Delete")
+              }
             >
               <Trash2 className="h-4 w-4" />
             </button>
