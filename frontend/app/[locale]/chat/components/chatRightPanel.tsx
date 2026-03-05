@@ -7,6 +7,7 @@ import { formatDate, formatUrl } from "@/lib/utils";
 import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 
 export function ChatRightPanel({
@@ -18,7 +19,7 @@ export function ChatRightPanel({
   selectedMessageId,
 }: ChatRightPanelProps) {
   const { t } = useTranslation("common");
-  // Local state
+  const { appConfig } = useConfig();
   const [expandedImages, setExpandedImages] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [processedImages, setProcessedImages] = useState<string[]>([]);
@@ -242,6 +243,10 @@ export function ChatRightPanel({
       try {
         // Handle datamate source type
         if (source_type === "datamate") {
+          if (!appConfig?.modelEngineEnabled) {
+            message.error("DataMate download not available: ModelEngine is not enabled");
+            return;
+          }
           if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
             if (!url || url === "#") {
               message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
