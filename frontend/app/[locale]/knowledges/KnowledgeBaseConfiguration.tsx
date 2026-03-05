@@ -24,11 +24,8 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
-import { API_ENDPOINTS } from "@/services/api";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
-import { ConfigStore } from "@/lib/config";
-import { configService } from "@/services/configService";
 import {
   SETUP_PAGE_CONTAINER,
   TWO_COLUMN_LAYOUT,
@@ -127,76 +124,29 @@ function DataConfig({ isActive }: DataConfigProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
-  const { modelConfig } = useConfig();
+  const { modelConfig, data: configData, invalidateConfig, config, updateConfig, saveConfig } = useConfig();
   const { token } = theme.useToken();
 
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
     localStorage.removeItem("kb_cache");
-
-    // Load DataMate URL configuration
-    const loadConfig = async () => {
-      try {
-        await loadDataMateConfig();
-      } catch (error) {
-        console.error("Failed to load DataMate configuration on mount:", error);
-        // Set default values if loading fails
-        setDataMateUrl("");
-      }
-    };
-    loadConfig();
+    loadDataMateConfig();
   }, []);
 
-  // Load DataMate URL configuration
-  const loadDataMateConfig = async () => {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const config = result.config;
-        console.log("Loaded config:", config);
-        // DataMate URL would be in the app config section
-        if (
-          config &&
-          config.app &&
-          typeof config.app.datamateUrl === "string"
-        ) {
-          console.log("Setting DataMate URL to:", config.app.datamateUrl);
-          setDataMateUrl(config.app.datamateUrl);
-        } else {
-          console.log("No DataMate URL found in config, setting to empty");
-          setDataMateUrl("");
-        }
-
-        if (
-          config &&
-          config.app &&
-          typeof config.app.modelEngineEnabled === "boolean"
-        ) {
-          setModelEngineEnabled(config.app.modelEngineEnabled);
-        }
-
-        // Return the DataMate URL for verification
-        return config.app?.datamateUrl || "";
-      } else {
-        console.error(
-          "Failed to load config, response status:",
-          response.status,
-          response.statusText
-        );
-        throw new Error(
-          `Failed to load config: ${response.status} ${response.statusText}`
-        );
-      }
-    } catch (error) {
-      log.error("Failed to load DataMate configuration:", error);
-      throw error; // Re-throw so the calling function can handle it
+  // Load DataMate URL configuration from React Query cached data
+  const loadDataMateConfig = () => {
+    if (configData?.app && typeof configData.app.datamateUrl === "string") {
+      setDataMateUrl(configData.app.datamateUrl);
+    } else {
+      setDataMateUrl("");
     }
+
+    if (configData?.app && typeof configData.app.modelEngineEnabled === "boolean") {
+      setModelEngineEnabled(configData.app.modelEngineEnabled);
+    }
+
+    return configData?.app?.datamateUrl || "";
   };
 
   // Get context values
@@ -301,20 +251,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Update ref
     prevIsActiveRef.current = isActive;
   }, [isActive]);
-
-  // Helper function to get authorization headers
-  const getAuthHeaders = () => {
-    const session =
-      typeof window !== "undefined" ? localStorage.getItem("session") : null;
-    const sessionObj = session ? JSON.parse(session) : null;
-    return {
-      "Content-Type": "application/json",
-      "User-Agent": "AgentFrontEnd/1.0",
-      ...(sessionObj?.access_token && {
-        Authorization: `Bearer ${sessionObj.access_token}`,
-      }),
-    };
-  };
 
   // Separately listen for knowledge base loading state, load user configuration when knowledge base loading is complete and in active state
   useEffect(() => {
@@ -561,7 +497,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [showDataMateConfigModal, setShowDataMateConfigModal] = useState(false);
   const [dataMateUrl, setDataMateUrl] = useState("");
   const [dataMateUrlError, setDataMateUrlError] = useState<string | null>(null);
-  const configStore = ConfigStore.getInstance();
 
   /**
    * Validate DataMate URL format
@@ -640,10 +575,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     setDataMateUrlError(null);
 
     try {
-      console.log("Saving DataMate URL:", dataMateUrl);
-
-      // Update global configuration with DataMate URL
-      const currentConfig = configStore.getConfig();
+      const currentConfig = config;
       const updatedConfig = {
         ...currentConfig,
         app: {
@@ -652,35 +584,17 @@ function DataConfig({ isActive }: DataConfigProps) {
         },
       };
 
-      // Save to backend using global config API
-      const success = await configService.saveConfigToBackend(updatedConfig);
+      updateConfig(updatedConfig);
 
-      if (!success) {
-        throw new Error("Failed to save configuration to backend");
+      const ok = await saveConfig(updatedConfig as any);
+      if (!ok) {
+        message.error(t("knowledgeBase.message.dataMateConfigError"));
+        return;
       }
 
       message.success(t("knowledgeBase.message.dataMateConfigSaved"));
-
-      // Update local config store
-      configStore.updateConfig(updatedConfig);
-
-      // Update local state
       setDataMateUrl(dataMateUrl);
-
-      try {
-        await configService.loadConfigToFrontend();
-        console.log("Configuration reloaded from backend successfully");
-      } catch (reloadError) {
-        console.warn(
-          "Failed to reload configuration from backend, but save was successful:",
-          reloadError
-        );
-        // Don't fail the entire operation if reload fails
-      }
-
-      // Trigger knowledge base sync with the new configuration
       await handleSync();
-
       setShowDataMateConfigModal(false);
     } catch (error) {
       log.error("Failed to save DataMate configuration:", error);

@@ -9,7 +9,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useModelList } from "@/hooks/model/useModelList";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
-import { ConfigStore } from "@/lib/config";
+import { useConfig } from "@/hooks/useConfig";
 import { updateToolConfig } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -98,6 +98,9 @@ export default function ToolManagement({
   // Use tool list hook for data management
   const { availableTools } = useToolList();
 
+  // Get config for model checks
+  const { modelConfig: tenantModelConfig } = useConfig();
+
   // Get VLM models to check availability
   const { availableVlmModels, models } = useModelList();
 
@@ -112,9 +115,7 @@ export default function ToolManagement({
 
     // Check if tenant configuration has selected a VLM model
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
-      const selectedVlmModelName = modelConfig.vlm?.modelName || modelConfig.vlm?.displayName;
+      const selectedVlmModelName = tenantModelConfig?.vlm?.modelName || tenantModelConfig?.vlm?.displayName;
 
       if (!selectedVlmModelName) {
         return false;
@@ -129,7 +130,7 @@ export default function ToolManagement({
     } catch (error) {
       return false;
     }
-  }, [availableVlmModels, models]);
+  }, [availableVlmModels, models, tenantModelConfig]);
 
   // Get Embedding models to check availability
   const { availableEmbeddingModels } = useModelList();
@@ -145,10 +146,8 @@ export default function ToolManagement({
 
     // Check if tenant configuration has selected an Embedding model
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
       const selectedEmbeddingModelName =
-        modelConfig.embedding?.modelName || modelConfig.embedding?.displayName;
+        tenantModelConfig?.embedding?.modelName || tenantModelConfig?.embedding?.displayName;
 
       if (!selectedEmbeddingModelName) {
         return false;
@@ -165,7 +164,7 @@ export default function ToolManagement({
     } catch (error) {
       return false;
     }
-  }, [availableEmbeddingModels, models]);
+  }, [availableEmbeddingModels, models, tenantModelConfig]);
 
   // Prefetch knowledge bases for KB tools
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
