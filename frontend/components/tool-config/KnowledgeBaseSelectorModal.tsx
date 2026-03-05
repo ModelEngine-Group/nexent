@@ -18,11 +18,39 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import {
-  KnowledgeBaseSelectorProps,
-  getKnowledgeBaseSourcesForTool,
-} from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+
+interface KnowledgeBaseSelectorProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (selectedKnowledgeBases: KnowledgeBase[]) => void;
+  selectedIds: string[];
+  toolType: "knowledge_base_search" | "dify_search" | "datamate_search";
+  title?: string;
+  maxSelect?: number;
+  showCreateButton?: boolean;
+  showDeleteButton?: boolean;
+  showCheckbox?: boolean;
+  difyConfig?: {
+    serverUrl?: string;
+    apiKey?: string;
+  };
+}
+
+function getKnowledgeBaseSourcesForTool(
+  toolType: "knowledge_base_search" | "dify_search" | "datamate_search"
+): string[] {
+  switch (toolType) {
+    case "knowledge_base_search":
+      return ["nexent"];
+    case "dify_search":
+      return ["dify"];
+    case "datamate_search":
+      return ["datamate"];
+    default:
+      return ["nexent"];
+  }
+}
 
 interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   knowledgeBases: KnowledgeBase[];
