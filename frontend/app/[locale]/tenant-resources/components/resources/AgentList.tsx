@@ -104,7 +104,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { agents, isLoading, refetch } = useAgentList(tenantId);
 
   // Fetch groups for group name mapping and selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // Create group name mapping

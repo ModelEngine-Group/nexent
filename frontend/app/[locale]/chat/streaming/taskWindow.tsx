@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Button } from "antd";
+import { Button, message as antdMessage } from "antd";
 import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
@@ -27,6 +27,7 @@ import {
   extractObjectNameFromUrl,
 } from "@/services/storageService";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 /**
  * Extract code content and language from model_output_code content
@@ -248,7 +249,7 @@ const messageHandlers: MessageHandler[] = [
   {
     canHandle: (message) =>
       message.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER,
-    render: (message, t) => {
+    render: (message, t, context) => {
       // Find search results in the message context
       const messageContainer = message._messageContainer;
       if (
@@ -377,12 +378,16 @@ const messageHandlers: MessageHandler[] = [
       ): Promise<void> => {
         try {
           if (site.sourceType === "datamate") {
+            if (!context?.appConfig?.modelEngineEnabled) {
+              antdMessage.error("DataMate download not available: ModelEngine is not enabled");
+              return;
+            }
             if (
               !site.datamateDatasetId &&
               !site.datamateFileId &&
               (!site.url || site.url === "#")
             ) {
-              message.error(
+              antdMessage.error(
                 t(
                   "taskWindow.downloadError",
                   "Missing Datamate dataset or file information"
@@ -418,7 +423,7 @@ const messageHandlers: MessageHandler[] = [
               setTimeout(() => {
                 document.body.removeChild(link);
               }, 100);
-              message.success(
+              antdMessage.success(
                 t("taskWindow.downloadSuccess", "File download started")
               );
               return;
@@ -434,7 +439,7 @@ const messageHandlers: MessageHandler[] = [
                 : `attachments/${site.filename}`;
             }
             if (!objectName) {
-              message.error(
+              antdMessage.error(
                 t(
                   "taskWindow.downloadError",
                   "Failed to download file. Please try again."
@@ -448,12 +453,12 @@ const messageHandlers: MessageHandler[] = [
             );
           }
 
-          message.success(
+          antdMessage.success(
             t("taskWindow.downloadSuccess", "File download started")
           );
         } catch (error) {
           log.error("Failed to download knowledge file:", error);
-          message.error(
+          antdMessage.error(
             t(
               "taskWindow.downloadError",
               "Failed to download file. Please try again."
@@ -1104,6 +1109,7 @@ interface TaskWindowProps {
 
 export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
   const { t } = useTranslation("common");
+  const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [isExpanded, setIsExpanded] = useState(true); // default expand task details interface
@@ -1272,7 +1278,7 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
 
     const handler = messageHandlers.find((h) => h.canHandle(message));
     if (handler) {
-      return handler.render(message, t);
+      return handler.render(message, t, { appConfig });
     }
 
     // Fallback processing, normally not executed here

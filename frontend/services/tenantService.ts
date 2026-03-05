@@ -181,6 +181,7 @@ export async function deleteTenant(tenantId: string): Promise<void> {
 
 /**
  * Get users belonging to a tenant (using existing users/list endpoint)
+ * Returns all users without pagination
  */
 export async function getTenantUsers(tenantId: string): Promise<TenantUsersResponse> {
   try {
@@ -191,15 +192,14 @@ export async function getTenantUsers(tenantId: string): Promise<TenantUsersRespo
       },
       body: JSON.stringify({
         tenant_id: tenantId,
-        page: 1,
-        page_size: 100, // Get all users for delete warning
+        // Omit page and page_size to get all users
       }),
     });
 
     const result = await response.json();
     return {
       users: result.data || [],
-      total: result.pagination?.total || 0,
+      total: result.total || 0,
       message: result.message || "",
     };
   } catch (error) {

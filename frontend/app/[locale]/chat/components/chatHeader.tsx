@@ -6,7 +6,7 @@ import { Button } from "antd";
 
 import { Input } from "@/components/ui/input";
 import { loadMemoryConfig, setMemorySwitch } from "@/services/memoryService";
-import { configStore } from "@/lib/config";
+import { useConfig } from "@/hooks/useConfig";
 import log from "@/lib/logger";
 import { useRouter } from "next/navigation";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -31,6 +31,7 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const { confirm } = useConfirmModal();
+  const { modelConfig } = useConfig();
   const isAdmin = isSpeedMode || user?.role === USER_ROLES.ADMIN;
 
   const showAutoOffConfirm = () => {
@@ -71,7 +72,6 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   // Check embedding configuration and memory switch once when entering the page
   useEffect(() => {
     try {
-      const modelConfig = configStore.getModelConfig();
       const configured = Boolean(
         modelConfig?.embedding?.modelName ||
         modelConfig?.multiEmbedding?.modelName

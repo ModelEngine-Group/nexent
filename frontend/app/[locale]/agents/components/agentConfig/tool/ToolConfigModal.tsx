@@ -16,7 +16,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
-import { ConfigStore } from "@/lib/config";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
@@ -24,6 +23,7 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import { useConfig } from "@/hooks/useConfig";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useKnowledgeBaseConfigChangeHandler } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
@@ -73,6 +73,9 @@ export default function ToolConfigModal({
     null
   );
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+
+  // Use React Query for config data
+  const { data: configData } = useConfig();
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
@@ -97,46 +100,12 @@ export default function ToolConfigModal({
   const [hasUserModifiedDatamateUrl, setHasUserModifiedDatamateUrl] =
     useState(false);
 
-  // Helper function to get authorization headers
-  const getAuthHeaders = () => {
-    const session =
-      typeof window !== "undefined" ? localStorage.getItem("session") : null;
-    const sessionObj = session ? JSON.parse(session) : null;
-    return {
-      "Content-Type": "application/json",
-      "User-Agent": "AgentFrontEnd/1.0",
-      ...(sessionObj?.access_token && {
-        Authorization: `Bearer ${sessionObj.access_token}`,
-      }),
-    };
-  };
-
-  // Load DataMate URL from knowledge base configuration
-  const loadKnowledgeBaseDataMateUrl = useCallback(async () => {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const config = result.config;
-        if (
-          config &&
-          config.app &&
-          typeof config.app.datamateUrl === "string"
-        ) {
-          setKnowledgeBaseDataMateUrl(config.app.datamateUrl);
-        }
-      }
-    } catch (error) {
-      log.error(
-        "Failed to load DataMate URL from knowledge base config:",
-        error
-      );
+  // Load DataMate URL from knowledge base configuration via React Query cached data
+  const loadKnowledgeBaseDataMateUrl = useCallback(() => {
+    if (configData?.app && typeof configData.app.datamateUrl === "string") {
+      setKnowledgeBaseDataMateUrl(configData.app.datamateUrl);
     }
-  }, []);
+  }, [configData]);
 
   // Check if current tool requires knowledge base selection (must be declared before toolKbType)
   const toolRequiresKbSelection = useMemo(() => {
@@ -244,18 +213,16 @@ export default function ToolConfigModal({
   // Get current embedding model from config for model matching
   const currentEmbeddingModel = useMemo(() => {
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
-      // Use modelName if available, otherwise try displayName
+      const modelConfig = configData?.models;
       return (
-        modelConfig.embedding?.modelName ||
-        modelConfig.embedding?.displayName ||
+        modelConfig?.embedding?.modelName ||
+        modelConfig?.embedding?.displayName ||
         null
       );
     } catch {
       return null;
     }
-  }, []);
+  }, [configData]);
 
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
@@ -300,10 +267,7 @@ export default function ToolConfigModal({
     // Load DataMate URL from knowledge base configuration
     // This should run every time the modal opens for datamate_search tool
     if (tool?.name === "datamate_search" && isOpen && !modalOpened) {
-      loadKnowledgeBaseDataMateUrl().then(() => {
-        // After loading, check if we need to apply the URL
-        // The other useEffect will handle the application
-      });
+      loadKnowledgeBaseDataMateUrl();
     }
   }, [tool?.name, isOpen, modalOpened]);
 

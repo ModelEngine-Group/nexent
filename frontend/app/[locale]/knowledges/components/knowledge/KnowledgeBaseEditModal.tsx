@@ -36,7 +36,7 @@ export function KnowledgeBaseEditModal({
   const originalNameRef = useRef<string>("");
 
   // Fetch groups for group selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // Reset form and states when knowledge base changes
