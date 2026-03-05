@@ -30,8 +30,6 @@ import {
   createMessageAttachments,
   cleanupAttachmentUrls,
 } from "@/app/chat/internal/chatPreprocess";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
-
 import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
@@ -1435,15 +1433,6 @@ export function ChatInterface() {
           </div>
         </div>
       </div>
-      <TooltipProvider>
-        <Tooltip
-          title={t("chatInterface.stopGenerating")}
-          open={false}
-          placement="top"
-        >
-          <div className="fixed inset-0 pointer-events-none" />
-        </Tooltip>
-      </TooltipProvider>
     </>
   );
 }
