@@ -218,7 +218,47 @@ const isToolsDirty = (baselineAgent: EditableAgent | null, editedAgent: Editable
   if (!baselineAgent) {
     return editedAgent.tools.length > 0;
   }
-  return JSON.stringify(baselineAgent.tools) !== JSON.stringify(editedAgent.tools);
+
+  // Compare tools by ID and their initParams to avoid false positives from object reference differences
+  const baselineTools = baselineAgent.tools;
+  const editedTools = editedAgent.tools;
+
+  // First check if the count is different
+  if (baselineTools.length !== editedTools.length) {
+    return true;
+  }
+
+  // Sort by ID and compare key properties to handle different orderings
+  const sortedBaseline = [...baselineTools].sort((a, b) => Number(a.id) - Number(b.id));
+  const sortedEdited = [...editedTools].sort((a, b) => Number(a.id) - Number(b.id));
+
+  for (let i = 0; i < sortedBaseline.length; i++) {
+    const baseTool = sortedBaseline[i];
+    const editTool = sortedEdited[i];
+
+    // Check if ID is different
+    if (Number(baseTool.id) !== Number(editTool.id)) {
+      return true;
+    }
+
+    // Compare initParams if they exist
+    const baseParams = baseTool.initParams || [];
+    const editParams = editTool.initParams || [];
+
+    if (baseParams.length !== editParams.length) {
+      return true;
+    }
+
+    // Compare each param's name and value
+    for (const baseParam of baseParams) {
+      const editParam = editParams.find(p => p.name === baseParam.name);
+      if (!editParam || baseParam.value !== editParam.value) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 };
 
 const isSubAgentIdsDirty = (baselineAgent: EditableAgent | null, editedAgent: EditableAgent): boolean => {
@@ -264,11 +304,10 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   updateTools: (tools) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, tools: [...tools] };
-      // If there are already unsaved changes, keep it true and skip recalculation.
-      // Only when state is clean do we need to check whether tools changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isToolsDirty(state.baselineAgent, editedAgent);
+      // Always recalculate hasUnsavedChanges to correctly handle:
+      // 1. Selecting a tool -> hasUnsavedChanges = true
+      // 2. Deselecting it back to original -> hasUnsavedChanges = false
+      const hasUnsavedChanges = isToolsDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
