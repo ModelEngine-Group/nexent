@@ -303,11 +303,12 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
             "Bearer ") else authorization
 
         # Decode and verify JWT (signature + expiration)
+        # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
         decoded = jwt.decode(
             token,
             SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
-            options={"verify_exp": True},
+            options={"verify_exp": True, "verify_aud": False},
         )
 
         # Extract user ID from JWT claims
