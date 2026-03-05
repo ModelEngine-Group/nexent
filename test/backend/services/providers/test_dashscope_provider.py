@@ -4,7 +4,7 @@ Tests cover model fetching, type classification, and error handling.
 """
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch, Mock
 from pytest_mock import MockFixture
 
 import httpx
@@ -14,6 +14,27 @@ from backend.services.providers.dashscope_provider import DashScopeModelProvider
 
 class TestDashScopeModelProvider:
     """Tests for DashScopeModelProvider class."""
+
+    def _setup_mock_client(self, mocker, mock_response):
+        """Set up mock for httpx.AsyncClient with proper context manager."""
+        # Create mock client that handles the get request
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        # Create context manager mock
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        # Create a mock class that can be called with verify=False
+        mock_client_class = Mock(return_value=mock_cm)
+        
+        mocker.patch(
+            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
+            mock_client_class
+        )
+        
+        return mock_client_class
 
     @pytest.mark.asyncio
     async def test_get_models_llm_success(self, mocker: MockFixture):
@@ -44,17 +65,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -99,17 +111,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -149,17 +152,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -199,17 +193,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -249,17 +234,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -299,17 +275,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -349,17 +316,8 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -385,17 +343,8 @@ class TestDashScopeModelProvider:
         mock_response.json.return_value = {"output": {"models": []}}
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
+        self._setup_mock_client(mocker, mock_response)
 
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
         mocker.patch(
             "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
             "https://dashscope.aliyuncs.com/api/v1/models"
@@ -429,10 +378,6 @@ class TestDashScopeModelProvider:
             "backend.services.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
-        )
 
         provider = DashScopeModelProvider()
         provider_config = {
@@ -460,10 +405,6 @@ class TestDashScopeModelProvider:
             "backend.services.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
-        )
 
         provider = DashScopeModelProvider()
         provider_config = {
@@ -490,10 +431,6 @@ class TestDashScopeModelProvider:
         mocker.patch(
             "backend.services.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm
-        )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
         )
 
         provider = DashScopeModelProvider()
@@ -539,10 +476,6 @@ class TestDashScopeModelProvider:
         mocker.patch(
             "backend.services.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm
-        )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
         )
 
         provider = DashScopeModelProvider()
@@ -596,10 +529,6 @@ class TestDashScopeModelProvider:
             "backend.services.providers.dashscope_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
-        )
 
         provider = DashScopeModelProvider()
         provider_config = {
@@ -633,21 +562,7 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
-        )
+        self._setup_mock_client(mocker, mock_response)
 
         provider = DashScopeModelProvider()
         provider_config = {
@@ -688,21 +603,7 @@ class TestDashScopeModelProvider:
         }
         mock_response.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        mock_cm = MagicMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cm.__aexit__ = AsyncMock(return_value=None)
-
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
-            return_value=mock_cm
-        )
-        mocker.patch(
-            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
-            "https://dashscope.aliyuncs.com/api/v1/models"
-        )
+        self._setup_mock_client(mocker, mock_response)
 
         provider = DashScopeModelProvider()
 
@@ -715,4 +616,3 @@ class TestDashScopeModelProvider:
         result = await provider.get_models({"model_type": "reranker", "api_key": "test-key"})
         assert len(result) == 1
         assert result[0]["id"] == "rerank-v1"
-

@@ -258,7 +258,7 @@ class TestTokenPonyModelProvider:
         mock_response.json.return_value = {
             "data": [
                 {
-                    "id": "whisper-1",
+                    "id": "stt-whisper-1",
                     "object": "model",
                     "owned_by": "openai"
                 }
@@ -291,7 +291,7 @@ class TestTokenPonyModelProvider:
         result = await provider.get_models(provider_config)
 
         assert len(result) == 1
-        assert result[0]["id"] == "whisper-1"
+        assert result[0]["id"] == "stt-whisper-1"
         assert result[0]["model_type"] == "stt"
         assert result[0]["model_tag"] == "stt"
 
