@@ -325,11 +325,15 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     Returns:
         tuple[str, str]: (user_id, tenant_id)
     """
-    # if deploy in speed mode or authorization is None, return default user id and tenant id
-    if IS_SPEED_MODE or authorization is None:
+    # In speed mode, allow unauthenticated access with default user for demo/dev
+    if IS_SPEED_MODE:
         logging.debug(
-            "Speed mode or no valid authorization header detected - returning default user ID and tenant ID")
+            "Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
+
+    # In normal mode, missing auth header means unauthorized - return 401, not default user
+    if authorization is None or (isinstance(authorization, str) and not authorization.strip()):
+        raise UnauthorizedError("No authorization header provided")
 
     try:
         user_id = _extract_user_id_from_jwt_token(authorization)
