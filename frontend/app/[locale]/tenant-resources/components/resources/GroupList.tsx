@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -35,13 +35,24 @@ import { type User } from "@/services/userService";
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch } = useGroupList(tenantId);
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const { data, isLoading, refetch } = useGroupList(tenantId, page, pageSize);
   const { data: userData, refetch: refetchUsers } = useUserList(
-    tenantId,
-    1,
-    100
-  ); // Get all users for member management
+    tenantId
+    // Omit page and pageSize to get all users for member management
+  );
+
+  // Reset page to 1 when tenantId changes
+  useEffect(() => {
+    setPage(1);
+  }, [tenantId]);
+
   const groups = data?.groups || [];
+  const total = data?.total || 0;
   const allUsers = userData?.users || [];
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -262,6 +273,10 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
     [t]
   );
 
+  const handlePageChange = (newPage: number, _pageSize: number) => {
+    setPage(newPage);
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
@@ -278,7 +293,12 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
         columns={columns}
         rowKey={(r) => String(r.group_id)}
         loading={isLoading}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize: pageSize,
+          total: total,
+          onChange: handlePageChange,
+        }}
         scroll={{ x: true }}
         className="flex-1"
       />

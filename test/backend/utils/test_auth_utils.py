@@ -183,9 +183,78 @@ def test_calculate_expires_at_speed_mode(monkeypatch):
 
 def test_extract_user_id_from_jwt_token(monkeypatch):
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
     uid = au._extract_user_id_from_jwt_token("Bearer " + token)
     assert uid == "user-xyz"
+
+
+def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
+    """Test that missing SUPABASE_JWT_SECRET raises UnauthorizedError"""
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+    token = au.generate_test_jwt("user-xyz", expires_in=3600)
+
+    with pytest.raises(UnauthorizedError, match="JWT verification is not configured"):
+        au._extract_user_id_from_jwt_token("Bearer " + token)
+
+
+def test_extract_user_id_invalid_signature_raises(monkeypatch):
+    """Test that token signed with wrong secret raises UnauthorizedError"""
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "wrong-secret")
+    token = au.generate_test_jwt("user-xyz", expires_in=3600)
+
+    with pytest.raises(UnauthorizedError, match="Invalid or expired"):
+        au._extract_user_id_from_jwt_token("Bearer " + token)
+
+
+def test_extract_user_id_expired_token_raises(monkeypatch):
+    """Test that expired token raises UnauthorizedError (ExpiredSignatureError path)"""
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    # Token expired 1 hour ago
+    token = au.generate_test_jwt("user-xyz", expires_in=-3600)
+
+    with pytest.raises(UnauthorizedError, match="Token has expired"):
+        au._extract_user_id_from_jwt_token("Bearer " + token)
+
+
+def test_extract_user_id_malformed_token_raises(monkeypatch):
+    """Test that malformed JWT raises UnauthorizedError (InvalidTokenError path)"""
+    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    with pytest.raises(UnauthorizedError, match="Invalid or expired"):
+        au._extract_user_id_from_jwt_token("Bearer invalid.jwt.here")
+
+
+def test_extract_user_id_unauthorized_error_re_raised(monkeypatch):
+    """Test that UnauthorizedError from inner code is re-raised without wrapping"""
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "any-secret")
+
+    def mock_decode_raises_unauthorized(*args, **kwargs):
+        raise UnauthorizedError("Inner auth error")
+
+    # Patch only jwt.decode to preserve real exception classes for except clauses
+    monkeypatch.setattr(au.jwt, "decode", mock_decode_raises_unauthorized)
+
+    with pytest.raises(UnauthorizedError, match="Inner auth error"):
+        au._extract_user_id_from_jwt_token("Bearer fake-token")
+
+
+def test_extract_user_id_generic_exception_raises(monkeypatch):
+    """Test that generic Exception during decode raises UnauthorizedError"""
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    def mock_decode_raises_value_error(*args, **kwargs):
+        raise ValueError("Unexpected decode error")
+
+    # Patch only jwt.decode to preserve real exception classes for except clauses
+    monkeypatch.setattr(au.jwt, "decode", mock_decode_raises_value_error)
+
+    with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
+        au._extract_user_id_from_jwt_token("Bearer any-token")
 
 
 def test_get_current_user_id_speed_mode(monkeypatch):
@@ -196,6 +265,7 @@ def test_get_current_user_id_speed_mode(monkeypatch):
 
 def test_get_current_user_id_with_mapping(monkeypatch):
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
     # user->tenant mapping
     monkeypatch.setattr(au, "get_user_tenant_by_user_id",
@@ -292,6 +362,7 @@ def test_get_jwt_expiry_seconds_exception(monkeypatch):
 def test_get_current_user_id_no_tenant_mapping(monkeypatch):
     """Test get_current_user_id when no tenant mapping found"""
     monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
 
     # Mock get_user_tenant_by_user_id to return None

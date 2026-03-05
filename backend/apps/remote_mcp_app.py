@@ -1,8 +1,9 @@
 import logging
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from http import HTTPStatus
 
 from consts.const import NEXENT_MCP_DOCKER_IMAGE, ENABLE_UPLOAD_IMAGE
@@ -37,7 +38,8 @@ async def get_tools_from_remote_mcp(
 ):
     """ Used to list tool information from the remote MCP server """
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         tools_info = await get_tool_from_remote_mcp_server(
             mcp_server_name=service_name,
             remote_mcp_server=mcp_url,
@@ -71,7 +73,8 @@ async def add_remote_proxies(
 ):
     """ Used to add a remote MCP server """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await add_remote_mcp_server_list(tenant_id=effective_tenant_id,
@@ -111,7 +114,8 @@ async def delete_remote_proxies(
 ):
     """ Used to delete a remote MCP server """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await delete_remote_mcp_server_list(tenant_id=effective_tenant_id,
@@ -139,7 +143,8 @@ async def update_remote_proxy(
 ):
     """ Used to update an existing remote MCP server """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await update_remote_mcp_server_list(
@@ -175,7 +180,8 @@ async def get_remote_proxies(
 ):
     """ Used to get the list of remote MCP servers """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         remote_mcp_server_list = await get_remote_mcp_server_list(
@@ -205,7 +211,8 @@ async def get_mcp_record(
 ):
     """ Get single MCP record by ID """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
 
@@ -251,7 +258,8 @@ async def check_mcp_health(
     """ Used to check the health of the MCP server, the front end can call it,
     and automatically update the database status """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await check_mcp_health_and_update_db(mcp_url, service_name, effective_tenant_id, user_id)
@@ -293,7 +301,8 @@ async def add_mcp_from_config(
     }
     """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
 
@@ -420,7 +429,8 @@ async def stop_mcp_container(
 ):
     """ Stop and remove MCP container """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
 
@@ -473,7 +483,8 @@ async def list_mcp_containers(
 ):
     """ List all MCP containers for the current tenant """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
 
@@ -486,7 +497,8 @@ async def list_mcp_containers(
                 detail="Docker service unavailable"
             )
 
-        containers = container_manager.list_mcp_containers(tenant_id=effective_tenant_id)
+        containers = container_manager.list_mcp_containers(
+            tenant_id=effective_tenant_id)
         containers = attach_mcp_container_permissions(
             containers=containers,
             tenant_id=effective_tenant_id,
@@ -514,14 +526,17 @@ async def list_mcp_containers(
 async def get_container_logs(
     container_id: str,
     tail: int = 100,
+    follow: bool = Query(
+        True, description="Whether to follow logs in real-time"),
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
     http_request: Request = None
 ):
-    """ Get logs from MCP container """
+    """ Get logs from MCP container via SSE stream """
     try:
-        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        user_id, auth_tenant_id, _ = get_current_user_info(
+            authorization, http_request)
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
 
@@ -534,13 +549,36 @@ async def get_container_logs(
                 detail="Docker service unavailable"
             )
 
-        logs = container_manager.get_container_logs(container_id, tail=tail)
+        async def generate_log_stream():
+            """Generate SSE stream of container logs"""
+            try:
+                async for log_line in container_manager.stream_container_logs(
+                    container_id, tail=tail, follow=follow
+                ):
+                    # Format as SSE: data: {json}\n\n
+                    payload = json.dumps(
+                        {"logs": log_line, "status": "success"},
+                        ensure_ascii=False
+                    )
+                    yield f"data: {payload}\n\n"
+            except Exception as stream_error:
+                logger.error(f"Error in log stream: {stream_error}")
+                error_payload = json.dumps(
+                    {
+                        "logs": f"An error occurred while streaming container logs.",
+                        "status": "error"
+                    },
+                    ensure_ascii=False
+                )
+                yield f"data: {error_payload}\n\n"
 
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "logs": logs,
-                "status": "success"
+        return StreamingResponse(
+            generate_log_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
     except HTTPException:
@@ -549,7 +587,7 @@ async def get_container_logs(
         logger.error(f"Failed to get container logs: {e}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get container logs: {str(e)}"
+            detail=f"Failed to get container logs."
         )
 
 
@@ -575,7 +613,8 @@ if ENABLE_UPLOAD_IMAGE:
         Container naming: {filename-without-extension}-{tenant-id[:8]}-{user-id[:8]}
         """
         try:
-            user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+            user_id, auth_tenant_id, _ = get_current_user_info(
+                authorization, http_request)
             # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
             effective_tenant_id = tenant_id or auth_tenant_id
 

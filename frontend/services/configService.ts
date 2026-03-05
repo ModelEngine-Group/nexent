@@ -1,76 +1,37 @@
-import { API_ENDPOINTS } from "./api";
-
+import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { GlobalConfig } from "@/types/modelConfig";
+import { getAuthHeaders } from "@/lib/auth";
 
-import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
-import { ConfigStore } from "@/lib/config";
-import log from "@/lib/logger";
-// @ts-ignore
-const fetch = fetchWithAuth;
-
+/**
+ * Config Service
+ * Provides methods to fetch and save configuration data from backend API
+ * This service only handles API communication, no localStorage or caching
+ */
 export class ConfigService {
-  // Save global configuration to backend
-  async saveConfigToBackend(config: GlobalConfig): Promise<boolean> {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.save, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(config),
-      });
+  /**
+   * Fetch config from backend API
+   * @returns Raw config data from backend
+   */
+  async fetchConfig(): Promise<unknown> {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.config.load, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        log.error("Failed to save configuration:", errorData);
-        return false;
-      }
-
-      await response.json();
-      return true;
-    } catch (error) {
-      log.error("Save configuration request exception:", error);
-      return false;
-    }
+    const result = await response.json();
+    return result.config;
   }
 
-  // Add: Load configuration from backend and write to localStorage
-  async loadConfigToFrontend(): Promise<boolean> {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        log.error("Failed to load configuration:", errorData);
-        return false;
-      }
-      const result = await response.json();
-      const config = result.config;
-      if (config) {
-        // Use the conversion function of configStore
-        const frontendConfig = ConfigStore.transformBackend2Frontend(config);
-
-        // Write to localStorage separately
-        if (frontendConfig.app) {
-          localStorage.setItem("app", JSON.stringify(frontendConfig.app));
-        }
-        if (frontendConfig.models) {
-          localStorage.setItem("model", JSON.stringify(frontendConfig.models));
-        }
-
-        // Trigger configuration reload and dispatch event
-        if (typeof window !== "undefined") {
-          const configStore = ConfigStore.getInstance();
-          configStore.reloadFromStorage();
-        }
-
-        return true;
-      }
-      return false;
-    } catch (error) {
-      log.error("Load configuration request exception:", error);
-      return false;
-    }
+  /**
+   * Save config to backend API
+   * @param config GlobalConfig to save
+   */
+  async saveConfig(config: GlobalConfig): Promise<void> {
+    await fetchWithErrorHandling(API_ENDPOINTS.config.save, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(config),
+    });
   }
 }
 
