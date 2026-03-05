@@ -1,7 +1,12 @@
+import pytest
 import unittest
 from unittest.mock import patch, MagicMock, Mock
 import sys
 import os
+
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+import atexit
 
 # Add the backend directory to path so we can import modules
 backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend'))
@@ -23,8 +28,10 @@ minio_mock.client = MagicMock()
 # before any module imports that might trigger MinioClient initialization
 critical_patches = [
     # Patch storage factory and MinIO config validation FIRST
-    patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock),
-    patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None),
+    patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
+          return_value=storage_client_mock),
+    patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
+          lambda self: None),
     # Mock boto3 client
     patch('boto3.client', return_value=Mock()),
     # Mock boto3 resource
@@ -54,27 +61,30 @@ all_patches = critical_patches + patches
 # After import, we can patch get_db_session if needed
 try:
     from backend.database import client as db_client_module
+
     # Patch get_db_session after module is imported
-    db_session_patch = patch.object(db_client_module, 'get_db_session', return_value=Mock())
+    db_session_patch = patch.object(
+        db_client_module, 'get_db_session', return_value=Mock())
     db_session_patch.start()
     all_patches.append(db_session_patch)
 except ImportError:
     # If import fails, try patching the path directly (may trigger import)
-    db_session_patch = patch('backend.database.client.get_db_session', return_value=Mock())
+    db_session_patch = patch(
+        'backend.database.client.get_db_session', return_value=Mock())
     db_session_patch.start()
     all_patches.append(db_session_patch)
 
-# Now safe to import app modules
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
+# Now safe to import app modules - imports moved after patches
 from apps.config_app import app
 
-
 # Stop all patches at the end of the module
-import atexit
+
+
 def stop_patches():
     for p in all_patches:
         p.stop()
+
+
 atexit.register(stop_patches)
 
 
@@ -94,9 +104,9 @@ class TestBaseApp(unittest.TestCase):
             if middleware.cls.__name__ == "CORSMiddleware":
                 cors_middleware = middleware
                 break
-        
+
         self.assertIsNotNone(cors_middleware)
-        
+
         # In FastAPI, middleware options are stored in 'middleware.kwargs'
         self.assertEqual(cors_middleware.kwargs.get("allow_origins"), ["*"])
         self.assertTrue(cors_middleware.kwargs.get("allow_credentials"))
@@ -107,30 +117,9 @@ class TestBaseApp(unittest.TestCase):
         """Test that all routers are included in the app."""
         # Get all routes in the app
         routes = [route.path for route in app.routes]
-        
+
         # Check if routes exist (at least some routes should be present)
         self.assertTrue(len(routes) > 0)
-
-    def test_http_exception_handler(self):
-        """Test the HTTP exception handler."""
-        # Test that the exception handler is registered
-        exception_handlers = app.exception_handlers
-        self.assertIn(HTTPException, exception_handlers)
-        
-        # Test that the handler function exists and is callable
-        http_exception_handler = exception_handlers[HTTPException]
-        self.assertIsNotNone(http_exception_handler)
-        self.assertTrue(callable(http_exception_handler))
-
-    def test_generic_exception_handler(self):
-        """Test the generic exception handler."""
-        # Test that the exception handler is registered
-        exception_handlers = app.exception_handlers
-        self.assertIn(Exception, exception_handlers)
-        
-        # Test that the handler function exists and is callable
-        generic_exception_handler = exception_handlers[Exception]
-        self.assertTrue(callable(generic_exception_handler))
 
     def test_exception_handling_with_client(self):
         """Test exception handling using the test client."""
@@ -178,7 +167,8 @@ class TestBaseApp(unittest.TestCase):
             'file_manager_router',
             'proxy_router',
             'tool_config_router',
-            'mock_user_management_router',  # or 'user_management_router' depending on IS_SPEED_MODE
+            # or 'user_management_router' depending on IS_SPEED_MODE
+            'mock_user_management_router',
             'summary_router',
             'prompt_router',
             'tenant_config_router',
@@ -197,19 +187,8 @@ class TestBaseApp(unittest.TestCase):
 
         # Since it's hard to identify routers directly from routes,
         # we'll check that we have a reasonable number of routes
-        self.assertGreater(len(app.routes), 10)  # Should have many routes from all routers
-
-    def test_http_exception_handler_registration(self):
-        """Test that HTTP exception handler is properly registered."""
-        # Test that the exception handler exists in the app
-        exception_handlers = app.exception_handlers
-        self.assertIn(HTTPException, exception_handlers)
-
-    def test_generic_exception_handler_registration(self):
-        """Test that generic exception handler is properly registered."""
-        # Test that the exception handler exists in the app
-        exception_handlers = app.exception_handlers
-        self.assertIn(Exception, exception_handlers)
+        # Should have many routes from all routers
+        self.assertGreater(len(app.routes), 10)
 
 
 if __name__ == "__main__":

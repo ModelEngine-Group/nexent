@@ -660,6 +660,31 @@ Nexent开发者加油
 一直在寻找企业级简单好用的智能体平台，Nexent是个非常值得一试的好产品，祝Nexent发展越来越好！
 :::
 
+::: info 398248996@qq.com - 2026-2-27
+从ModelEngine中看到的Nexent，windows环境部署，遇到点困难，提了Issues，期待回复，祝越来越好！
+:::
+
+::: info saerreas1221 - 2026-3-2
+一直在寻找企业级简单好用的智能体平台，Nexent是个非常值得一试的好产品，祝Nexent发展越来越好！
+:::
+
+::: info haruhikage1 - 2026-3-2
+尝试探索新版本的功能，想要自己开发mcp工具。
+:::
+
+::: info saerreas1221 - 2026-3-2
+感谢Nexent开源项目，新手也能轻松贡献！，Nexent是个非常值得一试的智能体平台，祝Nexent发展越来越好！
+:::
+
+::: tip Snowny - 2026-03-03 
+期待能使用Nexent成为智能体开发大佬 
+:::
+
+::: info anxinghei - 2026-3-3
+Nexent 加油！希望能达成所愿！
+:::
+
 ::: info CwjXFH - 2026-3-3
 持续研究Agent中，先学习后贡献
 :::
+
