@@ -149,7 +149,7 @@ export function useSessionManager() {
       reconcileExpiryRef.current = () => {};
       clearTimers();
     };
-  }, [isSpeedMode]);
+  }, [isSpeedMode, isDeploymentReady]);
 
   /**
    * Setup automatic token refresh on user activity
