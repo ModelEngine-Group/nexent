@@ -2356,7 +2356,7 @@ class TestDataProcessService(unittest.TestCase):
     def test_convert_office_to_pdf_impl_no_remote_cleanup_when_not_exists(
         self, _exists, _mkdtemp, mock_rmtree, _get_stream, mock_file_exists
     ):
-        """OfficeConversionException raised and file_exists=False → delete_file never called (623->625 branch)."""
+        """OfficeConversionException raised and file_exists=False → delete_file never called."""
         with patch('backend.services.data_process_service.delete_file') as mock_del:
             with self.assertRaises(OfficeConversionException):
                 asyncio.run(
@@ -2373,7 +2373,7 @@ class TestDataProcessService(unittest.TestCase):
     def test_convert_office_to_pdf_impl_mkdtemp_failure(
         self, _exists, mock_mkdtemp, mock_rmtree, _get_stream
     ):
-        """tempfile.mkdtemp raises → temp_dir stays None → finally skips cleanup (630->exit branch)."""
+        """tempfile.mkdtemp raises → temp_dir stays None → finally skips cleanup."""
         with self.assertRaises(OfficeConversionException) as ctx:
             asyncio.run(
                 self.service.convert_office_to_pdf_impl(

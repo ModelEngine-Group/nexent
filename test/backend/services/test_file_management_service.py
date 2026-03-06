@@ -1450,3 +1450,27 @@ class TestConvertOfficeToCachedPdf:
                     "preview/converted/docs/report_deadbeef.pdf",
                     "preview/converting/docs/report_deadbeef.pdf.tmp",
                 )
+
+    @pytest.mark.asyncio
+    async def test_reuses_existing_lock_for_same_object(self):
+        """If a lock for object_name already exists, it is reused."""
+        import asyncio as _asyncio
+        import backend.services.file_management_service as _svc
+        from backend.services.file_management_service import _convert_office_to_cached_pdf
+
+        existing_lock = _asyncio.Lock()
+        _svc._conversion_locks["docs/existing.docx"] = existing_lock
+
+        mock_stream = BytesIO(b"%PDF-1.4 cached")
+        try:
+            with patch('backend.services.file_management_service._get_cached_pdf_stream',
+                       return_value=mock_stream):
+                result = await _convert_office_to_cached_pdf(
+                    "docs/existing.docx",
+                    "preview/converted/docs/existing_aabbccdd.pdf",
+                    "preview/converting/docs/existing_aabbccdd.pdf.tmp",
+                )
+        finally:
+            _svc._conversion_locks.pop("docs/existing.docx", None)
+
+        assert result is mock_stream
