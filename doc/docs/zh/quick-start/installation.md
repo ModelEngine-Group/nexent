@@ -70,6 +70,9 @@ delete from nexent.user_tenant_t where user_id = '你的user_id';
 
 部署成功完成后：
 1. 在浏览器中打开 **http://localhost:3000**
+2. 登录超级管理员账号
+3. 访问租户资源 → 创建租户及租户管理员
+4. 登录租户管理员账号
 2. 参考 [用户指南](../user-guide/home-page) 进行智能体的开发
 
 
