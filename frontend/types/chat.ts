@@ -178,12 +178,18 @@ export interface CardItem {
   [key: string]: any; // Allow other properties
 }
 
+// Context passed from the component to module-level message handlers
+export interface MessageHandlerContext {
+  appConfig?: import("@/types/modelConfig").AppConfig;
+}
+
 // Message handler interface for task window extensibility
 export interface MessageHandler {
   canHandle: (message: any) => boolean;
   render: (
     message: any,
-    t: (key: string, options?: any) => string
+    t: (key: string, options?: any) => string,
+    context?: MessageHandlerContext
   ) => React.ReactNode;
 }
 

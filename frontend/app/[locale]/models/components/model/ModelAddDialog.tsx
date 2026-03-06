@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
-import { configService } from "@/services/configService";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
 import { ModelType, SingleModelConfig } from "@/types/modelConfig";
@@ -191,7 +190,7 @@ export const ModelAddDialog = ({
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig, getConfig } = useConfig();
+  const { updateModelConfig, saveConfig } = useConfig();
 
   // Parse backend error message and return i18n key with params
   const parseModelError = (
@@ -236,16 +235,11 @@ export const ModelAddDialog = ({
   const [loadingModelList, setLoadingModelList] = useState(false);
 
   const persistModelConfig = useCallback(async () => {
-    try {
-      const ok = await configService.saveConfigToBackend(getConfig() as any);
-      if (!ok) {
-        message.error(t("setup.page.error.saveConfig"));
-      }
-    } catch (error) {
+    const ok = await saveConfig();
+    if (!ok) {
       message.error(t("setup.page.error.saveConfig"));
-      log.error("Failed to auto save model configuration", error);
     }
-  }, [getConfig, message, t]);
+  }, [saveConfig, message, t]);
 
   // Settings modal state
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);

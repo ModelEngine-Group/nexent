@@ -187,8 +187,8 @@ def get_version_detail_impl(
         if key != 'current_version_no':
             result[key] = value
 
-    # Add tools
-    result['tools'] = tools_snapshot
+    # Add tools (only enabled tools)
+    result['tools'] = [t for t in tools_snapshot if t.get('enabled', True)]
 
     # Extract sub_agent_id_list from relations
     result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_snapshot]
@@ -578,7 +578,8 @@ def _get_version_detail_or_draft(
             if key != 'current_version_no':
                 result[key] = value
 
-        result['tools'] = tools_draft
+        # Add tools (only enabled tools)
+        result['tools'] = [t for t in tools_draft if t.get('enabled', True)]
         result['sub_agent_id_list'] = [r['selected_agent_id'] for r in relations_draft]
         result['version'] = {
             'version_name': 'Draft',

@@ -283,12 +283,10 @@ function TenantList({
                   ? "bg-blue-50 border border-blue-200"
                   : "hover:bg-gray-50"
               }`}
+              onClick={() => onSelect(tenant.tenant_id)}
             >
               <div className="flex items-center justify-between">
-                <div
-                  className="flex-1"
-                  onClick={() => onSelect(tenant.tenant_id)}
-                >
+                <div className="flex-1">
                   {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
                 </div>
                 <div className="opacity-0 group-hover:opacity-100 flex space-x-1">

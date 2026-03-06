@@ -211,25 +211,19 @@ async def get_user_id(request: Request):
                             content={"message": "User not logged in",
                                      "data": {"user_id": None}})
     try:
-        # Use the unified token validation function
+        # Use the unified token validation function (validates signature via Supabase)
         is_valid, user = validate_token(authorization)
         if is_valid and user:
             return JSONResponse(status_code=HTTPStatus.OK,
                                 content={"message": "Get user ID successfully",
-                                         "data":{"user_id": user.id}})
+                                         "data": {"user_id": user.id}})
 
-        # If the token is invalid, try to parse the user ID from the token
-        user_id, _ = get_current_user_id(authorization)
-        if user_id:
-            return JSONResponse(status_code=HTTPStatus.OK,
-                                content={"message": "Successfully parsed user ID from token",
-                                         "data": {"user_id": user_id}})
-        raise ValueError("User not logged in or session invalid")
-
-    except ValueError as e:
-        logging.error(f"Get user ID failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        # Token invalid or expired - do not trust unsigned JWT, return 401
+        logging.warning("Get user ID failed: token validation failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                             detail="User not logged in or session invalid")
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Get user ID failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
