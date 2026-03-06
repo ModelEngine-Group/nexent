@@ -243,42 +243,6 @@ export default function ToolManagement({
           },
         ];
         updateTools(newSelectedTools);
-
-        // In non-creating mode, immediately save tool config to backend
-        if (!isCreatingMode && currentAgentId) {
-          try {
-            // Convert params to backend format
-            const paramsObj = mergedParams.reduce(
-              (acc, param) => {
-                acc[param.name] = param.value;
-                return acc;
-              },
-              {} as Record<string, any>
-            );
-
-            const isEnabled = true; // New tool is enabled by default
-            const result = await updateToolConfig(
-              numericId,
-              currentAgentId,
-              paramsObj,
-              isEnabled
-            );
-
-            if (result.success) {
-              // Invalidate queries to refresh tool info
-              queryClient.invalidateQueries({
-                queryKey: ["toolInfo", numericId, currentAgentId],
-              });
-            } else {
-              message.error(
-                result.message || t("toolConfig.message.saveError")
-              );
-            }
-          } catch (error) {
-            console.error("Failed to save tool config:", error);
-            message.error(t("toolConfig.message.saveError"));
-          }
-        }
       }
     }
   };

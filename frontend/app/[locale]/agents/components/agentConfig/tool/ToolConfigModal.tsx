@@ -746,51 +746,10 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
-      // For editing mode (when currentAgentId exists), always call API
-      // For creating mode (isCreatingMode=true), update local state only
-      if (isCreatingMode) {
-        // In creating mode, just update local state
-        updateTools(newSelectedTools);
-        message.success(t("toolConfig.message.saveSuccess"));
-        handleClose(); // Close modal
-        return;
-      }
-
-      if (!currentAgentId) {
-        // Should not happen in normal editing mode, but handle gracefully
-        updateTools(newSelectedTools);
-        message.success(t("toolConfig.message.saveSuccess"));
-        handleClose(); // Close modal
-        return;
-      }
-
-      // Edit mode: call API to persist changes
-      try {
-        setIsLoading(true);
-        const isEnabled = true; //  New tool is enabled by default
-        const result = await updateToolConfig(
-          parseInt(toolToSave.id),
-          currentAgentId,
-          paramsObj,
-          isEnabled
-        );
-        setIsLoading(false);
-
-        if (result.success) {
-          // Update local state and invalidate queries
-          updateTools(newSelectedTools);
-          queryClient.invalidateQueries({
-            queryKey: ["toolInfo", parseInt(toolToSave.id), currentAgentId],
-          });
-          message.success(t("toolConfig.message.saveSuccess"));
-          handleClose(); // Close modal
-        } else {
-          message.error(result.message || t("toolConfig.message.saveError"));
-        }
-      } catch (error) {
-        setIsLoading(false);
-        message.error(t("toolConfig.message.saveError"));
-      }
+      // Update local state only - actual save will happen when user clicks "Save Agent"
+      updateTools(newSelectedTools);
+      message.success(t("toolConfig.message.saveSuccess"));
+      handleClose(); // Close modal
 
       // Call original onSave if provided
       if (onSave) {
