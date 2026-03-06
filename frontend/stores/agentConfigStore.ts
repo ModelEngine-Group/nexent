@@ -321,9 +321,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const editedAgent = { ...state.editedAgent, sub_agent_id_list: nextIds };
       // If there are already unsaved changes, keep it true and skip recalculation.
       // Only when state is clean do we need to check whether sub-agent IDs changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isSubAgentIdsDirty(state.baselineAgent, editedAgent);
+      const hasUnsavedChanges = isSubAgentIdsDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
@@ -336,9 +334,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const editedAgent = { ...state.editedAgent, ...payload };
       // If there are already unsaved changes, keep it true and skip recalculation.
       // Only when state is clean do we need to check whether business info changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isBusinessInfoDirty(state.baselineAgent, editedAgent);
+      const hasUnsavedChanges = isBusinessInfoDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
@@ -351,9 +347,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const editedAgent = { ...state.editedAgent, ...payload };
       // If there are already unsaved changes, keep it true and skip recalculation.
       // Only when state is clean do we need to check whether profile info changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isProfileInfoDirty(state.baselineAgent, editedAgent);
+      const hasUnsavedChanges = isProfileInfoDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
