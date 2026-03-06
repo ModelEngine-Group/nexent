@@ -236,6 +236,3 @@ class StorageClient(ABC):
             Tuple[bool, str]: (Success status, Destination object name or error message)
         """
         pass
-
- 
-

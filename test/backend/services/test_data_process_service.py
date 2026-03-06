@@ -2348,6 +2348,41 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIn('invalid PDF header', str(ctx.exception))
         mock_delete_file.assert_called_once_with('converted/doc.pdf')
 
+    @patch('backend.services.data_process_service.file_exists', return_value=False)
+    @patch('backend.services.data_process_service.get_file_stream', return_value=None)
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_no_remote_cleanup_when_not_exists(
+        self, _exists, _mkdtemp, mock_rmtree, _get_stream, mock_file_exists
+    ):
+        """OfficeConversionException raised and file_exists=False → delete_file never called (623->625 branch)."""
+        with patch('backend.services.data_process_service.delete_file') as mock_del:
+            with self.assertRaises(OfficeConversionException):
+                asyncio.run(
+                    self.service.convert_office_to_pdf_impl(
+                        'uploads/doc.docx', 'converted/doc.pdf'
+                    )
+                )
+        mock_del.assert_not_called()
+
+    @patch('backend.services.data_process_service.get_file_stream', return_value=None)
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', side_effect=OSError('no space left on device'))
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_mkdtemp_failure(
+        self, _exists, mock_mkdtemp, mock_rmtree, _get_stream
+    ):
+        """tempfile.mkdtemp raises → temp_dir stays None → finally skips cleanup (630->exit branch)."""
+        with self.assertRaises(OfficeConversionException) as ctx:
+            asyncio.run(
+                self.service.convert_office_to_pdf_impl(
+                    'uploads/doc.docx', 'converted/doc.pdf'
+                )
+            )
+        self.assertIn('Unexpected error', str(ctx.exception))
+        mock_rmtree.assert_not_called()
+
     @patch('backend.services.data_process_service.convert_office_to_pdf',
            new_callable=AsyncMock)
     @patch('backend.services.data_process_service.upload_file')

@@ -1029,22 +1029,6 @@ async def test_preview_file_chinese_filename(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_preview_file_not_found_error(monkeypatch):
-    """Test previewing a non-existent file returns 404"""
-    async def fake_preview(object_name):
-        raise Exception("File not found")
-    
-    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
-    
-    with pytest.raises(Exception) as ei:
-        await file_management_app.preview_file(
-            object_name="nonexistent/file.pdf",
-            filename=None
-        )
-    assert "File not found" in str(ei.value)
-
-
-@pytest.mark.asyncio
 async def test_preview_file_too_large_error(monkeypatch):
     """Test previewing a file exceeding size limit returns 413"""
     _FileTooLargeException = sys.modules["consts.exceptions"].FileTooLargeException

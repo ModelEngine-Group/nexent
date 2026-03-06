@@ -39,7 +39,7 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 # Preview Configuration
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
 # Limit concurrent Office-to-PDF conversions
-MAX_CONCURRENT_CONVERSIONS = 5 
+MAX_CONCURRENT_CONVERSIONS = 5
 # Supported Office file MIME types
 OFFICE_MIME_TYPES = [
     'application/msword',  # .doc

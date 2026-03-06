@@ -300,43 +300,44 @@ async def _convert_office_to_cached_pdf(
             _conversion_locks[object_name] = asyncio.Lock()
         file_lock = _conversion_locks[object_name]
 
-    async with file_lock:
-        # Double-check: another request may have completed the conversion while we waited
-        cached_stream = _get_cached_pdf_stream(pdf_object_name)
-        if cached_stream is not None:
-            return cached_stream
+    try:
+        async with file_lock:
+            # Double-check: another request may have completed the conversion while we waited
+            cached_stream = _get_cached_pdf_stream(pdf_object_name)
+            if cached_stream is not None:
+                return cached_stream
 
-        # Conversion semaphore is enforced inside the data-process service
-        try:
-            # Request conversion: data-process downloads, converts, uploads to temp path, validates
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{DATA_PROCESS_SERVICE}/tasks/convert_to_pdf",
-                    data={
-                        "object_name": object_name,
-                        "pdf_object_name": temp_pdf_object_name,
-                    },
-                )
-            if response.status_code != 200:
-                raise Exception(
-                    f"data-process conversion returned {response.status_code}: {response.text}"
-                )
+            # Conversion semaphore is enforced inside the data-process service
+            try:
+                # Request conversion: data-process downloads, converts, uploads to temp path, validates
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.post(
+                        f"{DATA_PROCESS_SERVICE}/tasks/convert_to_pdf",
+                        data={
+                            "object_name": object_name,
+                            "pdf_object_name": temp_pdf_object_name,
+                        },
+                    )
+                if response.status_code != 200:
+                    raise Exception(
+                        f"data-process conversion returned {response.status_code}: {response.text}"
+                    )
 
-            # Atomic move from temp to final location, then clean up temp
-            copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
-            if not copy_result.get('success'):
-                raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
-            delete_file(temp_pdf_object_name)
-
-        except Exception as e:
-            if file_exists(temp_pdf_object_name):
+                # Atomic move from temp to final location, then clean up temp
+                copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
+                if not copy_result.get('success'):
+                    raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
                 delete_file(temp_pdf_object_name)
-            logger.error(f"Office conversion failed: {str(e)}")
-            raise OfficeConversionException(f"Failed to convert Office document to PDF: {str(e)}") from e
-        finally:
-            # Clean up the file lock (prevents memory leak for many unique files)
-            async with _conversion_locks_guard:
-                _conversion_locks.pop(object_name, None)
+
+            except Exception as e:
+                if file_exists(temp_pdf_object_name):
+                    delete_file(temp_pdf_object_name)
+                logger.error(f"Office conversion failed: {str(e)}")
+                raise OfficeConversionException(f"Failed to convert Office document to PDF: {str(e)}") from e
+    finally:
+        # Clean up the file lock (prevents memory leak for many unique files)
+        async with _conversion_locks_guard:
+            _conversion_locks.pop(object_name, None)
 
     file_stream = get_file_stream(pdf_object_name)
     if file_stream is None:
