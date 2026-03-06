@@ -2348,6 +2348,174 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIn('invalid PDF header', str(ctx.exception))
         mock_delete_file.assert_called_once_with('converted/doc.pdf')
 
+    @patch('backend.services.data_process_service.convert_office_to_pdf',
+           new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.upload_file')
+    @patch('backend.services.data_process_service.get_file_size_from_minio')
+    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_size_zero(
+        self, _exists, _mkdtemp, mock_rmtree,
+        mock_get_stream, mock_get_size, mock_upload, mock_convert
+    ):
+        """remote_size == 0 → OfficeConversionException: cannot read remote file size."""
+        mock_get_stream.return_value = self._make_stream(b'DOC data')
+        mock_get_size.return_value = 0
+        mock_upload.return_value = {'success': True}
+        mock_convert.return_value = '/tmp/test_cv/doc.pdf'
+        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        with patch('builtins.open', MagicMock()):
+            with self.assertRaises(OfficeConversionException) as ctx:
+                asyncio.run(
+                    self.service.convert_office_to_pdf_impl(
+                        'uploads/doc.docx', 'converted/doc.pdf'
+                    )
+                )
+        self.assertIn('cannot read remote file size', str(ctx.exception))
+
+    @patch('backend.services.data_process_service.convert_office_to_pdf',
+           new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.upload_file')
+    @patch('backend.services.data_process_service.get_file_size_from_minio')
+    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_size_too_small(
+        self, _exists, _mkdtemp, mock_rmtree,
+        mock_get_stream, mock_get_size, mock_upload, mock_convert
+    ):
+        """remote_size < 100 (but > 0) → OfficeConversionException: file too small."""
+        mock_get_stream.return_value = self._make_stream(b'DOC data')
+        mock_get_size.return_value = 50
+        mock_upload.return_value = {'success': True}
+        mock_convert.return_value = '/tmp/test_cv/doc.pdf'
+        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        with patch('builtins.open', MagicMock()):
+            with self.assertRaises(OfficeConversionException) as ctx:
+                asyncio.run(
+                    self.service.convert_office_to_pdf_impl(
+                        'uploads/doc.docx', 'converted/doc.pdf'
+                    )
+                )
+        self.assertIn('file too small', str(ctx.exception))
+
+    @patch('backend.services.data_process_service.convert_office_to_pdf',
+           new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.upload_file')
+    @patch('backend.services.data_process_service.get_file_size_from_minio')
+    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_stream_none(
+        self, _exists, _mkdtemp, mock_rmtree,
+        mock_get_stream, mock_get_size, mock_upload, mock_convert
+    ):
+        """get_file_stream returns None for header check → OfficeConversionException."""
+        mock_get_stream.side_effect = [
+            self._make_stream(b'DOC data'),  # Step 1: original file
+            None,                            # Step 4: header check stream
+        ]
+        mock_get_size.return_value = 208
+        mock_upload.return_value = {'success': True}
+        mock_convert.return_value = '/tmp/test_cv/doc.pdf'
+        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        with patch('builtins.open', MagicMock()):
+            with self.assertRaises(OfficeConversionException) as ctx:
+                asyncio.run(
+                    self.service.convert_office_to_pdf_impl(
+                        'uploads/doc.docx', 'converted/doc.pdf'
+                    )
+                )
+        self.assertIn('cannot read uploaded file', str(ctx.exception))
+
+    @patch('backend.services.data_process_service.convert_office_to_pdf',
+           new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.upload_file')
+    @patch('backend.services.data_process_service.get_file_size_from_minio')
+    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_close_raises(
+        self, _exists, _mkdtemp, mock_rmtree,
+        mock_get_stream, mock_get_size, mock_upload, mock_convert
+    ):
+        """stream.close() raises during header check → exception swallowed, pipeline succeeds."""
+        header_stream = MagicMock()
+        header_stream.read.return_value = b'%PDF-1.4'
+        header_stream.close.side_effect = OSError('close failed')
+        mock_get_stream.side_effect = [
+            self._make_stream(b'DOC data'),  # Step 1: original file
+            header_stream,                   # Step 4: header check
+        ]
+        mock_get_size.return_value = 208
+        mock_upload.return_value = {'success': True}
+        mock_convert.return_value = '/tmp/test_cv/doc.pdf'
+        with patch('builtins.open', MagicMock()):
+            asyncio.run(
+                self.service.convert_office_to_pdf_impl(
+                    'uploads/doc.docx', 'converted/doc.pdf'
+                )
+            )
+        mock_convert.assert_called_once()
+
+    @patch('backend.services.data_process_service.convert_office_to_pdf',
+           new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.upload_file')
+    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_unexpected_exception(
+        self, _exists, _mkdtemp, mock_rmtree,
+        mock_get_stream, mock_upload, mock_convert
+    ):
+        """Non-OfficeConversionException from upload_file → wrapped as OfficeConversionException."""
+        mock_get_stream.return_value = self._make_stream(b'DOC data')
+        mock_convert.return_value = '/tmp/test_cv/doc.pdf'
+        mock_upload.side_effect = ConnectionError('storage unreachable')
+        with patch('builtins.open', MagicMock()):
+            with self.assertRaises(OfficeConversionException) as ctx:
+                asyncio.run(
+                    self.service.convert_office_to_pdf_impl(
+                        'uploads/doc.docx', 'converted/doc.pdf'
+                    )
+                )
+        self.assertIn('Unexpected error', str(ctx.exception))
+
+    @patch('backend.services.data_process_service.convert_office_to_pdf',
+           new_callable=AsyncMock)
+    @patch('backend.services.data_process_service.upload_file')
+    @patch('backend.services.data_process_service.get_file_size_from_minio')
+    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('shutil.rmtree')
+    @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
+    @patch('os.path.exists', return_value=True)
+    def test_convert_office_to_pdf_impl_cleanup_failure(
+        self, _exists, _mkdtemp, mock_rmtree,
+        mock_get_stream, mock_get_size, mock_upload, mock_convert
+    ):
+        """shutil.rmtree raises during cleanup → error is logged, not re-raised."""
+        mock_get_stream.side_effect = [
+            self._make_stream(b'DOC data'),     # Step 1: original file
+            self._make_stream(b'%PDF-1.4 ok'),  # Step 4: header check
+        ]
+        mock_get_size.return_value = 208
+        mock_upload.return_value = {'success': True}
+        mock_convert.return_value = '/tmp/test_cv/doc.pdf'
+        mock_rmtree.side_effect = OSError('permission denied')
+        with patch('builtins.open', MagicMock()):
+            # Cleanup error must not propagate
+            asyncio.run(
+                self.service.convert_office_to_pdf_impl(
+                    'uploads/doc.docx', 'converted/doc.pdf'
+                )
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1174,3 +1174,21 @@ async def test_preview_file_does_not_exist_error(monkeypatch):
     assert "File not found" in str(ei.value)
 
 
+@pytest.mark.asyncio
+async def test_preview_file_office_conversion_error(monkeypatch):
+    """OfficeConversionException from preview_file_impl → HTTP 500 with conversion detail."""
+    _OfficeConversionException = sys.modules["consts.exceptions"].OfficeConversionException
+
+    async def fake_preview(object_name):
+        raise _OfficeConversionException("LibreOffice conversion failed")
+
+    monkeypatch.setattr(file_management_app, "preview_file_impl", fake_preview)
+
+    with pytest.raises(Exception) as ei:
+        await file_management_app.preview_file(
+            object_name="files/report.docx",
+            filename=None
+        )
+    assert "Failed to preview file" in str(ei.value)
+
+
