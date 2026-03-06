@@ -27,6 +27,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useKnowledgeBaseConfigChangeHandler } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 
 export interface ToolConfigModalProps {
@@ -45,6 +46,7 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "knowledge_base_search",
   "dify_search",
   "datamate_search",
+  "idata_search",
 ];
 
 export default function ToolConfigModal({
@@ -91,6 +93,26 @@ export default function ToolConfigModal({
     apiKey: "",
   });
 
+  // iData configuration state
+  const [idataConfig, setIdataConfig] = useState<{
+    serverUrl: string;
+    apiKey: string;
+    userId: string;
+    knowledgeSpaceId: string;
+  }>({
+    serverUrl: "",
+    apiKey: "",
+    userId: "",
+    knowledgeSpaceId: "",
+  });
+
+  // iData knowledge spaces state
+  const [idataKnowledgeSpaces, setIdataKnowledgeSpaces] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [idataKnowledgeSpacesLoading, setIdataKnowledgeSpacesLoading] =
+    useState(false);
+
   // DataMate URL from knowledge base configuration
   const [knowledgeBaseDataMateUrl, setKnowledgeBaseDataMateUrl] =
     useState<string>("");
@@ -117,11 +139,13 @@ export default function ToolConfigModal({
     | "knowledge_base_search"
     | "dify_search"
     | "datamate_search"
+    | "idata_search"
     | null => {
     if (!toolRequiresKbSelection) return null;
     const name = tool?.name;
     if (name === "dify_search") return "dify_search";
     if (name === "datamate_search") return "datamate_search";
+    if (name === "idata_search") return "idata_search";
     return "knowledge_base_search";
   }, [tool?.name, toolRequiresKbSelection]);
 
@@ -147,6 +171,46 @@ export default function ToolConfigModal({
     }
   }, [toolKbType, difyServerUrlParam, difyApiKeyParam]);
 
+  // Get iData configuration from initial params
+  const idataServerUrlParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "server_url");
+  }, [currentParams]);
+
+  const idataApiKeyParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "api_key");
+  }, [currentParams]);
+
+  const idataUserIdParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "user_id");
+  }, [currentParams]);
+
+  const idataKnowledgeSpaceIdParam = useMemo(() => {
+    return currentParams.find((param) => param.name === "knowledge_space_id");
+  }, [currentParams]);
+
+  // Initialize iData config from params
+  useEffect(() => {
+    if (toolKbType === "idata_search") {
+      const serverUrl = idataServerUrlParam?.value || "";
+      const apiKey = idataApiKeyParam?.value || "";
+      const userId = idataUserIdParam?.value || "";
+      const knowledgeSpaceId = idataKnowledgeSpaceIdParam?.value || "";
+
+      setIdataConfig({
+        serverUrl,
+        apiKey,
+        userId,
+        knowledgeSpaceId,
+      });
+    }
+  }, [
+    toolKbType,
+    idataServerUrlParam,
+    idataApiKeyParam,
+    idataUserIdParam,
+    idataKnowledgeSpaceIdParam,
+  ]);
+
   // Fetch knowledge bases for tool config based on tool type (now uses React Query caching)
   // For datamate_search, use the server_url from the form as config
   const datamateServerUrl = useMemo(() => {
@@ -156,6 +220,40 @@ export default function ToolConfigModal({
     }
     return "";
   }, [toolKbType, currentParams]);
+
+  // Fetch iData knowledge spaces when config is available
+  useEffect(() => {
+    if (
+      toolKbType === "idata_search" &&
+      idataConfig.serverUrl &&
+      idataConfig.apiKey &&
+      idataConfig.userId
+    ) {
+      setIdataKnowledgeSpacesLoading(true);
+      knowledgeBaseService
+        .getIdataKnowledgeSpaces(
+          idataConfig.serverUrl,
+          idataConfig.apiKey,
+          idataConfig.userId
+        )
+        .then((spaces) => {
+          setIdataKnowledgeSpaces(spaces);
+          setIdataKnowledgeSpacesLoading(false);
+        })
+        .catch((error) => {
+          log.error("Failed to fetch iData knowledge spaces:", error);
+          setIdataKnowledgeSpaces([]);
+          setIdataKnowledgeSpacesLoading(false);
+        });
+    } else if (toolKbType === "idata_search") {
+      setIdataKnowledgeSpaces([]);
+    }
+  }, [
+    toolKbType,
+    idataConfig.serverUrl,
+    idataConfig.apiKey,
+    idataConfig.userId,
+  ]);
 
   const {
     data: knowledgeBases = [],
@@ -168,7 +266,19 @@ export default function ToolConfigModal({
       ? difyConfig
       : toolKbType === "datamate_search"
         ? { serverUrl: datamateServerUrl }
-        : undefined
+        : toolKbType === "idata_search"
+          ? idataConfig.serverUrl &&
+            idataConfig.apiKey &&
+            idataConfig.userId &&
+            idataConfig.knowledgeSpaceId
+            ? {
+                serverUrl: idataConfig.serverUrl,
+                apiKey: idataConfig.apiKey,
+                userId: idataConfig.userId,
+                knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+              }
+            : undefined
+          : undefined
   );
 
   // Handle config change: clear knowledge base selection and refetch
@@ -210,9 +320,68 @@ export default function ToolConfigModal({
         ? difyConfig
         : toolKbType === "datamate_search"
           ? { serverUrl: datamateServerUrl }
-          : undefined,
+          : toolKbType === "idata_search"
+            ? {
+                serverUrl: idataConfig.serverUrl,
+                apiKey: idataConfig.apiKey,
+                userId: idataConfig.userId,
+              }
+            : undefined,
     onConfigChange: handleKbConfigChange,
   });
+
+  // Handle iData knowledge space ID change: clear knowledge base selection and refetch
+  const prevKnowledgeSpaceIdRef = useRef<string>("");
+  useEffect(() => {
+    if (
+      toolKbType === "idata_search" &&
+      idataConfig.knowledgeSpaceId &&
+      idataConfig.serverUrl &&
+      idataConfig.apiKey &&
+      idataConfig.userId
+    ) {
+      // Only trigger if knowledge space ID actually changed
+      if (prevKnowledgeSpaceIdRef.current === idataConfig.knowledgeSpaceId) {
+        return;
+      }
+
+      // Update ref
+      prevKnowledgeSpaceIdRef.current = idataConfig.knowledgeSpaceId;
+
+      // Clear previous knowledge base selection when space ID changes
+      setSelectedKbIds([]);
+      setSelectedKbDisplayNames([]);
+
+      // Clear form value for dataset_ids field
+      const kbFieldIndex = currentParams.findIndex(
+        (p) => p.name === "dataset_ids"
+      );
+      if (kbFieldIndex >= 0) {
+        form.setFieldValue(`param_${kbFieldIndex}`, []);
+        const updatedParams = [...currentParams];
+        updatedParams[kbFieldIndex] = {
+          ...updatedParams[kbFieldIndex],
+          value: [],
+        };
+        setCurrentParams(updatedParams);
+      }
+
+      // Refetch knowledge bases with new space ID
+      refetchKnowledgeBases();
+    } else if (toolKbType === "idata_search") {
+      // Reset ref when config is cleared
+      prevKnowledgeSpaceIdRef.current = "";
+    }
+  }, [
+    toolKbType,
+    idataConfig.knowledgeSpaceId,
+    idataConfig.serverUrl,
+    idataConfig.apiKey,
+    idataConfig.userId,
+    refetchKnowledgeBases,
+    currentParams,
+    form,
+  ]);
 
   // Get current embedding model from config for model matching
   const currentEmbeddingModel = useMemo(() => {
@@ -888,7 +1057,8 @@ export default function ToolConfigModal({
   const getToolType = ():
     | "knowledge_base_search"
     | "dify_search"
-    | "datamate_search" => {
+    | "datamate_search"
+    | "idata_search" => {
     return toolKbType || "knowledge_base_search";
   };
 
@@ -1025,13 +1195,47 @@ export default function ToolConfigModal({
   );
 
   const renderParamInput = (param: ToolParam, index: number) => {
+    // Get field name for form
+    const fieldName = `param_${index}`;
+
     // Get options from frontend configuration based on tool name and parameter name
     const options = getToolParamOptions(tool.name, param.name);
 
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
 
+    // Special handling for iData knowledge_space_id parameter
+    const isIdataKnowledgeSpaceId =
+      toolKbType === "idata_search" && param.name === "knowledge_space_id";
+
     const inputComponent = (() => {
+      // Handle iData knowledge space ID selector
+      if (isIdataKnowledgeSpaceId) {
+        const currentValue = form.getFieldValue(fieldName);
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            loading={idataKnowledgeSpacesLoading}
+            value={currentValue}
+            options={idataKnowledgeSpaces.map((space) => ({
+              value: space.id,
+              label: space.name,
+            }))}
+            onChange={(value) => {
+              // Update idataConfig when space ID changes
+              setIdataConfig((prev) => ({
+                ...prev,
+                knowledgeSpaceId: value || "",
+              }));
+              // Also update form value
+              form.setFieldValue(fieldName, value);
+            }}
+          />
+        );
+      }
+
       // Handle select type - when options are defined in frontend config
       if (isSelectType) {
         return (
@@ -1406,7 +1610,14 @@ export default function ToolConfigModal({
             ? difyConfig
             : toolKbType === "datamate_search"
               ? { serverUrl: datamateServerUrl }
-              : undefined
+              : toolKbType === "idata_search"
+                ? {
+                    serverUrl: idataConfig.serverUrl,
+                    apiKey: idataConfig.apiKey,
+                    userId: idataConfig.userId,
+                    knowledgeSpaceId: idataConfig.knowledgeSpaceId,
+                  }
+                : undefined
         }
       />
     </>

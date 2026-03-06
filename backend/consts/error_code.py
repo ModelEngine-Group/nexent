@@ -157,6 +157,14 @@ class ErrorCode(Enum):
     # 03 - ME Service
     ME_CONNECTION_FAILED = "130301"  # ME service connection failed
 
+    # 04 - iData Service
+    IDATA_SERVICE_ERROR = "130401"  # iData service error
+    IDATA_CONFIG_INVALID = "130402"  # Invalid iData configuration
+    IDATA_CONNECTION_ERROR = "130403"  # iData connection error
+    IDATA_AUTH_ERROR = "130404"  # iData auth error
+    IDATA_RATE_LIMIT = "130405"  # iData rate limit
+    IDATA_RESPONSE_ERROR = "130406"  # iData response error
+
     # ==================== 14 Northbound / 北向接口 ====================
     # 01 - Request
     NORTHBOUND_REQUEST_FAILED = "140101"  # Northbound request failed
@@ -216,4 +224,10 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.DIFY_CONNECTION_ERROR: 502,
     ErrorCode.DIFY_RESPONSE_ERROR: 502,
     ErrorCode.DIFY_RATE_LIMIT: 429,
+    # iData (module 13)
+    ErrorCode.IDATA_CONFIG_INVALID: 400,
+    ErrorCode.IDATA_AUTH_ERROR: 401,
+    ErrorCode.IDATA_CONNECTION_ERROR: 502,
+    ErrorCode.IDATA_RESPONSE_ERROR: 502,
+    ErrorCode.IDATA_RATE_LIMIT: 429,
 }
