@@ -579,6 +579,8 @@ export default function ToolConfigModal({
   // Reset when currentAgentId changes (i.e., when switching agents)
   const hasTriggeredInitialRefetch = useRef(false);
   const prevAgentIdRef = useRef<number | undefined>(undefined);
+  // Track if sync message has been shown when KB selector opens
+  const hasShownSyncMessageRef = useRef(false);
 
   // Reset refetch flag when switching agents and invalidate cache to force fresh fetch
   useEffect(() => {
@@ -623,6 +625,43 @@ export default function ToolConfigModal({
     toolKbType,
     difyConfig,
   ]);
+
+  // Show sync message when knowledge base selector modal opens
+  // This provides immediate feedback on sync status to the user
+  useEffect(() => {
+    // Only trigger when KB selector opens and tool requires KB selection
+    if (kbSelectorVisible && toolRequiresKbSelection && !hasShownSyncMessageRef.current) {
+      // Mark as shown to avoid duplicate messages
+      hasShownSyncMessageRef.current = true;
+
+      // Trigger sync and show message based on result
+      refetchKnowledgeBases()
+        .then((result) => {
+          if (result.isError || result.error) {
+            log.error("Failed to sync knowledge bases:", result.error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          } else {
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          }
+        })
+        .catch((error) => {
+          log.error("Failed to sync knowledge bases:", error);
+          // Clear knowledge base list on sync failure
+          clearKnowledgeBases();
+          message.error(t("knowledgeBase.message.syncError"));
+        });
+    }
+  }, [kbSelectorVisible, toolRequiresKbSelection, refetchKnowledgeBases, clearKnowledgeBases, t]);
+
+  // Reset sync message flag when KB selector closes
+  useEffect(() => {
+    if (!kbSelectorVisible) {
+      hasShownSyncMessageRef.current = false;
+    }
+  }, [kbSelectorVisible]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
