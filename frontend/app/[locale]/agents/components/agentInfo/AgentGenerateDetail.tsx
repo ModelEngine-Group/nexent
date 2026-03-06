@@ -29,6 +29,7 @@ import { generatePromptStream } from "@/services/promptService";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useConfig } from "@/hooks/useConfig";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { USER_ROLES } from "@/const/auth";
@@ -62,8 +63,24 @@ export default function AgentGenerateDetail({
   const updateBusinessInfo = useAgentConfigStore((state) => state.updateBusinessInfo);
   const updateProfileInfo = useAgentConfigStore((state) => state.updateProfileInfo);
 
-  // Model data from React Query
-  const { availableLlmModels, defaultLlmModel, isLoading: loadingModels } = useModelList();
+  // Model data: default LLM name from config, resolve to full model from model list
+  const { defaultLlmModelName } = useConfig();
+  const { availableLlmModels, models, isLoading: loadingModels } = useModelList();
+  const defaultLlmModel = useMemo(() => {
+    if (defaultLlmModelName) {
+      const found = availableLlmModels.find(
+        (m) => m.name === defaultLlmModelName || m.displayName === defaultLlmModelName
+      );
+      if (found) return found;
+      return models.find(
+        (m) =>
+          m.type === "llm" &&
+          (m.name === defaultLlmModelName || m.displayName === defaultLlmModelName)
+      );
+    }
+    // No default configured: use the first available LLM, or undefined if none
+    return availableLlmModels[0];
+  }, [defaultLlmModelName, availableLlmModels, models]);
 
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
