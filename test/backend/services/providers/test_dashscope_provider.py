@@ -575,6 +575,57 @@ class TestDashScopeModelProvider:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_get_models_rate_limit_retry(self, mocker: MockFixture):
+        """Test that a 429 response triggers a retry after sleeping."""
+        rate_limit_response = MagicMock()
+        rate_limit_response.status_code = 429
+
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.json.return_value = {
+            "output": {
+                "models": [
+                    {
+                        "model": "qwen-turbo",
+                        "description": "Text generation",
+                        "inference_metadata": {
+                            "request_modality": ["Text"],
+                            "response_modality": ["Text"],
+                        },
+                    }
+                ]
+            }
+        }
+        ok_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [rate_limit_response, ok_response]
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+        mocker.patch(
+            "backend.services.providers.dashscope_provider.httpx.AsyncClient",
+            return_value=mock_cm,
+        )
+        mocker.patch(
+            "backend.services.providers.dashscope_provider.DASHSCOPE_GET_URL",
+            "https://dashscope.aliyuncs.com/api/v1/models",
+        )
+        mocker.patch(
+            "backend.services.providers.dashscope_provider.asyncio.sleep",
+            new=AsyncMock(),
+        )
+
+        provider = DashScopeModelProvider()
+        result = await provider.get_models({"model_type": "llm", "api_key": "test-key"})
+
+        assert mock_client.get.call_count == 2
+        assert len(result) == 1
+        assert result[0]["id"] == "qwen-turbo"
+
+    @pytest.mark.asyncio
     async def test_get_models_with_chinese_description(self, mocker: MockFixture):
         """Test model classification by Chinese description."""
         mock_response = MagicMock()
