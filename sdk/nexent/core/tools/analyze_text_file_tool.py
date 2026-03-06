@@ -29,17 +29,36 @@ class AnalyzeTextFileTool(Tool):
     description = (
         "Extract content from text files and analyze them using a large language model based on your query. "
         "Supports multiple files from S3 URLs (s3://bucket/key or /bucket/key), HTTP, and HTTPS URLs. "
-        "The tool will extract the text content from each file and return an analysis based on your question."
+        "The tool will extract text content from each file and return an analysis based on your question."
     )
+
+    description_zh = "从文本文件中提取内容，并根据你的问题使用大语言模型进行分析。支持来自 S3、HTTP 和 HTTPS URL 的多个文件。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。该工具将从每个文件中提取文本内容，并根据你的问题返回分析结果。"
 
     inputs = {
         "file_url_list": {
             "type": "array",
-            "description": "List of file URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs."
+            "description": "List of file URLs (S3, HTTP, or HTTPS). Supports s3://bucket/key, /bucket/key, http://, and https:// URLs.",
+            "description_zh": "文件 URL 列表（S3、HTTP 或 HTTPS）。支持 s3://bucket/key、/bucket/key、http:// 和 https:// URL。"
         },
         "query": {
             "type": "string",
-            "description": "User's question to guide the analysis"
+            "description": "User's question to guide the analysis",
+            "description_zh": "用户的问题，用于指导分析"
+        }
+    }
+
+    init_param_descriptions = {
+        "storage_client": {
+            "description": "Storage client for downloading files",
+            "description_zh": "存储客户端，用于下载文件"
+        },
+        "data_process_service_url": {
+            "description": "URL of data process service",
+            "description_zh": "数据处理服务的 URL"
+        },
+        "llm_model": {
+            "description": "The LLM model to use",
+            "description_zh": "要使用的 LLM 模型"
         }
     }
     output_type = "array"

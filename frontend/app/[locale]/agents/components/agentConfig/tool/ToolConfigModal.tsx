@@ -28,6 +28,7 @@ import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector
 import { useKnowledgeBaseConfigChangeHandler } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
+import { isZhLocale, getLocalizedDescription } from "@/lib/utils";
 
 export interface ToolConfigModalProps {
   isOpen: boolean;
@@ -939,7 +940,7 @@ export default function ToolConfigModal({
       const placeholder = t(
         "toolConfig.input.knowledgeBaseSelector.placeholder",
         {
-          name: param.description || param.name,
+          name: getLocalizedDescription(param.description, param.description_zh) || param.name,
         }
       );
 
@@ -1037,7 +1038,7 @@ export default function ToolConfigModal({
         return (
           <Select
             placeholder={t("toolConfig.input.string.placeholder", {
-              name: param.description,
+              name: getLocalizedDescription(param.description, param.description_zh),
             })}
             options={options.map((option) => ({
               value: option,
@@ -1052,7 +1053,7 @@ export default function ToolConfigModal({
           return (
             <InputNumber
               placeholder={t("toolConfig.input.string.placeholder", {
-                name: param.description,
+                name: getLocalizedDescription(param.description, param.description_zh),
               })}
             />
           );
@@ -1071,7 +1072,7 @@ export default function ToolConfigModal({
             return (
               <Input.Password
                 placeholder={t("toolConfig.input.string.placeholder", {
-                  name: param.description,
+                  name: getLocalizedDescription(param.description, param.description_zh),
                 })}
               />
             );
@@ -1081,7 +1082,7 @@ export default function ToolConfigModal({
           return (
             <Input.TextArea
               placeholder={t(`toolConfig.input.${param.type}.placeholder`, {
-                name: param.description,
+                name: getLocalizedDescription(param.description, param.description_zh),
               })}
               autoSize={{ minRows: 1, maxRows: 8 }}
               style={{ resize: "vertical" }}
@@ -1165,7 +1166,9 @@ export default function ToolConfigModal({
         }
       >
         <div className="mb-4">
-          <p className="text-sm text-gray-500 mb-4">{tool?.description}</p>
+          <p className="text-sm text-gray-500 mb-4">
+            {getLocalizedDescription(tool?.description, tool?.description_zh)}
+          </p>
           <div className="text-sm font-medium mb-2">
             {t("toolConfig.title.paramConfig")}
           </div>
@@ -1336,7 +1339,7 @@ export default function ToolConfigModal({
                       }
                       rules={rules}
                       tooltip={{
-                        title: param.description,
+                        title: getLocalizedDescription(param.description, param.description_zh),
                         placement: "topLeft",
                         styles: { root: { maxWidth: 400 } },
                       }}
