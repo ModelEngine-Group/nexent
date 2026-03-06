@@ -53,7 +53,6 @@ class UnstructuredProcessor(FileProcessor):
         Returns:
             List of standardized chunk dictionaries
         """
-        from unstructured.partition.auto import partition
 
         # Validate input parameters
         if not file_data:
@@ -62,12 +61,17 @@ class UnstructuredProcessor(FileProcessor):
         # Merge parameters
         processed_params = self._merge_params(params)
 
-        # Prepare partition parameters
-        partition_kwargs = self._prepare_partition_kwargs(
-            file_data, chunking_strategy, processed_params)
-
-        # Execute file partitioning
-        elements = partition(**partition_kwargs)
+        if filename and filename.lower().endswith(".json"):
+            elements = self._partition_json(
+                file_data=file_data,
+                max_characters=processed_params["max_characters"])
+        else:
+            # Prepare partition parameters
+            partition_kwargs = self._prepare_partition_kwargs(
+                file_data, chunking_strategy, processed_params)
+            from unstructured.partition.auto import partition
+            # Execute file partitioning
+            elements = partition(**partition_kwargs)
 
         # Process results
         return self._process_elements(elements, chunking_strategy, filename)
@@ -203,7 +207,9 @@ class UnstructuredProcessor(FileProcessor):
         Returns:
             List of supported file formats
         """
-        return [".txt", ".pdf", ".docx", ".doc", ".html", ".htm", ".md", ".rtf", ".odt", ".pptx", ".ppt"]
+        return [
+            ".txt", ".pdf", ".docx", ".doc", ".html", ".htm", ".md", ".rtf", ".odt", ".pptx", ".ppt", ".json", ".epub", ".csv", ".xml"
+        ]
 
     def validate_file_format(self, filename: str) -> bool:
         """
@@ -246,3 +252,28 @@ class UnstructuredProcessor(FileProcessor):
             "created_time": stat.st_ctime,
             "modified_time": stat.st_mtime,
         }
+
+    def _partition_json(self, file_data: bytes, max_characters: int) -> List:
+        """
+        Partition JSON file content into CompositeElement chunks.
+
+        This method provides a specialized JSON splitting strategy that:
+        - Preserves top-level key-value integrity whenever possible
+        - Falls back to plain text splitting when safe JSON boundaries cannot be found
+        - Keeps output format consistent with unstructured partition results
+
+        Args:
+            file_data: Raw JSON file bytes
+            max_characters: Maximum number of characters per chunk
+
+        Returns:
+            List of CompositeElement objects containing chunked text
+        """
+        from unstructured.documents.elements import CompositeElement
+        from .json_chunk_processor import JSONChunkProcessor
+
+        return [
+            CompositeElement(text=chunk)
+            for chunk in JSONChunkProcessor(max_characters).split(file_data)
+            if chunk and chunk.strip()
+        ]
