@@ -161,6 +161,7 @@ export default function ToolConfigModal({
     data: knowledgeBases = [],
     isLoading: kbLoading,
     refetch: refetchKnowledgeBases,
+    clearKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(
     toolKbType,
     toolKbType === "dify_search"
@@ -195,9 +196,12 @@ export default function ToolConfigModal({
       setCurrentParams(updatedParams);
     }
 
+    // Clear knowledge base list when config changes (API key/URL changed)
+    clearKnowledgeBases();
+
     // Refetch knowledge bases with new config
     refetchKnowledgeBases();
-  }, [refetchKnowledgeBases, currentParams, form]);
+  }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
 
   useKnowledgeBaseConfigChangeHandler({
     toolKbType,
@@ -1333,10 +1337,28 @@ export default function ToolConfigModal({
         knowledgeBases={knowledgeBases}
         isLoading={kbLoading}
         showCheckbox={true}
-        onSync={(toolType) =>
-          // Use refetchKnowledgeBases instead of syncKnowledgeBases to properly update React Query cache
-          refetchKnowledgeBases()
-        }
+        onSync={async (toolType) => {
+          try {
+            const result = await refetchKnowledgeBases();
+            // Check if refetch has an error - React Query sets isError when queryFn throws
+            // Note: if queryFn catches error internally and returns data, isError will be false
+            // So we need to check both error and isError
+            if (result.isError || result.error) {
+              log.error("Failed to sync knowledge bases:", result.error);
+              // Clear knowledge base list on sync failure
+              clearKnowledgeBases();
+              message.error(t("knowledgeBase.message.syncError"));
+              return;
+            }
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          } catch (error) {
+            log.error("Failed to sync knowledge bases:", error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          }
+        }}
         syncLoading={kbLoading}
         isSelectable={canSelectKnowledgeBase}
         currentEmbeddingModel={currentEmbeddingModel}
