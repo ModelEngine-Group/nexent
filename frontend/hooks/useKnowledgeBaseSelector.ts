@@ -37,6 +37,7 @@ export function useKnowledgeBasesForToolConfig(
   }
 ) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
 
   // Support both difyConfig and datamateConfig naming conventions
   const difyConfig = config;
@@ -93,17 +94,12 @@ export function useKnowledgeBasesForToolConfig(
       } else if (toolType === "dify_search") {
         // For Dify, fetch knowledge bases using provided config
         if (difyConfig?.serverUrl && difyConfig?.apiKey) {
-          try {
-            kbs = await knowledgeBaseService.getDifyKnowledgeBases(
-              difyConfig.serverUrl,
-              difyConfig.apiKey
-            );
-          } catch (error: any) {
-            log.error("Failed to fetch Dify knowledge bases:", error);
-            // Show i18n error message to user
-            showErrorToUser(error, t);
-            kbs = [];
-          }
+          // Don't catch error here - let it propagate to React Query so caller can handle it
+          kbs = await knowledgeBaseService.getDifyKnowledgeBases(
+            difyConfig.serverUrl,
+            difyConfig.apiKey
+          );
+          log.info("Dify knowledge bases fetched successfully:", kbs.length);
         } else {
           // No Dify config provided, return empty
           kbs = [];
@@ -126,9 +122,18 @@ export function useKnowledgeBasesForToolConfig(
     gcTime: 5 * 60_000, // Keep in cache for 5 minutes
     refetchOnMount: false, // Only refetch if data is stale
     refetchOnWindowFocus: false, // Don't refetch on window focus
+    retry: 0, // Don't retry on failure - show error immediately
   });
 
-  return query;
+  // Provide a method to clear knowledge bases cache (useful when sync fails)
+  const clearKnowledgeBases = useCallback(() => {
+    queryClient.setQueryData(
+      knowledgeBaseKeys.list(toolType || "default", difyConfig?.serverUrl || ""),
+      []
+    );
+  }, [queryClient, toolType, difyConfig?.serverUrl]);
+
+  return { ...query, clearKnowledgeBases };
 }
 
 /**
