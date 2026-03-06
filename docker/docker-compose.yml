@@ -298,6 +298,7 @@ services:
         mc admin policy attach myadmin readwrite --user=$MINIO_ACCESS_KEY
         mc mb myadmin/$MINIO_DEFAULT_BUCKET
         mc anonymous set download myadmin/$MINIO_DEFAULT_BUCKET
+        mc ilm rule add myadmin/$MINIO_DEFAULT_BUCKET --prefix 'converted/' --expiry-days 7 --id expire-converted-pdfs
         wait $$MINIO_PID
       "
 
