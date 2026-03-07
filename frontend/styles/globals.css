@@ -338,3 +338,25 @@ tr.selected-row > td:first-child::before {
 .ant-tooltip .ant-tooltip-inner {
   border: none !important;
 }
+
+/* Home hero artistic title */
+.hero-art-title {
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.hero-art-title-main {
+  background: linear-gradient(98deg, #0f172a 0%, #1e40af 52%, #2563eb 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-art-title-accent {
+  background: linear-gradient(98deg, #2563eb 0%, #3b82f6 56%, #06b6d4 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 14px rgba(37, 99, 235, 0.18);
+}
