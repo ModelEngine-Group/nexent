@@ -30,9 +30,7 @@ class UserSignUpRequest(BaseModel):
     """User registration request model"""
     email: EmailStr
     password: str = Field(..., min_length=6)
-    is_admin: Optional[bool] = False
     invite_code: Optional[str] = None
-    with_new_invitation: Optional[bool] = False
 
 
 class UserSignInRequest(BaseModel):
@@ -279,6 +277,7 @@ class AgentInfoRequest(BaseModel):
     enabled_tool_ids: Optional[List[int]] = None
     related_agent_ids: Optional[List[int]] = None
     group_ids: Optional[List[int]] = None
+    ingroup_permission: Optional[str] = None
     version_no: int = 0
 
 
@@ -491,6 +490,8 @@ class MCPUpdateRequest(BaseModel):
     current_mcp_url: str = Field(..., description="Current MCP server URL")
     new_service_name: str = Field(..., description="New MCP service name")
     new_mcp_url: str = Field(..., description="New MCP server URL")
+    new_authorization_token: Optional[str] = Field(
+        None, description="New authorization token for MCP server authentication (e.g., Bearer token)")
 
 
 # Tenant Management Data Models
@@ -536,21 +537,27 @@ class GroupUpdateRequest(BaseModel):
 class GroupListRequest(BaseModel):
     """Request model for listing groups"""
     tenant_id: str = Field(..., description="Tenant ID to filter groups")
-    page: int = Field(1, ge=1, description="Page number for pagination")
-    page_size: int = Field(
-        20, ge=1, le=100, description="Number of items per page")
-    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
-    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
+    page: Optional[int] = Field(
+        None, ge=1, description="Page number for pagination. If not provided, returns all data")
+    page_size: Optional[int] = Field(
+        None, ge=1, le=100, description="Number of items per page. If not provided, returns all data")
+    sort_by: Optional[str] = Field(
+        "created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field(
+        "desc", description="Sort order (asc or desc)")
 
 
 class UserListRequest(BaseModel):
     """Request model for listing users"""
     tenant_id: str = Field(..., description="Tenant ID to filter users")
-    page: int = Field(1, ge=1, description="Page number for pagination")
-    page_size: int = Field(
-        20, ge=1, le=100, description="Number of items per page")
-    sort_by: Optional[str] = Field("created_at", description="Field to sort by")
-    sort_order: Optional[str] = Field("desc", description="Sort order (asc or desc)")
+    page: Optional[int] = Field(
+        None, ge=1, description="Page number for pagination. If not provided, returns all data")
+    page_size: Optional[int] = Field(
+        None, ge=1, le=100, description="Number of items per page. If not provided, returns all data")
+    sort_by: Optional[str] = Field(
+        "created_at", description="Field to sort by")
+    sort_order: Optional[str] = Field(
+        "desc", description="Sort order (asc or desc)")
 
 
 class GroupUserRequest(BaseModel):
@@ -779,6 +786,12 @@ class VersionRollbackRequest(BaseModel):
 class VersionStatusRequest(BaseModel):
     """Request model for updating version status"""
     status: str = Field(..., description="New status: DISABLED / ARCHIVED")
+
+
+class VersionUpdateRequest(BaseModel):
+    """Request model for updating version metadata (name and description)"""
+    version_name: Optional[str] = Field(None, description="User-defined version name for display")
+    release_note: Optional[str] = Field(None, description="Release notes / version description")
 
 
 class VersionCompareRequest(BaseModel):

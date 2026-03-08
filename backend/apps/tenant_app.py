@@ -14,7 +14,13 @@ from consts.model import (
     TenantUpdateRequest,
 )
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from services.tenant_service import create_tenant, get_tenant_info, get_tenants_paginated, update_tenant_info
+from services.tenant_service import (
+    create_tenant,
+    get_tenant_info,
+    get_tenants_paginated,
+    update_tenant_info,
+    delete_tenant,
+)
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -220,7 +226,17 @@ async def delete_tenant_endpoint(
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
-    Delete tenant (placeholder - not yet implemented)
+    Delete tenant and all associated resources
+
+    This will:
+    - Delete all users in the tenant
+    - Delete all groups in the tenant
+    - Delete all models in the tenant
+    - Delete all knowledge bases in the tenant
+    - Delete all agents in the tenant
+    - Delete all MCP configurations in the tenant
+    - Delete all invitation codes in the tenant
+    - Delete all tenant configurations
 
     Args:
         tenant_id: Tenant identifier
@@ -233,14 +249,29 @@ async def delete_tenant_endpoint(
         # Get current user ID from token
         user_id, _ = get_current_user_id(authorization)
 
-        # Note: Delete functionality is not yet implemented in the service layer
-        # This will raise ValidationError as per current implementation
-        raise ValidationError("Tenant deletion is not yet implemented due to complex dependencies")
+        # Perform tenant deletion with all associated resources
+        await delete_tenant(tenant_id, deleted_by=user_id)
 
-    except ValidationError as exc:
-        logger.warning(f"Tenant deletion not supported: {str(exc)}")
+        logger.info(f"Deleted tenant {tenant_id} and all associated resources by user {user_id}")
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "Tenant deleted successfully",
+                "data": {"tenant_id": tenant_id}
+            }
+        )
+
+    except NotFoundException as exc:
+        logger.warning(f"Tenant not found for deletion: {tenant_id}")
         raise HTTPException(
-            status_code=HTTPStatus.NOT_IMPLEMENTED,
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc)
+        )
+    except ValidationError as exc:
+        logger.warning(f"Tenant deletion validation error: {str(exc)}")
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
             detail=str(exc)
         )
     except UnauthorizedError as exc:

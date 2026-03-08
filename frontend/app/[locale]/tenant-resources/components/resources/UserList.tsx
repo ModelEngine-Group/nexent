@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
@@ -30,13 +30,30 @@ import {
   type CreateGroupRequest,
 } from "@/services/groupService";
 
-export default function UserList({ tenantId }: { tenantId: string | null }) {
+export default function UserList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
   const { t } = useTranslation("common");
 
-  const { data, isLoading, refetch } = useUserList(tenantId);
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const { data, isLoading, refetch } = useUserList(tenantId, page, pageSize);
   const { data: groupsData } = useGroupList(tenantId);
 
+  // Reset page to 1 when tenantId changes
+  useEffect(() => {
+    setPage(1);
+  }, [tenantId]);
+
+  // Trigger refetch when refreshKey changes
+  useEffect(() => {
+    if (refreshKey && refreshKey > 0 && tenantId) {
+      refetch();
+    }
+  }, [refreshKey, tenantId, refetch]);
+
   const users = data?.users || [];
+  const total = data?.total || 0;
   const groups = groupsData?.groups || [];
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -183,6 +200,10 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
     []
   );
 
+  const handlePageChange = (newPage: number, _pageSize: number) => {
+    setPage(newPage);
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <Table
@@ -190,7 +211,12 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         columns={columns}
         rowKey={(r) => String(r.id)}
         loading={isLoading}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize: pageSize,
+          total: total,
+          onChange: handlePageChange,
+        }}
         scroll={{ x: true }}
         className="flex-1"
       />
@@ -234,14 +260,14 @@ export default function UserList({ tenantId }: { tenantId: string | null }) {
         <Form layout="vertical" form={groupForm}>
           <Form.Item
             name="name"
-            label={t("tenantResources.tenants.name")}
-            rules={[{ required: true, message: "Please enter group name" }]}
+            label={t("tenantResources.groups.name")}
+            rules={[{ required: true, message: t("tenantResources.groups.enterName") }]}
           >
-            <Input placeholder="Enter group name" />
+            <Input placeholder={t("tenantResources.groups.enterName")} />
           </Form.Item>
-          <Form.Item name="description" label="Description">
+          <Form.Item name="description" label={t("common.description")}>
             <Input.TextArea
-              placeholder="Enter group description (optional)"
+              placeholder={t("tenantResources.groups.enterDescription")}
               rows={3}
             />
           </Form.Item>

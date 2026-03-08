@@ -20,7 +20,7 @@ The Nexent homepage highlights the core entry points of the platform:
 
 ### Left navigation
 
-The left sidebar exposes every major module:
+Taking the administrator account as an example, the left sidebar exposes every major module:
 
 - **Home Page** – Return to the homepage.
 - **Start Chat** – Open the chat interface.

@@ -1,11 +1,14 @@
 """
 Database operations for user tenant relationship management
 """
+import logging
 from typing import Any, List, Dict, Optional
 
 from consts.const import DEFAULT_TENANT_ID
 from database.client import as_dict, get_db_session
 from database.db_models import UserTenant
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_tenant_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
@@ -72,15 +75,15 @@ def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         session.add(user_tenant)
 
 
-def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20,
+def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
                            sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
-        page (int): Page number (1-based)
-        page_size (int): Number of items per page
+        page (Optional[int]): Page number (1-based). If None, returns all data
+        page_size (Optional[int]): Number of items per page. If None, returns all data
         sort_by (str): Field to sort by
         sort_order (str): Sort order (asc or desc)
 
@@ -107,9 +110,13 @@ def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20,
             else:
                 query = query.order_by(UserTenant.create_time.asc())
 
-        # Get paginated results
-        offset = (page - 1) * page_size
-        results = query.offset(offset).limit(page_size).all()
+        # Apply pagination only if both page and page_size are provided
+        if page is not None and page_size is not None:
+            offset = (page - 1) * page_size
+            results = query.offset(offset).limit(page_size).all()
+        else:
+            # Return all results when pagination is not specified
+            results = query.all()
 
         return {
             "users": [as_dict(row) for row in results],
@@ -163,4 +170,29 @@ def soft_delete_user_tenant_by_user_id(user_id: str, deleted_by: str) -> bool:
             "update_time": "NOW()"
         })
 
+        return result > 0
+
+
+def soft_delete_users_by_tenant_id(tenant_id: str, deleted_by: str) -> bool:
+    """
+    Soft delete all user tenant relationships for a tenant
+
+    Args:
+        tenant_id (str): Tenant ID to delete all users from
+        deleted_by (str): User who performed the deletion
+
+    Returns:
+        bool: True if any records were deleted
+    """
+    with get_db_session() as session:
+        result = session.query(UserTenant).filter(
+            UserTenant.tenant_id == tenant_id,
+            UserTenant.delete_flag == "N"
+        ).update({
+            "delete_flag": "Y",
+            "updated_by": deleted_by,
+            "update_time": "NOW()"
+        })
+
+        logger.info(f"Soft deleted {result} user-tenant relationships for tenant {tenant_id}")
         return result > 0

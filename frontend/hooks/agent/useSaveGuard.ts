@@ -68,6 +68,7 @@ export const useSaveGuard = () => {
         business_logic_model_id: currentEditedAgent.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
         related_agent_ids: relatedAgentIds,
+        ingroup_permission: currentEditedAgent.ingroup_permission ?? "READ_ONLY",
       });
 
       if (result.success) {

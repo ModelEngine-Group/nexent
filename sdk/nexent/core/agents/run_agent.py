@@ -17,21 +17,21 @@ monitoring_manager = get_monitoring_manager()
 def _detect_transport(url: str) -> str:
     """
     Auto-detect MCP transport type based on URL format.
-    
+
     Args:
         url: MCP server URL
-        
+
     Returns:
         Transport type: 'sse' or 'streamable-http'
     """
     url_stripped = url.strip()
-    
+
     # Check URL ending to determine transport type
     if url_stripped.endswith("/sse"):
         return "sse"
     elif url_stripped.endswith("/mcp"):
         return "streamable-http"
-    
+
     # Default to streamable-http for unrecognized formats
     return "streamable-http"
 
@@ -39,12 +39,13 @@ def _detect_transport(url: str) -> str:
 def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Normalize MCP host configuration to a dictionary format.
-    
+
     Args:
-        mcp_host_item: Either a string URL or a dict with 'url' and optional 'transport'
-        
+        mcp_host_item: Either a string URL or a dict with 'url', optional 'transport',
+                       and optional 'headers' or 'authorization'
+
     Returns:
-        Dictionary with 'url' and 'transport' keys
+        Dictionary with 'url', 'transport', and optionally 'headers' keys
     """
     if isinstance(mcp_host_item, str):
         url = mcp_host_item
@@ -59,7 +60,23 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
             transport = _detect_transport(url)
         if transport not in ("sse", "streamable-http"):
             raise ValueError(f"Invalid transport type: {transport}. Must be 'sse' or 'streamable-http'")
-        return {"url": url, "transport": transport}
+
+        result = {"url": url, "transport": transport}
+
+        # Support authorization parameter - convert to headers format
+        if "authorization" in mcp_host_item and "headers" in mcp_host_item:
+            # Both provided: merge headers with authorization
+            headers = mcp_host_item["headers"].copy() if isinstance(mcp_host_item["headers"], dict) else {}
+            headers["Authorization"] = mcp_host_item["authorization"]
+            result["headers"] = headers
+        elif "authorization" in mcp_host_item:
+            # Only authorization provided: create headers dict
+            result["headers"] = {"Authorization": mcp_host_item["authorization"]}
+        elif "headers" in mcp_host_item:
+            # Only headers provided: use as is
+            result["headers"] = mcp_host_item["headers"]
+
+        return result
     else:
         raise ValueError(f"Invalid MCP host item type: {type(mcp_host_item)}. Must be str or dict")
 

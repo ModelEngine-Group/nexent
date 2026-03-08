@@ -9,7 +9,7 @@ import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useModelList } from "@/hooks/model/useModelList";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
-import { ConfigStore } from "@/lib/config";
+import { useConfig } from "@/hooks/useConfig";
 import { updateToolConfig } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -75,7 +75,15 @@ export default function ToolManagement({
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
 
-  const editable = currentAgentId || isCreatingMode;
+  // Get current agent permission from store
+  const currentAgentPermission = useAgentConfigStore(
+    (state) => state.currentAgentPermission
+  );
+
+  // Check if current agent is read-only (only when agent is selected and permission is READ_ONLY)
+  const isReadOnly = !isCreatingMode && currentAgentId !== undefined && currentAgentPermission === "READ_ONLY";
+
+  const editable = (currentAgentId || isCreatingMode) && !isReadOnly;
 
   // Get state from store
   const originalSelectedTools = useAgentConfigStore(
@@ -89,6 +97,9 @@ export default function ToolManagement({
 
   // Use tool list hook for data management
   const { availableTools } = useToolList();
+
+  // Get config for model checks
+  const { modelConfig: tenantModelConfig } = useConfig();
 
   // Get VLM models to check availability
   const { availableVlmModels, models } = useModelList();
@@ -104,9 +115,7 @@ export default function ToolManagement({
 
     // Check if tenant configuration has selected a VLM model
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
-      const selectedVlmModelName = modelConfig.vlm?.modelName || modelConfig.vlm?.displayName;
+      const selectedVlmModelName = tenantModelConfig?.vlm?.modelName || tenantModelConfig?.vlm?.displayName;
 
       if (!selectedVlmModelName) {
         return false;
@@ -121,7 +130,7 @@ export default function ToolManagement({
     } catch (error) {
       return false;
     }
-  }, [availableVlmModels, models]);
+  }, [availableVlmModels, models, tenantModelConfig]);
 
   // Get Embedding models to check availability
   const { availableEmbeddingModels } = useModelList();
@@ -137,10 +146,8 @@ export default function ToolManagement({
 
     // Check if tenant configuration has selected an Embedding model
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
       const selectedEmbeddingModelName =
-        modelConfig.embedding?.modelName || modelConfig.embedding?.displayName;
+        tenantModelConfig?.embedding?.modelName || tenantModelConfig?.embedding?.displayName;
 
       if (!selectedEmbeddingModelName) {
         return false;
@@ -157,7 +164,7 @@ export default function ToolManagement({
     } catch (error) {
       return false;
     }
-  }, [availableEmbeddingModels, models]);
+  }, [availableEmbeddingModels, models, tenantModelConfig]);
 
   // Prefetch knowledge bases for KB tools
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
@@ -423,8 +430,16 @@ export default function ToolManagement({
                           );
                           const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmConfigured);
                           const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingConfigured);
-                          const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding;
-                          return (
+                          const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
+                          // Tooltip priority: permission > VLM > Embedding
+                          const tooltipTitle = isReadOnly
+                            ? t("agent.noEditPermission")
+                            : isDisabledDueToVlm
+                            ? t("toolPool.vlmDisabledTooltip")
+                            : isDisabledDueToEmbedding
+                            ? t("toolPool.embeddingDisabledTooltip")
+                            : undefined;
+                          const toolCard = (
                             <div
                               key={tool.id}
                               className={`border-2 rounded-md p-2 flex items-center justify-between transition-all duration-300 ease-in-out min-h-[52px] shadow-sm ${
@@ -491,6 +506,13 @@ export default function ToolManagement({
                               />
                             </div>
                           );
+                          return tooltipTitle ? (
+                            <Tooltip key={tool.id} title={tooltipTitle}>
+                              {toolCard}
+                            </Tooltip>
+                          ) : (
+                            toolCard
+                          );
                         })}
                       </div>
                     ),
@@ -513,8 +535,16 @@ export default function ToolManagement({
                 const isSelected = originalSelectedToolIdsSet.has(tool.id);
                 const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmConfigured);
                 const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingConfigured);
-                const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding;
-                return (
+                const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
+                // Tooltip priority: permission > VLM > Embedding
+                const tooltipTitle = isReadOnly
+                  ? t("agent.noEditPermission")
+                  : isDisabledDueToVlm
+                  ? t("toolPool.vlmDisabledTooltip")
+                  : isDisabledDueToEmbedding
+                  ? t("toolPool.embeddingDisabledTooltip")
+                  : undefined;
+                const toolCard = (
                   <div
                     key={tool.id}
                     className={`border-2 rounded-md p-2 flex items-center justify-between transition-all duration-300 ease-in-out min-h-[52px] shadow-sm ${
@@ -578,6 +608,13 @@ export default function ToolManagement({
                       }
                     />
                   </div>
+                );
+                return tooltipTitle ? (
+                  <Tooltip key={tool.id} title={tooltipTitle}>
+                    {toolCard}
+                  </Tooltip>
+                ) : (
+                  toolCard
                 );
               })}
             </div>

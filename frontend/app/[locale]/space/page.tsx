@@ -139,14 +139,13 @@ export default function SpacePage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.2 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-8"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-4 pb-8"
           >
             {/* Create/Import agent card - only for admin */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.3, delay: 0.3 }}
-                className="aspect-[4/3]"
               >
                 <div className="w-full h-full flex flex-col gap-2">
                   {/* Create new agent - top half */}
@@ -187,7 +186,6 @@ export default function SpacePage() {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.3, delay: 0.3 + (index + 1) * 0.05 }}
-                className="aspect-[4/3]"
               >
                 <AgentCard agent={agent} onRefresh={onRefresh} />
               </motion.div>

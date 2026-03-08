@@ -67,12 +67,14 @@ export default function McpConfigModal({
     handleUploadImage,
     handleDeleteContainer,
     handleViewLogs,
+    handleGetMcpRecord,
   } = useMcpConfig({ enabled: visible });
 
   // Local UI state
   const [addingServer, setAddingServer] = useState(false);
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
+  const [newServerAuthorizationToken, setNewServerAuthorizationToken] = useState("");
 
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<any[]>([]);
@@ -82,6 +84,7 @@ export default function McpConfigModal({
   const [editServerModalVisible, setEditServerModalVisible] = useState(false);
   const [editingServer, setEditingServer] = useState<any>(null);
   const [updatingServer, setUpdatingServer] = useState(false);
+  const [loadingMcpRecord, setLoadingMcpRecord] = useState(false);
 
   const [addingContainer, setAddingContainer] = useState(false);
   const [containerConfigJson, setContainerConfigJson] = useState("");
@@ -90,14 +93,13 @@ export default function McpConfigModal({
   );
 
   const [logsModalVisible, setLogsModalVisible] = useState(false);
-  const [currentContainerLogs, setCurrentContainerLogs] = useState("");
   const [currentContainerId, setCurrentContainerId] = useState("");
-  const [loadingLogs, setLoadingLogs] = useState(false);
 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
   const [uploadPort, setUploadPort] = useState<number | undefined>(undefined);
   const [uploadServiceName, setUploadServiceName] = useState("");
+  const [uploadAuthorizationToken, setUploadAuthorizationToken] = useState("");
 
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
   const noMcpEditPermissionTitle = t("mcpConfig.permission.noEdit");
@@ -158,10 +160,15 @@ export default function McpConfigModal({
     }
 
     setAddingServer(true);
-    const result = await handleAddServer(newServerUrl.trim(), serverName);
+    const result = await handleAddServer(
+      newServerUrl.trim(),
+      serverName,
+      newServerAuthorizationToken.trim() || null
+    );
     if (result.success) {
       setNewServerName("");
       setNewServerUrl("");
+      setNewServerAuthorizationToken("");
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
     } else {
       message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addServerFailed")));
@@ -244,12 +251,29 @@ export default function McpConfigModal({
     }
   };
 
-  const onEditServer = (server: any) => {
+  const onEditServer = async (server: any) => {
     setEditingServer(server);
     setEditServerModalVisible(true);
+    setLoadingMcpRecord(true);
+
+    // If mcp_id is available, fetch the latest record data including authorization_token
+    if (server.mcp_id) {
+      const result = await handleGetMcpRecord(server.mcp_id);
+      if (result.success && result.data) {
+        setEditingServer({
+          ...server,
+          service_name: result.data.mcp_name,
+          mcp_url: result.data.mcp_server,
+          authorization_token: result.data.authorization_token,
+        });
+      } else {
+        message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getMcpRecordFailed")));
+      }
+    }
+    setLoadingMcpRecord(false);
   };
 
-  const onSaveEditedServer = async (name: string, url: string) => {
+  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null) => {
     if (!editingServer) return;
     if (!name.trim() || !url.trim()) {
       message.error(t("mcpConfig.message.nameAndUrlRequired"));
@@ -272,7 +296,8 @@ export default function McpConfigModal({
       editingServer.service_name,
       editingServer.mcp_url,
       name.trim(),
-      url.trim()
+      url.trim(),
+      authorizationToken
     );
     if (result.success) {
       setEditServerModalVisible(false);
@@ -343,13 +368,19 @@ export default function McpConfigModal({
     }
 
     setUploadingImage(true);
-    const result = await handleUploadImage(file, uploadPort, uploadServiceName.trim() || undefined);
+    const result = await handleUploadImage(
+      file,
+      uploadPort,
+      uploadServiceName.trim() || undefined,
+      uploadAuthorizationToken.trim() || undefined
+    );
     if (!result.success) {
       message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.uploadImageFailed")));
     } else {
       setUploadFileList([]);
       setUploadPort(undefined);
       setUploadServiceName("");
+      setUploadAuthorizationToken("");
       message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.uploadImageSuccess"));
     }
     setUploadingImage(false);
@@ -383,18 +414,7 @@ export default function McpConfigModal({
 
   const onViewLogs = async (containerId: string) => {
     setCurrentContainerId(containerId);
-    setLoadingLogs(true);
     setLogsModalVisible(true);
-    setCurrentContainerLogs("");
-
-    const result = await handleViewLogs(containerId, 500);
-    if (result.success) {
-      setCurrentContainerLogs(result.data);
-    } else {
-      message.error(result.messageKey ? t(result.messageKey) : t("mcpConfig.message.getContainerLogsFailed"));
-      setCurrentContainerLogs(t("mcpConfig.message.getContainerLogsFailed"));
-    }
-    setLoadingLogs(false);
   };
 
   // Server list table columns
@@ -638,49 +658,66 @@ export default function McpConfigModal({
                 children: (
                   <Card size="small" style={{ marginTop: 8 }}>
                     <Space orientation="vertical" style={{ width: "100%" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                        }}
-                      >
-                        <Input
-                          placeholder={t("mcpConfig.addServer.namePlaceholder")}
-                          value={newServerName}
-                          onChange={(e) => setNewServerName(e.target.value)}
-                          style={{ flex: 1 }}
-                          maxLength={20}
-                          disabled={actionsLocked || addingServer}
-                        />
-                        <Input
-                          placeholder={t("mcpConfig.addServer.urlPlaceholder")}
-                          value={newServerUrl}
-                          onChange={(e) => setNewServerUrl(e.target.value)}
-                          style={{ flex: 2 }}
-                          disabled={actionsLocked || addingServer}
-                        />
-                        <Button
-                          type="primary"
-                          onClick={onAddServer}
-                          loading={addingServer || updatingTools}
-                          icon={
-                            addingServer || updatingTools ? (
-                              <LoaderCircle
-                                className="animate-spin"
-                                style={{ width: 16, height: 16 }}
-                              />
-                            ) : (
-                              <Plus style={{ width: 16, height: 16 }} />
-                            )
-                          }
-                          disabled={actionsLocked}
+                      <Space direction="vertical" style={{ width: "100%" }} size="small">
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
                         >
-                          {updatingTools
-                            ? t("mcpConfig.addServer.button.updating")
-                            : t("mcpConfig.addServer.button.add")}
-                        </Button>
-                      </div>
+                          <Input
+                            placeholder={t("mcpConfig.addServer.namePlaceholder")}
+                            value={newServerName}
+                            onChange={(e) => setNewServerName(e.target.value)}
+                            style={{ flex: 0.8 }}
+                            maxLength={20}
+                            disabled={actionsLocked || addingServer}
+                          />
+                          <Input
+                            placeholder={t("mcpConfig.addServer.urlPlaceholder")}
+                            value={newServerUrl}
+                            onChange={(e) => setNewServerUrl(e.target.value)}
+                            style={{ flex: 3 }}
+                            disabled={actionsLocked || addingServer}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <Input.Password
+                            placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
+                            value={newServerAuthorizationToken}
+                            onChange={(e) => setNewServerAuthorizationToken(e.target.value)}
+                            disabled={actionsLocked || addingServer}
+                            style={{ flex: 1 }}
+                          />
+                          <Button
+                            type="primary"
+                            onClick={onAddServer}
+                            loading={addingServer || updatingTools}
+                            icon={
+                              addingServer || updatingTools ? (
+                                <LoaderCircle
+                                  className="animate-spin"
+                                  style={{ width: 16, height: 16 }}
+                                />
+                              ) : (
+                                <Plus style={{ width: 16, height: 16 }} />
+                              )
+                            }
+                            disabled={actionsLocked}
+                          >
+                            {updatingTools
+                              ? t("mcpConfig.addServer.button.updating")
+                              : t("mcpConfig.addServer.button.add")}
+                          </Button>
+                        </div>
+                      </Space>
                     </Space>
                   </Card>
                 ),
@@ -864,6 +901,23 @@ export default function McpConfigModal({
                                 style={{ flex: 1 }}
                                 disabled={actionsLocked}
                               />
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                alignItems: "center",
+                              }}
+                            >
+                              <Input.Password
+                                placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
+                                value={uploadAuthorizationToken}
+                                onChange={(e) =>
+                                  setUploadAuthorizationToken(e.target.value)
+                                }
+                                disabled={actionsLocked}
+                                style={{ flex: 1 }}
+                              />
                               <Button
                                 type="primary"
                                 onClick={onUploadImage}
@@ -964,20 +1018,23 @@ export default function McpConfigModal({
       {/* Edit server modal */}
       <McpEditServerModal
         open={editServerModalVisible}
-        onCancel={() => setEditServerModalVisible(false)}
+        onCancel={() => {
+          setEditServerModalVisible(false);
+          setEditingServer(null);
+        }}
         onSave={onSaveEditedServer}
         initialName={editingServer?.service_name || ""}
         initialUrl={editingServer?.mcp_url || ""}
-        loading={updatingServer}
+        initialAuthorizationToken={editingServer?.authorization_token || null}
+        loading={updatingServer || loadingMcpRecord}
       />
 
       {/* Container logs modal */}
       <McpContainerLogsModal
         open={logsModalVisible}
         onCancel={() => setLogsModalVisible(false)}
-        loading={loadingLogs}
-        logs={currentContainerLogs}
         containerId={currentContainerId}
+        tail={500}
       />
     </>
   );

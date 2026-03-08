@@ -318,6 +318,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tenant_agent_t (
     provide_run_summary BOOLEAN DEFAULT FALSE,
     version_no INTEGER DEFAULT 0 NOT NULL,
     current_version_no INTEGER NULL,
+    ingroup_permission VARCHAR(30),
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -371,6 +372,7 @@ COMMENT ON COLUMN nexent.ag_tenant_agent_t.delete_flag IS 'Whether it is deleted
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.is_new IS 'Whether this agent is marked as new for the user';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.version_no IS 'Version number. 0 = draft/editing state, >=1 = published snapshot';
 COMMENT ON COLUMN nexent.ag_tenant_agent_t.current_version_no IS 'Current published version number. NULL means no version published yet';
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.ingroup_permission IS 'In-group permission: EDIT, READ_ONLY, PRIVATE';
 
 -- Create index for is_new queries
 CREATE INDEX IF NOT EXISTS idx_ag_tenant_agent_t_is_new
@@ -380,7 +382,7 @@ WHERE delete_flag = 'N';
 
 -- Create the ag_tool_instance_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_instance_t (
-    tool_instance_id INTEGER NOT NULL,
+    tool_instance_id SERIAL NOT NULL,
     tool_id INTEGER,
     agent_id INTEGER,
     params JSON,
@@ -487,6 +489,7 @@ CREATE TABLE IF NOT EXISTS nexent.mcp_record_t (
     mcp_server VARCHAR(500),
     status BOOLEAN DEFAULT NULL,
     container_id VARCHAR(200) DEFAULT NULL,
+    authorization_token VARCHAR(500) DEFAULT NULL,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(100),
@@ -505,6 +508,7 @@ COMMENT ON COLUMN nexent.mcp_record_t.mcp_name IS 'MCP name';
 COMMENT ON COLUMN nexent.mcp_record_t.mcp_server IS 'MCP server address';
 COMMENT ON COLUMN nexent.mcp_record_t.status IS 'MCP server connection status, true=connected, false=disconnected, null=unknown';
 COMMENT ON COLUMN nexent.mcp_record_t.container_id IS 'Docker container ID for MCP service, NULL for non-containerized MCP';
+COMMENT ON COLUMN nexent.mcp_record_t.authorization_token IS 'Authorization token for MCP server authentication (e.g., Bearer token)';
 COMMENT ON COLUMN nexent.mcp_record_t.create_time IS 'Creation time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.mcp_record_t.created_by IS 'Creator ID, audit field';
@@ -562,7 +566,7 @@ COMMENT ON COLUMN nexent.user_tenant_t.delete_flag IS 'Delete flag, Y/N';
 
 -- Create the ag_agent_relation_t table in the nexent schema
 CREATE TABLE IF NOT EXISTS nexent.ag_agent_relation_t (
-    relation_id INTEGER NOT NULL,
+    relation_id SERIAL NOT NULL,
     selected_agent_id INTEGER,
     parent_agent_id INTEGER,
     tenant_id VARCHAR(100),

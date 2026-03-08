@@ -4053,6 +4053,79 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("error_code", str(exc.exception))
 
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_check_kb_exist_exclude_index_name_matches(self, mock_get_knowledge):
+        """Test that KB is available when exclude_index_name matches the found record's index_name."""
+        # Setup: knowledge_name exists in tenant, but exclude_index_name matches
+        mock_get_knowledge.return_value = {
+            "knowledge_name": "test_kb",
+            "index_name": "test-index-123",
+            "tenant_id": "tenant1"
+        }
+
+        # Execute with exclude_index_name matching the found record
+        result = check_knowledge_base_exist_impl(
+            knowledge_name="test_kb",
+            vdb_core=self.mock_vdb_core,
+            user_id="test_user",
+            tenant_id="tenant1",
+            exclude_index_name="test-index-123"
+        )
+
+        # Assert
+        mock_get_knowledge.assert_called_once_with({
+            "knowledge_name": "test_kb",
+            "tenant_id": "tenant1"
+        })
+        # Should return available because we're excluding this specific index
+        self.assertEqual(result["status"], "available")
+
+    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    def test_check_kb_exist_exclude_index_name_does_not_match(self, mock_get_knowledge):
+        """Test that KB is exists_in_tenant when exclude_index_name does not match."""
+        # Setup: knowledge_name exists in tenant with different index_name
+        mock_get_knowledge.return_value = {
+            "knowledge_name": "test_kb",
+            "index_name": "existing-index",
+            "tenant_id": "tenant1"
+        }
+
+        # Execute with exclude_index_name that doesn't match
+        result = check_knowledge_base_exist_impl(
+            knowledge_name="test_kb",
+            vdb_core=self.mock_vdb_core,
+            user_id="test_user",
+            tenant_id="tenant1",
+            exclude_index_name="different-index"
+        )
+
+        # Assert
+        self.assertEqual(result["status"], "exists_in_tenant")
+
+    def test_rethrow_or_plain_non_json_string(self):
+        """_rethrow_or_plain should re-raise plain string message when not valid JSON."""
+        from backend.services.vectordatabase_service import _rethrow_or_plain
+
+        plain_message = "This is a plain error message without JSON"
+
+        with self.assertRaises(Exception) as exc:
+            _rethrow_or_plain(Exception(plain_message))
+
+        # Should re-raise the original string message
+        self.assertEqual(str(exc.exception), plain_message)
+
+    def test_rethrow_or_plain_json_without_error_code(self):
+        """_rethrow_or_plain should re-raise plain string when JSON has no error_code."""
+        from backend.services.vectordatabase_service import _rethrow_or_plain
+
+        json_message = '{"detail": "some error", "status": 500}'
+
+        with self.assertRaises(Exception) as exc:
+            _rethrow_or_plain(Exception(json_message))
+
+        # Should re-raise the original string, not the JSON
+        self.assertEqual(str(exc.exception), json_message)
+
     @patch('services.redis_service.get_redis_service')
     def test_full_delete_knowledge_base_no_files_redis_warning(self, mock_get_redis):
         """full_delete_knowledge_base handles empty file list and surfaces Redis warnings."""

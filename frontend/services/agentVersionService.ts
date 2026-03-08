@@ -143,6 +143,25 @@ export interface VersionRollbackResponse {
 }
 
 /**
+ * Request model for updating version metadata
+ */
+export interface VersionUpdateRequest {
+  version_name?: string;
+  release_note?: string;
+}
+
+/**
+ * Response model for update version
+ */
+export interface VersionUpdateResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    version_no: number;
+  };
+}
+
+/**
  * Request model for version comparison
  */
 export interface VersionCompareRequest {
@@ -441,6 +460,50 @@ export async function deleteVersion(
     return {
       success: false,
       message: error instanceof Error ? error.message : "Failed to delete version",
+    };
+  }
+}
+
+/**
+ * Update version metadata (version_name and release_note)
+ * @param agentId The agent ID
+ * @param versionNo The version number to update
+ * @param request Update request containing version_name and/or release_note
+ * @returns Promise containing the update result
+ */
+export async function updateVersion(
+  agentId: number,
+  versionNo: number,
+  request: VersionUpdateRequest
+): Promise<VersionUpdateResponse> {
+  try {
+    const response = await fetch(
+      API_ENDPOINTS.agent.versions.update(agentId, versionNo),
+      {
+        method: "PUT",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      message: "Version updated successfully",
+      data: data,
+    };
+  } catch (error) {
+    log.error("Failed to update agent version:", error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Failed to update version",
     };
   }
 }
