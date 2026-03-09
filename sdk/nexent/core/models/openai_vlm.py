@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import logging
 import os
 from typing import List, Dict, Any, Union, BinaryIO
 
@@ -32,17 +34,31 @@ class OpenAIVLModel(OpenAIModel):
 
     async def check_connectivity(self) -> bool:
         """
-        Check the connectivity of the VLM model.
+        Check the connectivity of the VLM model by sending a test request with
+        a text prompt and an image URL. VLM APIs (especially DashScope qwen-vl)
+        require specific format: content as a list with 'type': 'image' and
+        'type': 'text' objects.
 
         Returns:
-            bool: Returns True if the model can respond normally, otherwise returns False.
+            bool: True if the model responds successfully, otherwise False.
         """
+        # DashScope VLM format: each part needs 'type' field
+        test_image_url = "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250925/thtclx/input1.png"
+        content_parts: List[Dict[str, Any]] = [
+            {"type": "image_url", "image_url": {"url": test_image_url}},
+            {"type": "text", "text": "Hello"},
+        ]
         try:
-            # Directly reuse the parent class's check_connectivity method
-            return await super().check_connectivity()
+            await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.model_id,
+                messages=[{"role": "user", "content": content_parts}],
+                max_tokens=5,
+                stream=False,
+            )
+            return True
         except Exception as e:
-            import logging
-            logging.error(f"VLM connectivity check failed: {str(e)}")
+            logger.error("VLM connectivity check failed: %s", e)
             return False
 
     def encode_image(self, image_input: Union[str, BinaryIO]) -> str:
