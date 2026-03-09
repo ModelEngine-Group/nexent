@@ -167,3 +167,4 @@ Stuck or have questions? We're here to help! Reach out to us via：
 ## 🎉 Celebrate Your Contribution!
 
 Thank you for being part of the Nexent journey. Your contributions make a real difference, and we can't wait to see what you create! Happy coding! 🚀🌈
+之前开源项目技术门槛太高了，感谢nexent，让我进一步认识一些项目，简单处理各种要求！
