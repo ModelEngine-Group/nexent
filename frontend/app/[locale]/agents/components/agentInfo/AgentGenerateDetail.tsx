@@ -21,8 +21,6 @@ import { Zap, Maximize2 } from "lucide-react";
 
 import log from "@/lib/logger";
 import { AgentProfileInfo, AgentBusinessInfo } from "@/types/agentConfig";
-import { configService } from "@/services/configService";
-import { ConfigStore } from "@/lib/config";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import {
   GENERATE_PROMPT_STREAM_TYPES,
@@ -70,7 +68,7 @@ export default function AgentGenerateDetail({
   // Tenant & group data for group selection
   const { data: tenantData } = useTenantList();
   const tenantId = user?.tenantId ?? tenantData?.data?.[0]?.tenant_id ?? null;
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
 
   // Agent list for name uniqueness validation (use local data instead of API call)
   const { agents: agentList } = useAgentList(tenantId);
@@ -119,26 +117,6 @@ export default function AgentGenerateDetail({
     );
   };
 
-
-  // Ensure tenant config is loaded for default model selection
-  useEffect(() => {
-    const loadConfigIfNeeded = async () => {
-      try {
-        // Check if config is already loaded
-        const configStore = ConfigStore.getInstance();
-        const modelConfig = configStore.getModelConfig();
-
-        // If no LLM model is configured, try to load config from backend
-        if (!modelConfig.llm?.modelName && !modelConfig.llm?.displayName) {
-          await configService.loadConfigToFrontend();
-        }
-      } catch (error) {
-        log.warn("Failed to load tenant config:", error);
-      }
-    };
-
-    loadConfigIfNeeded();
-  }, []);
 
   const stylesObject: TabsProps["styles"] = {
     root: {},

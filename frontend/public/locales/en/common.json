@@ -298,6 +298,8 @@
   "agent.llmModel": "LLM Model",
   "agent.version": "Version",
   "agent.version.current": "Current Version",
+  "agent.version.select": "Select Version",
+  "agent.version.noPublished": "No Published Versions",
   "agent.status.unpublished": "Unpublished",
   "agent.unavailableReasons.duplicate_name": "Duplicate Agent Variable Name",
   "agent.unavailableReasons.duplicate_display_name": "Duplicate Agent Name",

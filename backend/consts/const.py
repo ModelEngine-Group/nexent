@@ -40,6 +40,9 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
+# JWT secret for verifying Supabase-signed access tokens.
+# GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
+SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
 # ===== To be migrated to frontend configuration =====
@@ -304,4 +307,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
-APP_VERSION = "v1.8.0.1"
+APP_VERSION = "v1.8.0.2"

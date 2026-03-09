@@ -1330,7 +1330,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 ingroup_permission = agent.get("ingroup_permission")
                 is_creator = str(agent.get("created_by")) == str(user_id)
                 # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
-                if len(user_group_ids.intersection(agent_group_ids)) == 0 or (ingroup_permission == PERMISSION_PRIVATE and not is_creator):
+                if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
 
             # Use shared availability check function
