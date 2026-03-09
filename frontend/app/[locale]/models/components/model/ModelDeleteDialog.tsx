@@ -1252,7 +1252,9 @@ export const ModelDeleteDialog = ({
           </div>
 
           {(selectedSource === MODEL_SOURCES.SILICON ||
-            selectedSource === MODEL_SOURCES.MODELENGINE) &&
+            selectedSource === MODEL_SOURCES.MODELENGINE ||
+            selectedSource === MODEL_SOURCES.DASHSCOPE ||
+            selectedSource === MODEL_SOURCES.TOKENPONY) &&
           providerModels.length > 0 ? (
             <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-200">
               {providerModels.length > 0 && (
