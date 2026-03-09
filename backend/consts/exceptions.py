@@ -115,6 +115,21 @@ class IncorrectInviteCodeException(Exception):
     pass
 
 
+class OfficeConversionException(Exception):
+    """Raised when Office-to-PDF conversion via data-process service fails."""
+    pass
+
+
+class UnsupportedFileTypeException(Exception):
+    """Raised when a file type is not supported for the requested operation."""
+    pass
+
+
+class FileTooLargeException(Exception):
+    """Raised when a file exceeds the maximum allowed size for the requested operation."""
+    pass
+
+
 class UserRegistrationException(Exception):
     """Raised when user registration fails."""
     pass
