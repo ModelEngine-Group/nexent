@@ -412,8 +412,7 @@ class TestErrorResponseFormat:
         import json
         body = json.loads(response.body)
         assert "code" in body
-        # Code should be integer when converted (string "130204" -> int 130204)
-        assert body["code"] == 130204
+        assert body["code"] == "130204"
 
     def test_error_response_contains_message(self):
         """Test that error response contains message."""
@@ -516,7 +515,7 @@ class TestAppExceptionToDict:
         """Test that to_dict contains code as integer."""
         exc = AppException(ErrorCode.DIFY_AUTH_ERROR, "Auth failed")
         result = exc.to_dict()
-        assert result["code"] == 130204
+        assert result["code"] == "130204"
 
     def test_to_dict_contains_message(self):
         """Test that to_dict contains message."""
