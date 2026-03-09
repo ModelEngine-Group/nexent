@@ -1082,6 +1082,7 @@
   "mcpService.message.invalidUploadParameters": "Invalid upload parameters",
   "mcpService.message.serviceNameAlreadyExists": "MCP service name already exists",
   "mcpService.message.fileTooLarge": "File size exceeds limit",
+  "mcpService.message.missingMcpImage": "Failed to add container: MCP service startup image is missing",
 
   "agentConfig.tools.refreshSuccess": "Tool list refreshed successfully",
   "agentConfig.tools.refreshFailed": "Failed to refresh tool list",
