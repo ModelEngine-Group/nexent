@@ -199,7 +199,11 @@ async def list_provider_models_for_tenant(tenant_id: str, provider: str, model_t
         model_list = get_models_by_tenant_factory_type(
             tenant_id, provider, model_type)
         for model in model_list:
-            model["id"] = model["model_repo"] + "/" + model["model_name"]
+            # Use add_repo_to_name for consistent format with /model/list API
+            model["id"] = add_repo_to_name(
+                model_repo=model["model_repo"],
+                model_name=model["model_name"],
+            )
 
         logging.debug(f"Provider model {provider} created successfully")
         return model_list
