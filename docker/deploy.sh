@@ -869,7 +869,7 @@ check_super_admin_user_exists() {
   # Check if super admin user exists in Supabase
   local email="suadmin@nexent.com"
   local curl_container="nexent-config"
-  
+
   # Determine which container to use for curl command
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ] || ! docker ps | grep -q "nexent-config"; then
     if docker ps | grep -q "supabase-db-mini"; then
@@ -895,7 +895,7 @@ check_super_admin_user_exists() {
   # This is less reliable but works when database access is not available
   local test_response
   test_response=$(docker exec "$curl_container" bash -c "curl -s -X POST http://kong:8000/auth/v1/token?grant_type=password -H \"apikey: ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"dummy_password_check\"}'" 2>/dev/null)
-  
+
   if echo "$test_response" | grep -q '"error_code":"invalid_credentials"'; then
     return 0  # User exists (wrong password means user exists)
   elif echo "$test_response" | grep -q '"error_code":"email_not_confirmed"'; then
@@ -972,7 +972,7 @@ create_default_super_admin_user() {
   local check_result
   check_super_admin_user_exists
   check_result=$?
-  
+
   if [ $check_result -eq 0 ]; then
     echo "   ✅ Super admin user (${email}) already exists."
     echo "   💡 Skipping user creation. If you need to reset the password, please do so manually."
@@ -1041,7 +1041,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="latest"
+  APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
@@ -1086,12 +1086,12 @@ main_deploy() {
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
     generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
-    
+
     # Create default super admin user (only for full version)
     if [ "$DEPLOYMENT_VERSION" = "full" ]; then
       create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
     fi
-    
+
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"
