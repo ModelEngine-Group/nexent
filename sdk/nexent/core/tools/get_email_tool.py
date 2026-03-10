@@ -19,7 +19,7 @@ class GetEmailTool(Tool):
         "Get emails from email server. Supports filtering emails by time range and sender (sender must be an email address, not a name or non-ASCII string; subject filtering is not supported due to IMAP limitations)."
     )
 
-    description_zh = "获取邮件，支持按时间范围和发件人筛选。。受 IMAP 限制，暂不支持按主题筛选。"
+    description_zh = "获取邮件，支持按时间范围和发件人筛选。受 IMAP 限制，暂不支持按主题筛选。"
 
     inputs = {
         "days": {
