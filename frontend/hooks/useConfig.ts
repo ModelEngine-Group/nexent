@@ -258,6 +258,15 @@ export function useConfig() {
 
   const config: GlobalConfig = (query.data as GlobalConfig | undefined) ?? defaultConfig;
 
+  // Whether config has selected a VLM model
+  const isVlmAvailable = !!(config?.models?.vlm?.modelName || config?.models?.vlm?.displayName);
+
+  // Whether config has selected an Embedding model
+  const isEmbeddingAvailable = !!(config?.models?.embedding?.modelName || config?.models?.embedding?.displayName);
+
+  // Default LLM model name from config (modelName or displayName)
+  const defaultLlmModelName = config?.models?.llm?.modelName || config?.models?.llm?.displayName || "";
+
   const updateAppConfig = useCallback(
     (partial: Partial<AppConfig>) => {
       if (!config) return;
@@ -332,6 +341,9 @@ export function useConfig() {
     config,
     appConfig: config?.app,
     modelConfig: config?.models,
+    isVlmAvailable,
+    isEmbeddingAvailable,
+    defaultLlmModelName,
     updateAppConfig,
     updateModelConfig,
     updateConfig,
