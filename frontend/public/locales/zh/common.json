@@ -442,6 +442,10 @@
   "toolPool.vlmDisabledTooltip": "请联系管理员配置可用的视觉语言模型",
   "toolPool.embeddingDisabledTooltip": "请联系管理员配置可用的向量模型",
   "toolPool.tooltip.functionGuide": "1. 本地知识库检索功能，请启用knowledge_base_search工具；\n2. 文本文件解析功能，请启用analyze_text_file工具；\n3. 图片解析功能，请启用analyze_image工具。",
+  "toolPool.duplicateToolName.title": "检测到重复工具名",
+  "toolPool.duplicateToolName.content": "您已勾选相同工具名的工具（{{toolName}}），重复选择会导致智能体无法正常运行。是否继续勾选？",
+  "toolPool.duplicateToolName.confirm": "继续",
+  "toolPool.duplicateToolName.cancel": "取消",
 
   "tool.message.unavailable": "该工具当前不可用，无法选择",
   "tool.error.noMainAgentId": "主代理ID未设置，无法更新工具状态",
