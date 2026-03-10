@@ -719,3 +719,7 @@ Nexent 加油！希望能达成所愿！
 ::: tip GZX- 2026-03-08
 感谢 Nexent 期待与Nexent一起进步。
 :::
+
+::: info xingzhewujiang - 2026-03-09
+偶然发现Nexent是一个开源的零代码智能体自动生成平台，非常值的研究与尝试，祝福Nexent让零代码走向AI全球。
+:::
