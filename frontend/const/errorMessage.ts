@@ -105,6 +105,19 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
   [ErrorCode.MODEL_CONFIG_INVALID]: "Model configuration is invalid.",
   [ErrorCode.MODEL_HEALTH_CHECK_FAILED]: "Model health check failed.",
   [ErrorCode.MODEL_PROVIDER_ERROR]: "Model provider error.",
+  [ErrorCode.MODEL_PROMPT_GENERATION_FAILED]:
+    "Model is unavailable. Please check the model status and try again.",
+  // 02 - Model API errors
+  [ErrorCode.MODEL_API_KEY_INVALID]:
+    "Model API key is invalid or expired. Please check your API key configuration.",
+  [ErrorCode.MODEL_API_KEY_NO_PERMISSION]:
+    "Model API key does not have permission. Please check your API key permissions.",
+  [ErrorCode.MODEL_RATE_LIMIT_EXCEEDED]:
+    "Rate limit exceeded. Please try again later.",
+  [ErrorCode.MODEL_SERVICE_UNAVAILABLE]:
+    "Model service is temporarily unavailable. Please try again later.",
+  [ErrorCode.MODEL_CONNECTION_ERROR]:
+    "Failed to connect to model service. Please check your network and model configuration.",
 
   // ==================== 10 Memory / 记忆管理 ====================
   // 01 - Memory

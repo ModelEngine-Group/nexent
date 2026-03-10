@@ -433,17 +433,30 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
       };
     } else {
       let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
+      let messageKey: string | undefined;
 
       if (response.status === 400) {
-        errorMessage = data.detail || t('mcpService.message.invalidConfig');
+        const rawError = data.detail || data.message || '';
+        // Check if error is related to image not found
+        const errorLower = rawError.toLowerCase();
+        if (rawError && (errorLower.includes('image not found') || 
+            errorLower.includes('mcp service startup image is missing') ||
+            (errorLower.includes('not found') && errorLower.includes('image')))) {
+          messageKey = 'mcpService.message.missingMcpImage';
+          errorMessage = t('mcpService.message.missingMcpImage');
+        } else {
+          errorMessage = rawError || t('mcpService.message.invalidConfig');
+        }
       } else if (response.status === 503) {
+        messageKey = 'mcpService.message.dockerServiceUnavailable';
         errorMessage = t('mcpService.message.dockerServiceUnavailable');
       }
 
       return {
         success: false,
         data: null,
-        message: errorMessage
+        message: errorMessage,
+        messageKey: messageKey
       };
     }
   } catch (error) {
@@ -451,7 +464,8 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
     return {
       success: false,
       data: null,
-      message: t('mcpService.message.networkError')
+      message: t('mcpService.message.networkError'),
+      messageKey: 'mcpService.message.networkError'
     };
   }
 };

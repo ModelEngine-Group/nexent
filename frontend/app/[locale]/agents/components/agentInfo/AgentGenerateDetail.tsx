@@ -541,7 +541,21 @@ export default function AgentGenerateDetail({
         },
         (error) => {
           log.error("Generate prompt stream error:", error);
-          message.error(t("businessLogic.config.message.generateError"));
+          // Try to get i18n translated message using error code, fallback to backend message or default
+          let errorMessage = t("businessLogic.config.message.generateError");
+          if (error?.code) {
+            const i18nKey = `errorCode.${error.code}`;
+            const translated = t(i18nKey);
+            // Check if translation exists (i18next returns the key if not found)
+            if (translated !== i18nKey) {
+              errorMessage = translated;
+            } else if (error?.message) {
+              errorMessage = error.message;
+            }
+          } else if (error?.message) {
+            errorMessage = error.message;
+          }
+          message.error(errorMessage);
           setIsGenerating(false);
         },
         () => {

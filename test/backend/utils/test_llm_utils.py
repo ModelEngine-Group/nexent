@@ -139,6 +139,9 @@ class TestCallLLMForSystemPrompt:
         )
 
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
         mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
         mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
         mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
@@ -155,14 +158,15 @@ class TestCallLLMForSystemPrompt:
         mock_llm_instance.client.chat.completions.create.side_effect = Exception("LLM error")
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(AppException) as exc_info:
             call_llm_for_system_prompt(
                 1,
                 "user prompt",
                 "system prompt",
             )
 
-        assert "LLM error" in str(exc_info.value)
+        # Verify AppException is raised with correct error code for unmapped errors
+        assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED
 
 
 class TestProcessThinkingTokens:
@@ -813,3 +817,289 @@ class AdditionalLLMUtilsTests:
         mock_logger.error.assert_called_once()
         call_args = mock_logger.error.call_args[0][0]
         assert "Failed to generate prompt" in call_args
+
+
+class TestCallLLMForSystemPromptErrorHandling:
+    """Tests for error handling in call_llm_for_system_prompt function."""
+
+    def _create_mock_llm_setup(self, mocker: MockFixture):
+        """Helper to setup common mocks for LLM error tests."""
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_get_model_name = mocker.patch('backend.utils.llm_utils.get_model_name_from_config')
+        mock_openai = mocker.patch('backend.utils.llm_utils.OpenAIModel')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+        mock_get_model_name.return_value = "gpt-4"
+
+        mock_llm_instance = mock_openai.return_value
+        mock_llm_instance._prepare_completion_kwargs.return_value = {}
+
+        return mock_llm_instance
+
+    def test_error_401_api_key_invalid(self, mocker: MockFixture):
+        """Test error handling for 401 status code - API key invalid."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 401: Invalid API key"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_API_KEY_INVALID
+
+    def test_error_unauthorized_lowercase(self, mocker: MockFixture):
+        """Test error handling for 'unauthorized' in error message."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Unauthorized access to the resource"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_API_KEY_INVALID
+
+    def test_error_api_key_in_message(self, mocker: MockFixture):
+        """Test error handling for 'api key' in error message."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Invalid API key provided"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_API_KEY_INVALID
+
+    def test_error_403_forbidden(self, mocker: MockFixture):
+        """Test error handling for 403 status code - no permission."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 403: Access forbidden"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_API_KEY_NO_PERMISSION
+
+    def test_error_forbidden_lowercase(self, mocker: MockFixture):
+        """Test error handling for 'forbidden' in error message."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Request forbidden by the server"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_API_KEY_NO_PERMISSION
+
+    def test_error_404_not_found(self, mocker: MockFixture):
+        """Test error handling for 404 status code - model not found."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 404: Model not found"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_NOT_FOUND
+
+    def test_error_not_found_lowercase(self, mocker: MockFixture):
+        """Test error handling for 'not found' in error message."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "The requested model was not found"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_NOT_FOUND
+
+    def test_error_429_rate_limit(self, mocker: MockFixture):
+        """Test error handling for 429 status code - rate limit exceeded."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 429: Rate limit exceeded"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_RATE_LIMIT_EXCEEDED
+
+    def test_error_rate_limit_lowercase(self, mocker: MockFixture):
+        """Test error handling for 'rate limit' in error message."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Too many requests, rate limit reached"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_RATE_LIMIT_EXCEEDED
+
+    def test_error_500_service_unavailable(self, mocker: MockFixture):
+        """Test error handling for 500 status code - service unavailable."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 500: Internal server error"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_SERVICE_UNAVAILABLE
+
+    def test_error_502_service_unavailable(self, mocker: MockFixture):
+        """Test error handling for 502 status code - bad gateway."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 502: Bad gateway"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_SERVICE_UNAVAILABLE
+
+    def test_error_503_service_unavailable(self, mocker: MockFixture):
+        """Test error handling for 503 status code - service unavailable."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 503: Service temporarily unavailable"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_SERVICE_UNAVAILABLE
+
+    def test_error_504_service_unavailable(self, mocker: MockFixture):
+        """Test error handling for 504 status code - gateway timeout."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Error 504: Gateway timeout"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_SERVICE_UNAVAILABLE
+
+    def test_error_connection_error(self, mocker: MockFixture):
+        """Test error handling for connection error."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Connection error: Unable to reach the server"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_CONNECTION_ERROR
+
+    def test_error_timeout(self, mocker: MockFixture):
+        """Test error handling for timeout error."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Request timeout occurred"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_CONNECTION_ERROR
+
+    def test_error_connection_refused(self, mocker: MockFixture):
+        """Test error handling for connection refused error."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Connection refused by the server"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_CONNECTION_ERROR
+
+    def test_error_generic_unmapped_error(self, mocker: MockFixture):
+        """Test error handling for generic unmapped errors."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception(
+            "Some unexpected error occurred"
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+
+    def test_error_empty_message(self, mocker: MockFixture):
+        """Test error handling for exception with empty message."""
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+
+        mock_llm_instance = self._create_mock_llm_setup(mocker)
+        mock_llm_instance.client.chat.completions.create.side_effect = Exception()
+
+        with pytest.raises(AppException) as exc_info:
+            call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert exc_info.value.error_code == ErrorCode.MODEL_PROMPT_GENERATION_FAILED

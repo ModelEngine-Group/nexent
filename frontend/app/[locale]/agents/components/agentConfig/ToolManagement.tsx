@@ -11,6 +11,7 @@ import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { updateToolConfig } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import { Settings, AlertTriangle } from "lucide-react";
 
@@ -73,6 +74,7 @@ export default function ToolManagement({
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const { confirm } = useConfirmModal();
 
   // Get current agent permission from store
   const currentAgentPermission = useAgentConfigStore(
