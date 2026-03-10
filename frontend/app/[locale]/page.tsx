@@ -55,9 +55,9 @@ export default function Homepage() {
   const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center">
+    <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
       {/* Hero area */}
-      <section className="relative w-full py-4 flex flex-col items-center justify-center text-center">
+      <section className="relative w-full p-4 flex flex-col items-center justify-center text-center flex-shrink-0">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
@@ -132,7 +132,7 @@ export default function Homepage() {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 0.6 }}
-        className="w-full mt-1 max-w-7xl"
+        className="w-full mt-1 max-w-7xl py-4 px-8"
       >
         <motion.h3
           initial={{ opacity: 0, y: -20 }}
