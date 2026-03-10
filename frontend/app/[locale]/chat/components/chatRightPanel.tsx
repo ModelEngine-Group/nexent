@@ -479,7 +479,7 @@ export function ChatRightPanel({
       {/* Image viewer modal */}
       {viewingImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80"
           onClick={() => setViewingImage(null)}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
