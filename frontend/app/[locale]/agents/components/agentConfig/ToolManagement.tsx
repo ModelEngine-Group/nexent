@@ -12,6 +12,7 @@ import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { updateToolConfig } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import { Settings, AlertTriangle } from "lucide-react";
 
@@ -74,6 +75,7 @@ export default function ToolManagement({
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const { confirm } = useConfirmModal();
 
   // Get current agent permission from store
   const currentAgentPermission = useAgentConfigStore(
@@ -277,7 +279,46 @@ export default function ToolManagement({
       );
       updateTools(newSelectedTools);
     } else {
-      // If not selected, determine tool params and check if modal is needed
+      // If not selected, check for duplicate tool names first
+      const duplicateTool = currentSelectdTools.find(
+        (selectedTool) => selectedTool.name === tool.name
+      );
+
+      if (duplicateTool) {
+        // Show confirmation modal for duplicate tool name
+        return new Promise<void>((resolve) => {
+          confirm({
+            title: t("toolPool.duplicateToolName.title"),
+            content: t("toolPool.duplicateToolName.content", {
+              toolName: tool.name,
+            }),
+            okText: t("toolPool.duplicateToolName.confirm"),
+            cancelText: t("toolPool.duplicateToolName.cancel"),
+            danger: true,
+            onOk: async () => {
+              // User confirmed, proceed with tool selection
+              await proceedWithToolSelection();
+              resolve();
+            },
+            onCancel: () => {
+              // User cancelled, do nothing
+              resolve();
+            },
+          });
+        });
+      }
+
+      // No duplicate, proceed with normal tool selection
+      await proceedWithToolSelection();
+    }
+
+    // Helper function to proceed with tool selection after duplicate check
+    async function proceedWithToolSelection() {
+      // Get latest tools again to ensure we have the most up-to-date list
+      const currentSelectdTools =
+        useAgentConfigStore.getState().editedAgent.tools;
+
+      // Determine tool params and check if modal is needed
       const configuredTool = currentSelectdTools.find(
         (t) => parseInt(t.id) === numericId
       );

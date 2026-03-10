@@ -44,8 +44,8 @@ class TestAppException:
         """Test AppException.to_dict() method."""
         exc = AppException(ErrorCode.DIFY_AUTH_ERROR, "Auth failed", {"key": "value"})
         result = exc.to_dict()
-        
-        assert result["code"] == 130204
+
+        assert result["code"] == "130204"
         assert result["message"] == "Auth failed"
         assert result["details"] == {"key": "value"}
 
@@ -53,7 +53,7 @@ class TestAppException:
         """Test that to_dict() returns null for empty details."""
         exc = AppException(ErrorCode.DIFY_AUTH_ERROR, "Auth failed")
         result = exc.to_dict()
-        
+
         assert result["details"] is None
 
     def test_app_exception_http_status_property(self):
@@ -71,7 +71,7 @@ class TestAppException:
             (ErrorCode.COMMON_TOKEN_EXPIRED, 401),
             (ErrorCode.COMMON_FORBIDDEN, 403),
         ]
-        
+
         for error_code, expected_status in test_cases:
             exc = AppException(error_code)
             assert exc.http_status == expected_status, \

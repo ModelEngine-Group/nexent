@@ -47,7 +47,7 @@ const isProduction = process.env.NODE_ENV === "production";
 function buildCookieOptions(httpOnly) {
   return {
     httpOnly,
-    secure: isProduction,
+    secure: false, // cookie can be send through http
     sameSite: "lax",
     path: "/",
   };
