@@ -2428,6 +2428,90 @@ async def test_list_all_agent_info_impl_group_filtering(
 @patch("backend.services.agent_service.get_user_tenant_by_user_id")
 @patch("backend.services.agent_service.query_group_ids_by_user")
 @patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_creator_can_see_own_agent_without_group_overlap(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """Test that users can see agents they created even if group_ids don't overlap."""
+    mock_agents = [
+        {
+            "agent_id": 1,
+            "name": "Agent 1",
+            "display_name": "Display Agent 1",
+            "description": "Agent created by current_user, but in different groups",
+            "enabled": True,
+            "group_ids": "5,6",  # Different groups from user's groups [1, 2]
+            "created_by": "current_user",  # User is the creator
+            "create_time": 1,
+        },
+        {
+            "agent_id": 2,
+            "name": "Agent 2",
+            "display_name": "Display Agent 2",
+            "description": "Agent not created by current_user, no group overlap",
+            "enabled": True,
+            "group_ids": "7,8",  # Different groups from user's groups [1, 2]
+            "created_by": "other_user",  # User is NOT the creator
+            "create_time": 2,
+        },
+        {
+            "agent_id": 3,
+            "name": "Agent 3",
+            "display_name": "Display Agent 3",
+            "description": "Agent with group overlap",
+            "enabled": True,
+            "group_ids": "1,9",  # Overlaps with user's group 1
+            "created_by": "another_user",
+            "create_time": 3,
+        }
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "USER"}  # Regular user
+    mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
+
+    # Mock convert_string_to_list to handle both empty strings and comma-separated values
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+
+    # Mock check_agent_availability to return (is_available, unavailable_reasons)
+    mock_check_availability.return_value = (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="current_user")
+
+    # Should see:
+    # - Agent 1: created by current_user, even though groups don't overlap (new logic)
+    # - Agent 3: groups overlap (1 is in both user's groups and agent's groups)
+    # Should NOT see:
+    # - Agent 2: not created by current_user AND groups don't overlap
+    assert len(result) == 2
+    agent_ids = [a["agent_id"] for a in result]
+    assert 1 in agent_ids, "Agent 1 should be visible because user is the creator"
+    assert 3 in agent_ids, "Agent 3 should be visible because groups overlap"
+    assert 2 not in agent_ids, "Agent 2 should be filtered out (not creator and no group overlap)"
+
+
+@pytest.mark.asyncio
+@patch("backend.services.agent_service.get_model_by_model_id")
+@patch("backend.services.agent_service.check_agent_availability")
+@patch("backend.services.agent_service.convert_string_to_list")
+@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("backend.services.agent_service.query_group_ids_by_user")
+@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_disabled_agents_filtered(
     mock_query_agents,
     mock_query_groups,
@@ -2550,7 +2634,7 @@ async def test_list_all_agent_info_impl_group_query_error_for_user_role(
             "description": "Test agent",
             "enabled": True,
             "group_ids": "1,2",
-            "created_by": "user1",
+            "created_by": "other_user",  # Different from user_id to test filtering logic
             "create_time": 1,
         }
     ]
@@ -2560,17 +2644,31 @@ async def test_list_all_agent_info_impl_group_query_error_for_user_role(
     mock_get_user_tenant.return_value = {"user_role": "USER"}
     # Simulate exception when querying group IDs - this should trigger lines 1274-1278
     mock_query_groups.side_effect = Exception("Database connection error")
-    mock_convert_list.return_value = []
+    
+    # Mock convert_string_to_list to handle comma-separated values
+    def convert_side_effect(x):
+        if not x or (isinstance(x, str) and x.strip() == ""):
+            return []
+        parts = str(x).split(",")
+        result = []
+        for part in parts:
+            stripped = part.strip()
+            if stripped and stripped.isdigit():
+                result.append(int(stripped))
+        return result
+    mock_convert_list.side_effect = convert_side_effect
+    
     # Mock check_agent_availability to return (is_available, unavailable_reasons)
     mock_check_availability.return_value = (True, [])
     mock_get_model.return_value = None
 
     # Should not raise exception, but should handle gracefully
-    # When group query fails, user_group_ids is set to empty set, so no agents match
+    # When group query fails, user_group_ids is set to empty set
+    # Agent is not created by user1, so it should be filtered out (no group overlap and not creator)
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="user1")
 
-    # Since user_group_ids is empty set (due to exception), no agents should match group filter
-    # So result should be empty
+    # Since user_group_ids is empty set (due to exception) and user is not the creator,
+    # agent should be filtered out according to line 1328 logic
     assert len(result) == 0
     # Verify that query_group_ids_by_user was called (to trigger the exception)
     mock_query_groups.assert_called_once_with("user1")

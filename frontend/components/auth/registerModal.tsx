@@ -106,8 +106,7 @@ export function RegisterModal() {
       await register(
         values.email,
         values.password,
-        values.inviteCode,
-        true,
+        values.inviteCode
       );
 
       // Reset form and clear error states

@@ -35,6 +35,7 @@ from backend.services.remote_mcp_service import (
     get_remote_mcp_server_list,
     check_mcp_health_and_update_db,
     delete_mcp_by_container_id,
+    get_mcp_record_by_id,
     upload_and_start_mcp_image,
     attach_mcp_container_permissions,
 )
@@ -100,6 +101,130 @@ class TestMcpServerHealth(unittest.IsolatedAsyncioTestCase):
         result = await mcp_server_health('http://test-server:8080')
         self.assertTrue(result)
 
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_with_authorization_token(self, mock_client_cls):
+        """Test health check with authorization token"""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client_cls.return_value = mock_client
+
+        result = await mcp_server_health('http://test-server', authorization_token='Bearer token123')
+        self.assertTrue(result)
+
+        # Verify Client was called with transport containing headers
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        transport = call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+        self.assertEqual(transport.headers, {"Authorization": "Bearer token123"})
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_without_authorization_token(self, mock_client_cls):
+        """Test health check without authorization token"""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client_cls.return_value = mock_client
+
+        result = await mcp_server_health('http://test-server', authorization_token=None)
+        self.assertTrue(result)
+
+        # Verify Client was called with transport containing empty headers
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        transport = call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+        self.assertEqual(transport.headers, {})
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_with_sse_url(self, mock_client_cls):
+        """Test health check with /sse URL ending - should use SSETransport"""
+        from fastmcp.client.transports import SSETransport
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client_cls.return_value = mock_client
+
+        result = await mcp_server_health('http://test-server/sse', authorization_token='token123')
+        self.assertTrue(result)
+
+        # Verify SSETransport was used
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        transport = call_args[1]['transport']
+        self.assertIsInstance(transport, SSETransport)
+        self.assertEqual(transport.url, 'http://test-server/sse')
+        self.assertEqual(transport.headers, {"Authorization": "token123"})
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_with_mcp_url(self, mock_client_cls):
+        """Test health check with /mcp URL ending - should use StreamableHttpTransport"""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client_cls.return_value = mock_client
+
+        result = await mcp_server_health('http://test-server/mcp', authorization_token='token123')
+        self.assertTrue(result)
+
+        # Verify StreamableHttpTransport was used
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        transport = call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+        self.assertEqual(transport.url, 'http://test-server/mcp')
+        self.assertEqual(transport.headers, {"Authorization": "token123"})
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_with_unknown_url_format(self, mock_client_cls):
+        """Test health check with unknown URL format - should default to StreamableHttpTransport"""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client_cls.return_value = mock_client
+
+        result = await mcp_server_health('http://test-server/api', authorization_token='token123')
+        self.assertTrue(result)
+
+        # Verify StreamableHttpTransport was used as default
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        transport = call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+        self.assertEqual(transport.url, 'http://test-server/api')
+        self.assertEqual(transport.headers, {"Authorization": "token123"})
+
+    @patch('backend.services.remote_mcp_service.Client')
+    async def test_health_with_url_whitespace(self, mock_client_cls):
+        """Test health check with URL containing whitespace - should be stripped"""
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.is_connected = MagicMock(return_value=True)
+        mock_client_cls.return_value = mock_client
+
+        result = await mcp_server_health('  http://test-server/mcp  ', authorization_token='token123')
+        self.assertTrue(result)
+
+        # Verify URL was stripped and StreamableHttpTransport was used
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        transport = call_args[1]['transport']
+        self.assertIsInstance(transport, StreamableHttpTransport)
+        # URL should be stripped before being passed to transport
+        self.assertEqual(transport.url, 'http://test-server/mcp')
+
 
 class TestAddRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
     """Test add_remote_mcp_server_list"""
@@ -118,8 +243,36 @@ class TestAddRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         # Verify calls
         mock_check_name.assert_called_once_with(
             mcp_name='name', tenant_id='tid')
-        mock_health.assert_called_once_with(remote_mcp_server='http://srv')
+        mock_health.assert_called_once_with(remote_mcp_server='http://srv', authorization_token=None)
         mock_create.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.create_mcp_record')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_add_success_with_authorization_token(self, mock_check_name, mock_health, mock_create):
+        """Test successful MCP server addition with authorization token"""
+        mock_check_name.return_value = False  # Name doesn't exist
+        mock_health.return_value = True  # Health check passes
+
+        # Should execute successfully without exception
+        await add_remote_mcp_server_list(
+            'tid', 'uid', 'http://srv', 'name',
+            container_id='container-123',
+            authorization_token='Bearer token123'
+        )
+
+        # Verify calls
+        mock_check_name.assert_called_once_with(
+            mcp_name='name', tenant_id='tid')
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://srv',
+            authorization_token='Bearer token123'
+        )
+        mock_create.assert_called_once()
+        # Verify authorization_token was passed to create_mcp_record
+        create_call_kwargs = mock_create.call_args[1]
+        self.assertEqual(create_call_kwargs['mcp_data']['authorization_token'], 'Bearer token123')
+        self.assertEqual(create_call_kwargs['mcp_data']['container_id'], 'container-123')
 
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     async def test_add_name_exists(self, mock_check_name):
@@ -134,6 +287,16 @@ class TestAddRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     async def test_add_health_fail(self, mock_check_name, mock_health):
         """Test health check failure"""
+        mock_check_name.return_value = False
+        mock_health.return_value = False  # Health check returns False
+
+        with self.assertRaises(MCPConnectionError):
+            await add_remote_mcp_server_list('tid', 'uid', 'http://srv', 'name')
+
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_add_health_fail_with_exception(self, mock_check_name, mock_health):
+        """Test health check failure with exception"""
         mock_check_name.return_value = False
         mock_health.side_effect = MCPConnectionError("MCP connection failed")
 
@@ -320,20 +483,131 @@ class TestGetRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["permission"], "EDIT")
         self.assertEqual(result[1]["permission"], "EDIT")
 
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_with_is_need_auth_true(self, mock_get):
+        """Test getting server list with is_need_auth=True (default) includes authorization_token"""
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "authorization_token": "token123",
+                "mcp_id": 1
+            },
+            {
+                "mcp_name": "n2",
+                "mcp_server": "u2",
+                "status": False,
+                "authorization_token": None,
+                "mcp_id": 2
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid', is_need_auth=True)
+
+        self.assertEqual(len(result), 2)
+        self.assertIn("authorization_token", result[0])
+        self.assertEqual(result[0]["authorization_token"], "token123")
+        self.assertIn("authorization_token", result[1])
+        self.assertIsNone(result[1]["authorization_token"])
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_with_is_need_auth_false(self, mock_get):
+        """Test getting server list with is_need_auth=False excludes authorization_token"""
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "authorization_token": "token123",
+                "mcp_id": 1
+            },
+            {
+                "mcp_name": "n2",
+                "mcp_server": "u2",
+                "status": False,
+                "authorization_token": "token456",
+                "mcp_id": 2
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid', is_need_auth=False)
+
+        self.assertEqual(len(result), 2)
+        self.assertNotIn("authorization_token", result[0])
+        self.assertNotIn("authorization_token", result[1])
+        # Verify other fields are still present
+        self.assertEqual(result[0]["remote_mcp_server_name"], "n1")
+        self.assertEqual(result[0]["mcp_id"], 1)
+        self.assertEqual(result[1]["remote_mcp_server_name"], "n2")
+        self.assertEqual(result[1]["mcp_id"], 2)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_default_is_need_auth_true(self, mock_get):
+        """Test that default behavior (is_need_auth not specified) includes authorization_token"""
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "authorization_token": "token123",
+                "mcp_id": 1
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid')
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("authorization_token", result[0])
+        self.assertEqual(result[0]["authorization_token"], "token123")
+
+    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    async def test_get_list_with_user_id_and_is_need_auth_false(self, mock_get, mock_get_user_tenant):
+        """Test getting server list with user_id and is_need_auth=False"""
+        mock_get_user_tenant.return_value = {"user_role": "USER"}
+        mock_get.return_value = [
+            {
+                "mcp_name": "n1",
+                "mcp_server": "u1",
+                "status": True,
+                "created_by": "user123",
+                "authorization_token": "token123",
+                "mcp_id": 1
+            }
+        ]
+
+        result = await get_remote_mcp_server_list('tid', user_id="user123", is_need_auth=False)
+
+        self.assertEqual(len(result), 1)
+        self.assertNotIn("authorization_token", result[0])
+        self.assertEqual(result[0]["permission"], "EDIT")
+        self.assertEqual(result[0]["mcp_id"], 1)
+
 
 class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
     """Test check_mcp_health_and_update_db"""
 
     @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    async def test_check_health_success(self, mock_health, mock_update):
+    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    async def test_check_health_success(self, mock_get_token, mock_health, mock_update):
         """Test successful health check and update"""
+        mock_get_token.return_value = 'Bearer token123'
         mock_health.return_value = True
 
         # Should execute successfully without exception
         await check_mcp_health_and_update_db('http://srv', 'name', 'tid', 'uid')
 
-        mock_health.assert_called_once_with(remote_mcp_server='http://srv')
+        mock_get_token.assert_called_once_with(
+            mcp_name='name',
+            mcp_server='http://srv',
+            tenant_id='tid'
+        )
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://srv',
+            authorization_token='Bearer token123'
+        )
         mock_update.assert_called_once_with(
             mcp_name='name',
             mcp_server='http://srv',
@@ -344,8 +618,25 @@ class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    async def test_check_health_false(self, mock_health, mock_update):
+    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    async def test_check_health_with_none_token(self, mock_get_token, mock_health, mock_update):
+        """Test health check with None authorization token"""
+        mock_get_token.return_value = None
+        mock_health.return_value = True
+
+        await check_mcp_health_and_update_db('http://srv', 'name', 'tid', 'uid')
+
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://srv',
+            authorization_token=None
+        )
+
+    @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    async def test_check_health_false(self, mock_get_token, mock_health, mock_update):
         """Test health check failure - should raise MCPConnectionError when status is False"""
+        mock_get_token.return_value = 'Bearer token123'
         mock_health.return_value = False
 
         with self.assertRaises(MCPConnectionError) as context:
@@ -362,10 +653,12 @@ class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    async def test_update_db_fail(self, mock_health, mock_update):
+    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    async def test_update_db_fail(self, mock_get_token, mock_health, mock_update):
         """Test database update failure - exception should propagate from database layer"""
         from sqlalchemy.exc import SQLAlchemyError
 
+        mock_get_token.return_value = 'Bearer token123'
         mock_health.return_value = True
         mock_update.side_effect = SQLAlchemyError("Database error")
 
@@ -374,8 +667,10 @@ class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
-    async def test_health_check_exception(self, mock_health, mock_update):
+    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    async def test_health_check_exception(self, mock_get_token, mock_health, mock_update):
         """Test health check exception - should catch exception, set status to False, and raise MCPConnectionError"""
+        mock_get_token.return_value = 'Bearer token123'
         mock_health.side_effect = MCPConnectionError("Connection failed")
 
         # Should catch the exception from mcp_server_health, set status to False, and then raise MCPConnectionError
@@ -383,7 +678,10 @@ class TestCheckMcpHealthAndUpdateDb(unittest.IsolatedAsyncioTestCase):
             await check_mcp_health_and_update_db('http://srv', 'name', 'tid', 'uid')
 
         self.assertEqual(str(context.exception), "MCP connection failed")
-        mock_health.assert_called_once_with(remote_mcp_server='http://srv')
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://srv',
+            authorization_token='Bearer token123'
+        )
         mock_update.assert_called_once_with(
             mcp_name='name',
             mcp_server='http://srv',
@@ -524,6 +822,94 @@ class TestUploadAndStartMcpImage(unittest.IsolatedAsyncioTestCase):
 
         # Verify MCP server was registered
         mock_add_server.assert_called_once()
+
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('tempfile.NamedTemporaryFile')
+    async def test_upload_success_with_authorization_token_in_env_vars(self, mock_temp_file, mock_check_name, mock_container_manager_class, mock_add_server):
+        """Test successful upload with authorization_token in env_vars"""
+        # Mock tempfile
+        mock_temp_file_obj = MagicMock()
+        mock_temp_file_obj.__enter__.return_value = mock_temp_file_obj
+        mock_temp_file_obj.__exit__.return_value = None
+        mock_temp_file_obj.name = "/tmp/test.tar"
+        mock_temp_file.return_value = mock_temp_file_obj
+
+        # Mock container manager
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container_from_tar = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+
+        mock_check_name.return_value = False
+        mock_add_server.return_value = None
+
+        result = await upload_and_start_mcp_image(
+            tenant_id="tenant123",
+            user_id="user456",
+            file_content=b"fake tar content",
+            filename="test.tar",
+            port=5020,
+            service_name="test-service",
+            env_vars='{"NODE_ENV": "production", "authorization_token": "Bearer token123"}'
+        )
+
+        self.assertEqual(result["status"], "success")
+
+        # Verify authorization_token was extracted from env_vars and passed to add_remote_mcp_server_list
+        mock_add_server.assert_called_once()
+        call_kwargs = mock_add_server.call_args[1]
+        self.assertEqual(call_kwargs["authorization_token"], "Bearer token123")
+
+    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('tempfile.NamedTemporaryFile')
+    async def test_upload_success_without_authorization_token_in_env_vars(self, mock_temp_file, mock_check_name, mock_container_manager_class, mock_add_server):
+        """Test successful upload without authorization_token in env_vars"""
+        # Mock tempfile
+        mock_temp_file_obj = MagicMock()
+        mock_temp_file_obj.__enter__.return_value = mock_temp_file_obj
+        mock_temp_file_obj.__exit__.return_value = None
+        mock_temp_file_obj.name = "/tmp/test.tar"
+        mock_temp_file.return_value = mock_temp_file_obj
+
+        # Mock container manager
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        mock_container_manager.start_mcp_container_from_tar = AsyncMock(return_value={
+            "container_id": "container-123",
+            "mcp_url": "http://localhost:5020/mcp",
+            "host_port": "5020",
+            "status": "started",
+            "container_name": "test-service-user1234"
+        })
+
+        mock_check_name.return_value = False
+        mock_add_server.return_value = None
+
+        result = await upload_and_start_mcp_image(
+            tenant_id="tenant123",
+            user_id="user456",
+            file_content=b"fake tar content",
+            filename="test.tar",
+            port=5020,
+            service_name="test-service",
+            env_vars='{"NODE_ENV": "production"}'  # No authorization_token
+        )
+
+        self.assertEqual(result["status"], "success")
+
+        # Verify authorization_token is None when not in env_vars
+        mock_add_server.assert_called_once()
+        call_kwargs = mock_add_server.call_args[1]
+        self.assertIsNone(call_kwargs["authorization_token"])
 
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
     async def test_upload_invalid_file_type(self, mock_check_name):
@@ -754,11 +1140,12 @@ class TestUploadAndStartMcpImage(unittest.IsolatedAsyncioTestCase):
 class MockMCPUpdateRequest:
     """Mock MCPUpdateRequest for testing"""
 
-    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url):
+    def __init__(self, current_service_name, current_mcp_url, new_service_name, new_mcp_url, new_authorization_token=None):
         self.current_service_name = current_service_name
         self.current_mcp_url = current_mcp_url
         self.new_service_name = new_service_name
         self.new_mcp_url = new_mcp_url
+        self.new_authorization_token = new_authorization_token
 
 
 class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
@@ -787,12 +1174,40 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         # Verify calls
         mock_check_name.assert_any_call(mcp_name='old_name', tenant_id='tid')
         mock_check_name.assert_any_call(mcp_name='new_name', tenant_id='tid')
-        mock_health.assert_called_once_with(remote_mcp_server='http://new.url')
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://new.url',
+            authorization_token=None
+        )
         mock_update_record.assert_called_once_with(
             update_data=update_data,
             tenant_id='tid',
             user_id='uid',
             status=True
+        )
+
+    @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
+    @patch('backend.services.remote_mcp_service.mcp_server_health')
+    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    async def test_update_success_with_new_authorization_token(self, mock_check_name, mock_health, mock_update_record):
+        """Test successful MCP server update with new authorization token"""
+        mock_check_name.side_effect = [True, False]
+        mock_health.return_value = True
+
+        update_data = MockMCPUpdateRequest(
+            current_service_name="old_name",
+            current_mcp_url="http://old.url",
+            new_service_name="new_name",
+            new_mcp_url="http://new.url",
+            new_authorization_token='Bearer new_token123'
+        )
+
+        # Should execute successfully without exception
+        await update_remote_mcp_server_list(update_data, 'tid', 'uid')
+
+        # Verify that new authorization token was used (not fetched from DB)
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://new.url',
+            authorization_token='Bearer new_token123'
         )
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
@@ -818,7 +1233,10 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_check_name.call_count, 1)
         mock_check_name.assert_called_with(
             mcp_name='same_name', tenant_id='tid')
-        mock_health.assert_called_once_with(remote_mcp_server='http://new.url')
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://new.url',
+            authorization_token=None
+        )
         mock_update_record.assert_called_once_with(
             update_data=update_data,
             tenant_id='tid',
@@ -885,6 +1303,10 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(str(context.exception),
                          "New MCP server connection failed")
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://unreachable.url',
+            authorization_token=None
+        )
 
     @patch('backend.services.remote_mcp_service.mcp_server_health')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
@@ -906,6 +1328,10 @@ class TestUpdateRemoteMcpServerList(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(str(context.exception),
                          "New MCP server connection failed")
+        mock_health.assert_called_once_with(
+            remote_mcp_server='http://failing.url',
+            authorization_token=None
+        )
 
     @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
     @patch('backend.services.remote_mcp_service.mcp_server_health')
@@ -1349,6 +1775,127 @@ class TestAttachMcpContainerPermissions(unittest.TestCase):
         self.assertEqual(result[0]["status"], "running")
         self.assertEqual(result[0]["port"], 8080)
         self.assertEqual(result[0]["permission"], "READ_ONLY")
+
+
+class TestGetMcpRecordById(unittest.IsolatedAsyncioTestCase):
+    """Test get_mcp_record_by_id function"""
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_success(self, mock_get_record):
+        """Test successful retrieval of MCP record"""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": "Bearer token123",
+            "status": True,
+            "mcp_id": 1
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["mcp_name"], "test-service")
+        self.assertEqual(result["mcp_server"], "http://test.com/mcp")
+        self.assertEqual(result["authorization_token"], "Bearer token123")
+
+        mock_get_record.assert_called_once_with(mcp_id=1, tenant_id="tenant123")
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_not_found(self, mock_get_record):
+        """Test when MCP record does not exist"""
+        mock_get_record.return_value = None
+
+        result = await get_mcp_record_by_id(mcp_id=999, tenant_id="tenant123")
+
+        self.assertIsNone(result)
+        mock_get_record.assert_called_once_with(mcp_id=999, tenant_id="tenant123")
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_with_none_authorization_token(self, mock_get_record):
+        """Test MCP record with None authorization token"""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": None,
+            "status": True,
+            "mcp_id": 1
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["mcp_name"], "test-service")
+        self.assertEqual(result["mcp_server"], "http://test.com/mcp")
+        self.assertIsNone(result["authorization_token"])
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_with_missing_fields(self, mock_get_record):
+        """Test MCP record with missing optional fields"""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            # authorization_token missing
+            "status": True,
+            "mcp_id": 1
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["mcp_name"], "test-service")
+        self.assertEqual(result["mcp_server"], "http://test.com/mcp")
+        self.assertIsNone(result["authorization_token"])  # Should be None when missing
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_with_empty_dict(self, mock_get_record):
+        """Test when database returns empty dict (should not happen but handle gracefully)"""
+        mock_get_record.return_value = {}
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        # Empty dict is falsy, so should return None
+        self.assertIsNone(result)
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_different_tenant(self, mock_get_record):
+        """Test getting MCP record with different tenant ID"""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": "token123",
+            "status": True,
+            "mcp_id": 1
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="different_tenant")
+
+        self.assertIsNotNone(result)
+        mock_get_record.assert_called_once_with(mcp_id=1, tenant_id="different_tenant")
+
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_mcp_record_returns_only_required_fields(self, mock_get_record):
+        """Test that function returns only mcp_name, mcp_server, and authorization_token"""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": "token123",
+            "status": True,
+            "mcp_id": 1,
+            "container_id": "container-123",
+            "created_by": "user123",
+            "other_field": "should_not_be_included"
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        # Should only contain the three required fields
+        self.assertEqual(set(result.keys()), {"mcp_name", "mcp_server", "authorization_token"})
+        self.assertNotIn("status", result)
+        self.assertNotIn("mcp_id", result)
+        self.assertNotIn("container_id", result)
+        self.assertNotIn("created_by", result)
+        self.assertNotIn("other_field", result)
 
 
 if __name__ == '__main__':

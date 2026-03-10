@@ -82,7 +82,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       editGroupForm.resetFields();
       editGroupForm.setFieldsValue(formValues);
     } catch (error) {
-      message.error("Failed to load group members");
+      message.error(t("tenantResources.groups.loadMembersFailed"));
       setGroupUsers([]);
       setAvailableUsers(allUsers);
       const formValues = {
@@ -105,7 +105,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       const members = await getGroupMembers(g.group_id);
       setGroupUsers(members);
     } catch (error) {
-      message.error("Failed to load group users");
+      message.error(t("tenantResources.groups.loadUsersFailed"));
       setGroupUsers([]);
     }
     setUserListModalVisible(true);
@@ -114,14 +114,14 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const handleDelete = async (id: number) => {
     try {
       await deleteGroup(id);
-      message.success("Group deleted");
+      message.success(t("tenantResources.groups.deleted"));
       // Invalidate all group queries to ensure all components get updated data
       queryClient.invalidateQueries({ queryKey: ["groups"] });
     } catch (err: any) {
       if (err.response?.data?.message) {
         message.error(err.response.data.message);
       } else {
-        message.error("Delete failed");
+        message.error(t("tenantResources.groups.deleteFailed"));
       }
     }
   };
@@ -129,7 +129,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (!tenantId) throw new Error("No tenant selected");
+      if (!tenantId) throw new Error(t("tenantResources.groups.noTenantSelected"));
 
       if (editingGroup) {
         const updateData: UpdateGroupRequest = {
@@ -137,14 +137,14 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           group_description: values.description,
         };
         await updateGroup(editingGroup.group_id, updateData);
-        message.success("Group updated");
+        message.success(t("tenantResources.groups.updated"));
       } else {
         const createData: CreateGroupRequest = {
           group_name: values.name,
           group_description: values.description,
         };
         await createGroup(tenantId, createData);
-        message.success("Group created");
+        message.success(t("tenantResources.groups.created"));
       }
       setModalVisible(false);
       // Invalidate all group queries to ensure all components get updated data
@@ -195,7 +195,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       } else if (err.response?.data?.message) {
         message.error(err.response.data.message);
       } else {
-        message.error("Failed to update group");
+        message.error(t("tenantResources.groups.updateFailed"));
       }
     }
   };
@@ -296,7 +296,7 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
           setModalVisible(false);
           editGroupForm.resetFields();
         }}
-        destroyOnClose
+        destroyOnHidden
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         width={editingGroup ? 600 : 400}

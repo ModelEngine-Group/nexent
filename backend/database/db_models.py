@@ -243,7 +243,7 @@ class ToolInstance(TableBase):
     user_id = Column(String(100), doc="User ID")
     tenant_id = Column(String(100), doc="Tenant ID")
     enabled = Column(Boolean, doc="Enabled")
-    version_no = Column(Integer, default=0, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
+    version_no = Column(Integer, default=0, primary_key=True, nullable=False, doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
 
 
 class KnowledgeRecord(TableBase):
@@ -321,6 +321,11 @@ class McpRecord(TableBase):
     container_id = Column(
         String(200),
         doc="Docker container ID for MCP service, None for non-containerized MCP",
+    )
+    authorization_token = Column(
+        String(500),
+        doc="Authorization token for MCP server authentication (e.g., Bearer token)",
+        default=None,
     )
 
 

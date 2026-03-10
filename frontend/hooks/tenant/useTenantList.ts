@@ -1,10 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
-import { listTenants } from "@/services/tenantService";
+import { listTenants, Tenant } from "@/services/tenantService";
+import log from "@/lib/logger";
 
-export function useTenantList() {
+export interface TenantListResult {
+  data: Tenant[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export function useTenantList(params?: { page?: number; page_size?: number }) {
   return useQuery({
-    queryKey: ["tenants"],
-    queryFn: () => listTenants(),
+    queryKey: ["tenants", params?.page ?? 1, params?.page_size ?? 20],
+    queryFn: async () => {
+      log.info("[useTenantList] Fetching tenants with params:", params);
+      const result = await listTenants(params);
+      log.info("[useTenantList] Received result:", result);
+      return result;
+    },
     staleTime: 1000 * 60, // Cache for 1 minute
   });
 }

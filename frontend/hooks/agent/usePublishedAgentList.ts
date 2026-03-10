@@ -29,6 +29,6 @@ export function usePublishedAgentList() {
 		...query,
 		agents,
 		availableAgents,
-		invalidate: () => queryClient.invalidateQueries({ queryKey: ["publishedAgents"] }),
+		invalidate: () => queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] }),
 	};
 }

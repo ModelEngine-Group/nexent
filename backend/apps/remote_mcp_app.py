@@ -17,6 +17,7 @@ from services.remote_mcp_service import (
     upload_and_start_mcp_image,
     update_remote_mcp_server_list,
     attach_mcp_container_permissions,
+    get_mcp_record_by_id,
 )
 from database.remote_mcp_db import check_mcp_name_exists
 from services.tool_configuration_service import get_tool_from_remote_mcp_server
@@ -30,11 +31,18 @@ logger = logging.getLogger("remote_mcp_app")
 @router.post("/tools")
 async def get_tools_from_remote_mcp(
     service_name: str,
-    mcp_url: str
+    mcp_url: str,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
 ):
     """ Used to list tool information from the remote MCP server """
     try:
-        tools_info = await get_tool_from_remote_mcp_server(mcp_server_name=service_name, remote_mcp_server=mcp_url)
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        tools_info = await get_tool_from_remote_mcp_server(
+            mcp_server_name=service_name,
+            remote_mcp_server=mcp_url,
+            tenant_id=tenant_id
+        )
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -54,6 +62,8 @@ async def get_tools_from_remote_mcp(
 async def add_remote_proxies(
     mcp_url: str,
     service_name: str,
+    authorization_token: Optional[str] = Query(
+        None, description="Authorization token for MCP server authentication (e.g., Bearer token)"),
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
@@ -68,7 +78,8 @@ async def add_remote_proxies(
                                          user_id=user_id,
                                          remote_mcp_server=mcp_url,
                                          remote_mcp_server_name=service_name,
-                                         container_id=None)
+                                         container_id=None,
+                                         authorization_token=authorization_token)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Successfully added remote MCP proxy",
@@ -170,6 +181,7 @@ async def get_remote_proxies(
         remote_mcp_server_list = await get_remote_mcp_server_list(
             tenant_id=effective_tenant_id,
             user_id=user_id,
+            is_need_auth=False
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -181,6 +193,50 @@ async def get_remote_proxies(
         logger.error(f"Failed to get remote MCP proxy: {e}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail="Failed to get remote MCP proxy")
+
+
+@router.get("/record/{mcp_id}")
+async def get_mcp_record(
+    mcp_id: int,
+    tenant_id: Optional[str] = Query(
+        None, description="Tenant ID for filtering (uses auth if not provided)"),
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None
+):
+    """ Get single MCP record by ID """
+    try:
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
+        # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
+        effective_tenant_id = tenant_id or auth_tenant_id
+
+        mcp_record = await get_mcp_record_by_id(
+            mcp_id=mcp_id,
+            tenant_id=effective_tenant_id
+        )
+
+        if not mcp_record:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="MCP record not found"
+            )
+
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "mcp_name": mcp_record.get("mcp_name"),
+                "mcp_server": mcp_record.get("mcp_server"),
+                "authorization_token": mcp_record.get("authorization_token"),
+                "status": "success"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get MCP record: {e}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to get MCP record"
+        )
 
 
 @router.get("/healthcheck")

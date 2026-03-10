@@ -1325,7 +1325,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
-                if len(user_group_ids.intersection(agent_group_ids)) == 0:
+                if len(user_group_ids.intersection(agent_group_ids)) == 0 and user_id != agent.get("created_by"):
                     continue
 
             # Use shared availability check function
@@ -1569,6 +1569,7 @@ async def prepare_agent_run(
         user_id=user_id,
         language=language,
         allow_memory_search=allow_memory_search,
+        is_debug=agent_request.is_debug,
     )
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)

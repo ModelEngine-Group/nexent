@@ -86,6 +86,7 @@ from backend.database.user_tenant_db import (
     get_users_by_tenant_id,
     update_user_tenant_role,
     soft_delete_user_tenant_by_user_id,
+    soft_delete_users_by_tenant_id,
 )
 
 class MockUserTenant:
@@ -551,3 +552,58 @@ def test_update_user_tenant_role_database_error(monkeypatch, mock_session):
 
     with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
         update_user_tenant_role("user123", "ADMIN", "updater456")
+
+
+def test_soft_delete_users_by_tenant_id_success(monkeypatch, mock_session):
+    """Test successfully soft deleting all users for a tenant"""
+    session, _ = mock_session
+
+    # Setup query filter().update() chain
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 5  # 5 users deleted
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_users_by_tenant_id("tenant123", "admin_user")
+    assert ok is True
+    mock_query.filter.assert_called_once()
+    mock_query.filter.return_value.update.assert_called_once()
+
+
+def test_soft_delete_users_by_tenant_id_no_users(monkeypatch, mock_session):
+    """Test soft deleting users when no users exist for the tenant"""
+    session, _ = mock_session
+    mock_query = MagicMock()
+    mock_query.filter.return_value.update.return_value = 0  # No users deleted
+    session.query.return_value = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    ok = soft_delete_users_by_tenant_id("empty_tenant", "admin_user")
+    assert ok is False  # Returns False when no users were deleted
+
+
+def test_soft_delete_users_by_tenant_id_database_error(monkeypatch, mock_session):
+    """Test database error handling for soft_delete_users_by_tenant_id"""
+    session, query = mock_session
+
+    # Mock query.filter to raise an error
+    query.filter.side_effect = MockSQLAlchemyError("Database connection failed")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
+        soft_delete_users_by_tenant_id("tenant123", "admin_user")

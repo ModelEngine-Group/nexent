@@ -22,6 +22,9 @@ RUN if [ "$APT_MIRROR" = "tsinghua" ]; then \
 # Optional pip mirror for Python packages
 RUN if [ -n "$MIRROR" ]; then pip config set global.index-url "$MIRROR"; fi
 
+# Install uv (fast Python package installer)
+RUN pip install --no-cache-dir uv
+
 ARG MCP_PROXY_VERSION
 
 WORKDIR /opt

@@ -75,9 +75,11 @@ class MockToolInfo:
 class TestGetToolsFromRemoteMCP:
     """Test endpoint for getting tools from remote MCP server"""
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_tool_from_remote_mcp_server')
-    def test_get_tools_success(self, mock_get_tools):
+    def test_get_tools_success(self, mock_get_tools, mock_get_user_info):
         """Test successful retrieval of tool information"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         # Mock tool information
         mock_tools = [
             MockToolInfo("tool1", "Tool 1 description"),
@@ -88,7 +90,8 @@ class TestGetToolsFromRemoteMCP:
         response = client.post(
             "/mcp/tools",
             params={"service_name": "test_service",
-                    "mcp_url": "http://test.com"}
+                    "mcp_url": "http://test.com"},
+            headers={"Authorization": "Bearer test_token"}
         )
 
         assert response.status_code == HTTPStatus.OK
@@ -97,36 +100,44 @@ class TestGetToolsFromRemoteMCP:
         assert len(data["tools"]) == 2
         assert data["status"] == "success"
 
+        mock_get_user_info.assert_called_once()
         mock_get_tools.assert_called_once_with(
             mcp_server_name="test_service",
-            remote_mcp_server="http://test.com"
+            remote_mcp_server="http://test.com",
+            tenant_id="tenant456"
         )
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_tool_from_remote_mcp_server')
-    def test_get_tools_connection_error(self, mock_get_tools):
+    def test_get_tools_connection_error(self, mock_get_tools, mock_get_user_info):
         """Test MCP connection error when retrieving tool information"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_get_tools.side_effect = MCPConnectionError(
             "MCP connection failed")
 
         response = client.post(
             "/mcp/tools",
             params={"service_name": "test_service",
-                    "mcp_url": "http://unreachable.com"}
+                    "mcp_url": "http://unreachable.com"},
+            headers={"Authorization": "Bearer test_token"}
         )
 
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         data = response.json()
         assert "MCP connection failed" in data["detail"]
 
+    @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_tool_from_remote_mcp_server')
-    def test_get_tools_general_failure(self, mock_get_tools):
+    def test_get_tools_general_failure(self, mock_get_tools, mock_get_user_info):
         """Test general failure to retrieve tool information"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
         mock_get_tools.side_effect = Exception("Unexpected error")
 
         response = client.post(
             "/mcp/tools",
             params={"service_name": "test_service",
-                    "mcp_url": "http://test.com"}
+                    "mcp_url": "http://test.com"},
+            headers={"Authorization": "Bearer test_token"}
         )
 
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -163,6 +174,7 @@ class TestAddRemoteProxies:
             remote_mcp_server="http://test.com",
             remote_mcp_server_name="test_service",
             container_id=None,
+            authorization_token=None,
         )
 
     @patch('apps.remote_mcp_app.get_current_user_info')
@@ -193,6 +205,7 @@ class TestAddRemoteProxies:
             remote_mcp_server="http://test.com",
             remote_mcp_server_name="test_service",
             container_id=None,
+            authorization_token=None,
         )
 
     @patch('apps.remote_mcp_app.get_current_user_info')
@@ -231,6 +244,37 @@ class TestAddRemoteProxies:
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         data = response.json()
         assert "MCP connection failed" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    def test_add_remote_proxy_with_authorization_token(self, mock_add_server, mock_get_user_info):
+        """Test adding remote MCP proxy with authorization token"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add",
+            params={
+                "mcp_url": "http://test.com",
+                "service_name": "test_service",
+                "authorization_token": "Bearer token123"
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify that authorization_token is passed to service
+        mock_add_server.assert_called_once_with(
+            tenant_id="tenant456",
+            user_id="user123",
+            remote_mcp_server="http://test.com",
+            remote_mcp_server_name="test_service",
+            container_id=None,
+            authorization_token="Bearer token123",
+        )
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
@@ -368,7 +412,7 @@ class TestGetRemoteProxies:
         assert data["remote_mcp_server_list"][1]["permission"] == "READ_ONLY"
 
         mock_get_user_info.assert_called_once()
-        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123")
+        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123", is_need_auth=False)
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
@@ -384,8 +428,8 @@ class TestGetRemoteProxies:
         )
 
         assert response.status_code == HTTPStatus.OK
-        # Verify that explicit tenant_id is used
-        mock_get_list.assert_called_once_with(tenant_id="explicit_tenant789", user_id="user123")
+        # Verify that explicit tenant_id is used and is_need_auth=False
+        mock_get_list.assert_called_once_with(tenant_id="explicit_tenant789", user_id="user123", is_need_auth=False)
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
@@ -402,6 +446,171 @@ class TestGetRemoteProxies:
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         data = response.json()
         assert "Failed to get remote MCP proxy" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_remote_mcp_server_list')
+    def test_get_remote_proxies_is_need_auth_false_excludes_token(self, mock_get_list, mock_get_user_info):
+        """Test that get_remote_mcp_server_list is called with is_need_auth=False and excludes authorization_token"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        # Mock return value without authorization_token (when is_need_auth=False)
+        mock_server_list = [
+            {
+                "remote_mcp_server_name": "server1",
+                "remote_mcp_server": "http://server1.com",
+                "status": True,
+                "permission": "EDIT",
+                "mcp_id": 1
+            },
+            {
+                "remote_mcp_server_name": "server2",
+                "remote_mcp_server": "http://server2.com",
+                "status": False,
+                "permission": "READ_ONLY",
+                "mcp_id": 2
+            }
+        ]
+        mock_get_list.return_value = mock_server_list
+
+        response = client.get(
+            "/mcp/list",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert "remote_mcp_server_list" in data
+        assert len(data["remote_mcp_server_list"]) == 2
+        
+        # Verify that authorization_token is not present in the response
+        assert "authorization_token" not in data["remote_mcp_server_list"][0]
+        assert "authorization_token" not in data["remote_mcp_server_list"][1]
+        
+        # Verify that other fields are present
+        assert data["remote_mcp_server_list"][0]["mcp_id"] == 1
+        assert data["remote_mcp_server_list"][1]["mcp_id"] == 2
+        
+        # Verify that get_remote_mcp_server_list was called with is_need_auth=False
+        mock_get_list.assert_called_once_with(tenant_id="tenant456", user_id="user123", is_need_auth=False)
+
+
+class TestGetMCPRecord:
+    """Test endpoint for getting single MCP record by ID"""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_mcp_record_success(self, mock_get_record, mock_get_user_info):
+        """Test successful retrieval of MCP record"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_record = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": "token123"
+        }
+        mock_get_record.return_value = mock_record
+
+        response = client.get(
+            "/mcp/record/1",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["mcp_name"] == "test-service"
+        assert data["mcp_server"] == "http://test.com/mcp"
+        assert data["authorization_token"] == "token123"
+
+        mock_get_user_info.assert_called_once()
+        mock_get_record.assert_called_once_with(
+            mcp_id=1,
+            tenant_id="tenant456"
+        )
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_mcp_record_with_tenant_id_param(self, mock_get_record, mock_get_user_info):
+        """Test getting MCP record with explicit tenant_id parameter"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_record = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": "token123"
+        }
+        mock_get_record.return_value = mock_record
+
+        response = client.get(
+            "/mcp/record/1",
+            params={"tenant_id": "explicit_tenant789"},
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        # Verify that explicit tenant_id is used
+        mock_get_record.assert_called_once_with(
+            mcp_id=1,
+            tenant_id="explicit_tenant789"
+        )
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_mcp_record_not_found(self, mock_get_record, mock_get_user_info):
+        """Test getting MCP record when record does not exist"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_get_record.return_value = None  # Record not found
+
+        response = client.get(
+            "/mcp/record/999",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.NOT_FOUND
+        data = response.json()
+        assert "MCP record not found" in data["detail"]
+
+        mock_get_record.assert_called_once_with(
+            mcp_id=999,
+            tenant_id="tenant456"
+        )
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_mcp_record_with_none_values(self, mock_get_record, mock_get_user_info):
+        """Test getting MCP record when some fields are None"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_record = {
+            "mcp_name": "test-service",
+            "mcp_server": "http://test.com/mcp",
+            "authorization_token": None  # Token can be None
+        }
+        mock_get_record.return_value = mock_record
+
+        response = client.get(
+            "/mcp/record/1",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["mcp_name"] == "test-service"
+        assert data["mcp_server"] == "http://test.com/mcp"
+        assert data["authorization_token"] is None
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.get_mcp_record_by_id')
+    def test_get_mcp_record_exception(self, mock_get_record, mock_get_user_info):
+        """Test getting MCP record when exception occurs"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+        mock_get_record.side_effect = Exception("Database error")
+
+        response = client.get(
+            "/mcp/record/1",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        data = response.json()
+        assert "Failed to get MCP record" in data["detail"]
 
 
 class TestCheckMCPHealth:

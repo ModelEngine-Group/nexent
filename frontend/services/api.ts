@@ -55,6 +55,7 @@ export const API_ENDPOINTS = {
       rollback: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}/rollback`,
       compare: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/versions/compare`,
       delete: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
+      update: (agentId: number, versionNo: number) => `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
     },
   },
   tool: {
@@ -212,6 +213,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/mcp/container/${containerId}/logs`,
     deleteContainer: (containerId: string) =>
       `${API_BASE_URL}/mcp/container/${containerId}`,
+    record: (mcpId: number) => `${API_BASE_URL}/mcp/record/${mcpId}`,
   },
   memory: {
     // ---------------- Memory configuration ----------------
@@ -258,7 +260,7 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/market/agents/${agentId}/mcp_servers`,
   },
   tenant: {
-    list: `${API_BASE_URL}/tenants`,
+    list: `${API_BASE_URL}/tenants/tenant-list`,
     create: `${API_BASE_URL}/tenants`,
     detail: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
     update: (tenantId: string) => `${API_BASE_URL}/tenants/${tenantId}`,
