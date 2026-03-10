@@ -335,6 +335,31 @@ class McpRecord(TableBase):
     )
 
 
+class McpServiceManage(TableBase):
+    """
+    MCP service management table
+    """
+
+    __tablename__ = "mcp_service_manage_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    manage_id = Column(Integer, Sequence("mcp_service_manage_t_manage_id_seq", schema=SCHEMA),
+                       primary_key=True, nullable=False, doc="Management record ID")
+    tenant_id = Column(String(100), doc="Tenant ID")
+    user_id = Column(String(100), doc="User ID")
+    mcp_name = Column(String(100), doc="MCP name")
+    mcp_server = Column(String(500), doc="MCP server address")
+    source_type = Column(String(30), doc="Source type: local/registry")
+    market_name = Column(String(200), doc="Market identifier")
+    mcp_version = Column(String(50), doc="MCP version")
+    transport_type = Column(String(30), doc="Transport type: streamable-http/sse/stdio")
+    config_json = Column(JSON, doc="MCP config data")
+    status = Column(Boolean, default=None, doc="Health status")
+    enabled = Column(Boolean, default=True, doc="Enabled")
+    tags = Column(String(200), doc="Tags")
+    category = Column(String(100), doc="Category")
+    last_sync_time = Column(TIMESTAMP(timezone=False), doc="Last sync time")
+
 class UserTenant(TableBase):
     """
     User and tenant relationship table
