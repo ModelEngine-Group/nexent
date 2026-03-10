@@ -13,6 +13,8 @@ import {
   message,
   Select,
 } from "antd";
+import type { TablePaginationConfig } from "antd";
+import { FilterValue, SorterResult } from "antd/es/table/interface";
 import { Edit, Trash2 } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
@@ -208,6 +210,20 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
       } else {
         message.error(t("tenantResources.groups.updateFailed"));
       }
+    }
+  };
+
+  // Handle pagination change
+  const handlePageChange = (
+    pagination: TablePaginationConfig,
+    _filters: Record<string, FilterValue | null>,
+    _sorter: SorterResult<Group> | SorterResult<Group>[]
+  ) => {
+    const newPage = pagination.current || 1;
+    const newPageSize = pagination.pageSize || 10;
+    setPage(newPage);
+    if (newPageSize !== pageSize) {
+      setPageSize(newPageSize);
     }
   };
 
