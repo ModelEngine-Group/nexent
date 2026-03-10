@@ -104,7 +104,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { agents, isLoading, refetch } = useAgentList(tenantId);
 
   // Fetch groups for group name mapping and selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // Create group name mapping
@@ -144,8 +144,18 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
     try {
       const agentId = Number(agent.id);
-      // Get selected version for this agent (default to 0 for current version)
-      const selectedVersionNo = selectedVersions.get(agentId) ?? 0;
+      const isPublished = agent.is_published === true;
+
+      // For published agents, use selected version or current_version_no
+      // For unpublished agents, use version_no=0 (draft)
+      let selectedVersionNo: number;
+      if (isPublished) {
+        const currentVersionNo = agent.current_version_no || 0;
+        selectedVersionNo = selectedVersions.get(agentId) ?? currentVersionNo;
+      } else {
+        selectedVersionNo = 0;
+      }
+
       const res = await searchAgentInfo(agentId, tenantId ?? undefined, selectedVersionNo);
       if (res.success && res.data) {
         const detail = res.data;
@@ -281,28 +291,32 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
       width: "10%",
       render: (_: unknown, record: AgentListRow) => {
         const agentId = Number(record.id);
+        const isPublished = record.is_published === true;
+
+        // If not published, show "无已发布版本"
+        if (!isPublished) {
+          return <span className="text-gray-400">{t("agent.version.noPublished")}</span>;
+        }
+
         const versions = agentVersions.get(agentId) || [];
         const isLoading = loadingVersions.get(agentId) || false;
-        // Default to 0 (current version) if not selected
+        const currentVersionNo = record.current_version_no || 0;
+
+        // Default to current_version_no if not selected, fallback to first version
+        // Must have a default value, cannot be undefined
         const selectedVersionNo = selectedVersions.has(agentId)
           ? selectedVersions.get(agentId)!
-          : 0;
+          : currentVersionNo > 0 ? currentVersionNo : (versions[0]?.version_no || undefined);
 
-        // Build options: current version (0) first, then other versions
-        const options = [
-          {
-            label: t("agent.version.current"),
-            value: 0,
-          },
-          ...versions.map((version) => ({
-            label: version.version_name,
-            value: version.version_no,
-          })),
-        ];
+        // Build options: only published versions (no draft version 0)
+        const options = versions.map((version) => ({
+          label: version.version_name,
+          value: version.version_no,
+        }));
 
         return (
           <Select
-            placeholder={t("agent.version.current")}
+            placeholder={t("agent.version.select")}
             value={selectedVersionNo}
             loading={isLoading}
             onDropdownVisibleChange={(open) => handleVersionDropdownOpen(agentId, open)}
@@ -446,7 +460,10 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               name="display_name"
               label={t("agent.displayName")}
             >
-              <Input placeholder={t("agent.displayNamePlaceholder")} readOnly />
+              <Input
+                placeholder={t("agent.displayName")}
+                readOnly
+              />
             </Form.Item>
 
             <Form.Item
@@ -461,7 +478,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                   <div style={{ position: "relative" }}>
                     <TextArea
                       value={form.getFieldValue("description")}
-                      placeholder={t("agent.descriptionPlaceholder")}
+                      placeholder={t("agent.description")}
                       autoSize={{ minRows: 4, maxRows: 6 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly
@@ -496,7 +513,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                   <div style={{ position: "relative" }}>
                     <TextArea
                       value={form.getFieldValue("duty_prompt")}
-                      placeholder={t("agent.dutyPromptPlaceholder")}
+                      placeholder={t("systemPrompt.card.duty.title")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly
@@ -531,7 +548,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                   <div style={{ position: "relative" }}>
                     <TextArea
                       value={form.getFieldValue("constraint_prompt")}
-                      placeholder={t("agent.constraintPromptPlaceholder")}
+                      placeholder={t("systemPrompt.card.constraint.title")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly
@@ -566,7 +583,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                   <div style={{ position: "relative" }}>
                     <TextArea
                       value={form.getFieldValue("few_shots_prompt")}
-                      placeholder={t("agent.fewShotsPromptPlaceholder")}
+                      placeholder={t("systemPrompt.card.fewShots.title")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly

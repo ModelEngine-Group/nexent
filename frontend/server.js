@@ -1,7 +1,10 @@
 const { createServer } = require("http");
+const http = require("http");
+const https = require("https");
 const { parse } = require("url");
 const next = require("next");
 const { createProxyServer } = require("http-proxy");
+const cookie = require("cookie");
 const path = require("path");
 
 // Load environment variables from .env file in parent directory (project root)
@@ -30,18 +33,252 @@ const PORT = 3000;
 
 const proxy = createProxyServer();
 
+// ============================================================================
+// Cookie configuration
+// ============================================================================
+const COOKIE_NAMES = {
+  ACCESS_TOKEN: "nexent_access_token",
+  REFRESH_TOKEN: "nexent_refresh_token",
+  EXPIRES_AT: "nexent_token_expires_at",
+};
+
+const isProduction = process.env.NODE_ENV === "production";
+
+function buildCookieOptions(httpOnly) {
+  return {
+    httpOnly,
+    secure: false, // cookie can be send through http
+    sameSite: "lax",
+    path: "/",
+  };
+}
+
+function setAuthCookies(res, session) {
+  const cookies = [];
+
+  const expiresInSeconds = session.expires_in_seconds || 3600;
+  
+  const refreshTokenMaxAge = expiresInSeconds * 10;
+
+  if (session.access_token) {
+    cookies.push(
+      cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, session.access_token, {
+        ...buildCookieOptions(true),
+        maxAge: expiresInSeconds, // Use backend-provided value
+      })
+    );
+  }
+
+  if (session.refresh_token) {
+    cookies.push(
+      cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, session.refresh_token, {
+        ...buildCookieOptions(true),
+        maxAge: refreshTokenMaxAge, // 10x access token lifetime
+      })
+    );
+  }
+
+  if (session.expires_at) {
+    cookies.push(
+      cookie.serialize(
+        COOKIE_NAMES.EXPIRES_AT,
+        String(session.expires_at),
+        {
+          ...buildCookieOptions(false), // readable by frontend JS
+          maxAge: expiresInSeconds, // Same as access token
+        }
+      )
+    );
+  }
+
+  if (cookies.length > 0) {
+    res.setHeader("Set-Cookie", cookies);
+  }
+}
+
+function clearAuthCookies(res) {
+  const expired = { maxAge: 0, path: "/" };
+  res.setHeader("Set-Cookie", [
+    cookie.serialize(COOKIE_NAMES.ACCESS_TOKEN, "", { ...expired, httpOnly: true }),
+    cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", { ...expired, httpOnly: true }),
+    cookie.serialize(COOKIE_NAMES.EXPIRES_AT, "", expired),
+  ]);
+}
+
+function parseCookies(req) {
+  return cookie.parse(req.headers.cookie || "");
+}
+
+// ============================================================================
+// Auth endpoint interception — manually forward and intercept tokens
+// ============================================================================
+const AUTH_INTERCEPT_ENDPOINTS = new Set([
+  "/api/user/signin",
+  "/api/user/signup",
+  "/api/user/refresh_token",
+  "/api/user/logout",
+  "/api/user/revoke",
+]);
+
+function collectRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/**
+ * For the refresh_token endpoint, inject the refresh_token from cookie
+ * into the request body so the backend can process it normally.
+ */
+function prepareAuthRequestBody(pathname, body, cookies) {
+  if (pathname === "/api/user/refresh_token" && cookies[COOKIE_NAMES.REFRESH_TOKEN]) {
+    try {
+      const parsed = body.length > 0 ? JSON.parse(body.toString()) : {};
+      parsed.refresh_token = cookies[COOKIE_NAMES.REFRESH_TOKEN];
+      return Buffer.from(JSON.stringify(parsed));
+    } catch {
+      return body;
+    }
+  }
+  return body;
+}
+
+function forwardAuthRequest(req, res, targetUrl) {
+  const parsedTarget = new URL(targetUrl);
+  const transport = parsedTarget.protocol === "https:" ? https : http;
+  const cookies = parseCookies(req);
+
+  collectRequestBody(req).then((rawBody) => {
+    const body = prepareAuthRequestBody(req.parsedPathname, rawBody, cookies);
+
+    const forwardHeaders = { ...req.headers, host: parsedTarget.host };
+
+    // Inject access_token from cookie as Authorization header for the backend
+    if (cookies[COOKIE_NAMES.ACCESS_TOKEN] && !forwardHeaders["authorization"]) {
+      forwardHeaders["authorization"] = `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`;
+    }
+
+    // Update content-length if body was modified
+    if (body.length !== rawBody.length) {
+      forwardHeaders["content-length"] = String(body.length);
+    }
+
+    const options = {
+      hostname: parsedTarget.hostname,
+      port: parsedTarget.port,
+      path: req.url,
+      method: req.method,
+      headers: forwardHeaders,
+    };
+
+    const proxyReq = transport.request(options, (proxyRes) => {
+      const responseChunks = [];
+      proxyRes.on("data", (chunk) => responseChunks.push(chunk));
+      proxyRes.on("end", () => {
+        const responseBody = Buffer.concat(responseChunks);
+        let finalBody = responseBody;
+
+        try {
+          const contentType = proxyRes.headers["content-type"] || "";
+          if (contentType.includes("application/json") && responseBody.length > 0) {
+            const data = JSON.parse(responseBody.toString());
+
+            const isLogout = req.parsedPathname === "/api/user/logout";
+            const isRevoke = req.parsedPathname === "/api/user/revoke";
+
+            if (isLogout || isRevoke) {
+              clearAuthCookies(res);
+            } else if (data.data && data.data.session) {
+              // Extract tokens, set cookies, strip tokens from response
+              const session = data.data.session;
+              setAuthCookies(res, session);
+
+              // Remove sensitive tokens from the response body sent to browser
+              const sanitized = { ...data };
+              sanitized.data = { ...data.data };
+              sanitized.data.session = {
+                expires_at: session.expires_at,
+                expires_in_seconds: session.expires_in_seconds,
+              };
+              finalBody = Buffer.from(JSON.stringify(sanitized));
+            }
+          }
+        } catch {
+          // If JSON parsing fails, pass through unchanged
+        }
+
+        // Copy response headers, but override content-length and set cookies
+        const responseHeaders = { ...proxyRes.headers };
+        responseHeaders["content-length"] = String(finalBody.length);
+        // Merge Set-Cookie: proxyRes cookies + our auth cookies
+        const existingSetCookie = res.getHeader("Set-Cookie") || [];
+        const upstreamSetCookie = proxyRes.headers["set-cookie"] || [];
+        const mergedCookies = [
+          ...(Array.isArray(existingSetCookie) ? existingSetCookie : [existingSetCookie]),
+          ...(Array.isArray(upstreamSetCookie) ? upstreamSetCookie : [upstreamSetCookie]),
+        ].filter(Boolean);
+
+        delete responseHeaders["set-cookie"];
+        if (mergedCookies.length > 0) {
+          responseHeaders["set-cookie"] = mergedCookies;
+        }
+
+        res.writeHead(proxyRes.statusCode, responseHeaders);
+        res.end(finalBody);
+      });
+    });
+
+    proxyReq.on("error", (err) => {
+      console.error("[Auth Proxy] Forward error:", err.message);
+      if (!res.headersSent) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ detail: "Backend unavailable" }));
+      }
+    });
+
+    proxyReq.write(body);
+    proxyReq.end();
+  }).catch((err) => {
+    console.error("[Auth Proxy] Body read error:", err.message);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "Internal proxy error" }));
+    }
+  });
+}
+
+// ============================================================================
+// Cookie-to-Header injection for regular proxy requests
+// ============================================================================
+proxy.on("proxyReq", (proxyReq, req) => {
+  const cookies = parseCookies(req);
+  if (cookies[COOKIE_NAMES.ACCESS_TOKEN] && !proxyReq.getHeader("authorization")) {
+    proxyReq.setHeader("Authorization", `Bearer ${cookies[COOKIE_NAMES.ACCESS_TOKEN]}`);
+  }
+});
+
+// ============================================================================
+// Server setup
+// ============================================================================
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
     const { pathname } = parsedUrl;
+    req.parsedPathname = pathname;
 
     // Proxy HTTP requests
     if (pathname.includes("/attachments/") && !pathname.startsWith("/api/")) {
       proxy.web(req, res, { target: MINIO_BACKEND });
     } else if (pathname.startsWith("/api/")) {
-      // Route market endpoints to market backend
-      if (pathname.startsWith("/api/market/")) {
-        // Rewrite path: /api/market/agents -> /agents
+      // Intercept auth endpoints to manage HttpOnly cookies
+      if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {
+        const target = HTTP_BACKEND;
+        forwardAuthRequest(req, res, target);
+      } else if (pathname.startsWith("/api/market/")) {
+        // Route market endpoints to market backend
         req.url = req.url.replace("/api/market", "");
         proxy.web(req, res, { target: MARKET_BACKEND, changeOrigin: true });
       } else {
@@ -57,7 +294,7 @@ app.prepare().then(() => {
         proxy.web(req, res, { target, changeOrigin: true });
       }
     } else {
-      // Let Next.js handle the request (environment variables now injected via layout.tsx)
+      // Let Next.js handle the request
       handle(req, res, parsedUrl);
     }
   });
@@ -80,7 +317,6 @@ app.prepare().then(() => {
       console.log(
         `[Proxy] Ignoring non-voice WebSocket upgrade for: ${pathname}`
       );
-      // Do nothing for other WebSocket requests (like Next.js HMR).
     }
   });
 

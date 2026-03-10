@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Row,
   Col,
@@ -27,6 +28,7 @@ import {
   updateTenant,
   deleteTenant,
   getTenantUsers,
+  getTenant,
 } from "@/services/tenantService";
 import { createInvitation, deleteInvitation } from "@/services/invitationService";
 import { authService } from "@/services/authService";
@@ -283,12 +285,10 @@ function TenantList({
                   ? "bg-blue-50 border border-blue-200"
                   : "hover:bg-gray-50"
               }`}
+              onClick={() => onSelect(tenant.tenant_id)}
             >
               <div className="flex items-center justify-between">
-                <div
-                  className="flex-1"
-                  onClick={() => onSelect(tenant.tenant_id)}
-                >
+                <div className="flex-1">
                   {tenant.tenant_name || t("tenantResources.tenants.unnamed")}
                 </div>
                 <div className="opacity-0 group-hover:opacity-100 flex space-x-1">
@@ -564,6 +564,31 @@ export default function UserManageComp() {
     refetch: refetchTenants,
   } = useTenantList({ page: currentPage, page_size: DEFAULT_PAGE_SIZE });
 
+  // For non-super admins, automatically select their own tenant based on user.tenantId
+  // This must be declared before useQuery that uses tenantId
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSuperAdmin && user?.tenantId && !tenantId) {
+      setTenantId(user.tenantId);
+    }
+  }, [isSuperAdmin, tenantId, user?.tenantId]);
+
+  // For non-super-admin users, directly fetch their tenant details
+  // This ensures they always get the correct tenant info regardless of pagination
+  const {
+    data: directTenantData,
+    isLoading: directTenantLoading,
+    refetch: refetchDirectTenant,
+  } = useQuery({
+    queryKey: ["tenant", tenantId],
+    queryFn: async () => {
+      if (!tenantId || isSuperAdmin) return null;
+      return await getTenant(tenantId);
+    },
+    enabled: !!tenantId && !isSuperAdmin,
+    staleTime: 1000 * 60, // Cache for 1 minute
+  });
+
   // Handle page change
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -585,17 +610,21 @@ export default function UserManageComp() {
   // Invitation list refresh key - increment to trigger invitation list refetch
   const [invitationListRefreshKey, setInvitationListRefreshKey] = useState(0);
 
-  // For non-super admins, automatically select their own tenant based on user.tenantId
-  const [tenantId, setTenantId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!isSuperAdmin && user?.tenantId && !tenantId) {
-      setTenantId(user.tenantId);
-    }
-  }, [isSuperAdmin, tenantId, user?.tenantId]);
-
   // Get current tenant name
-  const currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
-  const currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+  // For non-super-admin: use directly fetched tenant data (directTenantData)
+  // For super-admin: use paginated tenant list (tenantData)
+  let currentTenant: Tenant | undefined;
+  let currentTenantName: string;
+  
+  if (!isSuperAdmin && directTenantData) {
+    // Non-super-admin: use directly fetched tenant info
+    currentTenant = directTenantData;
+    currentTenantName = directTenantData.tenant_name || t("tenantResources.tenants.unnamed");
+  } else {
+    // Super-admin: search in paginated list
+    currentTenant = tenantData?.data?.find((t: Tenant) => t.tenant_id === tenantId);
+    currentTenantName = currentTenant?.tenant_name || t("tenantResources.tenants.unnamed");
+  }
 
   // Tenant name editing states
   const [isEditingTenantName, setIsEditingTenantName] = useState(false);
@@ -627,7 +656,12 @@ export default function UserManageComp() {
     }
     try {
       await updateTenant(tenantId, { tenant_name: trimmedName });
-      await refetchTenants();
+      // For non-super-admin, refetch the direct tenant data; for super-admin, refetch the list
+      if (!isSuperAdmin) {
+        await refetchDirectTenant();
+      } else {
+        await refetchTenants();
+      }
       message.success(t("tenantResources.tenants.updated"));
       setIsEditingTenantName(false);
     } catch (error) {

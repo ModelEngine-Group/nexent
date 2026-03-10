@@ -120,10 +120,14 @@ consts_provider_mod = types.ModuleType("consts.provider")
 class _ProviderEnum:
     SILICON = _EnumItem("silicon")
     MODELENGINE = _EnumItem("modelengine")
+    DASHSCOPE = _EnumItem("dashscope")
+    TOKENPONY = _EnumItem("tokenpony")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
 consts_provider_mod.SILICON_BASE_URL = "http://silicon.test"
+consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 sys.modules["consts.provider"] = consts_provider_mod
 
 # Stub services.model_provider_service used by service
@@ -551,6 +555,58 @@ async def test_create_provider_models_for_tenant_exception():
         with pytest.raises(Exception) as exc:
             await svc.create_provider_models_for_tenant("t1", req)
         assert "Failed to create provider models" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_dashscope_provider():
+    """Test batch_create_models_for_tenant with DASHSCOPE provider uses DASHSCOPE_BASE_URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [{"id": "qwen/qwen-turbo", "max_tokens": 8192}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("qwen", "qwen-turbo")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen/qwen-turbo"), \
+            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 1})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+
+
+@pytest.mark.asyncio
+async def test_batch_create_models_for_tenant_tokenpony_provider():
+    """Test batch_create_models_for_tenant with TOKENPONY provider uses TOKENPONY_BASE_URL."""
+    svc = import_svc()
+
+    batch_payload = {
+        "provider": "tokenpony",
+        "type": "llm",
+        "models": [{"id": "gpt/gpt-4o", "max_tokens": 128000}],
+        "api_key": "tp-key",
+    }
+
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=[]), \
+            mock.patch.object(svc, "delete_model_record"), \
+            mock.patch.object(svc, "split_repo_name", return_value=("gpt", "gpt-4o")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="gpt/gpt-4o"), \
+            mock.patch.object(svc, "get_model_by_display_name", return_value=None), \
+            mock.patch.object(svc, "prepare_model_dict", new=mock.AsyncMock(return_value={"model_id": 2})), \
+            mock.patch.object(svc, "create_model_record", return_value=True):
+
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+        call_args = svc.prepare_model_dict.call_args
+        assert call_args[1]["model_url"] == "https://api.tokenpony.cn/v1/"
 
 
 @pytest.mark.asyncio

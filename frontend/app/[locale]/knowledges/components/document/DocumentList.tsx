@@ -133,7 +133,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const tenantId = user?.tenantId || null;
 
     // Fetch groups for group selection
-    const { data: groupData } = useGroupList(tenantId, 1, 100);
+    const { data: groupData } = useGroupList(tenantId);
     const groups = groupData?.groups || [];
 
     // Create group name mapping
@@ -283,7 +283,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           setIsLoadingModels(true);
           try {
             const models = await modelService.getLLMModels();
-            setAvailableModels(models);
+            setAvailableModels(models.filter(m => m.connect_status === "available"));
 
             // Determine initial selection order:
             // 1) Knowledge base's own configured model (server-side config)

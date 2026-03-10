@@ -75,15 +75,15 @@ def insert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
         session.add(user_tenant)
 
 
-def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20,
+def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
                            sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
-        page (int): Page number (1-based)
-        page_size (int): Number of items per page
+        page (Optional[int]): Page number (1-based). If None, returns all data
+        page_size (Optional[int]): Number of items per page. If None, returns all data
         sort_by (str): Field to sort by
         sort_order (str): Sort order (asc or desc)
 
@@ -110,9 +110,13 @@ def get_users_by_tenant_id(tenant_id: str, page: int = 1, page_size: int = 20,
             else:
                 query = query.order_by(UserTenant.create_time.asc())
 
-        # Get paginated results
-        offset = (page - 1) * page_size
-        results = query.offset(offset).limit(page_size).all()
+        # Apply pagination only if both page and page_size are provided
+        if page is not None and page_size is not None:
+            offset = (page - 1) * page_size
+            results = query.offset(offset).limit(page_size).all()
+        else:
+            # Return all results when pagination is not specified
+            results = query.all()
 
         return {
             "users": [as_dict(row) for row in results],

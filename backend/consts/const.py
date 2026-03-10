@@ -36,10 +36,28 @@ UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 
+# Preview Configuration
+FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
+# Limit concurrent Office-to-PDF conversions
+MAX_CONCURRENT_CONVERSIONS = 5
+# Supported Office file MIME types
+OFFICE_MIME_TYPES = [
+    'application/msword',  # .doc
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
+    'application/vnd.ms-excel',  # .xls
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+    'application/vnd.ms-powerpoint',  # .ppt
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'  # .pptx
+]
+
+
 # Supabase Configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
+# JWT secret for verifying Supabase-signed access tokens.
+# GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
+SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
 
 
 # ===== To be migrated to frontend configuration =====
@@ -71,6 +89,7 @@ CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED"}
 # Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
 PERMISSION_READ = "READ_ONLY"
 PERMISSION_EDIT = "EDIT"
+PERMISSION_PRIVATE = "PRIVATE"
 
 
 # Deployment Version Configuration
@@ -303,4 +322,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
-APP_VERSION = "v1.8.0.1"
+APP_VERSION = "v1.8.0.2"

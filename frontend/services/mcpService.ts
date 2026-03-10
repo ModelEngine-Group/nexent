@@ -8,16 +8,10 @@ const t = (key: string, options?: any): string => {
   return i18n.t(key, options) as string;
 };
 
-// TODO: Use fetchWithAuth instead
-// Get authorization headers helper function
 const getAuthHeaders = () => {
-  const session = typeof window !== "undefined" ? localStorage.getItem("session") : null;
-  const sessionObj = session ? JSON.parse(session) : null;
-
   return {
     'Content-Type': 'application/json',
     'User-Agent': 'AgentFrontEnd/1.0',
-    ...(sessionObj?.access_token && { "Authorization": `Bearer ${sessionObj.access_token}` }),
   };
 };
 
@@ -439,17 +433,30 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
       };
     } else {
       let errorMessage = data.detail || data.message || t('mcpService.message.addFromConfigFailed');
+      let messageKey: string | undefined;
 
       if (response.status === 400) {
-        errorMessage = data.detail || t('mcpService.message.invalidConfig');
+        const rawError = data.detail || data.message || '';
+        // Check if error is related to image not found
+        const errorLower = rawError.toLowerCase();
+        if (rawError && (errorLower.includes('image not found') || 
+            errorLower.includes('mcp service startup image is missing') ||
+            (errorLower.includes('not found') && errorLower.includes('image')))) {
+          messageKey = 'mcpService.message.missingMcpImage';
+          errorMessage = t('mcpService.message.missingMcpImage');
+        } else {
+          errorMessage = rawError || t('mcpService.message.invalidConfig');
+        }
       } else if (response.status === 503) {
+        messageKey = 'mcpService.message.dockerServiceUnavailable';
         errorMessage = t('mcpService.message.dockerServiceUnavailable');
       }
 
       return {
         success: false,
         data: null,
-        message: errorMessage
+        message: errorMessage,
+        messageKey: messageKey
       };
     }
   } catch (error) {
@@ -457,7 +464,8 @@ export const addMcpFromConfig = async (mcpConfig: { mcpServers: Record<string, {
     return {
       success: false,
       data: null,
-      message: t('mcpService.message.networkError')
+      message: t('mcpService.message.networkError'),
+      messageKey: 'mcpService.message.networkError'
     };
   }
 };
@@ -506,7 +514,7 @@ export const getMcpContainers = async (tenantId?: string | null) => {
 };
 
 /**
- * Get MCP container logs
+ * Get MCP container logs (legacy non-streaming method)
  */
 export const getMcpContainerLogs = async (containerId: string, tail: number = 100, tenantId?: string | null) => {
   try {
@@ -557,6 +565,111 @@ export const getMcpContainerLogs = async (containerId: string, tail: number = 10
 };
 
 /**
+ * Stream MCP container logs via SSE
+ * Returns an AbortController that can be used to cancel the stream
+ */
+export const streamMcpContainerLogs = async (
+  containerId: string,
+  tail: number = 100,
+  follow: boolean = true,
+  tenantId?: string | null,
+  onData?: (logLine: string) => void,
+  onError?: (error: any) => void,
+  onComplete?: () => void,
+  abortSignal?: AbortSignal
+): Promise<AbortController> => {
+  const abortController = new AbortController();
+  const signal = abortSignal || abortController.signal;
+
+  (async () => {
+    try {
+      const params = new URLSearchParams({
+        tail: tail.toString(),
+        follow: follow.toString(),
+      });
+      if (tenantId) {
+        params.append('tenant_id', tenantId);
+      }
+      
+      const response = await fetch(
+        `${API_ENDPOINTS.mcp.containerLogs(containerId)}?${params.toString()}`,
+        {
+          headers: getAuthHeaders(),
+          signal: signal,
+        }
+      );
+
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      try {
+        while (true) {
+          // Check if aborted before reading
+          if (signal.aborted) {
+            break;
+          }
+
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete SSE messages (separated by \n\n)
+          let lines = buffer.split('\n\n');
+          buffer = lines.pop() || ''; // Keep incomplete message in buffer
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const json = JSON.parse(line.replace('data: ', ''));
+                if (json.logs && onData) {
+                  onData(json.logs);
+                }
+                if (json.status === 'error' && onError) {
+                  onError(new Error(json.logs || 'Unknown error'));
+                }
+              } catch (e) {
+                if (onError) onError(e);
+              }
+            }
+          }
+        }
+      } finally {
+        // Cancel the reader to close the stream
+        try {
+          await reader.cancel();
+        } catch (e) {
+          // Ignore cancel errors
+        }
+      }
+      
+      if (onComplete && !signal.aborted) {
+        onComplete();
+      }
+    } catch (error: any) {
+      // Ignore abort errors
+      if (error.name === 'AbortError') {
+        return;
+      }
+      log.error(t('mcpService.debug.streamContainerLogsFailed'), error);
+      if (onError && !signal.aborted) {
+        onError(error);
+      }
+      if (onComplete && !signal.aborted) {
+        onComplete();
+      }
+    }
+  })();
+
+  return abortController;
+};
+
+/**
  * Upload MCP image and start container
  */
 export const uploadMcpImage = async (file: File, port: number, serviceName?: string, envVars?: string, tenantId?: string | null) => {
@@ -574,10 +687,7 @@ export const uploadMcpImage = async (file: File, port: number, serviceName?: str
       formData.append('tenant_id', tenantId);
     }
 
-    const authHeaders = getAuthHeaders();
-    // Remove Content-Type header for FormData - let browser set it with boundary
-    const headers = { ...authHeaders };
-    delete headers['Content-Type'];
+    const { 'Content-Type': _, ...headers } = getAuthHeaders();
 
     const response = await fetch(API_ENDPOINTS.mcp.uploadImage, {
       method: 'POST',

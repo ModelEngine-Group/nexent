@@ -393,6 +393,7 @@ export interface UpdateAgentInfoPayload {
   business_logic_model_id?: number;
   enabled_tool_ids?: number[];
   related_agent_ids?: number[];
+  ingroup_permission?: string;
 }
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
@@ -651,7 +652,7 @@ export const regenerateAgentNameBatch = async (payload: {
  */
 export const searchAgentInfo = async (agentId: number, tenantId?: string, versionNo?: number) => {
   try {
-    const url = tenantId 
+    const url = tenantId
       ? `${API_ENDPOINTS.agent.searchInfo}?tenant_id=${encodeURIComponent(tenantId)}`
       : API_ENDPOINTS.agent.searchInfo;
     const response = await fetch(url, {
@@ -691,6 +692,7 @@ export const searchAgentInfo = async (agentId: number, tenantId?: string, versio
       unavailable_reasons: data.unavailable_reasons || [],
       sub_agent_id_list: data.sub_agent_id_list || [], // Add sub_agent_id_list
       group_ids: data.group_ids || [],
+      ingroup_permission: data.ingroup_permission || "READ_ONLY",
       tools: data.tools
         ? data.tools.map((tool: any) => {
             const params =
