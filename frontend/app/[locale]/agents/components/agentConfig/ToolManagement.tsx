@@ -1,17 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ToolConfigModal from "./tool/ToolConfigModal";
 import { ToolGroup, Tool, ToolParam } from "@/types/agentConfig";
 import { Tabs, Collapse, message, Tooltip } from "antd";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { useToolList } from "@/hooks/agent/useToolList";
-import { useModelList } from "@/hooks/model/useModelList";
 import { usePrefetchKnowledgeBases } from "@/hooks/useKnowledgeBaseSelector";
 import { useConfig } from "@/hooks/useConfig";
 import { updateToolConfig } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import { Settings, AlertTriangle } from "lucide-react";
 
@@ -74,6 +74,7 @@ export default function ToolManagement({
 }: ToolManagementProps) {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const { confirm } = useConfirmModal();
 
   // Get current agent permission from store
   const currentAgentPermission = useAgentConfigStore(
@@ -98,73 +99,7 @@ export default function ToolManagement({
   // Use tool list hook for data management
   const { availableTools } = useToolList();
 
-  // Get config for model checks
-  const { modelConfig: tenantModelConfig } = useConfig();
-
-  // Get VLM models to check availability
-  const { availableVlmModels, models } = useModelList();
-
-  // Check if VLM is properly configured:
-  // 1. Must have at least one VLM model that passed health check (available)
-  // 2. Must have a VLM model selected in tenant configuration
-  const isVlmConfigured = useMemo(() => {
-    // Check if there's any available VLM model
-    if (!availableVlmModels || availableVlmModels.length === 0) {
-      return false;
-    }
-
-    // Check if tenant configuration has selected a VLM model
-    try {
-      const selectedVlmModelName = tenantModelConfig?.vlm?.modelName || tenantModelConfig?.vlm?.displayName;
-
-      if (!selectedVlmModelName) {
-        return false;
-      }
-
-      // Check if the selected VLM model exists in available models
-      const isSelectedModelAvailable = availableVlmModels.some(
-        (model) => model.name === selectedVlmModelName || model.displayName === selectedVlmModelName
-      );
-
-      return isSelectedModelAvailable;
-    } catch (error) {
-      return false;
-    }
-  }, [availableVlmModels, models, tenantModelConfig]);
-
-  // Get Embedding models to check availability
-  const { availableEmbeddingModels } = useModelList();
-
-  // Check if Embedding is properly configured:
-  // 1. Must have at least one Embedding model that passed health check (available)
-  // 2. Must have an Embedding model selected in tenant configuration
-  const isEmbeddingConfigured = useMemo(() => {
-    // Check if there's any available Embedding model
-    if (!availableEmbeddingModels || availableEmbeddingModels.length === 0) {
-      return false;
-    }
-
-    // Check if tenant configuration has selected an Embedding model
-    try {
-      const selectedEmbeddingModelName =
-        tenantModelConfig?.embedding?.modelName || tenantModelConfig?.embedding?.displayName;
-
-      if (!selectedEmbeddingModelName) {
-        return false;
-      }
-
-      // Check if the selected Embedding model exists in available models
-      const isSelectedModelAvailable = availableEmbeddingModels.some(
-        (model) =>
-          model.name === selectedEmbeddingModelName ||
-          model.displayName === selectedEmbeddingModelName
-      );
-
-      return isSelectedModelAvailable;
-    } catch (error) {
-      return false;
-    }
-  }, [availableEmbeddingModels, models, tenantModelConfig]);
+  const { isVlmAvailable, isEmbeddingAvailable } = useConfig();
 
   // Prefetch knowledge bases for KB tools
   const { prefetchKnowledgeBases } = usePrefetchKnowledgeBases();
@@ -235,9 +170,7 @@ export default function ToolManagement({
       (t) => parseInt(t.id) === parseInt(tool.id)
     );
     // Merge configured tool with original tool to ensure all fields are present
-    const toolToUse = configuredTool
-      ? { ...tool, ...configuredTool, initParams: configuredTool.initParams }
-      : tool;
+    const toolToUse = configuredTool ? { ...tool, ...configuredTool, initParams: configuredTool.initParams } : tool;
 
     // Get merged parameters (for editing mode, merge with instance params)
     const mergedParams = await mergeToolParamsWithInstance(
@@ -264,23 +197,18 @@ export default function ToolManagement({
     }
 
     // Get latest tools directly from store to avoid stale closure issues
-    const currentSelectdTools =
-      useAgentConfigStore.getState().editedAgent.tools;
+    const currentSelectdTools = useAgentConfigStore.getState().editedAgent.tools;
     const isCurrentlySelected = currentSelectdTools.some(
       (t) => parseInt(t.id) === numericId
     );
 
     if (isCurrentlySelected) {
       // If already selected, deselect it
-      const newSelectedTools = currentSelectdTools.filter(
-        (t) => parseInt(t.id) !== numericId
-      );
+      const newSelectedTools = currentSelectdTools.filter((t) => parseInt(t.id) !== numericId);
       updateTools(newSelectedTools);
     } else {
       // If not selected, determine tool params and check if modal is needed
-      const configuredTool = currentSelectdTools.find(
-        (t) => parseInt(t.id) === numericId
-      );
+      const configuredTool = currentSelectdTools.find((t) => parseInt(t.id) === numericId);
       // Merge configured tool with original tool to ensure all fields are present
       const toolToUse = configuredTool
         ? { ...tool, ...configuredTool, initParams: configuredTool.initParams }
@@ -317,42 +245,6 @@ export default function ToolManagement({
           },
         ];
         updateTools(newSelectedTools);
-
-        // In non-creating mode, immediately save tool config to backend
-        if (!isCreatingMode && currentAgentId) {
-          try {
-            // Convert params to backend format
-            const paramsObj = mergedParams.reduce(
-              (acc, param) => {
-                acc[param.name] = param.value;
-                return acc;
-              },
-              {} as Record<string, any>
-            );
-
-            const isEnabled = true; // New tool is enabled by default
-            const result = await updateToolConfig(
-              numericId,
-              currentAgentId,
-              paramsObj,
-              isEnabled
-            );
-
-            if (result.success) {
-              // Invalidate queries to refresh tool info
-              queryClient.invalidateQueries({
-                queryKey: ["toolInfo", numericId, currentAgentId],
-              });
-            } else {
-              message.error(
-                result.message || t("toolConfig.message.saveError")
-              );
-            }
-          } catch (error) {
-            console.error("Failed to save tool config:", error);
-            message.error(t("toolConfig.message.saveError"));
-          }
-        }
       }
     }
   };
@@ -428,8 +320,8 @@ export default function ToolManagement({
                           const isSelected = originalSelectedToolIdsSet.has(
                             tool.id
                           );
-                          const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmConfigured);
-                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingConfigured);
+                          const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
+                          const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                           const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                           // Tooltip priority: permission > VLM > Embedding
                           const tooltipTitle = isReadOnly
@@ -533,8 +425,8 @@ export default function ToolManagement({
             >
               {group.tools.map((tool) => {
                 const isSelected = originalSelectedToolIdsSet.has(tool.id);
-                const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmConfigured);
-                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingConfigured);
+                const isDisabledDueToVlm = isToolDisabledDueToVlm(tool.name, isVlmAvailable);
+                const isDisabledDueToEmbedding = isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
                 const isDisabled = isDisabledDueToVlm || isDisabledDueToEmbedding || isReadOnly;
                 // Tooltip priority: permission > VLM > Embedding
                 const tooltipTitle = isReadOnly

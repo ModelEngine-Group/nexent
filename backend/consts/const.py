@@ -36,6 +36,21 @@ UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 
+# Preview Configuration
+FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
+# Limit concurrent Office-to-PDF conversions
+MAX_CONCURRENT_CONVERSIONS = 5
+# Supported Office file MIME types
+OFFICE_MIME_TYPES = [
+    'application/msword',  # .doc
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
+    'application/vnd.ms-excel',  # .xls
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+    'application/vnd.ms-powerpoint',  # .ppt
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'  # .pptx
+]
+
+
 # Supabase Configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
@@ -307,4 +322,4 @@ DEFAULT_EN_TITLE = "New Conversation"
 MODEL_ENGINE_ENABLED = os.getenv("MODEL_ENGINE_ENABLED")
 
 # APP Version
-APP_VERSION = "v1.8.0.1"
+APP_VERSION = "v1.8.0.2"

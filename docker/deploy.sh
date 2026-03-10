@@ -865,24 +865,98 @@ select_terminal_tool() {
     echo ""
 }
 
-generate_random_password() {
-  # Generate a URL/JSON safe random password (alphanumeric only)
-  local pwd=""
-  if command -v openssl >/dev/null 2>&1; then
-    pwd=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
+check_super_admin_user_exists() {
+  # Check if super admin user exists in Supabase
+  local email="suadmin@nexent.com"
+  local curl_container="nexent-config"
+  
+  # Determine which container to use for curl command
+  if [ "$DEPLOYMENT_MODE" = "infrastructure" ] || ! docker ps | grep -q "nexent-config"; then
+    if docker ps | grep -q "supabase-db-mini"; then
+      curl_container="supabase-db-mini"
+    else
+      echo "   ⚠️  Warning: Cannot check user existence - no suitable container available"
+      return 2  # Unknown status
+    fi
+  fi
+
+  # Try to query Supabase auth.users table directly (most reliable)
+  if [ "$DEPLOYMENT_VERSION" = "full" ] && docker ps | grep -q "supabase-db-mini"; then
+    local user_exists
+    user_exists=$(docker exec supabase-db-mini psql -U postgres -d "$SUPABASE_POSTGRES_DB" -t -c "SELECT COUNT(*) FROM auth.users WHERE email = '${email}';" 2>/dev/null | tr -d '[:space:]')
+    if [ "$user_exists" = "1" ]; then
+      return 0  # User exists
+    elif [ "$user_exists" = "0" ]; then
+      return 1  # User does not exist
+    fi
+  fi
+
+  # Fallback: Try to sign in with a dummy password to check if user exists
+  # This is less reliable but works when database access is not available
+  local test_response
+  test_response=$(docker exec "$curl_container" bash -c "curl -s -X POST http://kong:8000/auth/v1/token?grant_type=password -H \"apikey: ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"dummy_password_check\"}'" 2>/dev/null)
+  
+  if echo "$test_response" | grep -q '"error_code":"invalid_credentials"'; then
+    return 0  # User exists (wrong password means user exists)
+  elif echo "$test_response" | grep -q '"error_code":"email_not_confirmed"'; then
+    return 0  # User exists
   else
-    pwd=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+    return 1  # User likely does not exist
   fi
-  if [ -z "$pwd" ]; then
-    # Fallback (should be extremely rare)
-    pwd=$(date +%s%N | tr -dc '0-9' | head -c 20)
-  fi
-  echo "$pwd"
+}
+
+prompt_super_admin_password() {
+  # Prompt user to enter password for super admin user with confirmation
+  # Note: All prompts go to stderr, only password is returned via stdout
+  local password=""
+  local password_confirm=""
+  local max_attempts=3
+  local attempts=0
+
+  echo "" >&2
+  echo "🔐 Super Admin User Password Setup" >&2
+  echo "   Email: suadmin@nexent.com" >&2
+  echo "" >&2
+
+  while [ $attempts -lt $max_attempts ]; do
+    # First password input
+    echo "   🔐 Please enter password for super admin user:" >&2
+    read -s password
+    echo "" >&2
+
+    # Check if password is empty
+    if [ -z "$password" ]; then
+      echo "   ❌ Password cannot be empty. Please try again." >&2
+      attempts=$((attempts + 1))
+      continue
+    fi
+
+    # Confirm password input
+    echo "   🔐 Please confirm the password:" >&2
+    read -s password_confirm
+    echo "" >&2
+
+    # Check if passwords match
+    if [ "$password" != "$password_confirm" ]; then
+      echo "   ❌ Passwords do not match. Please try again." >&2
+      attempts=$((attempts + 1))
+      continue
+    fi
+
+    # Passwords match, return the password via stdout
+    echo "$password"
+    return 0
+  done
+
+  # Max attempts reached
+  echo "   ❌ Maximum attempts reached. Failed to set password." >&2
+  return 1
 }
 
 create_default_super_admin_user() {
   # Call the dedicated script for creating super admin user
   local script_path="$SCRIPT_DIR/create-su.sh"
+  local email="suadmin@nexent.com"
 
   if [ ! -f "$script_path" ]; then
     echo "   ❌ ERROR create-su.sh not found at $script_path"
@@ -892,15 +966,43 @@ create_default_super_admin_user() {
   # Make sure the script is executable
   chmod +x "$script_path"
 
+  # Check if super admin user already exists
+  echo ""
+  echo "🔍 Checking if super admin user exists..."
+  local check_result
+  check_super_admin_user_exists
+  check_result=$?
+  
+  if [ $check_result -eq 0 ]; then
+    echo "   ✅ Super admin user (${email}) already exists."
+    echo "   💡 Skipping user creation. If you need to reset the password, please do so manually."
+    return 0
+  elif [ $check_result -eq 1 ]; then
+    echo "   ℹ️  Super admin user (${email}) does not exist. Proceeding with creation..."
+  else
+    echo "   ⚠️  Warning: Could not determine if user exists. Proceeding with creation..."
+  fi
+
+  # Prompt for password
+  local password
+  password="$(prompt_super_admin_password)"
+  local prompt_result=$?
+
+  if [ $prompt_result -ne 0 ] || [ -z "$password" ]; then
+    echo "   ❌ Failed to get password from user."
+    return 1
+  fi
+
   # Export necessary environment variables for the script
   export SUPABASE_KEY
   export POSTGRES_USER
   export POSTGRES_DB
   export DEPLOYMENT_VERSION
   export SUPABASE_POSTGRES_DB
+  export DEPLOYMENT_MODE
 
-  # Execute the script with current environment variables
-  if bash "$script_path"; then
+  # Execute the script with password as argument
+  if bash "$script_path" "$password"; then
     return 0
   else
     return 1
@@ -939,7 +1041,7 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  APP_VERSION="$(get_app_version)"
+  APP_VERSION="latest"
   if [ -z "$APP_VERSION" ]; then
     echo "❌ Failed to get app version, please check the backend/consts/const.py file"
     exit 1
@@ -984,6 +1086,12 @@ main_deploy() {
   # Special handling for infrastructure mode
   if [ "$DEPLOYMENT_MODE" = "infrastructure" ]; then
     generate_env_for_infrastructure || { echo "❌ Environment generation failed"; exit 1; }
+    
+    # Create default super admin user (only for full version)
+    if [ "$DEPLOYMENT_VERSION" = "full" ]; then
+      create_default_super_admin_user || { echo "❌ Default super admin user creation failed"; exit 1; }
+    fi
+    
     echo "🎉 Infrastructure deployment completed successfully!"
     echo "     You can now start the core services manually using dev containers"
     echo "     Environment file available at: $(cd .. && pwd)/.env"

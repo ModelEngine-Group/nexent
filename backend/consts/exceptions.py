@@ -43,7 +43,7 @@ class AppException(Exception):
 
     def to_dict(self) -> dict:
         return {
-            "code": int(self.error_code.value),
+            "code": str(self.error_code.value),  # Keep as string to preserve leading zeros
             "message": self.message,
             "details": self.details if self.details else None
         }
@@ -112,6 +112,21 @@ class NoInviteCodeException(Exception):
 
 class IncorrectInviteCodeException(Exception):
     """Raised when invite code is incorrect."""
+    pass
+
+
+class OfficeConversionException(Exception):
+    """Raised when Office-to-PDF conversion via data-process service fails."""
+    pass
+
+
+class UnsupportedFileTypeException(Exception):
+    """Raised when a file type is not supported for the requested operation."""
+    pass
+
+
+class FileTooLargeException(Exception):
+    """Raised when a file exceeds the maximum allowed size for the requested operation."""
     pass
 
 
