@@ -283,7 +283,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           setIsLoadingModels(true);
           try {
             const models = await modelService.getLLMModels();
-            setAvailableModels(models);
+            setAvailableModels(models.filter(m => m.connect_status === "available"));
 
             // Determine initial selection order:
             // 1) Knowledge base's own configured model (server-side config)
