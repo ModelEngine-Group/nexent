@@ -49,16 +49,13 @@ class AnalyzeTextFileTool(Tool):
 
     init_param_descriptions = {
         "storage_client": {
-            "description": "Storage client for downloading files",
-            "description_zh": "存储客户端，用于下载文件"
+            "description": "Storage client for downloading files"
         },
         "data_process_service_url": {
-            "description": "URL of data process service",
-            "description_zh": "数据处理服务的 URL"
+            "description": "URL of data process service"
         },
         "llm_model": {
-            "description": "The LLM model to use",
-            "description_zh": "要使用的 LLM 模型"
+            "description": "The LLM model to use"
         }
     }
     output_type = "array"
