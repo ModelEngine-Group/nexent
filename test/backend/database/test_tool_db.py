@@ -228,14 +228,42 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
         "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.create_tool", MagicMock())
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data)
+
+    # Mock ToolInstance class - needs to have column attributes for query building
+    mock_tool_instance = MockToolInstance()
+
+    # Create a Mock class that can be used both as a class (for query) and instantiated
+    class MockToolInstanceClass:
+        tenant_id = MagicMock()
+        agent_id = MagicMock()
+        tool_id = MagicMock()
+        delete_flag = MagicMock()
+        version_no = MagicMock()
+
+        def __init__(self, **kwargs):
+            # Copy attributes from mock_tool_instance
+            for key, value in mock_tool_instance.__dict__.items():
+                setattr(self, key, value)
+            # Update with any kwargs passed
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    monkeypatch.setattr(
+        "backend.database.tool_db.ToolInstance", MockToolInstanceClass)
+
+    session.add = MagicMock()
+    session.flush = MagicMock()
 
     tool_info = MagicMock()
     tool_info.__dict__ = {"agent_id": 1, "tool_id": 1}
 
     result = create_or_update_tool_by_tool_info(tool_info, "tenant1", "user1")
 
-    assert result is None
+    assert isinstance(result, MockToolInstanceClass)
+    session.add.assert_called_once()
+    session.flush.assert_called_once()
 
 
 def test_query_all_tools(monkeypatch, mock_session):
