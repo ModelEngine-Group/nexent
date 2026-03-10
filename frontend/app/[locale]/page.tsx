@@ -11,7 +11,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button } from "antd";
+import { Button, Row, Col } from "antd";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -80,37 +80,41 @@ export default function Homepage() {
           {t("page.description")}
         </motion.p>
 
-        {/* Three parallel buttons */}
+        {/* Three parallel buttons - responsive: row on wide, column on narrow */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.4 }}
-          className="flex flex-col sm:flex-row gap-4"
         >
-          
-          <Button
-            onClick={navigateToChat}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-          >
-            <Bot className="mr-2 h-5 w-5 group-hover:animate-pulse" />
-            {t("page.startChat")}
-          </Button>
-
-          <Button
-            onClick={navigateToSetup}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-          >
-            <Zap className="mr-2 h-5 w-5 group-hover:animate-pulse" />
-            {t("page.quickConfig")}
-          </Button>
-
-          <Button
-            onClick={navigateToSpace}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-          >
-            <Globe className="mr-2 h-5 w-5 group-hover:animate-pulse" />
-            {t("page.agentSpace")}
-          </Button>
+          <Row gutter={[16, 16]} justify="center">
+            <Col xs={24} sm={24} md={8}>
+              <Button
+                onClick={navigateToChat}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+              >
+                <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                {t("page.startChat")}
+              </Button>
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Button
+                onClick={navigateToSetup}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+              >
+                <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                {t("page.quickConfig")}
+              </Button>
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Button
+                onClick={navigateToSpace}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+              >
+                <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                {t("page.agentSpace")}
+              </Button>
+            </Col>
+          </Row>
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
@@ -207,7 +211,7 @@ function FeatureCard({ icon, title, description }: FeatureCardProps) {
           {icon}
         </div>
         <div className="flex-1 min-w-0 flex flex-col justify-center">
-          <h4 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+          <h4 className="text-lg font-semibold text-slate-900 dark:text-white mb-2 truncate">
             {title}
           </h4>
           <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-3">
