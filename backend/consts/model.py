@@ -308,6 +308,7 @@ class ToolInfo(BaseModel):
     name: str
     description: str
     description_zh: Optional[str] = None
+    params: List
     source: str
     inputs: str
     output_type: str

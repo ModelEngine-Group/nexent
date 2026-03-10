@@ -51,16 +51,13 @@ class AnalyzeImageTool(Tool):
 
     init_param_descriptions = {
         "observer": {
-            "description": "Message observer",
-            "description_zh": "消息观察者"
+            "description": "Message observer"
         },
         "vlm_model": {
-            "description": "The VLM model to use",
-            "description_zh": "要使用的 VLM 模型"
+            "description": "The VLM model to use"
         },
         "storage_client": {
-            "description": "Storage client for downloading files",
-            "description_zh": "存储客户端，用于下载文件"
+            "description": "Storage client for downloading files"
         }
     }
     output_type = "array"

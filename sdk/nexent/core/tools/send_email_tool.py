@@ -13,7 +13,7 @@ from ..utils.tools_common_message import ToolCategory
 logger = logging.getLogger("send_email_tool")
 class SendEmailTool(Tool):
     name = "send_email"
-    description = "Send email to specified recipients. Supports only HTML formatted formatted email content, and can add multiple recipients, CC, and BCC."
+    description = "Send email to specified recipients. Supports only HTML formatted email content, and can add multiple recipients, CC, and BCC."
 
     description_zh = "向指定收件人发送 HTML 格式邮件，支持添加多个收件人、抄送和密送。"
 
