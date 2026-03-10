@@ -1090,6 +1090,7 @@
   "mcpService.message.invalidUploadParameters": "上传参数无效",
   "mcpService.message.serviceNameAlreadyExists": "MCP服务名称已存在",
   "mcpService.message.fileTooLarge": "文件大小超过限制",
+  "mcpService.message.missingMcpImage": "添加容器失败：缺少mcp服务启动镜像",
 
   "agentConfig.tools.refreshSuccess": "工具列表已刷新",
   "agentConfig.tools.refreshFailed": "刷新工具列表失败",
