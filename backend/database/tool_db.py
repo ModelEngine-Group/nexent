@@ -4,6 +4,7 @@ from typing import List
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
+from consts.model import ToolSourceEnum
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -190,13 +191,23 @@ def check_tool_list_initialized(tenant_id: str) -> bool:
 def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_list: List[ToolInfo]):
     """
     scan all tools and update the tool table in PG database, remove the duplicate tools
+    For MCP tools, use name&source&usage as unique key to allow same tool name from different MCP servers
     """
     with get_db_session() as session:
         # get all existing tools (including complete information)
         existing_tools = session.query(ToolInfo).filter(ToolInfo.delete_flag != 'Y',
                                                         ToolInfo.author == tenant_id).all()
-        existing_tool_dict = {
-            f"{tool.name}&{tool.source}": tool for tool in existing_tools}
+        # Build existing_tool_dict with different keys for MCP vs non-MCP tools
+        existing_tool_dict = {}
+        for tool in existing_tools:
+            if tool.source == ToolSourceEnum.MCP.value:
+                # For MCP tools, use name + source + usage (MCP server name) as unique key
+                key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
+            else:
+                # For other tools, use name + source as unique key
+                key = f"{tool.name}&{tool.source}"
+            existing_tool_dict[key] = tool
+
         # set all tools to unavailable
         for tool in existing_tools:
             tool.is_available = False
@@ -208,9 +219,15 @@ def update_tool_table_from_scan_tool_list(tenant_id: str, user_id: str, tool_lis
             is_available = True if re.match(
                 r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
 
-            if f"{tool.name}&{tool.source}" in existing_tool_dict:
-                # by tool name and source to update the existing tool
-                existing_tool = existing_tool_dict[f"{tool.name}&{tool.source}"]
+            # Use same key generation logic as above
+            if tool.source == ToolSourceEnum.MCP.value:
+                tool_key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
+            else:
+                tool_key = f"{tool.name}&{tool.source}"
+
+            if tool_key in existing_tool_dict:
+                # by tool name, source, and usage (for MCP) to update the existing tool
+                existing_tool = existing_tool_dict[tool_key]
                 for key, value in filtered_tool_data.items():
                     setattr(existing_tool, key, value)
                 existing_tool.updated_by = user_id
@@ -307,6 +324,7 @@ def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
         ).update({
             ToolInstance.delete_flag: 'Y', 'updated_by': user_id
         })
+
 
 def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: str, version_no: int = 0):
     """
