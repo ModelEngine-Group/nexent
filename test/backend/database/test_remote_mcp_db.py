@@ -68,6 +68,7 @@ sys.modules['backend.consts.exceptions'] = exceptions_mock
 from backend.database.remote_mcp_db import (
     create_mcp_record,
     delete_mcp_record_by_name_and_url,
+    restore_mcp_record_by_name_and_url,
     delete_mcp_record_by_container_id,
     update_mcp_status_by_name_and_url,
     update_mcp_record_by_name_and_url,
@@ -207,6 +208,59 @@ def test_delete_mcp_record_by_name_and_url_failure(monkeypatch, mock_session):
     with pytest.raises(SQLAlchemyError):
         delete_mcp_record_by_name_and_url(
             "test_mcp", "http://test.server.com", "tenant1", "user1")
+
+
+def test_restore_mcp_record_by_name_and_url_success(monkeypatch, mock_session):
+    """Test successful restoration of a soft-deleted MCP record"""
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.update = MagicMock(return_value=1)
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    updated_rows = restore_mcp_record_by_name_and_url(
+        "test_mcp",
+        "http://test.server.com",
+        "tenant1",
+        "user1",
+        status=True,
+        authorization_token="token_123",
+    )
+
+    assert updated_rows == 1
+    mock_filter.update.assert_called_once_with({
+        "delete_flag": "N",
+        "updated_by": "user1",
+        "status": True,
+        "authorization_token": "token_123",
+    })
+
+
+def test_restore_mcp_record_by_name_and_url_failure(monkeypatch, mock_session):
+    """Test failure of MCP record restoration - exception should propagate"""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    session, query = mock_session
+    query.filter.side_effect = SQLAlchemyError("Database error")
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+
+    with pytest.raises(SQLAlchemyError):
+        restore_mcp_record_by_name_and_url(
+            "test_mcp",
+            "http://test.server.com",
+            "tenant1",
+            "user1",
+        )
 
 
 def test_delete_mcp_record_by_container_id_success(monkeypatch, mock_session):
