@@ -1,20 +1,20 @@
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 import json
 import os
 from datetime import datetime
 
 # Create all necessary mocks
-mock_exa = MagicMock()
-mock_exa_client = MagicMock()
-mock_exa.Exa = mock_exa_client
+mock_tavily_client = MagicMock()
+mock_tavily = MagicMock()
+mock_tavily.TavilyClient = mock_tavily_client
 
 mock_aiohttp = MagicMock()
 mock_aiohttp.ClientSession = MagicMock()
 
 # Use module-level mocks
 module_mocks = {
-    'exa_py': mock_exa,
+    'tavily': mock_tavily,
     'aiohttp': mock_aiohttp
 }
 
@@ -23,7 +23,7 @@ with patch.dict('sys.modules', module_mocks):
     # Import all required modules
     from sdk.nexent.core.utils.observer import MessageObserver, ProcessType
     # Import target module
-    from sdk.nexent.core.tools.exa_search_tool import ExaSearchTool
+    from sdk.nexent.core.tools.tavily_search_tool import TavilySearchTool
 
 
 @pytest.fixture
@@ -34,21 +34,21 @@ def mock_observer():
 
 
 @pytest.fixture
-def exa_search_tool(mock_observer):
+def tavily_search_tool(mock_observer):
     # Reset all mock objects
-    mock_exa_client.reset_mock()
+    mock_tavily_client.reset_mock()
 
-    exa_api_key = "test_api_key"
-    with patch('exa_py.Exa', return_value=mock_exa_client):
-        tool = ExaSearchTool(
-            exa_api_key=exa_api_key,
+    tavily_api_key = "test_api_key"
+    with patch('tavily.TavilyClient', return_value=mock_tavily_client):
+        tool = TavilySearchTool(
+            tavily_api_key=tavily_api_key,
             observer=mock_observer,
             max_results=3,
             image_filter=True
         )
 
-        # Directly set a mock object for tool.exa
-        tool.exa = mock_exa_client
+        # Directly set a mock object for tool.tavily
+        tool.tavily = mock_tavily_client
 
     # Set environment variables
     os.environ["DATA_PROCESS_SERVICE"] = "http://test-service"
@@ -57,45 +57,46 @@ def exa_search_tool(mock_observer):
     return tool
 
 
-def create_mock_search_result(count=3):
-    """Helper method to create mock search results"""
+def create_mock_tavily_search_result(count=3):
+    """Helper method to create mock Tavily search results"""
     results = []
     for i in range(count):
-        result = MagicMock()
-        result.title = f"Test Title {i}"
-        result.url = f"https://example.com/{i}"
-        result.text = f"This is test text content {i}"
-        result.published_date = datetime.now().isoformat()
-        result.extras = {"image_links": [f"https://example.com/image{i}.jpg"]}
+        result = {
+            "title": f"Test Title {i}",
+            "url": f"https://example.com/{i}",
+            "content": f"This is test content {i}",
+            "published_date": datetime.now().isoformat(),
+            "score": 0.9 - i * 0.1
+        }
         results.append(result)
 
-    mock_response = MagicMock()
-    mock_response.results = results
+    mock_response = {
+        "results": results,
+        "images": [f"https://example.com/image{i}.jpg" for i in range(count)]
+    }
     return mock_response
 
 
-def test_forward_with_results(exa_search_tool, mock_observer):
+def test_forward_with_results(tavily_search_tool, mock_observer):
     """Test forward method with search results"""
     # Configure mock
-    mock_results = create_mock_search_result(3)
-    mock_exa_client.search_and_contents.return_value = mock_results
+    mock_results = create_mock_tavily_search_result(3)
+    mock_tavily_client.search.return_value = mock_results
 
     # Mock _filter_images method to prevent creating unawaited coroutines
-    with patch.object(exa_search_tool, '_filter_images'):
+    with patch.object(tavily_search_tool, '_filter_images'):
         # Call method
-        result = exa_search_tool.forward("test query")
+        result = tavily_search_tool.forward("test query")
 
     # Print actual JSON structure to help with understanding
     search_results = json.loads(result)
     print(f"\nActual search result structure: {json.dumps(search_results[0], indent=2)}")
 
     # Assertions
-    mock_exa_client.search_and_contents.assert_called_once_with(
-        "test query",
-        text={"max_characters": 2000},
-        livecrawl="always",
-        extras={"links": 0, "image_links": 10},
-        num_results=3
+    mock_tavily_client.search.assert_called_once_with(
+        query="test query",
+        max_results=3,
+        include_images=True
     )
 
     # Check observer messages
@@ -116,41 +117,43 @@ def test_forward_with_results(exa_search_tool, mock_observer):
     keys = first_result.keys()
     print(f"\nAvailable keys in result: {keys}")
 
-    # Modified assertion to check if text field exists rather than url
+    # Check if text field exists
     assert "text" in first_result
-    assert first_result["text"].startswith("This is test text content")
+    assert first_result["text"].startswith("This is test content")
 
     # If there's a cite_index field, verify it as well
     if "cite_index" in first_result:
         assert isinstance(first_result["cite_index"], int)
 
 
-def test_forward_no_results(exa_search_tool):
+def test_forward_no_results(tavily_search_tool):
     """Test forward method with no search results"""
     # Configure empty results mock
-    mock_response = MagicMock()
-    mock_response.results = []
-    mock_exa_client.search_and_contents.return_value = mock_response
+    mock_response = {
+        "results": [],
+        "images": []
+    }
+    mock_tavily_client.search.return_value = mock_response
 
     # Call method and check for exception
     with pytest.raises(Exception) as excinfo:
-        exa_search_tool.forward("test query")
+        tavily_search_tool.forward("test query")
 
     assert 'No results found' in str(excinfo.value)
 
 
-def test_forward_without_observer(exa_search_tool):
+def test_forward_without_observer(tavily_search_tool):
     """Test forward method without an observer"""
     # Mock _filter_images method to prevent creating unawaited coroutines
-    with patch.object(exa_search_tool, '_filter_images'), \
-        patch.object(ExaSearchTool, 'forward', wraps=exa_search_tool.forward) as wrapped_forward:
+    with patch.object(tavily_search_tool, '_filter_images'), \
+        patch.object(TavilySearchTool, 'forward', wraps=tavily_search_tool.forward) as wrapped_forward:
         # Directly set observer to None
         # Note: This is not recommended in production code, only for testing
         wrapped_forward.__defaults__ = (None,)
 
         # Configure mock and call method
-        mock_results = create_mock_search_result(2)
-        mock_exa_client.search_and_contents.return_value = mock_results
+        mock_results = create_mock_tavily_search_result(2)
+        mock_tavily_client.search.return_value = mock_results
 
         # Call method with parameters directly
         result = wrapped_forward("test query")
@@ -159,47 +162,45 @@ def test_forward_without_observer(exa_search_tool):
     search_results = json.loads(result)
     assert len(search_results) == 2
 
-    # Verify Exa search was called
-    mock_exa_client.search_and_contents.assert_called_with(
-        "test query",
-        text={"max_characters": 2000},
-        livecrawl="always",
-        extras={"links": 0, "image_links": 10},
-        num_results=3
+    # Verify Tavily search was called
+    mock_tavily_client.search.assert_called_with(
+        query="test query",
+        max_results=3,
+        include_images=True
     )
 
 
-def test_chinese_language_observer(exa_search_tool, mock_observer):
+def test_chinese_language_observer(tavily_search_tool, mock_observer):
     """Test Chinese language observer"""
     # Set observer language to Chinese
     mock_observer.lang = "zh"
 
     # Mock _filter_images method to prevent creating unawaited coroutines
-    with patch.object(exa_search_tool, '_filter_images'):
+    with patch.object(tavily_search_tool, '_filter_images'):
         # Configure mock
-        mock_results = create_mock_search_result(1)
-        mock_exa_client.search_and_contents.return_value = mock_results
+        mock_results = create_mock_tavily_search_result(1)
+        mock_tavily_client.search.return_value = mock_results
 
         # Call method
-        exa_search_tool.forward("测试查询")
+        tavily_search_tool.forward("测试查询")
 
     # Check Chinese running prompt
     mock_observer.add_message.assert_any_call("", ProcessType.TOOL, "网络搜索中...")
 
 
-def test_filter_images_success(exa_search_tool, mock_observer):
+def test_filter_images_success(tavily_search_tool, mock_observer):
     """Test successful image filtering"""
     # Set up test data
     images_list = ["https://example.com/image1.jpg", "https://example.com/image2.jpg"]
 
     # Mock _filter_images method
-    with patch.object(exa_search_tool, '_filter_images') as mock_filter:
+    with patch.object(tavily_search_tool, '_filter_images') as mock_filter:
         # Configure mock
-        mock_results = create_mock_search_result(1)
-        mock_exa_client.search_and_contents.return_value = mock_results
+        mock_results = create_mock_tavily_search_result(1)
+        mock_tavily_client.search.return_value = mock_results
 
         # Call forward method, which indirectly calls _filter_images
-        exa_search_tool.forward("test query")
+        tavily_search_tool.forward("test query")
 
         # Verify _filter_images was called with correct parameters
         mock_filter.assert_called_once()
@@ -208,22 +209,22 @@ def test_filter_images_success(exa_search_tool, mock_observer):
         assert isinstance(called_images, list)
 
 
-def test_filter_images_api_error(exa_search_tool, mock_observer):
+def test_filter_images_api_error(tavily_search_tool, mock_observer):
     """Test image filtering API error handling"""
     # Set up test data
     images_list = ["https://example.com/image1.jpg"]
 
     # Send message directly to observer, simulating _filter_images behavior
-    exa_search_tool._filter_images = lambda img_list, query: mock_observer.add_message(
+    tavily_search_tool._filter_images = lambda img_list, query: mock_observer.add_message(
         "", ProcessType.PICTURE_WEB, json.dumps({"images_url": img_list}, ensure_ascii=False)
     )
 
     # Configure mock
-    mock_results = create_mock_search_result(1)
-    mock_exa_client.search_and_contents.return_value = mock_results
+    mock_results = create_mock_tavily_search_result(1)
+    mock_tavily_client.search.return_value = mock_results
 
     # Call method
-    exa_search_tool.forward("test query")
+    tavily_search_tool.forward("test query")
 
     # Verify observer was called with unfiltered images
     mock_observer.add_message.assert_any_call("", ProcessType.PICTURE_WEB,
@@ -231,17 +232,17 @@ def test_filter_images_api_error(exa_search_tool, mock_observer):
                                                          ensure_ascii=False))
 
 
-def test_image_filter_disabled(exa_search_tool, mock_observer):
+def test_image_filter_disabled(tavily_search_tool, mock_observer):
     """Test behavior when image filtering is disabled"""
     # Disable image filtering
-    exa_search_tool.image_filter = False
+    tavily_search_tool.image_filter = False
 
     # Configure mock
-    mock_results = create_mock_search_result(1)
-    mock_exa_client.search_and_contents.return_value = mock_results
+    mock_results = create_mock_tavily_search_result(1)
+    mock_tavily_client.search.return_value = mock_results
 
     # Call method
-    exa_search_tool.forward("test query")
+    tavily_search_tool.forward("test query")
 
     # Verify images were sent to observer without filtering
     expected_images = ["https://example.com/image0.jpg"]
