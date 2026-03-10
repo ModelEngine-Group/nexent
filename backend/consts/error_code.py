@@ -121,6 +121,13 @@ class ErrorCode(Enum):
     MODEL_CONFIG_INVALID = "090102"  # Invalid model configuration
     MODEL_HEALTH_CHECK_FAILED = "090103"  # Health check failed
     MODEL_PROVIDER_ERROR = "090104"  # Model provider error
+    MODEL_PROMPT_GENERATION_FAILED = "090105"  # Model prompt generation failed
+    # 02 - Model API errors
+    MODEL_API_KEY_INVALID = "090201"  # API key is invalid or expired
+    MODEL_API_KEY_NO_PERMISSION = "090202"  # API key does not have permission
+    MODEL_RATE_LIMIT_EXCEEDED = "090203"  # Rate limit exceeded
+    MODEL_SERVICE_UNAVAILABLE = "090204"  # Model service is temporarily unavailable
+    MODEL_CONNECTION_ERROR = "090205"  # Failed to connect to model service
 
     # ==================== 10 Memory / 记忆管理 ====================
     # 01 - Memory
