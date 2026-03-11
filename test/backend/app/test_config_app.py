@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 import atexit
 
 # Add the backend directory to path so we can import modules
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend'))
+backend_path = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '../../../backend'))
 sys.path.insert(0, backend_path)
 
 # Apply patches before importing any app modules
@@ -188,6 +189,16 @@ class TestBaseApp(unittest.TestCase):
         # Since it's hard to identify routers directly from routes,
         # we'll check that we have a reasonable number of routes
         # Should have many routes from all routers
+        self.assertGreater(len(app.routes), 10)
+
+    def test_idata_router_included(self):
+        """Test that idata_router is imported and included in the app."""
+        # Verify that idata_router is imported
+        from apps.config_app import idata_router
+        self.assertIsNotNone(idata_router)
+
+        # Verify that the app has been properly initialized with routers
+        # The idata_router should be included, which means we should have routes
         self.assertGreater(len(app.routes), 10)
 
 

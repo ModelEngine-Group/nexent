@@ -1,3 +1,19 @@
+from backend.database.tool_db import (
+    create_tool,
+    create_or_update_tool_by_tool_info,
+    query_all_tools,
+    query_tool_instances_by_id,
+    query_tool_instances_by_agent_id,
+    query_tools_by_ids,
+    query_all_enabled_tool_instances,
+    update_tool_table_from_scan_tool_list,
+    add_tool_field,
+    search_tools_for_sub_agent,
+    check_tool_is_available,
+    delete_tools_by_agent_id,
+    search_last_tool_instance_by_tool_id,
+    check_tool_list_initialized
+)
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -92,22 +108,7 @@ sys.modules['database.agent_db'] = agent_db_mock
 sys.modules['backend.database.agent_db'] = agent_db_mock
 
 # Now we can safely import the module being tested
-from backend.database.tool_db import (
-    create_tool,
-    create_or_update_tool_by_tool_info,
-    query_all_tools,
-    query_tool_instances_by_id,
-    query_tool_instances_by_agent_id,
-    query_tools_by_ids,
-    query_all_enabled_tool_instances,
-    update_tool_table_from_scan_tool_list,
-    add_tool_field,
-    search_tools_for_sub_agent,
-    check_tool_is_available,
-    delete_tools_by_agent_id,
-    search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized
-)
+
 
 class MockToolInstance:
     def __init__(self):
@@ -264,6 +265,7 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
     assert isinstance(result, MockToolInstanceClass)
     session.add.assert_called_once()
     session.flush.assert_called_once()
+
 
 
 def test_query_all_tools(monkeypatch, mock_session):
