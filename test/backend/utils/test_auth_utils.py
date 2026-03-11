@@ -2,9 +2,16 @@ from backend.consts.exceptions import UnauthorizedError, SignatureValidationErro
 import time
 import sys
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import types
 import pytest
+
+# Ensure repository root and sdk/ are importable before any patch() that resolves modules.
+# Pytest rootdir is set to test/, so we must extend sys.path explicitly here.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "sdk"))
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -14,6 +21,44 @@ import pytest
 # This avoids side-effects such as Minio/S3 network calls that are triggered
 # during import time of database.client when auth_utils is imported.
 # ---------------------------------------------------------------------------
+
+# Stub `nexent.storage.*` modules early so unittest.mock.patch does not import the real
+# SDK package (which may pull optional heavy dependencies during __init__).
+_nexent_mod = types.ModuleType("nexent")
+_nexent_storage_mod = types.ModuleType("nexent.storage")
+_nexent_storage_factory_mod = types.ModuleType("nexent.storage.storage_client_factory")
+_nexent_minio_config_mod = types.ModuleType("nexent.storage.minio_config")
+
+_nexent_storage_factory_mod.create_storage_client_from_config = lambda *args, **kwargs: None
+
+class _MinIOStorageConfig:
+    def validate(self):
+        return None
+
+_nexent_minio_config_mod.MinIOStorageConfig = _MinIOStorageConfig
+
+_nexent_mod.storage = _nexent_storage_mod
+_nexent_storage_mod.storage_client_factory = _nexent_storage_factory_mod
+_nexent_storage_mod.minio_config = _nexent_minio_config_mod
+
+sys.modules["nexent"] = _nexent_mod
+sys.modules["nexent.storage"] = _nexent_storage_mod
+sys.modules["nexent.storage.storage_client_factory"] = _nexent_storage_factory_mod
+sys.modules["nexent.storage.minio_config"] = _nexent_minio_config_mod
+
+# Stub `backend.database.client` early so patch() can resolve the target even when
+# backend/ and backend/database/ are namespace packages (no __init__.py).
+_backend_mod = sys.modules.get("backend") or types.ModuleType("backend")
+_backend_database_mod = types.ModuleType("backend.database")
+_backend_database_client_mod = types.ModuleType("backend.database.client")
+_backend_database_client_mod.MinioClient = MagicMock()
+
+_backend_mod.database = _backend_database_mod
+_backend_database_mod.client = _backend_database_client_mod
+
+sys.modules["backend"] = _backend_mod
+sys.modules["backend.database"] = _backend_database_mod
+sys.modules["backend.database.client"] = _backend_database_client_mod
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -47,6 +92,10 @@ sys.modules['database.client'] = db_client_stub
 # Stub database.user_tenant_db to avoid real DB interactions
 sys.modules['database.user_tenant_db'] = MagicMock(
     get_user_tenant_by_user_id=MagicMock(return_value=None))
+
+# Stub database.token_db to avoid real DB interactions (used by auth_utils)
+sys.modules['database.token_db'] = MagicMock(
+    get_token_by_access_key=MagicMock(return_value=None))
 
 # Pre-mock nexent core dependency pulled by consts.model
 sys.modules['consts'] = MagicMock()
@@ -382,3 +431,200 @@ def test_get_current_user_id_exception(monkeypatch):
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
         au.get_current_user_id("Bearer invalid_token")
+
+
+# ---------------------------------------------------------------------------
+# Bearer Token (API Key) Authentication Tests
+# ---------------------------------------------------------------------------
+
+class TestValidateBearerToken:
+    """Tests for validate_bearer_token function."""
+
+    def test_validate_bearer_token_success(self, monkeypatch):
+        """Test successful Bearer token validation."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user123",
+            "delete_flag": "N"
+        }
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+
+        is_valid, token_info = au.validate_bearer_token("Bearer nexent-abc123")
+
+        assert is_valid is True
+        assert token_info is not None
+        assert token_info["user_id"] == "user123"
+
+    def test_validate_bearer_token_without_bearer_prefix(self, monkeypatch):
+        """Test Bearer token validation without 'Bearer ' prefix."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user123",
+            "delete_flag": "N"
+        }
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+
+        is_valid, token_info = au.validate_bearer_token("nexent-abc123")
+
+        assert is_valid is True
+        assert token_info is not None
+
+    def test_validate_bearer_token_empty_authorization(self):
+        """Test Bearer token validation with empty authorization header."""
+        is_valid, token_info = au.validate_bearer_token(None)
+
+        assert is_valid is False
+        assert token_info is None
+
+    def test_validate_bearer_token_empty_string(self):
+        """Test Bearer token validation with empty string."""
+        is_valid, token_info = au.validate_bearer_token("")
+
+        assert is_valid is False
+        assert token_info is None
+
+    def test_validate_bearer_token_empty_token(self):
+        """Test Bearer token validation with 'Bearer ' only."""
+        is_valid, token_info = au.validate_bearer_token("Bearer ")
+
+        assert is_valid is False
+        assert token_info is None
+
+    def test_validate_bearer_token_invalid_token(self, monkeypatch):
+        """Test Bearer token validation with non-existent token."""
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: None)
+
+        is_valid, token_info = au.validate_bearer_token("Bearer nexent-nonexistent")
+
+        assert is_valid is False
+        assert token_info is None
+
+    def test_validate_bearer_token_deleted(self, monkeypatch):
+        """Test Bearer token validation with deleted token."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-deleted",
+            "user_id": "user123",
+            "delete_flag": "Y"
+        }
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+
+        is_valid, token_info = au.validate_bearer_token("Bearer nexent-deleted")
+
+        assert is_valid is False
+        assert token_info is None
+
+    def test_validate_bearer_token_exception(self, monkeypatch):
+        """Test Bearer token validation with exception."""
+        def mock_get_token_raises(key):
+            raise Exception("Database error")
+
+        monkeypatch.setattr(au, "get_token_by_access_key", mock_get_token_raises)
+
+        is_valid, token_info = au.validate_bearer_token("Bearer nexent-error")
+
+        assert is_valid is False
+        assert token_info is None
+
+
+class TestGetUserAndTenantByAccessKey:
+    """Tests for get_user_and_tenant_by_access_key function."""
+
+    def test_get_user_and_tenant_success(self, monkeypatch):
+        """Test successful user and tenant retrieval."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user123",
+            "delete_flag": "N"
+        }
+        mock_user_tenant = {"tenant_id": "tenant456"}
+
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+
+        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+
+        assert result["user_id"] == "user123"
+        assert result["tenant_id"] == "tenant456"
+        assert result["token_id"] == 1
+
+    def test_get_user_and_tenant_default_tenant(self, monkeypatch):
+        """Test that DEFAULT_TENANT_ID is used when no tenant mapping exists."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user123",
+            "delete_flag": "N"
+        }
+
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: None)
+
+        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+
+        assert result["user_id"] == "user123"
+        assert result["tenant_id"] == au.DEFAULT_TENANT_ID
+        assert result["token_id"] == 1
+
+    def test_get_user_and_tenant_empty_tenant_id(self, monkeypatch):
+        """Test that DEFAULT_TENANT_ID is used when tenant_id is empty."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": "user123",
+            "delete_flag": "N"
+        }
+        mock_user_tenant = {"tenant_id": ""}
+
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+
+        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+
+        assert result["tenant_id"] == au.DEFAULT_TENANT_ID
+
+    def test_get_user_and_tenant_empty_access_key(self):
+        """Test with empty access key."""
+        with pytest.raises(UnauthorizedError, match="Invalid access key"):
+            au.get_user_and_tenant_by_access_key("")
+
+    def test_get_user_and_tenant_none_access_key(self):
+        """Test with None access key."""
+        with pytest.raises(UnauthorizedError, match="Invalid access key"):
+            au.get_user_and_tenant_by_access_key(None)
+
+    def test_get_user_and_tenant_token_not_found(self, monkeypatch):
+        """Test when token is not found."""
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: None)
+
+        with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
+            au.get_user_and_tenant_by_access_key("nexent-nonexistent")
+
+    def test_get_user_and_tenant_deleted_token(self, monkeypatch):
+        """Test when token is deleted."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-deleted",
+            "user_id": "user123",
+            "delete_flag": "Y"
+        }
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+
+        with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
+            au.get_user_and_tenant_by_access_key("nexent-deleted")
+
+    def test_get_user_and_tenant_no_user_id(self, monkeypatch):
+        """Test when token has no user_id."""
+        mock_token_info = {
+            "token_id": 1,
+            "access_key": "nexent-abc123",
+            "user_id": None,
+            "delete_flag": "N"
+        }
+        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+
+        with pytest.raises(UnauthorizedError, match="No user associated with this access key"):
+            au.get_user_and_tenant_by_access_key("nexent-abc123")

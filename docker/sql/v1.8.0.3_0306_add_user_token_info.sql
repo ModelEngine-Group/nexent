@@ -69,7 +69,10 @@ CREATE TABLE IF NOT EXISTS nexent.user_token_usage_log_t (
     related_id INT4,
     meta_data JSONB,
     create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    created_by VARCHAR(100)
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(100),
+    updated_by VARCHAR(100),
+    delete_flag VARCHAR(1) DEFAULT 'N'
 );
 
 ALTER TABLE "user_token_usage_log_t" OWNER TO "root";
@@ -84,7 +87,10 @@ COMMENT ON COLUMN nexent.user_token_usage_log_t.call_function_name IS 'API funct
 COMMENT ON COLUMN nexent.user_token_usage_log_t.related_id IS 'Related resource ID (e.g., conversation_id)';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.meta_data IS 'Additional metadata for this usage log entry, stored as JSON';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.create_time IS 'Creation time, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.update_time IS 'Update time, audit field';
 COMMENT ON COLUMN nexent.user_token_usage_log_t.created_by IS 'Creator ID, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.updated_by IS 'Last updater ID, audit field';
+COMMENT ON COLUMN nexent.user_token_usage_log_t.delete_flag IS 'Soft delete flag, Y means deleted';
 
 -- Create index on token_id for query performance
 CREATE INDEX IF NOT EXISTS idx_user_token_usage_log_token_id ON nexent.user_token_usage_log_t(token_id);

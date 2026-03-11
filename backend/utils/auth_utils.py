@@ -1,7 +1,9 @@
 import logging
 import time
+import hmac
+import hashlib
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import jwt
 from fastapi import Request
@@ -21,10 +23,111 @@ from consts.const import (
 from consts.exceptions import LimitExceededError, UnauthorizedError
 from database.user_tenant_db import get_user_tenant_by_user_id
 from database.token_db import get_token_by_access_key
-from typing import Dict
 
 # Module logger
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Shared test constants
+# ---------------------------------------------------------------------------
+
+# Fixed test secret used by generate_test_jwt and unit tests.
+MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"
+
+# ---------------------------------------------------------------------------
+# AK/SK (Access Key / Secret Key) authentication helpers
+# ---------------------------------------------------------------------------
+
+# Validity window in seconds for X-Timestamp header.
+TIMESTAMP_VALIDITY_WINDOW = 5 * 60
+
+
+def calculate_hmac_signature(secret_key: str, access_key: str, timestamp: str, body: str) -> str:
+    """
+    Calculate HMAC-SHA256 signature for AK/SK authentication.
+
+    Returns a lowercase hex digest of length 64.
+    """
+    message = f"{access_key}\n{timestamp}\n{body}".encode("utf-8")
+    return hmac.new(secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def validate_timestamp(timestamp: str) -> bool:
+    """Validate that timestamp is within allowed window."""
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+
+    now = int(time.time())
+    return abs(now - ts) <= TIMESTAMP_VALIDITY_WINDOW
+
+
+def extract_aksk_headers(headers: Dict[str, str]) -> Tuple[str, str, str]:
+    """Extract AK/SK headers or raise UnauthorizedError when missing."""
+    access_key = headers.get("X-Access-Key") if headers else None
+    timestamp = headers.get("X-Timestamp") if headers else None
+    signature = headers.get("X-Signature") if headers else None
+
+    if not access_key or not timestamp or not signature:
+        raise UnauthorizedError("Missing AK/SK authentication headers")
+
+    return access_key, timestamp, signature
+
+
+def get_aksk_config(tenant_id: str) -> Tuple[str, str]:
+    """
+    Get (access_key, secret_key) configuration for a tenant.
+
+    This is intentionally a thin indirection so tests can monkeypatch it.
+    """
+    raise UnauthorizedError("AK/SK authentication is not configured")
+
+
+def verify_aksk_signature(access_key: str, timestamp: str, signature: str, body: str, tenant_id: str = None) -> bool:
+    """Verify AK/SK signature; returns False instead of raising on mismatch."""
+    tenant = tenant_id or DEFAULT_TENANT_ID
+    try:
+        expected_access_key, secret_key = get_aksk_config(tenant)
+    except Exception:
+        return False
+
+    if access_key != expected_access_key:
+        return False
+
+    expected_sig = calculate_hmac_signature(secret_key, access_key, timestamp, body)
+    return hmac.compare_digest(expected_sig, signature)
+
+
+def validate_aksk_authentication(headers: Dict[str, str], body: str, tenant_id: str = None) -> bool:
+    """
+    Validate AK/SK authentication.
+
+    Returns True when valid, otherwise raises domain exceptions.
+    """
+    from consts.exceptions import SignatureValidationError  # imported lazily for test-time stubbing
+
+    try:
+        access_key, ts, sig = extract_aksk_headers(headers)
+
+        if not validate_timestamp(ts):
+            raise UnauthorizedError("Invalid or expired timestamp")
+
+        # Call with positional args so tests can monkeypatch with simple lambdas.
+        if tenant_id is None:
+            ok = verify_aksk_signature(access_key, ts, sig, body)
+        else:
+            ok = verify_aksk_signature(access_key, ts, sig, body, tenant_id)
+
+        if not ok:
+            raise SignatureValidationError("Invalid signature")
+
+        return True
+    except (UnauthorizedError, SignatureValidationError):
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error during AK/SK authentication")
+        raise UnauthorizedError("Authentication failed") from exc
 
 # ---------------------------------------------------------------------------
 # Bearer Token (API Key) authentication

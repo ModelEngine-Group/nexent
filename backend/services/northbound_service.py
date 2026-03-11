@@ -232,6 +232,10 @@ async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
     # Add meta_data from token usage log if available
     if ctx.token_id > 0:
         for item in conversations:
+            # Ensure we do not leak empty meta_data keys
+            if "meta_data" in item and not item.get("meta_data"):
+                item.pop("meta_data", None)
+
             conversation_id = item.get("conversation_id")
             if conversation_id:
                 try:
@@ -240,10 +244,14 @@ async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
                         related_id=int(conversation_id),
                         call_function_name="run_chat"
                     )
+                    # Only return meta_data when there is a usage log record and meta_data is non-empty
                     if meta_data:
                         item["meta_data"] = meta_data
+                    else:
+                        item.pop("meta_data", None)
                 except Exception as e:
                     logger.warning(f"Failed to get meta_data for conversation {conversation_id}: {str(e)}")
+                    item.pop("meta_data", None)
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
@@ -269,19 +277,6 @@ async def get_conversation_history_internal(ctx: NorthboundContext, conversation
 
 async def get_conversation_history(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     try:
-        # Log token usage
-        if ctx.token_id > 0:
-            try:
-                log_token_usage(
-                    token_id=ctx.token_id,
-                    call_function_name="get_conversation_history",
-                    related_id=conversation_id,
-                    created_by=ctx.user_id,
-                    metadata=None
-                )
-            except Exception as e:
-                logger.warning(f"Failed to log token usage: {str(e)}")
-
         return await get_conversation_history_internal(ctx, conversation_id)
     except Exception as e:
         raise Exception(f"Failed to get conversation history for conversation_id {conversation_id}: {str(e)}")
@@ -293,19 +288,6 @@ async def get_agent_info_list(ctx: NorthboundContext) -> Dict[str, Any]:
         # Remove internal information that partner don't need
         for agent_info in agent_info_list:
             agent_info.pop("agent_id", None)
-
-        # Log token usage
-        if ctx.token_id > 0:
-            try:
-                log_token_usage(
-                    token_id=ctx.token_id,
-                    call_function_name="get_agent_info_list",
-                    related_id=None,
-                    created_by=ctx.user_id,
-                    metadata=None
-                )
-            except Exception as e:
-                logger.warning(f"Failed to log token usage: {str(e)}")
 
         return {"message": "success", "data": agent_info_list, "requestId": ctx.request_id}
     except Exception as e:

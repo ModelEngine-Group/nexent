@@ -159,7 +159,7 @@ def log_token_usage(
             call_function_name=call_function_name,
             related_id=related_id,
             created_by=created_by,
-            metadata=metadata
+            meta_data=metadata
         )
         session.add(usage_log)
         session.flush()
@@ -184,6 +184,6 @@ def get_latest_usage_metadata(token_id: int, related_id: int, call_function_name
             UserTokenUsageLog.call_function_name == call_function_name
         ).order_by(UserTokenUsageLog.create_time.desc()).first()
 
-        if usage_log and usage_log.metadata:
-            return usage_log.metadata
+        if usage_log and usage_log.meta_data:
+            return usage_log.meta_data
         return None

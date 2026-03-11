@@ -44,7 +44,7 @@ async def _get_northbound_context(request: Request) -> NorthboundContext:
         if not is_valid or not token_info:
             raise HTTPException(
                 status_code=HTTPStatus.UNAUTHORIZED,
-                detail="Invalid or missing API key"
+                detail="Invalid or missing bearer token"
             )
 
         # Extract access_key from the token
