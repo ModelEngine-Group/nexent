@@ -3269,7 +3269,7 @@ class TestGetLocalToolsDescriptionZh:
 class TestGetLocalToolsDescriptionZhCoverage:
     """Additional tests for description_zh coverage in get_local_tools and list_all_tools."""
 
-    @patch('backend.services.tool_local_service.get_local_tools_classes')
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
     def test_get_local_tools_with_description_zh(self, mock_get_classes):
         """Test get_local_tools extracts description_zh from tool class."""
         from pydantic import Field
@@ -3312,7 +3312,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
         assert "query" in inputs
         assert inputs["query"]["description_zh"] == "查询"
 
-    @patch('backend.services.tool_local_service.get_local_tools_classes')
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
     def test_get_local_tools_param_without_description_zh(self, mock_get_classes):
         """Test get_local_tools handles param without description_zh."""
         from pydantic import Field
@@ -3339,7 +3339,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
         assert param1 is not None
         assert param1["description_zh"] is None
 
-    @patch('backend.services.tool_local_service.get_local_tools_classes')
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
     def test_get_local_tools_inputs_non_dict_value(self, mock_get_classes):
         """Test get_local_tools handles inputs with non-dict values."""
         from pydantic import Field
@@ -3365,9 +3365,10 @@ class TestGetLocalToolsDescriptionZhCoverage:
         inputs = json.loads(result[0].inputs)
         assert inputs == {"query": "string"}
 
-    @patch('backend.services.tool_local_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
-    def test_list_all_tools_merges_description_zh_for_local_tools(self, mock_query, mock_get_desc):
+    @pytest.mark.asyncio
+    async def test_list_all_tools_merges_description_zh_for_local_tools(self, mock_query, mock_get_desc):
         """Test list_all_tools merges description_zh from SDK for local tools."""
         mock_query.return_value = [
             {
@@ -3394,15 +3395,16 @@ class TestGetLocalToolsDescriptionZhCoverage:
         }
 
         from backend.services.tool_configuration_service import list_all_tools
-        result = list_all_tools("tenant1")
+        result = await list_all_tools("tenant1")
 
         assert len(result) == 1
         assert result[0]["description_zh"] == "本地工具"
         assert result[0]["params"][0]["description_zh"] == "参数1"
 
-    @patch('backend.services.tool_local_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
-    def test_list_all_tools_merges_inputs_description_zh(self, mock_query, mock_get_desc):
+    @pytest.mark.asyncio
+    async def test_list_all_tools_merges_inputs_description_zh(self, mock_query, mock_get_desc):
         """Test list_all_tools merges inputs description_zh from SDK."""
         mock_query.return_value = [
             {
@@ -3429,15 +3431,16 @@ class TestGetLocalToolsDescriptionZhCoverage:
         }
 
         from backend.services.tool_configuration_service import list_all_tools
-        result = list_all_tools("tenant1")
+        result = await list_all_tools("tenant1")
 
         import json
         inputs = json.loads(result[0]["inputs"])
         assert inputs["query"]["description_zh"] == "查询词"
 
-    @patch('backend.services.tool_local_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
-    def test_list_all_tools_non_local_tool(self, mock_query, mock_get_desc):
+    @pytest.mark.asyncio
+    async def test_list_all_tools_non_local_tool(self, mock_query, mock_get_desc):
         """Test list_all_tools handles non-local tools."""
         mock_query.return_value = [
             {
@@ -3459,14 +3462,15 @@ class TestGetLocalToolsDescriptionZhCoverage:
         mock_get_desc.return_value = {}
 
         from backend.services.tool_configuration_service import list_all_tools
-        result = list_all_tools("tenant1")
+        result = await list_all_tools("tenant1")
 
         assert len(result) == 1
         assert result[0]["description_zh"] == "MCP工具"
 
-    @patch('backend.services.tool_local_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
-    def test_list_all_tools_inputs_json_decode_error(self, mock_query, mock_get_desc):
+    @pytest.mark.asyncio
+    async def test_list_all_tools_inputs_json_decode_error(self, mock_query, mock_get_desc):
         """Test list_all_tools handles JSON decode error for inputs."""
         mock_query.return_value = [
             {
@@ -3493,7 +3497,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
         }
 
         from backend.services.tool_configuration_service import list_all_tools
-        result = list_all_tools("tenant1")
+        result = await list_all_tools("tenant1")
 
         assert len(result) == 1
         # Should not crash, inputs should remain as original string
@@ -3503,16 +3507,35 @@ class TestGetLocalToolsDescriptionZhCoverage:
 class TestGetLocalToolsClassesDirect:
     """Tests for get_local_tools_classes function directly."""
 
-    def test_get_local_tools_classes_returns_classes(self):
+    @patch('backend.services.tool_local_service.importlib.import_module')
+    def test_get_local_tools_classes_returns_classes(self, mock_import):
         """Test that get_local_tools_classes returns a list of classes."""
-        from backend.services.tool_local_service import get_local_tools_classes
+        # Create mock tool classes
+        mock_tool_class1 = type('TestTool1', (), {})
+        mock_tool_class2 = type('TestTool2', (), {})
         
+        # Create a mock package with tool classes
+        class MockPackage:
+            def __init__(self):
+                self.TestTool1 = mock_tool_class1
+                self.TestTool2 = mock_tool_class2
+                self.not_a_class = "string_value"
+                self.__name__ = 'nexent.core.tools'
+
+            def __dir__(self):
+                return ['TestTool1', 'TestTool2', 'not_a_class', '__name__']
+
+        mock_package = MockPackage()
+        mock_import.return_value = mock_package
+
+        from backend.services.tool_local_service import get_local_tools_classes
         result = get_local_tools_classes()
         
         assert isinstance(result, list)
-        # Should contain at least some tool classes from nexent.core.tools
-        for item in result:
-            assert isinstance(item, type)
+        assert mock_tool_class1 in result
+        assert mock_tool_class2 in result
+        # String should not be included
+        assert "string_value" not in result
 
 
 if __name__ == "__main__":
