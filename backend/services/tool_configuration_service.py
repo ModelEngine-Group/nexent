@@ -7,13 +7,18 @@ from urllib.parse import urljoin
 
 from pydantic_core import PydanticUndefined
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport, SSETransport
 import jsonref
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 
 from consts.const import LOCAL_MCP_SERVER, DATA_PROCESS_SERVICE
 from consts.exceptions import MCPConnectionError, ToolExecutionException, NotFoundException
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
-from database.remote_mcp_db import get_mcp_records_by_tenant, get_mcp_server_by_name_and_tenant
+from database.remote_mcp_db import (
+    get_mcp_records_by_tenant,
+    get_mcp_server_by_name_and_tenant,
+    get_mcp_authorization_token_by_name_and_url,
+)
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_all_tools,
@@ -29,6 +34,29 @@ from services.image_service import get_vlm_model
 from services.tool_local_service import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
+
+
+def _create_mcp_transport(url: str, authorization_token: Optional[str] = None):
+    """
+    Create appropriate MCP transport based on URL ending.
+
+    Args:
+        url: MCP server URL
+        authorization_token: Optional authorization token
+
+    Returns:
+        Transport instance (SSETransport or StreamableHttpTransport)
+    """
+    url_stripped = url.strip()
+    headers = {"Authorization": authorization_token} if authorization_token else {}
+
+    if url_stripped.endswith("/sse"):
+        return SSETransport(url=url_stripped, headers=headers)
+    elif url_stripped.endswith("/mcp"):
+        return StreamableHttpTransport(url=url_stripped, headers=headers)
+    else:
+        # Default to StreamableHttpTransport for unrecognized formats
+        return StreamableHttpTransport(url=url_stripped, headers=headers)
 
 
 def python_type_to_json_schema(annotation: Any) -> str:
@@ -214,14 +242,20 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
         # only update connected server
         if record["status"]:
             try:
-                tools_info.extend(await get_tool_from_remote_mcp_server(mcp_server_name=record["mcp_name"],
-                                                                        remote_mcp_server=record["mcp_server"]))
+                tools_info.extend(await get_tool_from_remote_mcp_server(
+                    mcp_server_name=record["mcp_name"],
+                    remote_mcp_server=record["mcp_server"],
+                    tenant_id=tenant_id
+                ))
             except Exception as e:
                 logger.error(f"mcp connection error: {str(e)}")
 
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
-    tools_info.extend(await get_tool_from_remote_mcp_server(mcp_server_name="nexent",
-                                                            remote_mcp_server=default_mcp_url))
+    tools_info.extend(await get_tool_from_remote_mcp_server(
+        mcp_server_name="nexent",
+        remote_mcp_server=default_mcp_url,
+        tenant_id=None
+    ))
     return tools_info
 
 
@@ -279,12 +313,34 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
     }
 
 
-async def get_tool_from_remote_mcp_server(mcp_server_name: str, remote_mcp_server: str):
-    """get the tool information from the remote MCP server, avoid blocking the event loop"""
+async def get_tool_from_remote_mcp_server(
+    mcp_server_name: str,
+    remote_mcp_server: str,
+    tenant_id: Optional[str] = None,
+    authorization_token: Optional[str] = None
+):
+    """
+    Get the tool information from the remote MCP server, avoid blocking the event loop
+
+    Args:
+        mcp_server_name: Name of the MCP server
+        remote_mcp_server: URL of the MCP server
+        tenant_id: Optional tenant ID for database lookup of authorization_token
+        authorization_token: Optional authorization token for authentication (if not provided and tenant_id is given, will be fetched from database)
+    """
+    # Get authorization token from database if not provided
+    if authorization_token is None and tenant_id:
+        authorization_token = get_mcp_authorization_token_by_name_and_url(
+            mcp_name=mcp_server_name,
+            mcp_server=remote_mcp_server,
+            tenant_id=tenant_id
+        )
+
     tools_info = []
 
     try:
-        client = Client(remote_mcp_server, timeout=10)
+        transport = _create_mcp_transport(remote_mcp_server, authorization_token)
+        client = Client(transport=transport, timeout=10)
         async with client:
             # List available operations
             tools = await client.list_tools()
@@ -453,7 +509,8 @@ def load_last_tool_config_impl(tool_id: int, tenant_id: str, user_id: str):
 async def _call_mcp_tool(
     mcp_url: str,
     tool_name: str,
-    inputs: Optional[Dict[str, Any]]
+    inputs: Optional[Dict[str, Any]],
+    authorization_token: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Common method to call MCP tool with connection handling.
@@ -462,6 +519,7 @@ async def _call_mcp_tool(
         mcp_url: MCP server URL
         tool_name: Name of the tool to call
         inputs: Parameters to pass to the tool
+        authorization_token: Optional authorization token for authentication
 
     Returns:
         Dict containing tool execution result
@@ -469,7 +527,8 @@ async def _call_mcp_tool(
     Raises:
         MCPConnectionError: If MCP connection fails
     """
-    client = Client(mcp_url)
+    transport = _create_mcp_transport(mcp_url, authorization_token)
+    client = Client(transport=transport)
     async with client:
         # Check if connected
         if not client.is_connected():
@@ -532,7 +591,16 @@ async def _validate_mcp_tool_remote(
     if not actual_mcp_url:
         raise NotFoundException(f"MCP server not found for name: {usage}")
 
-    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs)
+    # Get authorization token from database
+    authorization_token = None
+    if tenant_id:
+        authorization_token = get_mcp_authorization_token_by_name_and_url(
+            mcp_name=usage,
+            mcp_server=actual_mcp_url,
+            tenant_id=tenant_id
+        )
+
+    return await _call_mcp_tool(actual_mcp_url, tool_name, inputs, authorization_token)
 
 
 def _get_tool_class_by_name(tool_name: str) -> Optional[type]:
