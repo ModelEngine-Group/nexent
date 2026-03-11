@@ -396,7 +396,7 @@ class TestGetLocalToolsClasses:
     """ test the function of get_local_tools_classes"""
 
     @patch('backend.services.tool_configuration_service.importlib.import_module')
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_get_local_tools_classes_success(self, mock_get_local_tools_classes, mock_import):
         """ test the success of get_local_tools_classes"""
         # create the mock tool class
@@ -420,7 +420,7 @@ class TestGetLocalToolsClasses:
         mock_get_local_tools_classes.return_value = [
             mock_tool_class1, mock_tool_class2]
 
-        from backend.services.tool_configuration_service import get_local_tools_classes
+        from backend.services.tool_local_service import get_local_tools_classes
         result = get_local_tools_classes()
 
         # Assertions
@@ -430,14 +430,14 @@ class TestGetLocalToolsClasses:
         assert mock_non_class not in result
 
     @patch('backend.services.tool_configuration_service.importlib.import_module')
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_get_local_tools_classes_import_error(self, mock_get_local_tools_classes, mock_import):
         """ test the import error of get_local_tools_classes"""
         mock_import.side_effect = ImportError("Module not found")
         mock_get_local_tools_classes.side_effect = ImportError(
             "Module not found")
 
-        from backend.services.tool_configuration_service import get_local_tools_classes
+        from backend.services.tool_local_service import get_local_tools_classes
         with pytest.raises(ImportError):
             get_local_tools_classes()
 
@@ -445,7 +445,7 @@ class TestGetLocalToolsClasses:
 class TestGetLocalTools:
     """ test the function of get_local_tools"""
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     @patch('backend.services.tool_configuration_service.get_local_tools')
     def test_get_local_tools_success(self, mock_get_local_tools, mock_signature, mock_get_classes):
@@ -495,7 +495,7 @@ class TestGetLocalTools:
         assert tool_info.source == ToolSourceEnum.LOCAL.value
         assert tool_info.class_name == "TestTool"
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     @patch('backend.services.tool_configuration_service.get_local_tools')
     def test_get_local_tools_no_classes(self, mock_get_local_tools, mock_get_classes):
         """ test the no tool class of get_local_tools"""
@@ -506,7 +506,7 @@ class TestGetLocalTools:
         result = get_local_tools()
         assert result == []
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     @patch('backend.services.tool_configuration_service.get_local_tools')
     def test_get_local_tools_with_exception(self, mock_get_local_tools, mock_get_classes):
         """ test the exception of get_local_tools"""
@@ -3114,12 +3114,14 @@ class TestGetLocalToolsDescriptionZh:
 
     def setup_method(self):
         """Import the function to test."""
-        from backend.services.tool_configuration_service import get_local_tools_description_zh
+        from backend.services.tool_local_service import get_local_tools_description_zh
         self.get_local_tools_description_zh = get_local_tools_description_zh
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_returns_correct_structure_with_description_zh(self, mock_get_classes):
         """Test that function returns correct structure with description_zh for tools."""
+        from pydantic import Field
+        
         # Create a mock tool class with description_zh
         class MockToolWithDescriptionZh:
             name = "test_search_tool"
@@ -3139,7 +3141,7 @@ class TestGetLocalToolsDescriptionZh:
                 }
             }
 
-            def __init__(self, api_key: str = "default"):
+            def __init__(self, api_key: str = Field(description="API key", default="default")):
                 self.api_key = api_key
 
         mock_get_classes.return_value = [MockToolWithDescriptionZh]
@@ -3154,9 +3156,11 @@ class TestGetLocalToolsDescriptionZh:
         assert "params" in tool_info
         assert "inputs" in tool_info
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_extracts_param_description_zh(self, mock_get_classes):
         """Test that function extracts description_zh from init params."""
+        from pydantic import Field
+        
         class MockToolWithParamDescriptions:
             name = "test_tool"
             description = "Test tool"
@@ -3173,7 +3177,7 @@ class TestGetLocalToolsDescriptionZh:
                 }
             }
 
-            def __init__(self, param1: str = "", param2: int = 0):
+            def __init__(self, param1: str = Field(description="param1", default=""), param2: int = Field(description="param2", default=0)):
                 self.param1 = param1
                 self.param2 = param2
 
@@ -3193,7 +3197,7 @@ class TestGetLocalToolsDescriptionZh:
         assert param2_info is not None
         assert param2_info["description_zh"] == "第二个参数"
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_extracts_inputs_description_zh(self, mock_get_classes):
         """Test that function extracts description_zh from inputs."""
         class MockToolWithInputDescriptions:
@@ -3229,7 +3233,7 @@ class TestGetLocalToolsDescriptionZh:
         assert "limit" in inputs
         assert inputs["limit"]["description_zh"] == "最大结果数"
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_returns_empty_dict_when_no_tools(self, mock_get_classes):
         """Test that function returns empty dict when no tools available."""
         mock_get_classes.return_value = []
@@ -3238,7 +3242,7 @@ class TestGetLocalToolsDescriptionZh:
 
         assert result == {}
 
-    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_handles_tool_without_description_zh(self, mock_get_classes):
         """Test that function handles tools without description_zh gracefully."""
         class MockToolWithoutDescriptionZh:

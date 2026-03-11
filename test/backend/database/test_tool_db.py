@@ -92,15 +92,15 @@ sys.modules['database.agent_db'] = agent_db_mock
 sys.modules['backend.database.agent_db'] = agent_db_mock
 
 # Mock services module
-tool_configuration_service_mock = MagicMock()
-tool_configuration_service_mock.get_local_tools_description_zh = MagicMock(return_value={})
+tool_local_service_mock = MagicMock()
+tool_local_service_mock.get_local_tools_description_zh = MagicMock(return_value={})
 
 services_mock = MagicMock()
-services_mock.tool_configuration_service = tool_configuration_service_mock
+services_mock.tool_local_service = tool_local_service_mock
 
 # Add the mocked services module to sys.modules
 sys.modules['services'] = services_mock
-sys.modules['services.tool_configuration_service'] = tool_configuration_service_mock
+sys.modules['services.tool_local_service'] = tool_local_service_mock
 
 # Now we can safely import the module being tested
 from backend.database.tool_db import (
@@ -1436,7 +1436,7 @@ class TestAddToolFieldDescriptionZh:
         
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
-            "services.tool_configuration_service.get_local_tools_description_zh",
+            "services.tool_local_service.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
         
@@ -1474,7 +1474,7 @@ class TestAddToolFieldDescriptionZh:
         
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
-            "services.tool_configuration_service.get_local_tools_description_zh",
+            "services.tool_local_service.get_local_tools_description_zh",
             mock_get_sdk_descriptions
         )
         
