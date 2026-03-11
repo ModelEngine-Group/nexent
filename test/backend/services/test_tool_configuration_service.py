@@ -3120,6 +3120,8 @@ class TestGetLocalToolsDescriptionZh:
     @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_returns_correct_structure_with_description_zh(self, mock_get_classes):
         """Test that function returns correct structure with description_zh for tools."""
+        from pydantic import Field
+        
         # Create a mock tool class with description_zh
         class MockToolWithDescriptionZh:
             name = "test_search_tool"
@@ -3139,7 +3141,7 @@ class TestGetLocalToolsDescriptionZh:
                 }
             }
 
-            def __init__(self, api_key: str = "default"):
+            def __init__(self, api_key: str = Field(description="API key", default="default")):
                 self.api_key = api_key
 
         mock_get_classes.return_value = [MockToolWithDescriptionZh]
@@ -3157,6 +3159,8 @@ class TestGetLocalToolsDescriptionZh:
     @patch('backend.services.tool_local_service.get_local_tools_classes')
     def test_extracts_param_description_zh(self, mock_get_classes):
         """Test that function extracts description_zh from init params."""
+        from pydantic import Field
+        
         class MockToolWithParamDescriptions:
             name = "test_tool"
             description = "Test tool"
@@ -3173,7 +3177,7 @@ class TestGetLocalToolsDescriptionZh:
                 }
             }
 
-            def __init__(self, param1: str = "", param2: int = 0):
+            def __init__(self, param1: str = Field(description="param1", default=""), param2: int = Field(description="param2", default=0)):
                 self.param1 = param1
                 self.param2 = param2
 
