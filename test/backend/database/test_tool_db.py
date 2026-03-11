@@ -20,22 +20,6 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 # Mock consts.model module and ToolSourceEnum
 # Create a mock ToolSourceEnum that supports .value attribute access
-from backend.database.tool_db import (
-    create_tool,
-    create_or_update_tool_by_tool_info,
-    query_all_tools,
-    query_tool_instances_by_id,
-    query_tool_instances_by_agent_id,
-    query_tools_by_ids,
-    query_all_enabled_tool_instances,
-    update_tool_table_from_scan_tool_list,
-    add_tool_field,
-    search_tools_for_sub_agent,
-    check_tool_is_available,
-    delete_tools_by_agent_id,
-    search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized
-)
 
 class MockEnumMember:
     def __init__(self, value):
@@ -107,7 +91,22 @@ sys.modules['database.agent_db'] = agent_db_mock
 sys.modules['backend.database.agent_db'] = agent_db_mock
 
 # Now we can safely import the module being tested
-
+from backend.database.tool_db import (
+    create_tool,
+    create_or_update_tool_by_tool_info,
+    query_all_tools,
+    query_tool_instances_by_id,
+    query_tool_instances_by_agent_id,
+    query_tools_by_ids,
+    query_all_enabled_tool_instances,
+    update_tool_table_from_scan_tool_list,
+    add_tool_field,
+    search_tools_for_sub_agent,
+    check_tool_is_available,
+    delete_tools_by_agent_id,
+    search_last_tool_instance_by_tool_id,
+    check_tool_list_initialized
+)
 
 class MockToolInstance:
     def __init__(self):
