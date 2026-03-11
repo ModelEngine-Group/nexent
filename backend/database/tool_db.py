@@ -4,6 +4,7 @@ from typing import List
 from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
+from consts.model import ToolSourceEnum
 from services.tool_local_service import get_local_tools_description_zh
 
 
@@ -37,7 +38,7 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
     Args:
         tool_info: Dictionary containing tool information
         tenant_id: Tenant ID for filtering, mandatory
-        user_id: Optional user ID for filtering
+        user_id: User ID for updating (will be set as the last updater)
         version_no: Version number to filter. Default 0 = draft/editing state
 
     Returns:
@@ -48,9 +49,10 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
 
     with get_db_session() as session:
         # Query if there is an existing ToolInstance
+        # Note: Do not filter by user_id to avoid creating duplicate instances
+        # for the same agent_id and tool_id when different users save
         query = session.query(ToolInstance).filter(
             ToolInstance.tenant_id == tenant_id,
-            ToolInstance.user_id == user_id,
             ToolInstance.agent_id == tool_info_dict['agent_id'],
             ToolInstance.delete_flag != 'Y',
             ToolInstance.tool_id == tool_info_dict['tool_id'],
@@ -63,7 +65,12 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
                 if hasattr(tool_instance, key):
                     setattr(tool_instance, key, value)
         else:
-            create_tool(tool_info_dict, version_no)
+            # Create a new ToolInstance
+            new_tool_instance = ToolInstance(
+                **filter_property(tool_info_dict, ToolInstance))
+            session.add(new_tool_instance)
+            session.flush()  # Flush to get the ID
+            tool_instance = new_tool_instance
         return tool_instance
 
 
