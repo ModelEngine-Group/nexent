@@ -105,6 +105,9 @@ def get_local_tools() -> List[ToolInfo]:
     tools_info = []
     tools_classes = get_local_tools_classes()
     for tool_class in tools_classes:
+        # Get class-level init_param_descriptions for fallback
+        init_param_descriptions = getattr(tool_class, 'init_param_descriptions', {})
+        
         init_params_list = []
         sig = inspect.signature(tool_class.__init__)
         for param_name, param in sig.parameters.items():
@@ -113,7 +116,13 @@ def get_local_tools() -> List[ToolInfo]:
 
             # Get description in both languages
             param_description = param.default.description if hasattr(param.default, 'description') else ""
+            
+            # First try to get from param.default.description_zh (FieldInfo)
             param_description_zh = param.default.description_zh if hasattr(param.default, 'description_zh') else None
+            
+            # Fallback to init_param_descriptions if not found
+            if param_description_zh is None and param_name in init_param_descriptions:
+                param_description_zh = init_param_descriptions[param_name].get('description_zh')
 
             param_info = {
                 "type": python_type_to_json_schema(param.annotation),

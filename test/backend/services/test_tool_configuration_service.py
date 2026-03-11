@@ -3287,8 +3287,15 @@ class TestGetLocalToolsDescriptionZhCoverage:
                     "description_zh": "查询"
                 }
             }
+            # Use init_param_descriptions for param description_zh (Pydantic V2 doesn't support Field(description_zh=...))
+            init_param_descriptions = {
+                "param1": {
+                    "description": "Param1",
+                    "description_zh": "参数1"
+                }
+            }
 
-            def __init__(self, param1: str = Field(description="Param1", description_zh="参数1", default="")):
+            def __init__(self, param1: str = Field(description="Param1", default="")):
                 pass
 
         mock_get_classes.return_value = [MockToolWithZh]
@@ -3300,7 +3307,7 @@ class TestGetLocalToolsDescriptionZhCoverage:
         tool_info = result[0]
         assert tool_info.description_zh == "测试工具"
         
-        # Check params have description_zh
+        # Check params have description_zh from init_param_descriptions
         params = tool_info.params
         param1 = next((p for p in params if p["name"] == "param1"), None)
         assert param1 is not None
