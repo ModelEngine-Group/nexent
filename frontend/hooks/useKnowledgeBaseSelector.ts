@@ -303,6 +303,8 @@ export function useSyncKnowledgeBases() {
       config?: {
         serverUrl?: string;
         apiKey?: string;
+        userId?: string;
+        knowledgeSpaceId?: string;
       }
     ): Promise<void> => {
       setIsSyncing(toolType);
