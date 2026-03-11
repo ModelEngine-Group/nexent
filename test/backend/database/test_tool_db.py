@@ -250,6 +250,7 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
         tenant_id = MagicMock()
         agent_id = MagicMock()
         tool_id = MagicMock()
+        user_id = MagicMock()
         delete_flag = MagicMock()
         version_no = MagicMock()
 
@@ -1436,7 +1437,7 @@ class TestAddToolFieldDescriptionZh:
         
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
-            "services.tool_local_service.get_local_tools_description_zh",
+            "backend.database.tool_db.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
         
@@ -1474,7 +1475,7 @@ class TestAddToolFieldDescriptionZh:
         
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
-            "services.tool_local_service.get_local_tools_description_zh",
+            "backend.database.tool_db.get_local_tools_description_zh",
             mock_get_sdk_descriptions
         )
         
