@@ -1194,5 +1194,216 @@ async def test_manage_healthcheck_exception(client, auth_header, user_credential
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
+# Tests for /model/manage/provider/list endpoint
+@pytest.mark.asyncio
+async def test_manage_provider_list_success(client, auth_header, user_credentials, mocker):
+    """Test successful provider model list retrieval for a specified tenant."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider_models(*args, **kwargs):
+        return [
+            {
+                "id": "silicon/llama-3-8b",
+                "model_repo": "silicon",
+                "model_name": "llama-3-8b",
+                "object": "model",
+                "created": 1699999999,
+                "owned_by": "silicon",
+                "max_tokens": 8192
+            },
+            {
+                "id": "silicon/llama-3-70b",
+                "model_repo": "silicon",
+                "model_name": "llama-3-70b",
+                "object": "model",
+                "created": 1699999999,
+                "owned_by": "silicon",
+                "max_tokens": 8192
+            }
+        ]
+
+    mock_list = mocker.patch('apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "llm"
+    }
+    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully retrieved provider model list" in data["message"]
+    assert len(data["data"]) == 2
+    mock_list.assert_called_once_with("target_tenant", "silicon", "llm")
+
+
+@pytest.mark.asyncio
+async def test_manage_provider_list_exception(client, auth_header, user_credentials, mocker):
+    """Test provider model list retrieval with exception."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider_models(*args, **kwargs):
+        raise Exception("Provider API error")
+
+    mocker.patch('apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "llm"
+    }
+    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_manage_provider_list_empty(client, auth_header, user_credentials, mocker):
+    """Test provider model list retrieval with empty result."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_list_provider_models(*args, **kwargs):
+        return []
+
+    mock_list = mocker.patch('apps.model_managment_app.list_provider_models_for_tenant', side_effect=mock_list_provider_models)
+
+    request_data = {
+        "tenant_id": "empty_tenant",
+        "provider": "silicon",
+        "model_type": "embedding"
+    }
+    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert len(data["data"]) == 0
+
+
+# Tests for /model/manage/provider/create endpoint
+@pytest.mark.asyncio
+async def test_manage_provider_create_success(client, auth_header, user_credentials, mocker):
+    """Test successful provider model creation for a specified tenant."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_create_provider_models(*args, **kwargs):
+        return [
+            {
+                "id": "silicon/llama-3-8b",
+                "object": "model",
+                "created": 1699999999,
+                "owned_by": "silicon",
+                "max_tokens": 8192
+            },
+            {
+                "id": "silicon/llama-3-70b",
+                "object": "model",
+                "created": 1699999999,
+                "owned_by": "silicon",
+                "max_tokens": 8192
+            }
+        ]
+
+    mock_create = mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "llm",
+        "api_key": "test_api_key",
+        "base_url": ""
+    }
+    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert "Successfully created provider models" in data["message"]
+    assert len(data["data"]) == 2
+    mock_create.assert_called_once_with(
+        "target_tenant",
+        {"provider": "silicon", "model_type": "llm", "api_key": "test_api_key", "base_url": ""}
+    )
+
+
+@pytest.mark.asyncio
+async def test_manage_provider_create_with_base_url(client, auth_header, user_credentials, mocker):
+    """Test provider model creation with base URL for modelengine provider."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_create_provider_models(*args, **kwargs):
+        return [
+            {
+                "id": "modelengine/gpt-4",
+                "object": "model",
+                "created": 1699999999,
+                "owned_by": "modelengine",
+                "max_tokens": 8192
+            }
+        ]
+
+    mock_create = mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "modelengine",
+        "model_type": "llm",
+        "api_key": "test_api_key",
+        "base_url": "https://api.modelengine.example.com"
+    }
+    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    mock_create.assert_called_once_with(
+        "target_tenant",
+        {"provider": "modelengine", "model_type": "llm", "api_key": "test_api_key", "base_url": "https://api.modelengine.example.com"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_manage_provider_create_exception(client, auth_header, user_credentials, mocker):
+    """Test provider model creation with exception."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_create_provider_models(*args, **kwargs):
+        raise Exception("Provider API error")
+
+    mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "llm",
+        "api_key": "test_api_key",
+        "base_url": ""
+    }
+    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_manage_provider_create_empty(client, auth_header, user_credentials, mocker):
+    """Test provider model creation with empty result."""
+    mocker.patch('apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    async def mock_create_provider_models(*args, **kwargs):
+        return []
+
+    mock_create = mocker.patch('apps.model_managment_app.create_provider_models_for_tenant', side_effect=mock_create_provider_models)
+
+    request_data = {
+        "tenant_id": "target_tenant",
+        "provider": "silicon",
+        "model_type": "embedding",
+        "api_key": "test_api_key",
+        "base_url": ""
+    }
+    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert len(data["data"]) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

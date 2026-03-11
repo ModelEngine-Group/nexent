@@ -10,7 +10,7 @@ from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 from consts.model import UserSignInRequest, UserSignUpRequest
 from consts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException
 from services.user_management_service import get_authorized_client, validate_token, \
-    check_auth_service_health, signup_user, signup_user_with_invitation, signin_user, refresh_user_token, \
+    check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info
 from services.user_service import delete_user_and_cleanup
 from consts.exceptions import UnauthorizedError
@@ -42,19 +42,10 @@ async def service_health():
 async def signup(request: UserSignUpRequest):
     """User registration"""
     try:
-        if request.with_new_invitation:
-            user_data = await signup_user_with_invitation(email=request.email,
-                                                          password=request.password,
-                                                          invite_code=request.invite_code)
-        else:
-            user_data = await signup_user(email=request.email,
-                                          password=request.password,
-                                          is_admin=request.is_admin,
-                                          invite_code=request.invite_code)
-        if request.is_admin:
-            success_message = "🎉 Admin account registered successfully! You now have system management permissions."
-        else:
-            success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
+        user_data = await signup_user_with_invitation(email=request.email,
+                                                      password=request.password,
+                                                      invite_code=request.invite_code)
+        success_message = "🎉 User account registered successfully! Please start experiencing the AI assistant service."
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message":success_message, "data":user_data})
     except NoInviteCodeException as e:
@@ -220,25 +211,19 @@ async def get_user_id(request: Request):
                             content={"message": "User not logged in",
                                      "data": {"user_id": None}})
     try:
-        # Use the unified token validation function
+        # Use the unified token validation function (validates signature via Supabase)
         is_valid, user = validate_token(authorization)
         if is_valid and user:
             return JSONResponse(status_code=HTTPStatus.OK,
                                 content={"message": "Get user ID successfully",
-                                         "data":{"user_id": user.id}})
+                                         "data": {"user_id": user.id}})
 
-        # If the token is invalid, try to parse the user ID from the token
-        user_id, _ = get_current_user_id(authorization)
-        if user_id:
-            return JSONResponse(status_code=HTTPStatus.OK,
-                                content={"message": "Successfully parsed user ID from token",
-                                         "data": {"user_id": user_id}})
-        raise ValueError("User not logged in or session invalid")
-
-    except ValueError as e:
-        logging.error(f"Get user ID failed: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        # Token invalid or expired - do not trust unsigned JWT, return 401
+        logging.warning("Get user ID failed: token validation failed")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED,
                             detail="User not logged in or session invalid")
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Get user ID failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

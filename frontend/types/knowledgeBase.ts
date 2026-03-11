@@ -41,6 +41,9 @@ export interface KnowledgeBaseCreateParams {
   description: string;
   source?: string;
   embeddingModel?: string;
+  // Group permission and user groups for new knowledge bases
+  ingroup_permission?: string;
+  group_ids?: number[];
 }
 
 // Document type

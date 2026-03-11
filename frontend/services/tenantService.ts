@@ -25,6 +25,15 @@ export interface TenantListResponse {
   message: string;
 }
 
+export interface TenantListPaginatedResponse {
+  data: Tenant[];
+  message: string;
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export interface TenantDetailResponse {
   data: Tenant;
   message: string;
@@ -35,17 +44,47 @@ export interface CreateTenantResponse {
   message: string;
 }
 
+export interface TenantUser {
+  user_tenant_id: number;
+  user_id: string;
+  tenant_id: string;
+  user_role: string;
+  user_email: string;
+  create_time: string;
+  update_time: string;
+}
+
+export interface TenantUsersResponse {
+  users: TenantUser[];
+  total: number;
+  message: string;
+}
+
+export interface ListTenantsParams {
+  page?: number;
+  page_size?: number;
+}
+
 /**
- * List all tenants (filtered by user permissions)
+ * List tenants with pagination support (filtered by user permissions)
  */
-export async function listTenants(): Promise<Tenant[]> {
+export async function listTenants(params?: ListTenantsParams): Promise<TenantListPaginatedResponse> {
   try {
-    const response = await fetchWithAuth(API_ENDPOINTS.tenant.list, {
-      method: "GET",
+    const url = API_ENDPOINTS.tenant.list;
+
+    const response = await fetchWithAuth(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        page: params?.page ?? 1,
+        page_size: params?.page_size ?? 20,
+      }),
     });
 
-    const result: TenantListResponse = await response.json();
-    return result.data;
+    const result: TenantListPaginatedResponse = await response.json();
+    return result;
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -137,5 +176,36 @@ export async function deleteTenant(tenantId: string): Promise<void> {
       throw error;
     }
     throw new ApiError(500, "Failed to delete tenant");
+  }
+}
+
+/**
+ * Get users belonging to a tenant (using existing users/list endpoint)
+ * Returns all users without pagination
+ */
+export async function getTenantUsers(tenantId: string): Promise<TenantUsersResponse> {
+  try {
+    const response = await fetchWithAuth(API_ENDPOINTS.users.list, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tenant_id: tenantId,
+        // Omit page and page_size to get all users
+      }),
+    });
+
+    const result = await response.json();
+    return {
+      users: result.data || [],
+      total: result.total || 0,
+      message: result.message || "",
+    };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(500, "Failed to fetch tenant users");
   }
 }

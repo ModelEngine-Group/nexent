@@ -146,7 +146,7 @@ def _rethrow_or_plain(exc: Exception) -> None:
     raise Exception(msg)
 
 
-def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabaseCore, user_id: str, tenant_id: str) -> dict:
+def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabaseCore, user_id: str, tenant_id: str, exclude_index_name: Optional[str] = None) -> dict:
     """
     Check knowledge base existence and handle orphan cases
 
@@ -155,6 +155,7 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
         vdb_core: Elasticsearch core instance
         user_id: Current user ID
         tenant_id: Current tenant ID
+        exclude_index_name: Optional index name to exclude from the check (used when updating an existing knowledge base)
 
     Returns:
         dict: Status information about the knowledge base
@@ -165,6 +166,9 @@ def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabas
 
     # Case A: Knowledge base name already exists in the same tenant
     if pg_record:
+        # If we're excluding a specific index and this is the one we found, consider it available
+        if exclude_index_name and pg_record.get("index_name") == exclude_index_name:
+            return {"status": "available"}
         return {"status": "exists_in_tenant"}
 
     # Case B: Name is available in this tenant
@@ -389,6 +393,8 @@ class ElasticSearchService:
             vdb_core: VectorDatabaseCore,
             user_id: Optional[str],
             tenant_id: Optional[str],
+            ingroup_permission: Optional[str] = None,
+            group_ids: Optional[List[int]] = None,
     ):
         """
         Create a new knowledge base with a user-facing name and an internal Elasticsearch index name.
@@ -412,6 +418,13 @@ class ElasticSearchService:
                 "tenant_id": tenant_id,
                 "embedding_model_name": embedding_model.model if embedding_model else None,
             }
+
+            # Add group permission and group IDs if provided
+            if ingroup_permission is not None:
+                knowledge_data["ingroup_permission"] = ingroup_permission
+            if group_ids is not None:
+                knowledge_data["group_ids"] = group_ids
+
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
 
@@ -1219,7 +1232,6 @@ class ElasticSearchService:
                 summarize_clusters_map_reduce,
                 merge_cluster_summaries
             )
-
             # Use new Map-Reduce approach
             # Sample reasonable number of documents
             sample_count = min(batch_size // 5, 200)

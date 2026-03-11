@@ -11,12 +11,13 @@ import {
 } from "lucide-react";
 
 import { useConfig } from "@/hooks/useConfig";
-import { configService } from "@/services/configService";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
 import { ModelType, SingleModelConfig } from "@/types/modelConfig";
 import { MODEL_TYPES, PROVIDER_LINKS } from "@/const/modelConfig";
 import { useSiliconModelList } from "@/hooks/model/useSiliconModelList";
+import { useDashscopeModelList } from "@/hooks/model/useDashscopeModelList";
+import { useTokenPonyModelList } from "@/hooks/model/useTokenponyModelList";
 import log from "@/lib/logger";
 import {
   ModelChunkSizeSlider,
@@ -191,7 +192,7 @@ export const ModelAddDialog = ({
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig, getConfig } = useConfig();
+  const { updateModelConfig, saveConfig } = useConfig();
 
   // Parse backend error message and return i18n key with params
   const parseModelError = (
@@ -236,16 +237,11 @@ export const ModelAddDialog = ({
   const [loadingModelList, setLoadingModelList] = useState(false);
 
   const persistModelConfig = useCallback(async () => {
-    try {
-      const ok = await configService.saveConfigToBackend(getConfig() as any);
-      if (!ok) {
-        message.error(t("setup.page.error.saveConfig"));
-      }
-    } catch (error) {
+    const ok = await saveConfig();
+    if (!ok) {
       message.error(t("setup.page.error.saveConfig"));
-      log.error("Failed to auto save model configuration", error);
     }
-  }, [getConfig, message, t]);
+  }, [saveConfig, message, t]);
 
   // Settings modal state
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -254,14 +250,41 @@ export const ModelAddDialog = ({
   const [modelMaxTokens, setModelMaxTokens] = useState("4096");
 
   // Use the silicon model list hook
-  const { getModelList, getProviderSelectedModalList } = useSiliconModelList({
+  const siliconHook  = useSiliconModelList({
     form,
     setModelList,
     setSelectedModelIds,
     setShowModelList,
     setLoadingModelList,
+    tenantId,
   });
+  const dashscopeHook = useDashscopeModelList({
+    form,
+    setModelList,
+    setSelectedModelIds,
+    setShowModelList,
+    setLoadingModelList,
+    tenantId,
+  });
+  const tokenponyHook = useTokenPonyModelList({
+    form,
+    setModelList,
+    setSelectedModelIds,
+    setShowModelList,
+    setLoadingModelList,
+    tenantId,
+  });
+  let getModelList;
+  let getProviderSelectedModalList;
 
+// 2. 根据条件赋值
+  if (form.provider === "silicon") {
+    ({ getModelList, getProviderSelectedModalList } = siliconHook);
+  } else if (form.provider === "dashscope") {
+    ({ getModelList, getProviderSelectedModalList } = dashscopeHook);
+  } else if (form.provider === "tokenpony") {
+    ({ getModelList, getProviderSelectedModalList } = tokenponyHook);
+  }
   // Reset form to default state
   const resetForm = useCallback(() => {
     setForm(DEFAULT_FORM_STATE);
@@ -799,6 +822,8 @@ export const ModelAddDialog = ({
                 {t("model.provider.modelengine")}
               </Option>
               <Option value="silicon">{t("model.provider.silicon")}</Option>
+              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
+              <Option value="tokenpony">{t("model.provider.tokenpony")}</Option>
             </Select>
             {/* ModelEngine URL input (only when provider is ModelEngine) */}
             {form.provider === "modelengine" && (

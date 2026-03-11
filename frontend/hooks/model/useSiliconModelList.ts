@@ -19,6 +19,7 @@ interface UseSiliconModelListProps {
   setSelectedModelIds: (ids: Set<string>) => void;
   setShowModelList: (show: boolean) => void;
   setLoadingModelList: (loading: boolean) => void;
+  tenantId?: string; // Optional tenant ID for manage operations
 }
 
 export const useSiliconModelList = ({
@@ -27,6 +28,7 @@ export const useSiliconModelList = ({
   setSelectedModelIds,
   setShowModelList,
   setLoadingModelList,
+  tenantId,
 }: UseSiliconModelListProps) => {
   const { t } = useTranslation();
 
@@ -38,15 +40,27 @@ export const useSiliconModelList = ({
         ? ("multi_embedding" as ModelType)
         : form.type;
     try {
-      const result = await modelService.addProviderModel({
-        provider: form.provider,
-        type: modelType,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        baseUrl:
-          form.provider === "modelengine" && form.apiKey.trim() !== ""
-            ? (form as any).modelEngineUrl || ""
-            : undefined,
-      });
+      // Use manage interface if tenantId is provided (for super admin)
+      const result = tenantId
+        ? await modelService.addManageProviderModel({
+            tenantId,
+            provider: form.provider,
+            type: modelType,
+            apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+            baseUrl:
+              form.provider === "modelengine" && form.apiKey.trim() !== ""
+                ? (form as any).modelEngineUrl || ""
+                : undefined,
+          })
+        : await modelService.addProviderModel({
+            provider: form.provider,
+            type: modelType,
+            apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+            baseUrl:
+              form.provider === "modelengine" && form.apiKey.trim() !== ""
+                ? (form as any).modelEngineUrl || ""
+                : undefined,
+          });
 
       // Use centralized error processing
       const { models, error } = processProviderResponse(
@@ -92,15 +106,22 @@ export const useSiliconModelList = ({
       form.type === "embedding" && form.isMultimodal
         ? ("multi_embedding" as ModelType)
         : form.type;
-    const result = await modelService.getProviderSelectedModalList({
-      provider: form.provider,
-      type: modelType,
-      api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-      baseUrl:
-        form.provider === "modelengine" && form.apiKey.trim() !== ""
-          ? (form as any).modelEngineUrl || ""
-          : undefined,
-    });
+    // Use manage interface if tenantId is provided (for super admin)
+    const result = tenantId
+      ? await modelService.getManageProviderSelectedModalList({
+          tenantId,
+          provider: form.provider,
+          type: modelType,
+        })
+      : await modelService.getProviderSelectedModalList({
+          provider: form.provider,
+          type: modelType,
+          api_key: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+          baseUrl:
+            form.provider === "modelengine" && form.apiKey.trim() !== ""
+              ? (form as any).modelEngineUrl || ""
+              : undefined,
+        });
     return result;
   };
 

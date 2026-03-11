@@ -1,81 +1,91 @@
 "use client";
 import { useState } from "react";
-import {
-  GitBranch,
-  GitCompare,
-  Rocket,
-} from "lucide-react";
+import { GitBranch, GitCompare, Rocket } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  Card,
-  Flex,
-  Button,
-  Tag,
-  Typography,
-  Empty,
-  Spin,
-  Modal,
-  Form,
-  Input,
-  message,
-} from "antd";
+import { Card, Flex, Button, Tag, Empty, Spin, message } from "antd";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { publishVersion } from "@/services/agentVersionService";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { VersionCardItem } from "./AgentVersionCard";
 import log from "@/lib/logger";
-import { useQueryClient } from "@tanstack/react-query";
-
-const { TextArea } = Input;
+import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
+import { compareVersions, type VersionCompareResponse } from "@/services/agentVersionService";
 
 export default function AgentVersionManage() {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
-
   const currentAgentId = useAgentConfigStore((state) => state.currentAgentId);
 
   const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
   const { agentInfo, invalidate: invalidateAgentInfo } = useAgentInfo(currentAgentId);
+  
+  const [compareModalOpen, setCompareModalOpen] = useState(false);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(null);
+  const [selectedVersionA, setSelectedVersionA] = useState<number | null>(null);
+  const [selectedVersionB, setSelectedVersionB] = useState<number | null>(null);
 
 
-  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [publishForm] = Form.useForm();
-
-  // Open publish modal
-  const handlePublishClick = () => {
-    setIsPublishModalOpen(true);
+  const loadComparison = async (agentId: number, versionNoA: number, versionNoB: number) => {
+    try {
+      setCompareLoading(true);
+      const result = await compareVersions(agentId, versionNoA, versionNoB);
+      setCompareData(result);
+    } catch (error) {
+      log.error("Failed to compare versions:", error);
+      message.error(t("agent.version.compareError"));
+    } finally {
+      setCompareLoading(false);
+    }
   };
 
-  // Handle publish version
-  const handlePublish = async (values: { version_name?: string; release_note?: string }) => {
+  const handleOpenCompareModal = async () => {
     if (!currentAgentId) {
       message.error(t("agent.error.agentNotFound"));
       return;
     }
-
-    // Prevent duplicate submissions
-    if (isPublishing) {
-      log.warn("Publish request already in progress, ignoring duplicate click");
+    if (agentVersionList.length < 2) {
+      message.warning(t("agent.version.needTwoVersions"));
       return;
     }
 
-    try {
-      setIsPublishing(true);
-      await publishVersion(currentAgentId, values);
-      message.success(t("agent.version.publishSuccess"));
-      setIsPublishModalOpen(false);
-      publishForm.resetFields();
-      invalidateAgentVersionList();
-      invalidateAgentInfo();
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
-    } catch (error) {
-      log.error("Failed to publish version:", error);
-      message.error(t("agent.version.publishFailed"));
-    } finally {
-      setIsPublishing(false);
+    // Use the last two versions by version_no as default comparison
+    const sorted = [...agentVersionList].sort((a, b) => a.version_no - b.version_no);
+    const defaultVersionA = sorted[sorted.length - 2]?.version_no;
+    const defaultVersionB = sorted[sorted.length - 1]?.version_no;
+
+    if (!defaultVersionA || !defaultVersionB) {
+      message.warning(t("agent.version.needTwoVersions"));
+      return;
     }
+
+    setSelectedVersionA(defaultVersionA);
+    setSelectedVersionB(defaultVersionB);
+    setCompareModalOpen(true);
+    await loadComparison(currentAgentId, defaultVersionA, defaultVersionB);
+  };
+
+  const handleChangeVersionA = async (value: number) => {
+    setSelectedVersionA(value);
+    if (!currentAgentId || !selectedVersionB) {
+      return;
+    }
+    if (value === selectedVersionB) {
+      message.warning(t("agent.version.selectDifferentVersions"));
+      return;
+    }
+    await loadComparison(currentAgentId, value, selectedVersionB);
+  };
+
+  const handleChangeVersionB = async (value: number) => {
+    setSelectedVersionB(value);
+    if (!currentAgentId || !selectedVersionA) {
+      return;
+    }
+    if (value === selectedVersionA) {
+      message.warning(t("agent.version.selectDifferentVersions"));
+      return;
+    }
+    await loadComparison(currentAgentId, selectedVersionA, value);
   };
 
   const footer = [
@@ -92,9 +102,7 @@ export default function AgentVersionManage() {
       <Button
         type="text"
         icon={<GitCompare size={16} />}
-        onClick={() => {
-          log.info("Version comparison");
-        }}
+        onClick={handleOpenCompareModal}
       >
         {t("agent.version.compare")}
       </Button>
@@ -111,15 +119,6 @@ export default function AgentVersionManage() {
             <GitBranch size={16} />
             {t("agent.version.manage")}
           </Flex>
-        }
-        extra={
-          <Button
-            type="primary"
-            icon={<Rocket size={16} />}
-            onClick={handlePublishClick}
-          >
-            {t("agent.version.publish")}
-          </Button>
         }
         actions={footer}
         styles={{
@@ -152,46 +151,18 @@ export default function AgentVersionManage() {
         </div>
       </Card>
 
-      {/* Publish Version Modal */}
-      <Modal
-        centered
-        title={t("agent.version.publish")}
-        open={isPublishModalOpen}
-        onCancel={() => setIsPublishModalOpen(false)}
-        footer={null}
-        destroyOnHidden
-      >
-        <Form
-          form={publishForm}
-          layout="vertical"
-          onFinish={handlePublish}
-        >
-          <Form.Item
-            label={t("agent.version.versionName")}
-            name="version_name"
-            rules={[{ required: true, message: t("agent.version.versionNameRequired") }]}
-          >
-            <Input placeholder={t("agent.version.versionNamePlaceholder")} />
-          </Form.Item>
-          <Form.Item
-            label={t("agent.version.releaseNote")}
-            name="release_note"
-          >
-            <TextArea
-              rows={4}
-              placeholder={t("agent.version.releaseNotePlaceholder")}
-            />
-          </Form.Item>
-          <Form.Item className="mb-0 flex justify-end gap-2">
-            <Button onClick={() => setIsPublishModalOpen(false)} disabled={isPublishing}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="primary" htmlType="submit" loading={isPublishing} disabled={isPublishing}>
-              {t("common.confirm")}
-            </Button>
-          </Form.Item>
-        </Form>
-      </Modal>
+      <AgentVersionCompareModal
+        open={compareModalOpen}
+        loading={compareLoading}
+        versionList={agentVersionList}
+        currentVersionNo={agentInfo?.current_version_no}
+        compareData={compareData}
+        onCancel={() => setCompareModalOpen(false)}
+        selectedVersionNoA={selectedVersionA}
+        selectedVersionNoB={selectedVersionB}
+        onChangeVersionA={handleChangeVersionA}
+        onChangeVersionB={handleChangeVersionB}
+      />
     </>
   );
 }

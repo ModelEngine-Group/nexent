@@ -26,9 +26,19 @@ consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_const_mock.POSTGRES_DB = "test_db"
 consts_const_mock.POSTGRES_PORT = 5432
 consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
+consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYSTEM": "system"}
+consts_const_mock.THINK_START_PATTERN = "<think>"
+consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
+# Mock consts.error_code and consts.exceptions
+consts_error_code_mock = MagicMock()
+consts_error_code_mock.ErrorCode = MagicMock()
+consts_exceptions_mock = MagicMock()
+consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
+sys.modules['consts.error_code'] = consts_error_code_mock
+sys.modules['consts.exceptions'] = consts_exceptions_mock
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +64,6 @@ from backend.utils.document_vector_utils import (
     merge_cluster_summaries,
     get_documents_from_es,
     process_documents_for_clustering,
-    extract_cluster_content,
     analyze_cluster_coherence,
     merge_duplicate_documents_in_clusters
 )
@@ -499,32 +508,6 @@ class TestProcessDocumentsForClustering:
             assert isinstance(documents, dict)
             assert isinstance(embeddings, dict)
             assert len(documents) == len(embeddings)
-
-
-class TestExtractClusterContent:
-    """Test cluster content extraction"""
-
-    def test_extract_cluster_content(self):
-        """Test extracting content from cluster documents"""
-        document_samples = {
-            'doc1': {
-                'chunks': [{'content': 'Content 1'}],
-                'filename': 'doc1.pdf'
-            },
-            'doc2': {
-                'chunks': [{'content': 'Content 2'}],
-                'filename': 'doc2.pdf'
-            }
-        }
-        doc_ids = ['doc1', 'doc2']
-
-        result = extract_cluster_content(document_samples, doc_ids)
-
-        assert isinstance(result, str)  # The function returns a formatted string
-        assert 'Content 1' in result
-        assert 'Content 2' in result
-        assert 'doc1.pdf' in result
-        assert 'doc2.pdf' in result
 
 
 class TestAnalyzeClusterCoherence:

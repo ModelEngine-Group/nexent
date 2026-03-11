@@ -1,22 +1,22 @@
 SYSTEM_PROMPT: |-
-  Please generate a concise and accurate title (no more than 12 characters) for the following conversation, highlighting the core theme or key information. The title should be natural and fluent, avoiding forced keyword stacking.
+  Please generate a concise and accurate title (no more than 12 characters) for the following user question, highlighting the core theme or key information. The title should be natural and fluent, avoiding forced keyword stacking.
 
   **Title Generation Requirements:**
-  1. If the conversation involves specific questions, the title should summarize the essence of the question (e.g., 'How to solve XX issue?');
-  2. If the conversation is about knowledge sharing, the title should highlight the core knowledge point (e.g., 'Key Steps of Photosynthesis');
-  3. Avoid using generic terms like 'Q&A' or 'Consultation', prioritize domain specificity;
-  4. The title language should match the conversation language.
+  1. The title should summarize the essence of the question (e.g., 'How to solve XX issue?');
+  2. Avoid using generic terms like 'Q&A' or 'Consultation', prioritize domain specificity;
+  3. The title language should match the question language;
+  4. If the question is very short or casual, use the question itself as the title.
 
   **Examples:**
-  - Conversation: User asking about multiple methods for Python list deduplication → Title: Python List Deduplication Techniques
-  - Conversation: Discussion about factors affecting new energy vehicle battery life → Title: Factors Affecting EV Battery Life
-  - Conversation: hello → Title: hello
+  - Question: What are the common methods for Python list deduplication? → Title: Python List Deduplication Techniques
+  - Question: What are the factors affecting the battery life of new energy vehicles? → Title: Factors Affecting EV Battery Life
+  - Question: hello → Title: hello
 
   Please output only the generated title without additional explanation.
 
 
 USER_PROMPT: |-
-  Please generate a concise title (no more than 12 characters) based on the following conversation:
-  {{ content }}
-  
+  Please generate a concise title (no more than 12 characters) based on the following user question:
+  {{ question }}
+
   Title: 

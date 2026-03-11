@@ -44,11 +44,35 @@ After executing this command, the system will provide two different versions for
 - **Terminal Tool**: Enables openssh-server for AI agent shell command execution
 - **Regional optimization**: Mainland China users can use optimized image sources
 
+### ⚠️ Important Notes
+1️⃣ **When deploying v1.8.0 or later for the first time**, please pay special attention to the `suadmin` super administrator account information output in the Docker logs. This account has the highest system privileges, and the password is only displayed upon first generation. It cannot be viewed again later, so please be sure to save it securely.
+
+2️⃣ Forgot to note the `suadmin` account password? Follow these steps:
+```bash
+# Step1: Delete su account record in supabase container
+docker exec -it supabase-db-mini bash
+psql -U postgres
+select id, email from auth.users;
+# Get the user_id of suadmin@nexent.com account
+delete from auth.users where id = 'your_user_id';
+delete from auth.identities where user_id = 'your_user_id';
+
+# Step2: Delete su account record in nexent database
+docker exec -it nexent-postgresql bash
+psql -U root -d nexent
+delete from nexent.user_tenant_t where user_id = 'your_user_id';
+
+# Step3: Redeploy and record the su account password
+```
+
 ### 3. Access Your Installation
 
 When deployment completes successfully:
 1. Open **http://localhost:3000** in your browser
-2. Refer to the [User Guide](../user-guide/home-page) to develop agents
+2. Log in with the super administrator account
+3. Access tenant resources → Create tenant and tenant administrator
+4. Log in with the tenant administrator account
+5. Refer to the [User Guide](../user-guide/home-page) to develop agents
 
 
 ## 🏗️ Service Architecture

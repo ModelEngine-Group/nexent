@@ -15,8 +15,9 @@ from jinja2 import Template
 from agents.agent_run_manager import agent_run_manager
 from agents.create_agent_info import create_agent_run_info, create_tool_config_list
 from agents.preprocess_manager import preprocess_manager
+from services.agent_version_service import publish_version_impl
 from consts.const import MEMORY_SEARCH_START_MSG, MEMORY_SEARCH_DONE_MSG, MEMORY_SEARCH_FAIL_MSG, TOOL_TYPE_MAPPING, \
-    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
+    LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, PERMISSION_PRIVATE
 from consts.exceptions import MemoryPreparationException
 from consts.model import (
     AgentInfoRequest,
@@ -822,7 +823,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,
                 "enabled": request.enabled if request.enabled is not None else True,
-                "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids
+                "group_ids": convert_list_to_string(request.group_ids) if request.group_ids else user_group_ids,
+                "ingroup_permission": request.ingroup_permission
             }, tenant_id=tenant_id, user_id=user_id)
             agent_id = created["agent_id"]
         else:
@@ -1138,7 +1140,8 @@ async def import_agent_impl(
             for sub_agent_id in managed_agents:
                 insert_related_agent(parent_agent_id=mapping_agent_id[need_import_agent_id],
                                      child_agent_id=mapping_agent_id[sub_agent_id],
-                                     tenant_id=tenant_id)
+                                     tenant_id=tenant_id,
+                                     user_id=user_id)
         else:
             # Current agent still has sub-agents that haven't been imported
             agent_stack.append(need_import_agent_id)
@@ -1236,6 +1239,17 @@ async def import_agent_by_agent_id(
         tool.agent_id = new_agent_id
         create_or_update_tool_by_tool_info(
             tool_info=tool, tenant_id=tenant_id, user_id=user_id)
+    # Auto-publish initial version v1 for market-imported agents
+    try:
+        publish_version_impl(
+            agent_id=new_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_name="v1",
+            release_note="Initial version from Agent Market"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to auto-publish version v1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 
@@ -1313,7 +1327,10 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             # Apply visibility filter for DEV/USER based on group overlap
             if not can_edit_all:
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
-                if len(user_group_ids.intersection(agent_group_ids)) == 0:
+                ingroup_permission = agent.get("ingroup_permission")
+                is_creator = str(agent.get("created_by")) == str(user_id)
+                # Hide agent if: no group overlap OR (ingroup_permission is PRIVATE AND user is not creator)
+                if not is_creator and (len(user_group_ids.intersection(agent_group_ids)) == 0 or ingroup_permission == PERMISSION_PRIVATE):
                     continue
 
             # Use shared availability check function
@@ -1346,7 +1363,14 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                     model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
                 model_info = model_cache.get(model_id)
 
-            permission = PERMISSION_EDIT if can_edit_all or str(agent.get("created_by")) == str(user_id) else PERMISSION_READ
+            # Permission logic:
+            # - If creator or can_edit_all: PERMISSION_EDIT
+            # - Otherwise: use ingroup_permission, default to PERMISSION_READ if None
+            if can_edit_all or str(agent.get("created_by")) == str(user_id):
+                permission = PERMISSION_EDIT
+            else:
+                ingroup_permission = agent.get("ingroup_permission")
+                permission = ingroup_permission if ingroup_permission is not None else PERMISSION_READ
 
             simple_agent_list.append({
                 "agent_id": agent["agent_id"],
@@ -1557,6 +1581,7 @@ async def prepare_agent_run(
         user_id=user_id,
         language=language,
         allow_memory_search=allow_memory_search,
+        is_debug=agent_request.is_debug,
     )
     agent_run_manager.register_agent_run(
         agent_request.conversation_id, agent_run_info, user_id)

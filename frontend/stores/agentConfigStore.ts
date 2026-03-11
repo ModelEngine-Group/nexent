@@ -37,6 +37,7 @@ export type EditableAgent = Pick<
   | "business_logic_model_id"
   | "sub_agent_id_list"
   | "group_ids"
+  | "ingroup_permission"
 >;
 
 interface AgentConfigStoreState {
@@ -129,6 +130,7 @@ const emptyEditableAgent: EditableAgent = {
   business_logic_model_id: 0,
   sub_agent_id_list: [],
   group_ids: [],
+  ingroup_permission: "READ_ONLY",
 };
 
 const toEditable = (agent: Agent | null): EditableAgent =>
@@ -151,6 +153,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_id: agent.business_logic_model_id || 0,
         sub_agent_id_list: agent.sub_agent_id_list || [],
         group_ids: agent.group_ids || [],
+        ingroup_permission: agent.ingroup_permission || "READ_ONLY",
       }
     : { ...emptyEditableAgent };
 
@@ -189,7 +192,8 @@ const isProfileInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
       editedAgent.few_shots_prompt !== "" ||
-      normalizeArray(editedAgent.group_ids || []).length > 0
+      normalizeArray(editedAgent.group_ids || []).length > 0 ||
+      editedAgent.ingroup_permission !== "READ_ONLY"
     );
   }
   return (
@@ -205,7 +209,8 @@ const isProfileInfoDirty = (baselineAgent: EditableAgent | null, editedAgent: Ed
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
     baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
     JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
-      JSON.stringify(normalizeArray(editedAgent.group_ids ?? []))
+      JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
+    baselineAgent.ingroup_permission !== editedAgent.ingroup_permission
   );
 };
 
@@ -213,7 +218,79 @@ const isToolsDirty = (baselineAgent: EditableAgent | null, editedAgent: Editable
   if (!baselineAgent) {
     return editedAgent.tools.length > 0;
   }
-  return JSON.stringify(baselineAgent.tools) !== JSON.stringify(editedAgent.tools);
+
+  // Compare tools by ID and their initParams to avoid false positives from object reference differences
+  const baselineTools = baselineAgent.tools;
+  const editedTools = editedAgent.tools;
+
+  // First check if the count is different
+  if (baselineTools.length !== editedTools.length) {
+    return true;
+  }
+
+  // Sort by ID and compare key properties to handle different orderings
+  const sortedBaseline = [...baselineTools].sort((a, b) => Number(a.id) - Number(b.id));
+  const sortedEdited = [...editedTools].sort((a, b) => Number(a.id) - Number(b.id));
+
+  for (let i = 0; i < sortedBaseline.length; i++) {
+    const baseTool = sortedBaseline[i];
+    const editTool = sortedEdited[i];
+
+    // Check if ID is different
+    if (Number(baseTool.id) !== Number(editTool.id)) {
+      return true;
+    }
+
+    // Compare initParams if they exist
+    const baseParams = baseTool.initParams || [];
+    const editParams = editTool.initParams || [];
+
+    if (baseParams.length !== editParams.length) {
+      return true;
+    }
+
+    // Compare each param's name and value
+    for (const baseParam of baseParams) {
+      const editParam = editParams.find(p => p.name === baseParam.name);
+      if (!editParam) {
+        return true;
+      }
+      
+      // Deep comparison for array and object values
+      const baseValue = baseParam.value;
+      const editValue = editParam.value;
+      
+      // If both are arrays, compare their contents
+      if (Array.isArray(baseValue) && Array.isArray(editValue)) {
+        if (baseValue.length !== editValue.length) {
+          return true;
+        }
+        // Sort and compare array elements
+        const sortedBase = [...baseValue].sort();
+        const sortedEdit = [...editValue].sort();
+        if (JSON.stringify(sortedBase) !== JSON.stringify(sortedEdit)) {
+          return true;
+        }
+      } 
+      // If both are objects (but not arrays), compare their JSON representation
+      else if (
+        baseValue !== null && 
+        editValue !== null && 
+        typeof baseValue === 'object' && 
+        typeof editValue === 'object'
+      ) {
+        if (JSON.stringify(baseValue) !== JSON.stringify(editValue)) {
+          return true;
+        }
+      }
+      // For primitive values, use strict equality
+      else if (baseValue !== editValue) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 };
 
 const isSubAgentIdsDirty = (baselineAgent: EditableAgent | null, editedAgent: EditableAgent): boolean => {
@@ -259,11 +336,10 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
   updateTools: (tools) => {
     set((state) => {
       const editedAgent = { ...state.editedAgent, tools: [...tools] };
-      // If there are already unsaved changes, keep it true and skip recalculation.
-      // Only when state is clean do we need to check whether tools changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isToolsDirty(state.baselineAgent, editedAgent);
+      // Always recalculate hasUnsavedChanges to correctly handle:
+      // 1. Selecting a tool -> hasUnsavedChanges = true
+      // 2. Deselecting it back to original -> hasUnsavedChanges = false
+      const hasUnsavedChanges = isToolsDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
@@ -277,9 +353,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const editedAgent = { ...state.editedAgent, sub_agent_id_list: nextIds };
       // If there are already unsaved changes, keep it true and skip recalculation.
       // Only when state is clean do we need to check whether sub-agent IDs changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isSubAgentIdsDirty(state.baselineAgent, editedAgent);
+      const hasUnsavedChanges = isSubAgentIdsDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
@@ -292,9 +366,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const editedAgent = { ...state.editedAgent, ...payload };
       // If there are already unsaved changes, keep it true and skip recalculation.
       // Only when state is clean do we need to check whether business info changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isBusinessInfoDirty(state.baselineAgent, editedAgent);
+      const hasUnsavedChanges = isBusinessInfoDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,
@@ -307,9 +379,7 @@ export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => (
       const editedAgent = { ...state.editedAgent, ...payload };
       // If there are already unsaved changes, keep it true and skip recalculation.
       // Only when state is clean do we need to check whether profile info changed.
-      const hasUnsavedChanges = state.hasUnsavedChanges
-        ? true
-        : isProfileInfoDirty(state.baselineAgent, editedAgent);
+      const hasUnsavedChanges = isProfileInfoDirty(state.baselineAgent, editedAgent);
       return {
         editedAgent,
         hasUnsavedChanges,

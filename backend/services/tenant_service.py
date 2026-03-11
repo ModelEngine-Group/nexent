@@ -1,6 +1,7 @@
 """
 Tenant service for managing tenant operations
 """
+import asyncio
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -9,10 +10,19 @@ from database.tenant_config_db import (
     get_single_config_info,
     insert_config,
     update_config_by_tenant_config_id,
-    get_all_tenant_ids
+    get_all_tenant_ids,
+    delete_config_by_tenant_config_id,
+    get_all_configs_by_tenant_id,
 )
-from database.user_tenant_db import get_users_by_tenant_id
-from database.group_db import add_group
+from database.user_tenant_db import get_users_by_tenant_id, soft_delete_users_by_tenant_id
+from services.user_service import delete_user_and_cleanup
+from database.group_db import add_group, query_groups_by_tenant, remove_group
+from database.model_management_db import get_model_records, delete_model_record
+from database.knowledge_db import get_knowledge_info_by_tenant_id, delete_knowledge_record
+from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
+from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
+from database.invitation_db import query_invitations_by_tenant, remove_invitation
+from database.tool_db import delete_tools_by_agent_id
 from consts.const import TENANT_NAME, TENANT_ID, DEFAULT_GROUP_ID
 from consts.exceptions import NotFoundException, ValidationError, UserRegistrationException
 
@@ -31,6 +41,9 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Tenant information
     """
+    if not tenant_id:
+        return {}
+
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
     if not name_config:
@@ -109,22 +122,35 @@ def check_tenant_name_exists(tenant_name: str, exclude_tenant_id: Optional[str] 
     return False
 
 
-def get_all_tenants() -> List[Dict[str, Any]]:
+def get_tenants_paginated(page: int = 1, page_size: int = 20) -> Dict[str, Any]:
     """
-    Get all tenants
+    Get tenants with pagination support
+
+    Args:
+        page (int): Page number (starting from 1)
+        page_size (int): Number of items per page
 
     Returns:
-        List[Dict[str, Any]]: List of all tenant information
+        Dict[str, Any]: Dictionary containing paginated tenant data and pagination info
     """
-    tenant_ids = get_all_tenant_ids()
-    tenants = []
+    # Get all tenant IDs first
+    all_tenant_ids = get_all_tenant_ids()
+    total = len(all_tenant_ids)
 
-    for tenant_id in tenant_ids:
+    # Calculate pagination
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+
+    # Get tenant IDs for current page
+    page_tenant_ids = all_tenant_ids[start_idx:end_idx]
+
+    tenants = []
+    for tenant_id in page_tenant_ids:
         try:
             tenant_info = get_tenant_info(tenant_id)
             tenants.append(tenant_info)
         except NotFoundException:
-            # Return tenant with basic info but empty name for frontend to show as "unnamed tenant"
             logging.warning(f"Tenant info of {tenant_id} not found. Returning basic tenant structure.")
             tenant_info = {
                 "tenant_id": tenant_id,
@@ -133,7 +159,13 @@ def get_all_tenants() -> List[Dict[str, Any]]:
             }
             tenants.append(tenant_info)
 
-    return tenants
+    return {
+        "data": tenants,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
+    }
 
 
 def create_tenant(tenant_name: str, created_by: Optional[str] = None) -> Dict[str, Any]:
@@ -270,22 +302,152 @@ def update_tenant_info(tenant_id: str, tenant_name: str, updated_by: Optional[st
     return updated_tenant
 
 
-def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
+async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> bool:
     """
-    Delete tenant (placeholder for future implementation)
-    NOTE: Deletion logic is complex and not yet implemented
+    Delete tenant and all associated resources
+
+    This performs cascade deletion of:
+    - All users in the tenant (soft delete)
+    - All groups in the tenant
+    - All models in the tenant
+    - All knowledge bases in the tenant
+    - All agents in the tenant (including tool instances)
+    - All MCP configurations in the tenant
+    - All invitation codes in the tenant
+    - All tenant configurations
 
     Args:
-        tenant_id (str): Tenant ID
-        deleted_by (Optional[str]): Deleted by user ID
+        tenant_id (str): Tenant ID to delete
+        deleted_by (Optional[str]): User who initiated the deletion
 
     Returns:
-        bool: Always returns False as this is not yet implemented
+        bool: True if deletion was successful
 
     Raises:
-        ValidationError: Always raised as this is not yet implemented
+        NotFoundException: When tenant does not exist
+        ValidationError: When deletion fails
     """
-    raise NotImplementedError("Tenant deletion is not yet implemented due to complex dependencies")
+    # Validate tenant exists
+    name_config = get_single_config_info(tenant_id, TENANT_NAME)
+    if not name_config:
+        raise NotFoundException(f"Tenant {tenant_id} does not exist")
+
+    logger.info(f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
+
+    try:
+        # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
+        logger.info(f"Deactivating users for tenant {tenant_id}")
+        users_result = get_users_by_tenant_id(tenant_id, page=1, page_size=10000)
+        users = users_result.get("users", [])
+
+        if users:
+            async def delete_single_user(user: Dict[str, Any]) -> None:
+                user_id = user.get("user_id")
+                if user_id:
+                    try:
+                        await delete_user_and_cleanup(user_id, tenant_id)
+                        logger.info(f"Deactivated user {user_id} for tenant {tenant_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to deactivate user {user_id}: {str(e)}")
+
+            # Concurrently delete all users
+            await asyncio.gather(*[delete_single_user(user) for user in users])
+
+        # 2. Delete all groups in the tenant
+        logger.info(f"Deleting groups for tenant {tenant_id}")
+        groups = query_groups_by_tenant(tenant_id, page=1, page_size=10000)
+        for group in groups.get("data", []):
+            try:
+                remove_group(group["group_id"], deleted_by)
+            except Exception as e:
+                logger.warning(f"Failed to delete group {group.get('group_id')}: {str(e)}")
+
+        # 3. Delete all models in the tenant
+        logger.info(f"Deleting models for tenant {tenant_id}")
+        models = get_model_records({"tenant_id": tenant_id}, tenant_id)
+        for model in models:
+            try:
+                delete_model_record(model["model_id"], deleted_by or "system", tenant_id)
+            except Exception as e:
+                logger.warning(f"Failed to delete model {model.get('model_id')}: {str(e)}")
+
+        # 4. Delete all knowledge bases in the tenant
+        logger.info(f"Deleting knowledge bases for tenant {tenant_id}")
+        knowledge_list = get_knowledge_info_by_tenant_id(tenant_id)
+        for kb in knowledge_list:
+            try:
+                delete_knowledge_record({
+                    "knowledge_id": kb["knowledge_id"],
+                    "user_id": deleted_by or "system"
+                })
+            except Exception as e:
+                logger.warning(f"Failed to delete knowledge base {kb.get('knowledge_id')}: {str(e)}")
+
+        # 5. Delete all agents in the tenant (including related data)
+        logger.info(f"Deleting agents for tenant {tenant_id}")
+        agents = query_all_agent_info_by_tenant_id(tenant_id, version_no=0)
+        for agent in agents:
+            try:
+                agent_id = agent.get("agent_id")
+                # Delete tool instances first
+                delete_tools_by_agent_id(agent_id, tenant_id, deleted_by or "system", version_no=0)
+                # Delete agent relationships
+                delete_agent_relationship(agent_id, tenant_id, deleted_by or "system", version_no=0)
+                # Delete the agent
+                delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
+            except Exception as e:
+                logger.warning(f"Failed to delete agent {agent.get('agent_id')}: {str(e)}")
+
+        # Also delete published agents (version_no >= 1)
+        agents_published = query_all_agent_info_by_tenant_id(tenant_id, version_no=1)
+        for agent in agents_published:
+            try:
+                agent_id = agent.get("agent_id")
+                delete_tools_by_agent_id(agent_id, tenant_id, deleted_by or "system", version_no=1)
+                delete_agent_relationship(agent_id, tenant_id, deleted_by or "system", version_no=1)
+                delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
+            except Exception as e:
+                logger.warning(f"Failed to delete published agent {agent.get('agent_id')}: {str(e)}")
+
+        # 6. Delete all MCP configurations in the tenant
+        logger.info(f"Deleting MCP records for tenant {tenant_id}")
+        mcp_list = get_mcp_records_by_tenant(tenant_id)
+        for mcp in mcp_list:
+            try:
+                delete_mcp_record_by_name_and_url(
+                    mcp["mcp_name"],
+                    mcp["mcp_server"],
+                    tenant_id,
+                    deleted_by or "system"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to delete MCP {mcp.get('mcp_id')}: {str(e)}")
+
+        # 7. Delete all invitation codes in the tenant
+        logger.info(f"Deleting invitations for tenant {tenant_id}")
+        invitations = query_invitations_by_tenant(tenant_id)
+        for invitation in invitations:
+            try:
+                remove_invitation(invitation["invitation_id"], deleted_by)
+            except Exception as e:
+                logger.warning(f"Failed to delete invitation {invitation.get('invitation_id')}: {str(e)}")
+
+        # 8. Delete all tenant configurations (must be done last)
+        logger.info(f"Deleting tenant configurations for tenant {tenant_id}")
+        # Delete all config records for this tenant
+        all_configs = get_all_configs_by_tenant_id(tenant_id)
+        for config in all_configs:
+            try:
+                delete_config_by_tenant_config_id(config["tenant_config_id"])
+            except Exception as e:
+                logger.warning(f"Failed to delete config {config.get('tenant_config_id')}: {str(e)}")
+
+        logger.info(f"Successfully deleted tenant {tenant_id} and all associated resources")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to delete tenant {tenant_id}: {str(e)}")
+        raise ValidationError(f"Failed to delete tenant: {str(e)}")
 
 
 def _create_default_group_for_tenant(tenant_id: str, created_by: Optional[str] = None) -> int:

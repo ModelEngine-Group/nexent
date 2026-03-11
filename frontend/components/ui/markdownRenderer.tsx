@@ -551,7 +551,9 @@ const HoverableText = ({
   return (
     <TooltipProvider>
       <Tooltip
-        styles={{ root: { padding: 0, background: "transparent", boxShadow: "none" } }}
+        styles={{
+          container: { padding: 0, background: "transparent", boxShadow: "none" },
+        }}
         title={
           <div
             className="z-[9999] bg-white px-3 py-2 text-sm border border-gray-200 rounded-md shadow-md max-w-xl overflow-hidden"

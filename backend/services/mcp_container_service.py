@@ -6,7 +6,9 @@ interface while using the standardized SDK container management module.
 """
 
 import logging
-from typing import Dict, List, Optional
+import asyncio
+import threading
+from typing import Dict, List, Optional, AsyncGenerator
 
 from consts.exceptions import MCPConnectionError, MCPContainerError
 from nexent.container import (
@@ -97,7 +99,7 @@ class MCPContainerManager:
             service_name: Name of the MCP service
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
-            env_vars: Optional environment variables
+            env_vars: Optional environment variables (may contain authorization_token)
 
         Returns:
             Dictionary with container_id, mcp_url, host_port, and status
@@ -149,7 +151,7 @@ class MCPContainerManager:
             service_name: Name of the MCP service
             tenant_id: Tenant ID for isolation
             user_id: User ID for isolation
-            env_vars: Optional environment variables
+            env_vars: Optional environment variables (may contain authorization_token)
             host_port: Optional host port to bind
             full_command: Optional command to run in container
 
@@ -252,3 +254,91 @@ class MCPContainerManager:
         except Exception as e:
             logger.error(f"Failed to get container logs: {e}")
             return f"Error retrieving logs: {e}"
+
+    async def stream_container_logs(
+        self, container_id: str, tail: int = 100, follow: bool = True
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream container logs in real-time
+
+        Args:
+            container_id: Container ID or name
+            tail: Number of log lines to retrieve initially
+            follow: Whether to follow logs (stream new logs as they appear)
+
+        Yields:
+            Log lines as strings
+        """
+        try:
+            container = self.client.client.containers.get(container_id)
+            loop = asyncio.get_event_loop()
+
+            # First, get initial logs in a thread pool to avoid blocking
+            initial_logs = await loop.run_in_executor(
+                None,
+                lambda: container.logs(
+                    tail=tail, stdout=True, stderr=True, timestamps=False
+                )
+            )
+            if initial_logs:
+                decoded = initial_logs.decode("utf-8", errors="replace")
+                for line in decoded.splitlines():
+                    if line.strip():  # Only yield non-empty lines
+                        yield line
+
+            # Then, if follow is True, stream new logs
+            if follow:
+                # Create a queue to pass log chunks from thread to async generator
+                log_queue = asyncio.Queue()
+                # Use list to allow modification from nested function
+                stop_flag = [False]
+
+                def _stream_logs_sync():
+                    """Run blocking log stream in thread"""
+                    try:
+                        log_stream = container.logs(
+                            stdout=True,
+                            stderr=True,
+                            follow=True,
+                            stream=True,
+                            timestamps=False,
+                            tail=0,  # Only new logs
+                        )
+                        for log_chunk in log_stream:
+                            if stop_flag[0]:
+                                break
+                            # Put chunks in queue (will be processed in async context)
+                            asyncio.run_coroutine_threadsafe(
+                                log_queue.put(log_chunk), loop
+                            )
+                        # Signal end of stream
+                        asyncio.run_coroutine_threadsafe(
+                            log_queue.put(None), loop
+                        )
+                    except Exception as e:
+                        logger.error(f"Error in log stream thread: {e}")
+                        asyncio.run_coroutine_threadsafe(
+                            log_queue.put(None), loop
+                        )
+
+                # Start streaming in background thread
+                stream_thread = threading.Thread(
+                    target=_stream_logs_sync, daemon=True)
+                stream_thread.start()
+
+                # Process log chunks from queue
+                try:
+                    while True:
+                        log_chunk = await log_queue.get()
+                        if log_chunk is None:  # End of stream signal
+                            break
+                        decoded = log_chunk.decode("utf-8", errors="replace")
+                        # Split by newlines and yield each line
+                        for line in decoded.splitlines():
+                            if line.strip():  # Only yield non-empty lines
+                                yield line
+                finally:
+                    stop_flag[0] = True
+        except Exception as e:
+            logger.error(f"Failed to stream container logs: {e}")
+            yield f"Error retrieving logs: {e}"

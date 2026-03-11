@@ -1,9 +1,6 @@
 import logging
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
+from apps.app_factory import create_app
 from apps.agent_app import agent_config_router as agent_router
 from apps.config_sync_app import router as config_sync_router
 from apps.datamate_app import router as datamate_router
@@ -27,21 +24,11 @@ from apps.user_app import router as user_router
 from apps.invitation_app import router as invitation_router
 from consts.const import IS_SPEED_MODE
 
-# Import monitoring utilities
-from utils.monitoring import monitoring_manager
-
 # Create logger instance
 logger = logging.getLogger("base_app")
-app = FastAPI(root_path="/api")
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+# Create FastAPI app with common configurations
+app = create_app(title="Nexent Config API", description="Configuration APIs")
 
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
@@ -71,26 +58,3 @@ app.include_router(tenant_router)
 app.include_router(group_router)
 app.include_router(user_router)
 app.include_router(invitation_router)
-
-# Initialize monitoring for the application
-monitoring_manager.setup_fastapi_app(app)
-
-
-# Global exception handler for HTTP exceptions
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    logger.error(f"HTTPException: {exc.detail}")
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"message": exc.detail},
-    )
-
-
-# Global exception handler for all uncaught exceptions
-@app.exception_handler(Exception)
-async def generic_exception_handler(request, exc):
-    logger.error(f"Generic Exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"message": "Internal server error, please try again later."},
-    )

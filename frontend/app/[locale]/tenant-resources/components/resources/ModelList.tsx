@@ -6,6 +6,8 @@ import { Table, Button, Popconfirm, message, Tag, Pagination } from "antd";
 import { Edit, Trash2, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ColumnsType } from "antd/es/table";
+import type { TablePaginationConfig } from "antd";
+import { FilterValue, SorterResult } from "antd/es/table/interface";
 import { useManageTenantModels } from "@/hooks/model/useManageTenantModels";
 import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
@@ -70,7 +72,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   const handleDelete = async (displayName: string, _provider?: string) => {
     if (!tenantId) {
-      message.error("Tenant ID is required");
+      message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
     }
     try {
@@ -92,7 +94,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   // Handle checking model connectivity
   const handleCheckConnectivity = async (displayName: string) => {
     if (!tenantId) {
-      message.error("Tenant ID is required");
+      message.error(t("tenantResources.tenants.tenantIdRequired"));
       return;
     }
 
@@ -121,11 +123,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   // Handle pagination change
-  const handlePageChange = (newPage: number, newPageSize: number) => {
+  const handlePageChange = (
+    pagination: TablePaginationConfig,
+    _filters: Record<string, FilterValue | null>,
+    _sorter: SorterResult<ModelOption> | SorterResult<ModelOption>[]
+  ) => {
+    const newPage = pagination.current || 1;
+    const newPageSize = pagination.pageSize || 10;
     setPage(newPage);
     if (newPageSize !== pageSize) {
       setPageSize(newPageSize);
-      setPage(1);
     }
   };
 
@@ -135,13 +142,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       title: t("common.name"),
       dataIndex: "displayName",
       key: "displayName",
-      width: 170,
-      render: (text: string, record: ModelOption) => (
-        <div>
-          <div className="font-medium">{text || record.name}</div>
-          <div className="text-sm text-gray-500">{record.name}</div>
-        </div>
-      ),
+      width: 200,
+      ellipsis: true,
     },
     {
       title: t("common.type"),
@@ -212,6 +214,8 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
             title={t("tenantResources.models.confirmDelete")}
             description={t("common.cannotBeUndone")}
             onConfirm={() => handleDelete(record.displayName, record.source)}
+            okText={t("common.confirm")}
+            cancelText={t("common.cancel")}
           >
             <Tooltip title={t("tenantResources.models.deleteModel")}>
               <Button
@@ -243,7 +247,12 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         dataSource={models}
         loading={isLoading}
         rowKey="id"
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: page,
+          pageSize: pageSize,
+          total: total
+        }}
+        onChange={handlePageChange}
         scroll={{ x: true }}
         className="flex-1"
       />

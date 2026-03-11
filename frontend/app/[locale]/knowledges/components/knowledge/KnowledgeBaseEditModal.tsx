@@ -1,12 +1,14 @@
 "use client";
 
-import React from "react";
+import React, { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Form, Input, Select, message } from "antd";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { Can } from "@/components/permission/Can";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
+import { checkKnowledgeBaseName } from "@/services/uploadService";
+import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 
 interface KnowledgeBaseEditModalProps {
@@ -14,7 +16,7 @@ interface KnowledgeBaseEditModalProps {
   knowledgeBase: KnowledgeBase | null;
   tenantId: string | null;
   onCancel: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedKnowledgeBase: KnowledgeBase) => void;
 }
 
 export function KnowledgeBaseEditModal({
@@ -27,11 +29,17 @@ export function KnowledgeBaseEditModal({
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
 
+  // Name validation state
+  const [nameError, setNameError] = useState<string | null>(null);
+
+  // Store original name for comparison
+  const originalNameRef = useRef<string>("");
+
   // Fetch groups for group selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
-  // Reset form when knowledge base changes
+  // Reset form and states when knowledge base changes
   React.useEffect(() => {
     if (knowledgeBase && open) {
       form.setFieldsValue({
@@ -39,8 +47,35 @@ export function KnowledgeBaseEditModal({
         ingroup_permission: knowledgeBase.ingroup_permission || "READ_ONLY",
         group_ids: knowledgeBase.group_ids || [],
       });
+      // Store original name for comparison
+      originalNameRef.current = knowledgeBase.name;
+      // Reset error state
+      setNameError(null);
     }
   }, [knowledgeBase, open, form]);
+
+  // Check if name is valid (only when submitting)
+  const checkNameValidation = async (name: string): Promise<boolean> => {
+    // Allow if name is same as original
+    if (name === originalNameRef.current) {
+      setNameError(null);
+      return true;
+    }
+
+    try {
+      const result = await checkKnowledgeBaseName(name, t);
+      if (result.status === NAME_CHECK_STATUS.AVAILABLE) {
+        setNameError(null);
+        return true;
+      } else {
+        setNameError(t("tenantResources.knowledgeBase.nameExists"));
+        return false;
+      }
+    } catch (error) {
+      setNameError(t("tenantResources.knowledgeBase.nameCheckFailed"));
+      return false;
+    }
+  };
 
   // Handle form submission
   const handleSubmit = async () => {
@@ -48,6 +83,12 @@ export function KnowledgeBaseEditModal({
       const values = await form.validateFields();
 
       if (!knowledgeBase) return;
+
+      // Check name duplication on submit
+      const isNameValid = await checkNameValidation(values.knowledge_name);
+      if (!isNameValid) {
+        return; // Error message is displayed via Form.Item help
+      }
 
       await knowledgeBaseService.updateKnowledgeBase(knowledgeBase.id, {
         knowledge_name: values.knowledge_name,
@@ -57,10 +98,18 @@ export function KnowledgeBaseEditModal({
 
       message.success(t("tenantResources.knowledgeBase.updated"));
 
+      // Construct updated knowledge base object with new values
+      const updatedKnowledgeBase: KnowledgeBase = {
+        ...knowledgeBase,
+        name: values.knowledge_name,
+        ingroup_permission: values.ingroup_permission,
+        group_ids: values.group_ids,
+      };
+
       // Trigger knowledge base list refresh to seamlessly update UI
       knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
 
-      onSuccess();
+      onSuccess(updatedKnowledgeBase);
       onCancel();
     } catch (error: any) {
       if (error.errorFields) {
@@ -84,6 +133,8 @@ export function KnowledgeBaseEditModal({
         <Form.Item
           name="knowledge_name"
           label={t("common.name")}
+          validateStatus={nameError ? "error" : undefined}
+          help={nameError || undefined}
           rules={[
             { required: true, message: t("tenantResources.knowledgeBase.nameRequired") },
           ]}
@@ -99,11 +150,14 @@ export function KnowledgeBaseEditModal({
               { required: true, message: t("tenantResources.knowledgeBase.permissionRequired") },
             ]}
           >
-            <Select placeholder={t("tenantResources.knowledgeBase.permission")}>
-              <Select.Option value="EDIT">{t("tenantResources.knowledgeBase.permission.EDIT")}</Select.Option>
-              <Select.Option value="READ_ONLY">{t("tenantResources.knowledgeBase.permission.READ_ONLY")}</Select.Option>
-              <Select.Option value="PRIVATE">{t("tenantResources.knowledgeBase.permission.PRIVATE")}</Select.Option>
-            </Select>
+            <Select
+              placeholder={t("tenantResources.knowledgeBase.permission")}
+              options={[
+                { value: "EDIT", label: t("tenantResources.knowledgeBase.permission.EDIT") },
+                { value: "READ_ONLY", label: t("tenantResources.knowledgeBase.permission.READ_ONLY") },
+                { value: "PRIVATE", label: t("tenantResources.knowledgeBase.permission.PRIVATE") },
+              ]}
+            />
           </Form.Item>
         </Can>
 

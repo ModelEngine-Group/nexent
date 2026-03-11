@@ -21,7 +21,7 @@ import {
 } from "@/types/knowledgeBase";
 import { KNOWLEDGE_BASE_ACTION_TYPES } from "@/const/knowledgeBase";
 
-import { configStore } from "@/lib/config";
+import { useConfig } from "@/hooks/useConfig";
 import log from "@/lib/logger";
 
 // Reducer function
@@ -107,7 +107,9 @@ export const KnowledgeBaseContext = createContext<{
   createKnowledgeBase: (
     name: string,
     description: string,
-    source?: string
+    source?: string,
+    ingroup_permission?: string,
+    group_ids?: number[]
   ) => Promise<KnowledgeBase | null>;
   deleteKnowledgeBase: (id: string) => Promise<boolean>;
   selectKnowledgeBase: (id: string) => void;
@@ -150,6 +152,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   children,
 }) => {
   const { t } = useTranslation();
+  const { appConfig, modelConfig } = useConfig();
   const [state, dispatch] = useReducer(knowledgeBaseReducer, {
     knowledgeBases: [],
     selectedIds: [],
@@ -230,10 +233,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         localStorage.removeItem("preloaded_kb_data");
         localStorage.removeItem("kb_cache");
 
-        // Get knowledge base list data directly from server
         const result = await knowledgeBaseService.getKnowledgeBasesInfo(
           skipHealthCheck,
-          includeDataMateSync
+          includeDataMateSync,
+          null,
+          appConfig?.datamateUrl ?? null
         );
 
         dispatch({
@@ -309,7 +313,9 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     async (
       name: string,
       description: string,
-      source: string = "elasticsearch"
+      source: string = "elasticsearch",
+      ingroup_permission?: string,
+      group_ids?: number[]
     ) => {
       try {
         const newKB = await knowledgeBaseService.createKnowledgeBase({
@@ -318,6 +324,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           source,
           embeddingModel:
             state.currentEmbeddingModel || "text-embedding-3-small",
+          ingroup_permission,
+          group_ids,
         });
         return newKB;
       } catch (error) {
@@ -380,11 +388,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   const refreshKnowledgeBaseData = useCallback(
     async (forceRefresh = false) => {
       try {
-        // Directly call service to fetch knowledge base data, bypassing fetchKnowledgeBases
-        // This ensures sync operations always execute even during initial loading
         const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-          false, // skipHealthCheck
-          true // includeDataMateSync
+          false,
+          true,
+          null,
+          appConfig?.datamateUrl ?? null
         );
 
         dispatch({
@@ -392,7 +400,6 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           payload: result.knowledgeBases,
         });
 
-        // Handle DataMate sync error
         if (result.dataMateSyncError) {
           dispatch({
             type: KNOWLEDGE_BASE_ACTION_TYPES.SET_DATA_MATE_SYNC_ERROR,
@@ -435,11 +442,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   // Add a function to refresh the knowledge base data with DataMate sync and create records
   const refreshKnowledgeBaseDataWithDataMate = useCallback(async () => {
     try {
-      // Directly call service to fetch knowledge base data, bypassing fetchKnowledgeBases
-      // This ensures sync operations always execute even during initial loading
       const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-        false, // skipHealthCheck
-        true // includeDataMateSync
+        false,
+        true,
+        null,
+        appConfig?.datamateUrl ?? null
       );
 
       dispatch({
@@ -498,8 +505,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
 
     // Get current model config at initial load
     const loadInitialData = async () => {
-      const modelConfig = configStore.getModelConfig();
-      if (modelConfig.embedding?.modelName) {
+      if (modelConfig?.embedding?.modelName) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
           payload: modelConfig.embedding.modelName,
@@ -530,11 +536,10 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     // Listen for env config change event
     const handleEnvConfigChanged = () => {
       // Reload env related config
-      const newModelConfig = configStore.getModelConfig();
-      if (newModelConfig.embedding?.modelName !== state.currentEmbeddingModel) {
+      if (modelConfig?.embedding?.modelName !== state.currentEmbeddingModel) {
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-          payload: newModelConfig.embedding?.modelName || null,
+          payload: modelConfig?.embedding?.modelName || null,
         });
 
         // Reload knowledge base list when model changes

@@ -346,25 +346,16 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
 @patch('services.image_service.MessageObserver')
 @patch('services.image_service.get_model_name_from_config')
 @patch('services.image_service.tenant_config_manager')
-def test_get_vlm_model_with_empty_config(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
-    """Fallback to empty values when tenant config is empty."""
-    mock_tenant_config_manager.get_model_config.return_value = {}
+def test_get_vlm_model_with_none_config(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
+    """Return None when tenant config is None."""
+    mock_tenant_config_manager.get_model_config.return_value = None
     mock_model_instance = MagicMock()
     mock_openai_vl_model.return_value = mock_model_instance
 
-    result = get_vlm_model("tenant-2")
+    result = get_vlm_model("tenant-3")
 
-    # get_model_name_from_config should not be called because config is falsy
+    # get_model_name_from_config should not be called because config is None
     mock_get_model_name.assert_not_called()
-    mock_openai_vl_model.assert_called_once_with(
-        observer=mock_message_observer.return_value,
-        model_id="",
-        api_base="",
-        api_key="",
-        temperature=0.7,
-        top_p=0.7,
-        frequency_penalty=0.5,
-        max_tokens=512,
-        ssl_verify=True
-    )
-    assert result == mock_model_instance
+    # OpenAIVLModel should not be called when config is None
+    mock_openai_vl_model.assert_not_called()
+    assert result is None

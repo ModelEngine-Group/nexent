@@ -26,9 +26,19 @@ consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_const_mock.POSTGRES_DB = "test_db"
 consts_const_mock.POSTGRES_PORT = 5432
 consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
+consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYSTEM": "system"}
+consts_const_mock.THINK_START_PATTERN = "<think>"
+consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
+# Mock consts.error_code and consts.exceptions
+consts_error_code_mock = MagicMock()
+consts_error_code_mock.ErrorCode = MagicMock()
+consts_exceptions_mock = MagicMock()
+consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
+sys.modules['consts.error_code'] = consts_error_code_mock
+sys.modules['consts.exceptions'] = consts_exceptions_mock
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -44,101 +54,13 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: No
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
 from backend.utils.document_vector_utils import (
-    extract_cluster_content,
     summarize_cluster,
-    summarize_clusters,
     merge_cluster_summaries
 )
 
 
 class TestClusterSummarization:
     """Test cluster summarization functionality"""
-    
-    def test_extract_cluster_content_single_doc(self):
-        """Test extracting content from cluster with single document"""
-        document_samples = {
-            'doc_001': {
-                'filename': 'doc1.pdf',
-                'chunks': [
-                    {'content': 'Content chunk 1'},
-                    {'content': 'Content chunk 2'},
-                    {'content': 'Content chunk 3'}
-                ]
-            }
-        }
-        
-        cluster_doc_ids = ['doc_001']
-        content = extract_cluster_content(document_samples, cluster_doc_ids, max_chunks_per_doc=3)
-        
-        assert 'doc1.pdf' in content
-        assert 'Content chunk 1' in content
-        assert 'Content chunk 2' in content
-        assert 'Content chunk 3' in content
-    
-    def test_extract_cluster_content_multiple_docs(self):
-        """Test extracting content from cluster with multiple documents"""
-        document_samples = {
-            'doc_001': {
-                'filename': 'doc1.pdf',
-                'chunks': [
-                    {'content': 'Content chunk 1'},
-                    {'content': 'Content chunk 2'}
-                ]
-            },
-            'doc_002': {
-                'filename': 'doc2.pdf',
-                'chunks': [
-                    {'content': 'Content chunk 3'},
-                    {'content': 'Content chunk 4'}
-                ]
-            }
-        }
-        
-        cluster_doc_ids = ['doc_001', 'doc_002']
-        content = extract_cluster_content(document_samples, cluster_doc_ids, max_chunks_per_doc=3)
-        
-        assert 'doc1.pdf' in content
-        assert 'doc2.pdf' in content
-        assert 'Content chunk 1' in content
-        assert 'Content chunk 4' in content
-    
-    def test_extract_cluster_content_long_chunks(self):
-        """Test extracting content with long chunks"""
-        long_content = 'A' * 1000
-        document_samples = {
-            'doc_001': {
-                'filename': 'doc1.pdf',
-                'chunks': [
-                    {'content': long_content}
-                ]
-            }
-        }
-        
-        cluster_doc_ids = ['doc_001']
-        content = extract_cluster_content(document_samples, cluster_doc_ids, max_chunks_per_doc=3)
-        
-        # Content should be truncated
-        assert len(content) < len(long_content) + 100
-        assert '...' in content
-    
-    def test_extract_cluster_content_many_chunks(self):
-        """Test extracting representative chunks when document has many chunks"""
-        chunks = [{'content': f'Chunk {i}'} for i in range(10)]
-        document_samples = {
-            'doc_001': {
-                'filename': 'doc1.pdf',
-                'chunks': chunks
-            }
-        }
-        
-        cluster_doc_ids = ['doc_001']
-        content = extract_cluster_content(document_samples, cluster_doc_ids, max_chunks_per_doc=3)
-        
-        # Should only include representative chunks (first, middle, last)
-        assert 'Chunk 0' in content
-        assert 'Chunk 9' in content
-        # Middle chunk should be around chunk 4 or 5
-        assert 'Chunk 4' in content or 'Chunk 5' in content
     
     def test_summarize_cluster_placeholder(self):
         """Test cluster summarization (placeholder implementation)"""
@@ -171,36 +93,6 @@ class TestClusterSummarization:
         merged = merge_cluster_summaries(cluster_summaries)
         
         assert merged == ""
-    
-    def test_summarize_clusters(self):
-        """Test summarizing multiple clusters"""
-        document_samples = {
-            'doc_001': {
-                'filename': 'doc1.pdf',
-                'chunks': [{'content': 'Content 1'}]
-            },
-            'doc_002': {
-                'filename': 'doc2.pdf',
-                'chunks': [{'content': 'Content 2'}]
-            },
-            'doc_003': {
-                'filename': 'doc3.pdf',
-                'chunks': [{'content': 'Content 3'}]
-            }
-        }
-        
-        clusters = {
-            0: ['doc_001', 'doc_002'],
-            1: ['doc_003']
-        }
-        
-        summaries = summarize_clusters(document_samples, clusters, language="zh", max_words=150)
-        
-        assert len(summaries) == 2
-        assert 0 in summaries
-        assert 1 in summaries
-        assert summaries[0] is not None
-        assert summaries[1] is not None
 
 
 if __name__ == '__main__':

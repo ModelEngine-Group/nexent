@@ -1,9 +1,3 @@
-import { GlobalConfig } from "../types/modelConfig";
-
-// Configuration storage key name
-export const APP_CONFIG_KEY = "app";
-export const MODEL_CONFIG_KEY = "model";
-
 // Model type constants
 export const MODEL_TYPES = {
   LLM: "llm",
@@ -22,6 +16,8 @@ export const MODEL_SOURCES = {
   MODELENGINE: "modelengine",
   OPENAI_API_COMPATIBLE: "OpenAI-API-Compatible",
   CUSTOM: "custom",
+  DASHSCOPE: "dashscope",
+  TOKENPONY: "tokenpony",
 } as const;
 
 // Model status constants
@@ -46,6 +42,8 @@ export const MODEL_PROVIDER_KEYS = [
   "jina",
   "deepseek",
   "aliyuncs",
+  "tokenpony",
+  "dashscope",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -58,6 +56,8 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   jina: "jina",
   deepseek: "deepseek",
   aliyuncs: "aliyuncs",
+  tokenpony: "tokenpony",
+  dashscope: "dashscope",
 };
 
 // Icon filenames for providers
@@ -68,6 +68,8 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   jina: "/jina.png",
   deepseek: "/deepseek.png",
   aliyuncs: "/aliyuncs.png",
+  dashscope:"/aliyuncs.png",
+  tokenpony: "/tokenpony.png",
 };
 
 export const OFFICIAL_PROVIDER_ICON = "/modelengine-logo.png";
@@ -147,75 +149,3 @@ export const CARD_THEMES = {
   },
 };
 
-// Default configuration
-export const defaultConfig: GlobalConfig = {
-  app: {
-    appName: "",
-    appDescription: "",
-    iconType: ICON_TYPES.PRESET,
-    customIconUrl: "",
-    avatarUri: "",
-    modelEngineEnabled: false,
-    datamateUrl: "",
-  },
-  models: {
-    llm: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-    },
-    embedding: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-      dimension: 0,
-    },
-    multiEmbedding: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-      dimension: 0,
-    },
-    rerank: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-    },
-    vlm: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-    },
-    stt: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-    },
-    tts: {
-      modelName: "",
-      displayName: "",
-      apiConfig: {
-        apiKey: "",
-        modelUrl: "",
-      },
-    },
-  },
-};

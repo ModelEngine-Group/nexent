@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
@@ -16,7 +16,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import { CloseOutlined } from "@ant-design/icons";
-import { ConfigStore } from "@/lib/config";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
@@ -24,10 +23,9 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
-import {
-  useKnowledgeBasesForToolConfig,
-  useSyncKnowledgeBases,
-} from "@/hooks/useKnowledgeBaseSelector";
+import { useConfig } from "@/hooks/useConfig";
+import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
+import { useKnowledgeBaseConfigChangeHandler } from "@/hooks/useKnowledgeBaseConfigChangeHandler";
 import { API_ENDPOINTS } from "@/services/api";
 import log from "@/lib/logger";
 
@@ -75,6 +73,9 @@ export default function ToolConfigModal({
     null
   );
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+
+  // Use React Query for config data
+  const { data: configData } = useConfig();
   const [selectedKbDisplayNames, setSelectedKbDisplayNames] = useState<
     string[]
   >([]);
@@ -93,50 +94,18 @@ export default function ToolConfigModal({
   // DataMate URL from knowledge base configuration
   const [knowledgeBaseDataMateUrl, setKnowledgeBaseDataMateUrl] =
     useState<string>("");
+  // Track if knowledge base config has changed (server_url or api_key changed)
+  const [hasKbConfigChanged, setHasKbConfigChanged] = useState(false);
   // Track if user has manually modified the datamate URL field
   const [hasUserModifiedDatamateUrl, setHasUserModifiedDatamateUrl] =
     useState(false);
 
-  // Helper function to get authorization headers
-  const getAuthHeaders = () => {
-    const session =
-      typeof window !== "undefined" ? localStorage.getItem("session") : null;
-    const sessionObj = session ? JSON.parse(session) : null;
-    return {
-      "Content-Type": "application/json",
-      "User-Agent": "AgentFrontEnd/1.0",
-      ...(sessionObj?.access_token && {
-        Authorization: `Bearer ${sessionObj.access_token}`,
-      }),
-    };
-  };
-
-  // Load DataMate URL from knowledge base configuration
-  const loadKnowledgeBaseDataMateUrl = useCallback(async () => {
-    try {
-      const response = await fetch(API_ENDPOINTS.config.load, {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const config = result.config;
-        if (
-          config &&
-          config.app &&
-          typeof config.app.datamateUrl === "string"
-        ) {
-          setKnowledgeBaseDataMateUrl(config.app.datamateUrl);
-        }
-      }
-    } catch (error) {
-      log.error(
-        "Failed to load DataMate URL from knowledge base config:",
-        error
-      );
+  // Load DataMate URL from knowledge base configuration via React Query cached data
+  const loadKnowledgeBaseDataMateUrl = useCallback(() => {
+    if (configData?.app && typeof configData.app.datamateUrl === "string") {
+      setKnowledgeBaseDataMateUrl(configData.app.datamateUrl);
     }
-  }, []);
+  }, [configData]);
 
   // Check if current tool requires knowledge base selection (must be declared before toolKbType)
   const toolRequiresKbSelection = useMemo(() => {
@@ -192,6 +161,7 @@ export default function ToolConfigModal({
     data: knowledgeBases = [],
     isLoading: kbLoading,
     refetch: refetchKnowledgeBases,
+    clearKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(
     toolKbType,
     toolKbType === "dify_search"
@@ -201,24 +171,62 @@ export default function ToolConfigModal({
         : undefined
   );
 
-  // Sync knowledge bases hook
-  const { syncKnowledgeBases, isSyncing } = useSyncKnowledgeBases();
+  // Handle config change: clear knowledge base selection and refetch
+  // Uses shared hook for both Dify and DataMate tools
+  const handleKbConfigChange = useCallback(() => {
+    // Mark that config has changed - this prevents restoring from initialParams
+    setHasKbConfigChanged(true);
+
+    // Clear previous knowledge base selection
+    setSelectedKbIds([]);
+    setSelectedKbDisplayNames([]);
+
+    // Clear form value for knowledge base field (index_names or dataset_ids)
+    const kbFieldIndex = currentParams.findIndex(
+      (p) => p.name === "index_names" || p.name === "dataset_ids"
+    );
+    if (kbFieldIndex >= 0) {
+      form.setFieldValue(`param_${kbFieldIndex}`, []);
+      // Also clear the value in currentParams
+      const updatedParams = [...currentParams];
+      updatedParams[kbFieldIndex] = {
+        ...updatedParams[kbFieldIndex],
+        value: [],
+      };
+      setCurrentParams(updatedParams);
+    }
+
+    // Clear knowledge base list when config changes (API key/URL changed)
+    clearKnowledgeBases();
+
+    // Refetch knowledge bases with new config
+    refetchKnowledgeBases();
+  }, [refetchKnowledgeBases, clearKnowledgeBases, currentParams, form]);
+
+  useKnowledgeBaseConfigChangeHandler({
+    toolKbType,
+    config:
+      toolKbType === "dify_search"
+        ? difyConfig
+        : toolKbType === "datamate_search"
+          ? { serverUrl: datamateServerUrl }
+          : undefined,
+    onConfigChange: handleKbConfigChange,
+  });
 
   // Get current embedding model from config for model matching
   const currentEmbeddingModel = useMemo(() => {
     try {
-      const configStore = ConfigStore.getInstance();
-      const modelConfig = configStore.getModelConfig();
-      // Use modelName if available, otherwise try displayName
+      const modelConfig = configData?.models;
       return (
-        modelConfig.embedding?.modelName ||
-        modelConfig.embedding?.displayName ||
+        modelConfig?.embedding?.modelName ||
+        modelConfig?.embedding?.displayName ||
         null
       );
     } catch {
       return null;
     }
-  }, []);
+  }, [configData]);
 
   // Check if a knowledge base can be selected
   const canSelectKnowledgeBase = useCallback(
@@ -254,6 +262,7 @@ export default function ToolConfigModal({
     if (!isOpen) {
       setModalOpened(false);
       setKnowledgeBaseDataMateUrl("");
+      setHasKbConfigChanged(false);
     }
   }, [isOpen]);
 
@@ -262,10 +271,7 @@ export default function ToolConfigModal({
     // Load DataMate URL from knowledge base configuration
     // This should run every time the modal opens for datamate_search tool
     if (tool?.name === "datamate_search" && isOpen && !modalOpened) {
-      loadKnowledgeBaseDataMateUrl().then(() => {
-        // After loading, check if we need to apply the URL
-        // The other useEffect will handle the application
-      });
+      loadKnowledgeBaseDataMateUrl();
     }
   }, [tool?.name, isOpen, modalOpened]);
 
@@ -492,16 +498,117 @@ export default function ToolConfigModal({
   useEffect(() => {
     if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
       const displayNames = selectedKbIds.map((id) => {
-        const kb = knowledgeBases.find((k) => k.id === id);
+        // Use robust ID comparison
+        const kb = knowledgeBases.find(
+          (k) => String(k.id).trim() === String(id).trim()
+        );
         return kb?.display_name || kb?.name || id;
       });
       setSelectedKbDisplayNames(displayNames);
     }
   }, [knowledgeBases, selectedKbIds]);
 
-  // Trigger refetch when opening for knowledge base tools (with loading state support)
+  // Filter selectedKbIds to only include knowledge bases that exist in the current list
+  // This handles cases where knowledge bases are no longer available (e.g., wrong URL)
   useEffect(() => {
-    if (toolRequiresKbSelection && isOpen) {
+    if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
+      const validKbIds = selectedKbIds.filter((id) =>
+        knowledgeBases.some((kb) => String(kb.id).trim() === String(id).trim())
+      );
+      if (validKbIds.length !== selectedKbIds.length) {
+        setSelectedKbIds(validKbIds);
+        // Also update display names
+        const displayNames = validKbIds.map((id) => {
+          const kb = knowledgeBases.find(
+            (k) => String(k.id).trim() === String(id).trim()
+          );
+          return kb?.display_name || kb?.name || id;
+        });
+        setSelectedKbDisplayNames(displayNames);
+      }
+    }
+  }, [knowledgeBases]);
+
+  // Force sync selectedKbIds when modal is about to open (kbSelectorVisible changes to true)
+  // This ensures the modal receives the correct selected IDs
+  useEffect(() => {
+    // Skip if config has changed - don't restore from initialParams after server_url/api_key change
+    if (hasKbConfigChanged) {
+      return;
+    }
+
+    if (
+      kbSelectorVisible &&
+      selectedKbIds.length === 0 &&
+      initialParams.length > 0
+    ) {
+      // Parse initial index_names/dataset_ids value for knowledge base selection
+      if (toolRequiresKbSelection) {
+        const kbParam = initialParams.find(
+          (p) => p.name === "index_names" || p.name === "dataset_ids"
+        );
+        if (kbParam?.value) {
+          let ids: string[] = [];
+          if (Array.isArray(kbParam.value)) {
+            ids = kbParam.value.map(String);
+          } else if (typeof kbParam.value === "string") {
+            try {
+              const parsed = JSON.parse(kbParam.value);
+              if (Array.isArray(parsed)) {
+                ids = parsed.map(String);
+              }
+            } catch {
+              ids = kbParam.value.split(",").filter(Boolean);
+            }
+          }
+          if (ids.length > 0) {
+            setSelectedKbIds(ids);
+          }
+        }
+      }
+    }
+  }, [
+    kbSelectorVisible,
+    initialParams,
+    toolRequiresKbSelection,
+    hasKbConfigChanged,
+  ]);
+
+  // Trigger refetch when opening for knowledge base tools (with loading state support)
+  // Skip if initial load was already done to avoid duplicate API calls
+  // Reset when currentAgentId changes (i.e., when switching agents)
+  const hasTriggeredInitialRefetch = useRef(false);
+  const prevAgentIdRef = useRef<number | undefined>(undefined);
+  // Track if sync message has been shown when KB selector opens
+  const hasShownSyncMessageRef = useRef(false);
+
+  // Reset refetch flag when switching agents and invalidate cache to force fresh fetch
+  useEffect(() => {
+    if (currentAgentId !== prevAgentIdRef.current) {
+      prevAgentIdRef.current = currentAgentId;
+      hasTriggeredInitialRefetch.current = false;
+
+      // Invalidate knowledge base cache when switching agents to force fresh fetch
+      // This ensures we get the correct knowledge bases for the new agent's config
+      if (toolKbType === "dify_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "dify_search"],
+        });
+      } else if (toolKbType === "datamate_search") {
+        queryClient.invalidateQueries({
+          queryKey: ["knowledgeBases", "list", "datamate_search"],
+        });
+      }
+    }
+  }, [currentAgentId, toolKbType, queryClient]);
+
+  useEffect(() => {
+    if (
+      toolRequiresKbSelection &&
+      isOpen &&
+      !hasTriggeredInitialRefetch.current
+    ) {
+      hasTriggeredInitialRefetch.current = true;
       // For Dify, only refetch if we have valid config
       if (toolKbType === "dify_search") {
         if (difyConfig.serverUrl && difyConfig.apiKey) {
@@ -518,6 +625,43 @@ export default function ToolConfigModal({
     toolKbType,
     difyConfig,
   ]);
+
+  // Show sync message when knowledge base selector modal opens
+  // This provides immediate feedback on sync status to the user
+  useEffect(() => {
+    // Only trigger when KB selector opens and tool requires KB selection
+    if (kbSelectorVisible && toolRequiresKbSelection && !hasShownSyncMessageRef.current) {
+      // Mark as shown to avoid duplicate messages
+      hasShownSyncMessageRef.current = true;
+
+      // Trigger sync and show message based on result
+      refetchKnowledgeBases()
+        .then((result) => {
+          if (result.isError || result.error) {
+            log.error("Failed to sync knowledge bases:", result.error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          } else {
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          }
+        })
+        .catch((error) => {
+          log.error("Failed to sync knowledge bases:", error);
+          // Clear knowledge base list on sync failure
+          clearKnowledgeBases();
+          message.error(t("knowledgeBase.message.syncError"));
+        });
+    }
+  }, [kbSelectorVisible, toolRequiresKbSelection, refetchKnowledgeBases, clearKnowledgeBases, t]);
+
+  // Reset sync message flag when KB selector closes
+  useEffect(() => {
+    if (!kbSelectorVisible) {
+      hasShownSyncMessageRef.current = false;
+    }
+  }, [kbSelectorVisible]);
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
@@ -602,51 +746,10 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
-      // For editing mode (when currentAgentId exists), always call API
-      // For creating mode (isCreatingMode=true), update local state only
-      if (isCreatingMode) {
-        // In creating mode, just update local state
-        updateTools(newSelectedTools);
-        message.success(t("toolConfig.message.saveSuccess"));
-        handleClose(); // Close modal
-        return;
-      }
-
-      if (!currentAgentId) {
-        // Should not happen in normal editing mode, but handle gracefully
-        updateTools(newSelectedTools);
-        message.success(t("toolConfig.message.saveSuccess"));
-        handleClose(); // Close modal
-        return;
-      }
-
-      // Edit mode: call API to persist changes
-      try {
-        setIsLoading(true);
-        const isEnabled = true; //  New tool is enabled by default
-        const result = await updateToolConfig(
-          parseInt(toolToSave.id),
-          currentAgentId,
-          paramsObj,
-          isEnabled
-        );
-        setIsLoading(false);
-
-        if (result.success) {
-          // Update local state and invalidate queries
-          updateTools(newSelectedTools);
-          queryClient.invalidateQueries({
-            queryKey: ["toolInfo", parseInt(toolToSave.id), currentAgentId],
-          });
-          message.success(t("toolConfig.message.saveSuccess"));
-          handleClose(); // Close modal
-        } else {
-          message.error(result.message || t("toolConfig.message.saveError"));
-        }
-      } catch (error) {
-        setIsLoading(false);
-        message.error(t("toolConfig.message.saveError"));
-      }
+      // Update local state only - actual save will happen when user clicks "Save Agent"
+      updateTools(newSelectedTools);
+      message.success(t("toolConfig.message.saveSuccess"));
+      handleClose(); // Close modal
 
       // Call original onSave if provided
       if (onSave) {
@@ -1080,7 +1183,10 @@ export default function ToolConfigModal({
                             );
                           }
                           // Check if protocol is http or https
-                          if (url.protocol !== "http:" && url.protocol !== "https:") {
+                          if (
+                            url.protocol !== "http:" &&
+                            url.protocol !== "https:"
+                          ) {
                             return Promise.reject(
                               t("knowledgeBase.error.invalidUrlProtocol")
                             );
@@ -1229,17 +1335,29 @@ export default function ToolConfigModal({
         knowledgeBases={knowledgeBases}
         isLoading={kbLoading}
         showCheckbox={true}
-        onSync={(toolType) =>
-          syncKnowledgeBases(
-            toolType,
-            toolType === "datamate_search"
-              ? { serverUrl: datamateServerUrl }
-              : toolType === "dify_search"
-                ? difyConfig
-                : undefined
-          )
-        }
-        syncLoading={isSyncing === getToolType()}
+        onSync={async (toolType) => {
+          try {
+            const result = await refetchKnowledgeBases();
+            // Check if refetch has an error - React Query sets isError when queryFn throws
+            // Note: if queryFn catches error internally and returns data, isError will be false
+            // So we need to check both error and isError
+            if (result.isError || result.error) {
+              log.error("Failed to sync knowledge bases:", result.error);
+              // Clear knowledge base list on sync failure
+              clearKnowledgeBases();
+              message.error(t("knowledgeBase.message.syncError"));
+              return;
+            }
+            // Show success message after sync completes
+            message.success(t("knowledgeBase.message.syncSuccess"));
+          } catch (error) {
+            log.error("Failed to sync knowledge bases:", error);
+            // Clear knowledge base list on sync failure
+            clearKnowledgeBases();
+            message.error(t("knowledgeBase.message.syncError"));
+          }
+        }}
+        syncLoading={kbLoading}
         isSelectable={canSelectKnowledgeBase}
         currentEmbeddingModel={currentEmbeddingModel}
         difyConfig={

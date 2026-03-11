@@ -24,7 +24,6 @@ import {
   Mail,
   Edit,
   Key,
-  AlertTriangle,
   ChevronRight,
 } from "lucide-react";
 import { USER_ROLES } from "@/const/modelConfig";
@@ -32,8 +31,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useMemo } from "react";
-
-const { Text, Paragraph } = Typography;
+import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -52,7 +50,7 @@ export default function UserProfileComp() {
   const { user, groupIds } = useAuthorizationContext()
 
   // Fetch groups for group name mapping
-  const { data: groupData } = useGroupList(user?.tenantId || null, 1, 100);
+  const { data: groupData } = useGroupList(user?.tenantId || null);
   const groups = groupData?.groups || [];
 
   // Create group name mapping from group_id to group_name
@@ -83,7 +81,8 @@ export default function UserProfileComp() {
   const [editForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
 
-  // Get role display name
+  // Check if user is admin or super admin (cannot delete account)
+  const isAdminOrSuperAdmin = user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
   const getRoleDisplayName = (role: string) => {
     switch (role) {
       case USER_ROLES.SPEED:
@@ -434,41 +433,13 @@ export default function UserProfileComp() {
       </Modal>
 
       {/* Delete Account Confirmation Modal */}
-      <Modal
-        title={
-          <Space className="text-red-600">
-            <AlertTriangle className="h-5 w-5" />
-            <span>{t("auth.confirmRevoke") || "Confirm Account Deletion"}</span>
-          </Space>
-        }
+      <DeleteAccountModal
         open={isDeleteModalOpen}
         onOk={handleDeleteAccount}
         onCancel={() => setIsDeleteModalOpen(false)}
-        okText={t("auth.confirmRevokeOk") || "Delete Anyway"}
-        okButtonProps={{ danger: true, loading: isLoading }}
-        cancelText={t("auth.cancel") || "Cancel"}
-        width={500}
-      >
-        <Alert
-          type="error"
-          showIcon
-          className="mb-4"
-          message={t("profile.deleteWarningTitle") || "This action cannot be undone!"}
-          description={
-            <ul className="list-disc pl-4 mt-2 space-y-1">
-              <li>{t("profile.deleteWarning1") || "Your account will be permanently deleted"}</li>
-              <li>{t("profile.deleteWarning2") || "All your conversations and data will be removed"}</li>
-              <li>{t("profile.deleteWarning3") || "This action cannot be reversed"}</li>
-            </ul>
-          }
-        />
-        <div className="mt-4">
-          <Text strong>{t("profile.adminRestrictionTitle") || "Administrator Restriction"}</Text>
-          <Paragraph type="secondary" className="mt-1">
-            {t("auth.refuseRevokePrompt") || "Your role is tenant administrator. Account deletion for admin is not yet supported."}
-          </Paragraph>
-        </div>
-      </Modal>
+        loading={isLoading}
+        disabled={isAdminOrSuperAdmin}
+      />
     </Flex>
   );
 }
