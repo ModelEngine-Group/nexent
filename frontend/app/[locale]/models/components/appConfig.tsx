@@ -42,9 +42,11 @@ export const AppConfigSection: React.FC = () => {
   // Avatar-related state
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [selectedIconKey, setSelectedIconKey] = useState<string>(
-    presetIcons[0].key
+    appConfig.iconKey || presetIcons[0].key
   );
-  const [tempIconKey, setTempIconKey] = useState<string>(presetIcons[0].key);
+  const [tempIconKey, setTempIconKey] = useState<string>(
+    appConfig.iconKey || presetIcons[0].key
+  );
   const [tempColor, setTempColor] = useState<string>("#2689cb");
   const [avatarType, setAvatarType] = useState<
     (typeof ICON_TYPES)[keyof typeof ICON_TYPES]
@@ -114,11 +116,13 @@ export const AppConfigSection: React.FC = () => {
     }
     setAvatarType(appConfig.iconType);
     setCustomAvatarUrl(appConfig.customIconUrl);
+    setSelectedIconKey(appConfig.iconKey || presetIcons[0].key);
   }, [
     appConfig.appName,
     appConfig.appDescription,
     appConfig.iconType,
     appConfig.customIconUrl,
+    appConfig.iconKey,
   ]);
 
   // Listen for highlight missing field events
@@ -253,6 +257,7 @@ export const AppConfigSection: React.FC = () => {
 
         updateAppConfig({
           iconType: ICON_TYPES.PRESET,
+          iconKey: tempIconKey,
           customIconUrl: null,
           avatarUri: avatarUri,
         });
@@ -558,4 +563,4 @@ export const AppConfigSection: React.FC = () => {
       )}
     </div>
   );
-}; 
+};
