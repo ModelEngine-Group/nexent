@@ -5,7 +5,7 @@ from database.agent_db import logger
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
 from consts.model import ToolSourceEnum
-from services.tool_local_service import get_local_tools_description_zh
+from utils.tool_utils import get_local_tools_description_zh
 
 
 def create_tool(tool_info, version_no: int = 0):

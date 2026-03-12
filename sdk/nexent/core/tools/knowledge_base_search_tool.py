@@ -44,7 +44,7 @@ class KnowledgeBaseSearchTool(Tool):
         },
         "index_names": {
             "description": "The list of index names to search",
-            "description_zh": "要搜索的索引名称列表"
+            "description_zh": "要索引的知识库"
         },
         "search_mode": {
             "description": "The search mode, optional values: hybrid, accurate, semantic",

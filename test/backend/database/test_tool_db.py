@@ -91,16 +91,16 @@ agent_db_mock.logger = MagicMock()
 sys.modules['database.agent_db'] = agent_db_mock
 sys.modules['backend.database.agent_db'] = agent_db_mock
 
-# Mock services module
-tool_local_service_mock = MagicMock()
-tool_local_service_mock.get_local_tools_description_zh = MagicMock(return_value={})
+# Mock utils.tool_utils module
+tool_utils_mock = MagicMock()
+tool_utils_mock.get_local_tools_description_zh = MagicMock(return_value={})
 
-services_mock = MagicMock()
-services_mock.tool_local_service = tool_local_service_mock
+utils_mock.tool_utils = tool_utils_mock
 
-# Add the mocked services module to sys.modules
-sys.modules['services'] = services_mock
-sys.modules['services.tool_local_service'] = tool_local_service_mock
+# Add the mocked utils module to sys.modules
+sys.modules['utils'] = utils_mock
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.tool_utils'] = tool_utils_mock
 
 # Now we can safely import the module being tested
 from backend.database.tool_db import (

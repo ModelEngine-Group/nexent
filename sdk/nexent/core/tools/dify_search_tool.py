@@ -48,7 +48,7 @@ class DifySearchTool(Tool):
         },
         "dataset_ids": {
             "description": "JSON string array of Dify dataset IDs",
-            "description_zh": "Dify 数据集 ID 的 JSON 字符串数组"
+            "description_zh": "要索引的 Dify 知识库"
         },
         "top_k": {
             "description": "Maximum number of search results per dataset",

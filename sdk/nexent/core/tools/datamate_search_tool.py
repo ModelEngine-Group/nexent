@@ -46,7 +46,7 @@ class DataMateSearchTool(Tool):
         },
         "index_names": {
             "description": "The list of index names to search",
-            "description_zh": "要搜索的知识库名称列表（支持用户可见的 knowledge_name 或内部的 index_name）。如果未提供，将搜索所有可用的知识库。"
+            "description_zh": "要索引的知识库"
         },
         "top_k": {
             "description": "Default maximum number of search results to return",
