@@ -1,12 +1,13 @@
 import json
 import logging
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field
 from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
 from ..models.embedding_model import BaseEmbedding
+from ..models.rerank_model import BaseRerank
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
@@ -45,10 +46,18 @@ class KnowledgeBaseSearchTool(Tool):
             description="the search mode, optional values: hybrid, accurate, semantic",
             default="hybrid",
         ),
+        rerank: bool = Field(
+            description="Whether to enable reranking for search results",
+            default=False),
+        rerank_model_name: str = Field(
+            description="The name of the rerank model to use",
+            default=""),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
         embedding_model: BaseEmbedding = Field(
             description="The embedding model to use", default=None, exclude=True),
+        rerank_model: BaseRerank = Field(
+            description="The rerank model to use", default=None, exclude=True),
         vdb_core: VectorDatabaseCore = Field(
             description="Vector database client", default=None, exclude=True),
     ):
@@ -68,6 +77,9 @@ class KnowledgeBaseSearchTool(Tool):
         self.index_names = [] if index_names is None else index_names
         self.search_mode = search_mode
         self.embedding_model = embedding_model
+        self.rerank = rerank
+        self.rerank_model_name = rerank_model_name
+        self.rerank_model = rerank_model
 
         self.record_ops = 1  # To record serial number
         self.running_prompt_zh = "知识库检索中..."
@@ -113,6 +125,38 @@ class KnowledgeBaseSearchTool(Tool):
         if not kb_search_results:
             raise Exception(
                 "No results found! Try a less restrictive/shorter query.")
+
+        # Apply reranking if enabled
+        if self.rerank and self.rerank_model and kb_search_results:
+            try:
+                # Extract document contents for reranking
+                documents = [
+                    result.get("content", "") for result in kb_search_results
+                ]
+                # Perform reranking
+                reranked_results = self.rerank_model.rerank(
+                    query=query,
+                    documents=documents,
+                    top_n=len(documents)
+                )
+                # Reorder kb_search_results based on reranking results
+                if reranked_results:
+                    # Create a mapping of original index to reranked position
+                    original_results_map = {
+                        i: kb_search_results[i] for i in range(len(kb_search_results))
+                    }
+                    # Reorder results based on reranking
+                    kb_search_results = []
+                    for reranked_item in reranked_results:
+                        orig_idx = reranked_item.get("index")
+                        if orig_idx is not None and orig_idx in original_results_map:
+                            result = original_results_map[orig_idx]
+                            # Update score with relevance score from rerank model
+                            result["score"] = reranked_item.get("relevance_score", result.get("score", 0))
+                            kb_search_results.append(result)
+                    logger.info(f"Reranking applied, reordered {len(kb_search_results)} results")
+            except Exception as e:
+                logger.warning(f"Reranking failed, using original results: {str(e)}")
 
         search_results_json = []  # Organize search results into a unified format
         search_results_return = []  # Format for input to the large model

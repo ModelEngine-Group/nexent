@@ -49,6 +49,44 @@ const TOOLS_REQUIRING_KB_SELECTION = [
   "idata_search",
 ];
 
+const TOOLS_SUPPORTING_RERANK = [
+  "knowledge_base_search",
+  "dify_search",
+  "datamate_search",
+];
+
+function withRerankParams(params: ToolParam[], toolName?: string): ToolParam[] {
+  if (!toolName || !TOOLS_SUPPORTING_RERANK.includes(toolName)) return params;
+
+  const hasRerank = params.some((p) => p.name === "rerank");
+  const hasRerankModelName = params.some((p) => p.name === "rerank_model_name");
+  if (hasRerank && hasRerankModelName) return params;
+
+  const next = [...params];
+
+  if (!hasRerank) {
+    next.push({
+      name: "rerank",
+      type: "boolean",
+      required: false,
+      value: false,
+      description: "Whether to enable reranking for search results",
+    });
+  }
+
+  if (!hasRerankModelName) {
+    next.push({
+      name: "rerank_model_name",
+      type: "string",
+      required: false,
+      value: "",
+      description: "The name of the rerank model to use",
+    });
+  }
+
+  return next;
+}
+
 export default function ToolConfigModal({
   isOpen,
   onCancel,
@@ -488,15 +526,16 @@ export default function ToolConfigModal({
     // If server_url already has a saved value, use it
     if (serverUrlParam?.value) {
       // Initialize form with saved values (including server_url)
-      setCurrentParams(initialParams);
+      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
-      initialParams.forEach((param, index) => {
+      paramsWithRerank.forEach((param, index) => {
         formValues[`param_${index}`] = param.value;
       });
       form.setFieldsValue(formValues);
 
       // Parse initial index_names/dataset_ids value for knowledge base selection
-      const kbParam = initialParams.find(
+      const kbParam = paramsWithRerank.find(
         (p) => p.name === "index_names" || p.name === "dataset_ids"
       );
       if (kbParam?.value) {
@@ -531,18 +570,20 @@ export default function ToolConfigModal({
         return param;
       });
 
-      setCurrentParams(updatedParams);
+      const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+      setCurrentParams(paramsWithRerank);
 
       const formValues: Record<string, any> = {};
-      updatedParams.forEach((param, index) => {
+      paramsWithRerank.forEach((param, index) => {
         formValues[`param_${index}`] = param.value;
       });
       form.setFieldsValue(formValues);
     } else {
       // Either no default available OR user has modified the URL, initialize with initialParams
-      setCurrentParams(initialParams);
+      const paramsWithRerank = withRerankParams(initialParams, tool.name);
+      setCurrentParams(paramsWithRerank);
       const formValues: Record<string, any> = {};
-      initialParams.forEach((param, index) => {
+      paramsWithRerank.forEach((param, index) => {
         formValues[`param_${index}`] = param.value;
       });
       form.setFieldsValue(formValues);
@@ -617,10 +658,11 @@ export default function ToolConfigModal({
       return param;
     });
 
-    setCurrentParams(updatedParams);
+    const paramsWithRerank = withRerankParams(updatedParams, tool.name);
+    setCurrentParams(paramsWithRerank);
 
     const formValues: Record<string, any> = {};
-    updatedParams.forEach((param, index) => {
+    paramsWithRerank.forEach((param, index) => {
       formValues[`param_${index}`] = param.value;
     });
     form.setFieldsValue(formValues);
@@ -642,9 +684,10 @@ export default function ToolConfigModal({
     }
 
     // Initialize form values
-    setCurrentParams(initialParams);
+    const paramsWithRerank = withRerankParams(initialParams, tool?.name);
+    setCurrentParams(paramsWithRerank);
     const formValues: Record<string, any> = {};
-    initialParams.forEach((param, index) => {
+    paramsWithRerank.forEach((param, index) => {
       formValues[`param_${index}`] = param.value;
     });
     form.setFieldsValue(formValues);
@@ -1186,6 +1229,36 @@ export default function ToolConfigModal({
     // Determine if this parameter should be rendered as a select dropdown
     const isSelectType = options && options.length > 0;
 
+    // Special handling for rerank_model_name parameter - show model selector
+    if (param.name === "rerank_model_name") {
+      // First try to get the list of available rerank models from config
+      const rerankConfig = configData?.models?.rerank;
+      const hasRerankModel = rerankConfig?.modelName;
+
+      if (hasRerankModel) {
+        // If rerank model is configured, show it as an option
+        const modelOptions = [{ value: rerankConfig.modelName, label: rerankConfig.displayName || rerankConfig.modelName }];
+        return (
+          <Select
+            placeholder={t("toolConfig.input.string.placeholder", {
+              name: param.description,
+            })}
+            options={modelOptions}
+            allowClear
+          />
+        );
+      }
+      // If no rerank model configured, show text input for manual entry
+      return (
+        <Input.TextArea
+          placeholder={t("toolConfig.input.string.placeholder", {
+            name: param.description,
+          })}
+          autoSize={{ minRows: 1, maxRows: 2 }}
+        />
+      );
+    }
+
     // Special handling for iData knowledge_space_id parameter
     const isIdataKnowledgeSpaceId =
       toolKbType === "idata_search" && param.name === "knowledge_space_id";
@@ -1278,6 +1351,14 @@ export default function ToolConfigModal({
 
     return inputComponent;
   };
+
+  const isRerankEnabled = useMemo(() => {
+    const rerankIndex = currentParams.findIndex((p) => p.name === "rerank");
+    if (rerankIndex < 0) return false;
+    const fieldName = `param_${rerankIndex}`;
+    const value = form.getFieldValue(fieldName);
+    return Boolean(value);
+  }, [currentParams, form, formValues]);
 
   if (!tool) return null;
 
@@ -1383,6 +1464,9 @@ export default function ToolConfigModal({
             >
               <div className="pr-2 mt-3">
                 {currentParams.map((param, index) => {
+                  if (param.name === "rerank_model_name" && !isRerankEnabled) {
+                    return null;
+                  }
                   const fieldName = `param_${index}`;
                   const rules: any[] = [];
 
