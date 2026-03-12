@@ -1257,7 +1257,7 @@ export function ChatInput({
           </div>
         </div>
       ) : (
-        <div className="border-t-0 border-transparent bg-background">
+        <div className="border-t-0 border-transparent bg-background bg-white">
           <div className="max-w-3xl mx-auto">
             <div
               ref={dropAreaRef}

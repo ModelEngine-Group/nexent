@@ -473,13 +473,13 @@ export function ChatRightPanel({
     <div
       className={`transition-all duration-300 ease-in-out ${
         isVisible ? "lg:flex w-[400px]" : "lg:flex w-0 opacity-0"
-      } hidden border-l bg-background relative flex-col h-full`}
+      } hidden border-l bg-background relative flex-col h-full bg-white`}
       style={{ maxWidth: "400px", overflow: "hidden" }}
     >
       {/* Image viewer modal */}
       {viewingImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80"
           onClick={() => setViewingImage(null)}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">

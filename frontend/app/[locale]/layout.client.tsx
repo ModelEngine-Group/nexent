@@ -112,6 +112,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           style={siderStyle}
           width={SIDER_CONFIG.EXPANDED_WIDTH}
           collapsed={collapsed}
+          onCollapse={setCollapsed}
           trigger={null}
           breakpoint="lg"
           collapsedWidth={SIDER_CONFIG.COLLAPSED_WIDTH}
