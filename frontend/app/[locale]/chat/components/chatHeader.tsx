@@ -119,27 +119,27 @@ export function ChatHeader({ title, onRename }: ChatHeaderProps) {
   return (
     <>
       <header className="border-b border-transparent bg-background">
-        <div className="w-full flex justify-center p-2 ">
-            {isEditing ? (
-              <Input
-                ref={inputRef}
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onBlur={handleSubmit}
-                className="text-xl font-bold text-center h-9 max-w-xs"
-                autoFocus
-              />
-            ) : (
-              <h1
-                className="text-xl font-bold cursor-pointer px-2 py-1 rounded border border-transparent hover:border-slate-200"
-                onDoubleClick={handleDoubleClick}
-                title={t("chatHeader.doubleClickToEdit")}
-              >
-                {title}
-              </h1>
-            )}
-          </div>
+        <div className="w-full flex justify-center pt-4 pb-2">
+          {isEditing ? (
+            <Input
+              ref={inputRef}
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={handleSubmit}
+              className="text-xl font-bold text-center h-9 max-w-xs"
+              autoFocus
+            />
+          ) : (
+            <h1
+              className="text-xl font-bold cursor-pointer px-2 py-1 rounded border border-transparent hover:border-slate-200"
+              onDoubleClick={handleDoubleClick}
+              title={t("chatHeader.doubleClickToEdit")}
+            >
+              {title}
+            </h1>
+          )}
+        </div>
       </header>
 
     </>

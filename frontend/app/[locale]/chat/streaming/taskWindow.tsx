@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Globe,
@@ -1108,7 +1108,7 @@ interface TaskWindowProps {
   defaultExpanded?: boolean;
 }
 
-export function TaskWindow({ messages, isStreaming = false, defaultExpanded = true }: TaskWindowProps) {
+function TaskWindowInner({ messages, isStreaming = false, defaultExpanded = true }: TaskWindowProps) {
   const { t } = useTranslation("common");
   const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -1591,3 +1591,18 @@ export function TaskWindow({ messages, isStreaming = false, defaultExpanded = tr
     </>
   );
 }
+
+function areEqualTaskWindow(prev: TaskWindowProps, next: TaskWindowProps): boolean {
+  if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.messages.length !== next.messages.length) return false;
+  // During streaming the last message grows in content without the array length changing.
+  if (prev.messages.length > 0) {
+    const prevLast = prev.messages[prev.messages.length - 1];
+    const nextLast = next.messages[next.messages.length - 1];
+    if (prevLast.id !== nextLast.id || prevLast.content !== nextLast.content) return false;
+  }
+  // defaultExpanded is only meaningful on initial mount; exclude from equality check.
+  return true;
+}
+
+export const TaskWindow = React.memo(TaskWindowInner, areEqualTaskWindow);

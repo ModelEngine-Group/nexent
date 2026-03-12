@@ -53,14 +53,9 @@ const getI18nKeyByType = (type: string): string => {
 };
 
 export function ChatInterface() {
-  const router = useRouter();
-  const { user } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
   const [input, setInput] = useState("");
   // Replace the original messages state
-  const [sessionMessages, setSessionMessages] = useState<{
-    [conversationId: number]: ChatMessageType[];
-  }>({});
+  const [sessionMessages, setSessionMessages] = useState<{[conversationId: number]: ChatMessageType[];}>({});
   const [isSwitchedConversation, setIsSwitchedConversation] = useState(false); // Add conversation switching tracking state
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
@@ -69,15 +64,9 @@ export function ChatInterface() {
   const conversationManagement = useConversationManagement();
 
   // For each conversation, maintain independent SSE connections and states
-  const [streamingConversations, setStreamingConversations] = useState<
-    Set<number>
-  >(new Set());
-  const conversationControllersRef = useRef<Map<number, AbortController>>(
-    new Map()
-  );
-  const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(
-    new Map()
-  );
+  const [streamingConversations, setStreamingConversations] = useState<Set<number>>(new Set());
+  const conversationControllersRef = useRef<Map<number, AbortController>>(new Map());
+  const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
   // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content
@@ -741,8 +730,7 @@ export function ChatInterface() {
     });
 
     // Check if there are cached messages
-    const hasCachedMessages =
-      sessionMessages[dialog.conversation_id] !== undefined;
+    const hasCachedMessages = sessionMessages[dialog.conversation_id] !== undefined;
     const isCurrentActive = dialog.conversation_id === conversationManagement.selectedConversationId;
 
     // Log: click conversation
