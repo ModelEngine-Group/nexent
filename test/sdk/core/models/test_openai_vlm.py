@@ -69,6 +69,10 @@ with patch.dict("sys.modules", module_mocks):
         mock_client.chat = mock_chat
         model.client = mock_client
 
+        # Additional attributes required by __call__ -> _prepare_completion_kwargs
+        model.custom_role_conversions = {}
+        model.model_factory = MagicMock()
+
         return model
 
 
