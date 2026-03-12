@@ -80,16 +80,6 @@ export function useAuthenticationUI({
     handleUnauthenticatedModalClose();
   }, [handleUnauthenticatedModalClose]);
 
-  /**
-   * Check if current path is home page
-   * Home page paths: "/", "/zh", "/en"
-   */
-  const isLocaleHomePath = (path?: string | null) => {
-    if (!path) return false;
-    const segments = path.split("/").filter(Boolean);
-    return segments.length <= 1;
-  };
-
   useEffect(() => {
     if (isSpeedMode) return;
 
@@ -131,14 +121,7 @@ export function useAuthenticationUI({
     if (isSessionExpiredModalOpen) return;
     if (isLoginModalOpen) return;
     if (isRegisterModalOpen) return;
-    // Skip if already on home page
-    if (isLocaleHomePath(pathname)) return;
-
-    // For unauthenticated users accessing protected routes, show auth prompt
-    const effectivePath = getEffectiveRoutePath(pathname);
-    if (effectivePath !== "/") {
-      openAuthPromptModal();
-    }
+    openAuthPromptModal();
   }, [pathname, isAuthenticated, isSpeedMode, isAuthChecking, isSessionExpiredModalOpen, openAuthPromptModal]);
 
 

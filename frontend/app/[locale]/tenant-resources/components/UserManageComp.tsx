@@ -687,29 +687,27 @@ export default function UserManageComp() {
   return (
     <div className="w-full h-full">
       {/* Page header: grouped header without dividing line */}
-      <div className="w-full px-4 md:px-8 lg:px-16 py-6">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35 }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
-                <Building2 className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
-                  {t("tenantResources.title") || "Tenant Resource Management"}
-                </h1>
-                <p className="text-slate-600 dark:text-slate-300 mt-1">
-                  {t("tenantResources.subtitle") ||
-                    "Manage tenants, users, groups and resources"}
-                </p>
-              </div>
+      <div className="w-full px-10 pt-10">
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
+              <Building2 className="h-6 w-6 text-white" />
             </div>
-          </motion.div>
-        </div>
+            <div>
+              <h1 className="text-2xl font-bold text-purple-600 dark:text-purple-500">
+                {t("tenantResources.title") || "Tenant Resource Management"}
+              </h1>
+              <p className="text-slate-600 dark:text-slate-300 mt-1">
+                {t("tenantResources.subtitle") ||
+                  "Manage tenants, users, groups and resources"}
+              </p>
+            </div>
+          </div>
+        </motion.div>
       </div>
       <Row className="flex-1 min-h-0 h-full" align="stretch">
         <Can permission="tenant.list:read">
