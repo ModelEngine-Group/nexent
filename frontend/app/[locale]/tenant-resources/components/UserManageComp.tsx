@@ -193,10 +193,12 @@ function TenantList({
             });
 
             // Register admin account using the invitation code
+            // Do not auto-login for tenant admin creation
             const signupResult = await authService.signUp(
               values.adminEmail,
               values.adminPassword,
-              invitation.invitation_code
+              invitation.invitation_code,
+              false
             );
 
             if (signupResult.error) {
@@ -615,7 +617,7 @@ export default function UserManageComp() {
   // For super-admin: use paginated tenant list (tenantData)
   let currentTenant: Tenant | undefined;
   let currentTenantName: string;
-  
+
   if (!isSuperAdmin && directTenantData) {
     // Non-super-admin: use directly fetched tenant info
     currentTenant = directTenantData;
