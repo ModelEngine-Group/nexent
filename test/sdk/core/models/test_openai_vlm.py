@@ -232,6 +232,16 @@ def test_prepare_image_message_custom_system_prompt(vl_model_instance, tmp_path)
     assert messages[0]["content"][0]["text"] == custom_prompt
 
 
+def test_prepare_image_message_nonexistent_file(vl_model_instance):
+    """prepare_image_message should use default jpeg format when file doesn't exist."""
+
+    # Use a path that doesn't exist - should still work with default jpeg format
+    messages = vl_model_instance.prepare_image_message("/nonexistent/image.png", system_prompt="Test")
+
+    # Should use default jpeg format when file doesn't exist
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
 # ---------------------------------------------------------------------------
 # Tests for analyze_image
 # ---------------------------------------------------------------------------
