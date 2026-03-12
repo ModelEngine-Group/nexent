@@ -290,6 +290,23 @@ class TenantConfig(TableBase):
     config_value = Column(Text, doc="the value of the config")
 
 
+class PromptTemplate(TableBase):
+    """
+    Prompt template management table
+    """
+    __tablename__ = "prompt_template_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    template_id = Column(Integer, Sequence(
+        "prompt_template_t_template_id_seq", schema=SCHEMA), primary_key=True, nullable=False, doc="Template ID")
+    name = Column(String(200), doc="Template name")
+    description = Column(String(2000), doc="Template description")
+    prompt_text = Column(Text, doc="Template prompt text")
+    is_builtin = Column(Boolean, default=False,
+                        doc="Whether this template is built-in")
+    tenant_id = Column(String(100), doc="Tenant ID")
+
+
 class MemoryUserConfig(TableBase):
     """
     Tenant configuration information table

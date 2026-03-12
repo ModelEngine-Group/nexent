@@ -26,6 +26,9 @@ import {
   GENERATE_PROMPT_STREAM_TYPES,
 } from "@/const/agentConfig";
 import { generatePromptStream } from "@/services/promptService";
+import { listPromptTemplates } from "@/services/promptTemplateService";
+import type { PromptTemplate } from "@/types/promptTemplate";
+import { useAuth } from "@/hooks/useAuth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -107,6 +110,9 @@ export default function AgentGenerateDetail({
   // Modal states
   const [expandModalOpen, setExpandModalOpen] = useState(false);
   const [expandModalType, setExpandModalType] = useState<'duty' | 'constraint' | 'few-shots' | null>(null);
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
 
   // Only show "no edit permission" tooltip when the panel is active and agent is read-only.
   // Note: when no agent is selected, AgentInfoComp shows an overlay and we should not show
@@ -134,6 +140,41 @@ export default function AgentGenerateDetail({
     );
   };
 
+
+  // Ensure tenant config is loaded for default model selection
+  useEffect(() => {
+    const loadConfigIfNeeded = async () => {
+      try {
+        // Check if config is already loaded
+        const configStore = ConfigStore.getInstance();
+        const modelConfig = configStore.getModelConfig();
+
+        // If no LLM model is configured, try to load config from backend
+        if (!modelConfig.llm?.modelName && !modelConfig.llm?.displayName) {
+          await configService.loadConfigToFrontend();
+        }
+      } catch (error) {
+        log.warn("Failed to load tenant config:", error);
+      }
+    };
+
+    loadConfigIfNeeded();
+  }, []);
+
+  useEffect(() => {
+    const loadTemplates = async () => {
+      setTemplateLoading(true);
+      try {
+        const res = await listPromptTemplates();
+        setPromptTemplates(res?.data || []);
+      } catch (error) {
+        message.error(t("promptTemplate.message.loadError"));
+      } finally {
+        setTemplateLoading(false);
+      }
+    };
+    loadTemplates();
+  }, [message, t]);
 
   const stylesObject: TabsProps["styles"] = {
     root: {},
@@ -417,6 +458,42 @@ export default function AgentGenerateDetail({
     }
   };
 
+  const handleApplyTemplate = () => {
+    if (!selectedTemplateId) {
+      message.warning(t("promptTemplate.selectPlaceholder"));
+      return;
+    }
+    const selected = promptTemplates.find(
+      (template) => template.template_id === selectedTemplateId
+    );
+    if (!selected) return;
+
+    const targetTab =
+      activeTab === "duty" || activeTab === "constraint" || activeTab === "few-shots"
+        ? activeTab
+        : "duty";
+
+    switch (targetTab) {
+      case "duty":
+        form.setFieldsValue({ dutyPrompt: selected.prompt_text });
+        onUpdateProfile({ duty_prompt: selected.prompt_text });
+        break;
+      case "constraint":
+        form.setFieldsValue({ constraintPrompt: selected.prompt_text });
+        onUpdateProfile({ constraint_prompt: selected.prompt_text });
+        break;
+      case "few-shots":
+        form.setFieldsValue({ fewShotsPrompt: selected.prompt_text });
+        onUpdateProfile({ few_shots_prompt: selected.prompt_text });
+        break;
+      default:
+        break;
+    }
+    message.success(t("promptTemplate.message.applySuccess"));
+  };
+
+  // Custom validator for agent name uniqueness
+  const validateAgentNameUnique = async (_: any, value: string) => {
   // Generic validator for agent field uniqueness - use local agent list instead of API call
   const validateAgentFieldUnique = async (
     _: any,
@@ -963,6 +1040,35 @@ export default function AgentGenerateDetail({
                       whiteSpace: 'nowrap'
                     }}
                   />
+                </div>
+               <div style={{ marginLeft: 12, minWidth: 240 }}>
+                  <Select
+                    showSearch
+                    allowClear
+                    placeholder={t("promptTemplate.selectPlaceholder")}
+                    value={selectedTemplateId ?? undefined}
+                    onChange={(value) => setSelectedTemplateId(value ?? null)}
+                    loading={templateLoading}
+                    optionFilterProp="label"
+                    options={promptTemplates.map((template) => ({
+                      value: template.template_id,
+                      label: template.name,
+                    }))}
+                    filterOption={(input, option) =>
+                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    }
+                    style={{ width: "100%" }}
+                    disabled={!editable || isGenerating}
+                  />
+                </div>
+                <div style={{ marginLeft: 12 }}>
+                  <Button
+                    size="middle"
+                    onClick={handleApplyTemplate}
+                    disabled={!editable || isGenerating}
+                  >
+                    {t("promptTemplate.apply")}
+                  </Button>
                 </div>
                 <div style={{ marginLeft: 12 }}>
                   {wrapNoEditTooltipInline(
