@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Globe,
@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
-import { Button } from "antd";
+import { Button, message as antdMessage } from "antd";
 import { MarkdownRenderer, CodeBlock } from "@/components/ui/markdownRenderer";
 import { chatConfig } from "@/const/chatConfig";
 import {
@@ -27,6 +27,7 @@ import {
   extractObjectNameFromUrl,
 } from "@/services/storageService";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 /**
  * Extract code content and language from model_output_code content
@@ -248,7 +249,7 @@ const messageHandlers: MessageHandler[] = [
   {
     canHandle: (message) =>
       message.type === chatConfig.messageTypes.SEARCH_CONTENT_PLACEHOLDER,
-    render: (message, t) => {
+    render: (message, t, context) => {
       // Find search results in the message context
       const messageContainer = message._messageContainer;
       if (
@@ -377,12 +378,16 @@ const messageHandlers: MessageHandler[] = [
       ): Promise<void> => {
         try {
           if (site.sourceType === "datamate") {
+            if (!context?.appConfig?.modelEngineEnabled) {
+              antdMessage.error("DataMate download not available: ModelEngine is not enabled");
+              return;
+            }
             if (
               !site.datamateDatasetId &&
               !site.datamateFileId &&
               (!site.url || site.url === "#")
             ) {
-              message.error(
+              antdMessage.error(
                 t(
                   "taskWindow.downloadError",
                   "Missing Datamate dataset or file information"
@@ -418,7 +423,7 @@ const messageHandlers: MessageHandler[] = [
               setTimeout(() => {
                 document.body.removeChild(link);
               }, 100);
-              message.success(
+              antdMessage.success(
                 t("taskWindow.downloadSuccess", "File download started")
               );
               return;
@@ -434,7 +439,7 @@ const messageHandlers: MessageHandler[] = [
                 : `attachments/${site.filename}`;
             }
             if (!objectName) {
-              message.error(
+              antdMessage.error(
                 t(
                   "taskWindow.downloadError",
                   "Failed to download file. Please try again."
@@ -448,12 +453,12 @@ const messageHandlers: MessageHandler[] = [
             );
           }
 
-          message.success(
+          antdMessage.success(
             t("taskWindow.downloadSuccess", "File download started")
           );
         } catch (error) {
           log.error("Failed to download knowledge file:", error);
-          message.error(
+          antdMessage.error(
             t(
               "taskWindow.downloadError",
               "Failed to download file. Please try again."
@@ -1100,13 +1105,15 @@ const messageHandlers: MessageHandler[] = [
 interface TaskWindowProps {
   messages: TaskMessageType[];
   isStreaming?: boolean;
+  defaultExpanded?: boolean;
 }
 
-export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
+function TaskWindowInner({ messages, isStreaming = false, defaultExpanded = true }: TaskWindowProps) {
   const { t } = useTranslation("common");
+  const { appConfig } = useConfig();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isExpanded, setIsExpanded] = useState(true); // default expand task details interface
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded); // default expand task details interface
   const [contentHeight, setContentHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -1139,6 +1146,20 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
       setContentHeight(height);
     }
   }, [isExpanded, groupedMessages, messages]);
+
+  // Force recalculate content height after mount for cached error messages
+  useEffect(() => {
+    if (isExpanded && contentHeight === 0) {
+      // Delay to ensure DOM is rendered
+      const timer = setTimeout(() => {
+        if (contentRef.current) {
+          const height = contentRef.current.scrollHeight;
+          setContentHeight(height);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded, contentHeight]);
 
   // Dynamic threshold calculation based on content growth
   const calculateDynamicThreshold = (baseThreshold: number) => {
@@ -1272,7 +1293,7 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
 
     const handler = messageHandlers.find((h) => h.canHandle(message));
     if (handler) {
-      return handler.render(message, t);
+      return handler.render(message, t, { appConfig });
     }
 
     // Fallback processing, normally not executed here
@@ -1570,3 +1591,18 @@ export function TaskWindow({ messages, isStreaming = false }: TaskWindowProps) {
     </>
   );
 }
+
+function areEqualTaskWindow(prev: TaskWindowProps, next: TaskWindowProps): boolean {
+  if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.messages.length !== next.messages.length) return false;
+  // During streaming the last message grows in content without the array length changing.
+  if (prev.messages.length > 0) {
+    const prevLast = prev.messages[prev.messages.length - 1];
+    const nextLast = next.messages[next.messages.length - 1];
+    if (prevLast.id !== nextLast.id || prevLast.content !== nextLast.content) return false;
+  }
+  // defaultExpanded is only meaningful on initial mount; exclude from equality check.
+  return true;
+}
+
+export const TaskWindow = React.memo(TaskWindowInner, areEqualTaskWindow);

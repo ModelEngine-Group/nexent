@@ -311,9 +311,9 @@ export function ChatStreamMain({
   ]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative custom-scrollbar">
+    <div className="flex-1 flex flex-col overflow-hidden relative custom-scrollbar bg-white">
       {/* Main message area */}
-      <ScrollArea className="flex-1 px-4 pt-4" ref={scrollAreaRef}>
+      <ScrollArea className="flex-1 px-4 pt-4 bg-white" ref={scrollAreaRef}>
         <div className="max-w-3xl mx-auto">
           {processedMessages.finalMessages.length === 0 ? (
             isLoadingHistoricalConversation ? (

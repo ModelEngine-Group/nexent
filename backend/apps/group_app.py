@@ -133,10 +133,11 @@ async def get_groups_endpoint(
     Search groups for a specific tenant with pagination
 
     Args:
-        request: Group search request with tenant_id, page, and page_size
+        request: Group search request with tenant_id, optional page, and page_size.
+                If page and page_size are not provided, returns all data.
 
     Returns:
-        JSONResponse: Paginated list of groups for the tenant
+        JSONResponse: List of groups for the tenant (paginated or all)
     """
     try:
         # Validate tenant exists
@@ -150,18 +151,25 @@ async def get_groups_endpoint(
             sort_order=request.sort_order
         )
 
+        # Build response content
+        content = {
+            "message": "Groups retrieved successfully",
+            "data": result["groups"],
+            "total": result["total"]
+        }
+
+        # Add pagination info only if pagination was used
+        if request.page is not None and request.page_size is not None:
+            content["pagination"] = {
+                "page": request.page,
+                "page_size": request.page_size,
+                "total": result["total"],
+                "total_pages": (result["total"] + request.page_size - 1) // request.page_size
+            }
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={
-                "message": "Groups retrieved successfully",
-                "data": result["groups"],
-                "pagination": {
-                    "page": request.page,
-                    "page_size": request.page_size,
-                    "total": result["total"],
-                    "total_pages": (result["total"] + request.page_size - 1) // request.page_size
-                }
-            }
+            content=content
         )
 
     except NotFoundException as exc:

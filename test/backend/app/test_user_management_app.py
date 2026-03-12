@@ -518,39 +518,33 @@ class TestGetCurrentUserId:
         mock_validate.assert_called_once_with("Bearer token")
 
     @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_get_user_id_success_parsed_from_token(self, mock_get_user_id, mock_validate):
-        """Test successful user ID retrieval by parsing token"""
+    def test_get_user_id_token_validation_failed_returns_401(self, mock_validate):
+        """Test that when token validation fails, return 401 (no fallback to parse token)"""
         mock_validate.return_value = (False, None)
-        mock_get_user_id.return_value = ("user123", "tenant456")
 
         response = client.get(
             "/user/current_user_id",
             headers={"Authorization": "Bearer expired_token"}
         )
 
-        assert response.status_code == HTTPStatus.OK
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
         data = response.json()
-        assert data["message"] == "Successfully parsed user ID from token"
-        assert data["data"]["user_id"] == "user123"
+        assert "User not logged in or session invalid" in data["detail"]
         mock_validate.assert_called_once_with("Bearer expired_token")
-        mock_get_user_id.assert_called_once_with("Bearer expired_token")
 
     @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_current_user_id')
-    def test_get_user_id_invalid_session(self, mock_get_user_id, mock_validate):
-        """Test user ID retrieval with invalid session"""
+    def test_get_user_id_invalid_session(self, mock_validate):
+        """Test user ID retrieval with invalid session returns 401"""
         mock_validate.return_value = (False, None)
-        mock_get_user_id.return_value = (None, None)
 
         response = client.get(
             "/user/current_user_id",
             headers={"Authorization": "Bearer invalid_token"}
         )
 
-        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
         data = response.json()
-        assert data["detail"] == "User not logged in or session invalid"
+        assert "User not logged in or session invalid" in data["detail"]
 
     def test_get_user_id_no_authorization(self):
         """Test user ID retrieval without authorization header"""

@@ -419,7 +419,7 @@ def test_soft_delete_user_tenant_by_user_id_no_rows(monkeypatch, mock_session):
     assert ok is False
 
 
-def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
+def test_get_users_by_tenant_id_success_with_pagination(monkeypatch, mock_session):
     """Test successfully getting users by tenant ID with pagination"""
     session, query = mock_session
 
@@ -428,6 +428,16 @@ def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
         MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN"),
         MockUserTenant(user_id="user2", user_email="user2@example.com", user_role="USER"),
     ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_paginated_filter = MagicMock()
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = mock_paginated_results
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
 
     # Mock session.query to return different objects for different calls
     call_count = 0
@@ -442,14 +452,6 @@ def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
             return mock_q
         else:  # Second call for paginated results
             mock_q = MagicMock()
-            mock_paginated_filter = MagicMock()
-            mock_paginated_order_by = MagicMock()
-            mock_paginated_offset = MagicMock()
-            mock_paginated_limit = MagicMock()
-            mock_paginated_limit.all.return_value = mock_paginated_results
-            mock_paginated_offset.limit.return_value = mock_paginated_limit
-            mock_paginated_order_by.offset.return_value = mock_paginated_offset
-            mock_paginated_filter.order_by.return_value = mock_paginated_order_by
             mock_q.filter.return_value = mock_paginated_filter
             return mock_q
 
@@ -461,7 +463,7 @@ def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
 
-    result = get_users_by_tenant_id("test_tenant", page=2, page_size=10)
+    result = get_users_by_tenant_id("test_tenant", page=2, page_size=10, sort_by="created_at", sort_order="desc")
 
     assert result["total"] == 5
     assert len(result["users"]) == 2
@@ -471,6 +473,203 @@ def test_get_users_by_tenant_id_success(monkeypatch, mock_session):
     assert result["users"][1]["user_id"] == "user2"
     assert result["users"][1]["user_email"] == "user2@example.com"
     assert result["users"][1]["user_role"] == "USER"
+    # Verify pagination was applied
+    mock_paginated_order_by.offset.assert_called_once_with(10)  # (page-1) * page_size = (2-1) * 10 = 10
+    mock_paginated_offset.limit.assert_called_once_with(10)
+
+
+def test_get_users_by_tenant_id_success_without_pagination(monkeypatch, mock_session):
+    """Test successfully getting users by tenant ID without pagination (returns all data)"""
+    session, query = mock_session
+
+    # Mock the query result (all users)
+    mock_all_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN"),
+        MockUserTenant(user_id="user2", user_email="user2@example.com", user_role="USER"),
+        MockUserTenant(user_id="user3", user_email="user3@example.com", user_role="USER"),
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = mock_all_results
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 3
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for all results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=None, page_size=None)
+
+    assert result["total"] == 3
+    assert len(result["users"]) == 3
+    assert result["users"][0]["user_id"] == "user1"
+    assert result["users"][1]["user_id"] == "user2"
+    assert result["users"][2]["user_id"] == "user3"
+    # Verify .all() was called (no pagination)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_users_by_tenant_id_with_asc_sort(monkeypatch, mock_session):
+    """Test getting users by tenant ID with ascending sort order"""
+    session, query = mock_session
+
+    mock_paginated_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN")
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_paginated_filter = MagicMock()
+    mock_paginated_order_by = MagicMock()
+    mock_paginated_offset = MagicMock()
+    mock_paginated_limit = MagicMock()
+    mock_paginated_limit.all.return_value = mock_paginated_results
+    mock_paginated_offset.limit.return_value = mock_paginated_limit
+    mock_paginated_order_by.offset.return_value = mock_paginated_offset
+    mock_paginated_filter.order_by.return_value = mock_paginated_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 1
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for paginated results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_paginated_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="asc")
+
+    assert result["total"] == 1
+    assert len(result["users"]) == 1
+    # Verify order_by was called with asc
+    mock_paginated_filter.order_by.assert_called_once()
+
+
+def test_get_users_by_tenant_id_with_only_page_none(monkeypatch, mock_session):
+    """Test getting users by tenant ID when page is None but page_size is provided"""
+    session, query = mock_session
+
+    mock_all_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN")
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = mock_all_results
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 1
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for all results (no pagination when page is None)
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=None, page_size=10)
+
+    assert result["total"] == 1
+    assert len(result["users"]) == 1
+    # Verify .all() was called (no pagination when page is None)
+    mock_order_by.all.assert_called_once()
+
+
+def test_get_users_by_tenant_id_with_only_page_size_none(monkeypatch, mock_session):
+    """Test getting users by tenant ID when page_size is None but page is provided"""
+    session, query = mock_session
+
+    mock_all_results = [
+        MockUserTenant(user_id="user1", user_email="user1@example.com", user_role="ADMIN")
+    ]
+
+    # Create mock objects outside the function so they can be accessed in assertions
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = mock_all_results
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_count_filter = MagicMock()
+            mock_count_filter.count.return_value = 1
+            mock_q.filter.return_value = mock_count_filter
+            return mock_q
+        else:  # Second call for all results (no pagination when page_size is None)
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.user_tenant_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.user_tenant_db.as_dict", lambda obj: obj.__dict__)
+
+    result = get_users_by_tenant_id("test_tenant", page=1, page_size=None)
+
+    assert result["total"] == 1
+    assert len(result["users"]) == 1
+    # Verify .all() was called (no pagination when page_size is None)
+    mock_order_by.all.assert_called_once()
 
 
 def test_get_users_by_tenant_id_empty_result(monkeypatch, mock_session):
@@ -481,6 +680,28 @@ def test_get_users_by_tenant_id_empty_result(monkeypatch, mock_session):
     mock_count_query = MagicMock()
     mock_count_query.count.return_value = 0
     query.filter.return_value = mock_count_query
+
+    # Mock the query chain for results
+    mock_filter = MagicMock()
+    mock_order_by = MagicMock()
+    mock_order_by.all.return_value = []
+    mock_filter.order_by.return_value = mock_order_by
+
+    # Mock session.query to return different objects for different calls
+    call_count = 0
+    def mock_query(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First call for count
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_count_query
+            return mock_q
+        else:  # Second call for results
+            mock_q = MagicMock()
+            mock_q.filter.return_value = mock_filter
+            return mock_q
+
+    session.query = mock_query
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session

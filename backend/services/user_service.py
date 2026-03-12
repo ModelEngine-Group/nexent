@@ -2,7 +2,7 @@
 User service layer - handles user-related business logic
 """
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
@@ -19,15 +19,15 @@ from nexent.memory.memory_service import clear_memory
 logger = logging.getLogger(__name__)
 
 
-def get_users(tenant_id: str, page: int = 1, page_size: int = 20,
+def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
               sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
-        page (int): Page number (1-based)
-        page_size (int): Number of items per page
+        page (Optional[int]): Page number (1-based). If None, returns all data
+        page_size (Optional[int]): Number of items per page. If None, returns all data
         sort_by (str): Field to sort by
         sort_order (str): Sort order (asc or desc)
 
@@ -49,13 +49,20 @@ def get_users(tenant_id: str, page: int = 1, page_size: int = 20,
         }
         users.append(user_info)
 
-    return {
-        "users": users,
-        "total": result["total"],
-        "page": page,
-        "page_size": page_size,
-        "total_pages": (result["total"] + page_size - 1) // page_size
-    }
+    # Calculate pagination info only if pagination is used
+    if page is not None and page_size is not None:
+        return {
+            "users": users,
+            "total": result["total"],
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (result["total"] + page_size - 1) // page_size
+        }
+    else:
+        return {
+            "users": users,
+            "total": result["total"]
+        }
 
 
 async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str) -> Dict[str, Any]:

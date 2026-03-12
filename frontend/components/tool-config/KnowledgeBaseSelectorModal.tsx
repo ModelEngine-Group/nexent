@@ -18,11 +18,44 @@ import {
 } from "@ant-design/icons";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import {
-  KnowledgeBaseSelectorProps,
-  getKnowledgeBaseSourcesForTool,
-} from "./index";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+
+interface KnowledgeBaseSelectorProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (selectedKnowledgeBases: KnowledgeBase[]) => void;
+  selectedIds: string[];
+  toolType: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search";
+  title?: string;
+  maxSelect?: number;
+  showCreateButton?: boolean;
+  showDeleteButton?: boolean;
+  showCheckbox?: boolean;
+  // Dify/iData configuration for fetching knowledge bases
+  difyConfig?: {
+    serverUrl?: string;
+    apiKey?: string;
+    userId?: string;
+    knowledgeSpaceId?: string;
+  };
+}
+
+function getKnowledgeBaseSourcesForTool(
+  toolType: "knowledge_base_search" | "dify_search" | "datamate_search" | "idata_search"
+): string[] {
+  switch (toolType) {
+    case "knowledge_base_search":
+      return ["nexent"];
+    case "dify_search":
+      return ["dify"];
+    case "datamate_search":
+      return ["datamate"];
+    case "idata_search":
+      return ["idata"];
+    default:
+      return ["nexent"];
+  }
+}
 
 interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   knowledgeBases: KnowledgeBase[];
@@ -38,10 +71,12 @@ interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   // Selection validation props
   isSelectable?: (kb: KnowledgeBase) => boolean;
   currentEmbeddingModel?: string | null;
-  // Dify configuration for fetching Dify knowledge bases
+  // Dify/iData configuration for fetching knowledge bases
   difyConfig?: {
     serverUrl?: string;
     apiKey?: string;
+    userId?: string;
+    knowledgeSpaceId?: string;
   };
 }
 

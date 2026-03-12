@@ -17,6 +17,7 @@ export default function AgentSetupOrchestrator() {
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
   const enterCreateMode = useAgentConfigStore((state) => state.enterCreateMode);
+  const reset = useAgentConfigStore((state) => state.reset);
 
   // Local UI state for version panel
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] = useState(false);
@@ -31,6 +32,13 @@ export default function AgentSetupOrchestrator() {
       }, 100);
     }
   }, [searchParams, enterCreateMode]);
+
+  // Reset agent selection state when leaving the page
+  useEffect(() => {
+    return () => {
+      reset();
+    };
+  }, [reset]);
 
   return (
     <div className="w-full h-full p-8">

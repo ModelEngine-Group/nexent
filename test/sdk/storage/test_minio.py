@@ -883,3 +883,92 @@ class TestMinIOStorageClientExists:
 
         assert exists is False
 
+
+class TestMinIOStorageClientCopyFile:
+    """Test cases for copy_file method"""
+
+    @patch('nexent.storage.minio.boto3')
+    def test_copy_file_success(self, mock_boto3):
+        """Test successful file copy within the same bucket"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.copy_file('src.txt', 'dst.txt', 'test-bucket')
+
+        assert success is True
+        assert result == 'dst.txt'
+        mock_client.copy_object.assert_called_once_with(
+            Bucket='test-bucket',
+            Key='dst.txt',
+            CopySource={'Bucket': 'test-bucket', 'Key': 'src.txt'}
+        )
+
+    @patch('nexent.storage.minio.boto3')
+    def test_copy_file_uses_default_bucket(self, mock_boto3):
+        """Test copy_file falls back to default bucket when bucket is not specified"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.copy_file('src.txt', 'dst.txt')
+
+        assert success is True
+        assert result == 'dst.txt'
+        mock_client.copy_object.assert_called_once_with(
+            Bucket='test-bucket',
+            Key='dst.txt',
+            CopySource={'Bucket': 'test-bucket', 'Key': 'src.txt'}
+        )
+
+    @patch('nexent.storage.minio.boto3')
+    def test_copy_file_without_bucket(self, mock_boto3):
+        """Test copy_file fails when no bucket is configured"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin"
+        )
+
+        success, result = client.copy_file('src.txt', 'dst.txt')
+
+        assert success is False
+        assert result == "Bucket name is required"
+        mock_client.copy_object.assert_not_called()
+
+    @patch('nexent.storage.minio.boto3')
+    def test_copy_file_exception(self, mock_boto3):
+        """Test copy_file returns failure on unexpected exception"""
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+        mock_client.head_bucket.return_value = None
+        mock_client.copy_object.side_effect = Exception("copy failed")
+
+        client = MinIOStorageClient(
+            endpoint="http://localhost:9000",
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            default_bucket="test-bucket"
+        )
+
+        success, result = client.copy_file('src.txt', 'dst.txt')
+
+        assert success is False
+        assert "copy failed" in result

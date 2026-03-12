@@ -22,10 +22,18 @@ export const STATUS_CODES = {
   SERVER_ERROR: 1005,
 };
 
-// Local storage keys
+// Local storage keys (user info only — tokens are in HttpOnly cookies)
 export const STORAGE_KEYS = {
   SESSION: "session",
+  USER_INFO: "user_info",
 };
+
+// Cookie names managed by server.js BFF layer
+export const COOKIE_NAMES = {
+  ACCESS_TOKEN: "nexent_access_token",
+  REFRESH_TOKEN: "nexent_refresh_token",
+  EXPIRES_AT: "nexent_token_expires_at",
+} as const;
 
 // Type-safe authentication events (used with authEvents emitter)
 export const AUTH_EVENTS = {

@@ -26,9 +26,20 @@ consts_const_mock.POSTGRES_USER = "test_user"
 consts_const_mock.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_const_mock.POSTGRES_DB = "test_db"
 consts_const_mock.POSTGRES_PORT = 5432
+consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
+consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYSTEM": "system"}
+consts_const_mock.THINK_START_PATTERN = "<think>"
+consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
+# Mock consts.error_code and consts.exceptions
+consts_error_code_mock = MagicMock()
+consts_error_code_mock.ErrorCode = MagicMock()
+consts_exceptions_mock = MagicMock()
+consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
+sys.modules['consts.error_code'] = consts_error_code_mock
+sys.modules['consts.exceptions'] = consts_exceptions_mock
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))

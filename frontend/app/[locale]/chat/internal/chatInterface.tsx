@@ -30,8 +30,6 @@ import {
   createMessageAttachments,
   cleanupAttachmentUrls,
 } from "@/app/chat/internal/chatPreprocess";
-import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
-
 import { ConversationListItem, ApiConversationDetail } from "@/types/chat";
 import { ChatMessageType } from "@/types/chat";
 import { handleStreamResponse } from "@/app/chat/streaming/chatStreamHandler";
@@ -40,7 +38,7 @@ import {
   extractAssistantMsgFromResponse,
 } from "./extractMsgFromHistoryResponse";
 
-import { X } from "lucide-react";
+import { Layout } from "antd";
 import log from "@/lib/logger";
 
 const stepIdCounter = { current: 0 };
@@ -55,33 +53,20 @@ const getI18nKeyByType = (type: string): string => {
 };
 
 export function ChatInterface() {
-  const router = useRouter();
-  const { user } = useAuthorizationContext();
-  const { isSpeedMode } = useDeployment();
   const [input, setInput] = useState("");
   // Replace the original messages state
-  const [sessionMessages, setSessionMessages] = useState<{
-    [conversationId: number]: ChatMessageType[];
-  }>({});
+  const [sessionMessages, setSessionMessages] = useState<{[conversationId: number]: ChatMessageType[];}>({});
   const [isSwitchedConversation, setIsSwitchedConversation] = useState(false); // Add conversation switching tracking state
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
 
   // Use conversation management hook
   const conversationManagement = useConversationManagement();
-  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
-  const { appConfig } = useConfig();
 
   // For each conversation, maintain independent SSE connections and states
-  const [streamingConversations, setStreamingConversations] = useState<
-    Set<number>
-  >(new Set());
-  const conversationControllersRef = useRef<Map<number, AbortController>>(
-    new Map()
-  );
-  const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(
-    new Map()
-  );
+  const [streamingConversations, setStreamingConversations] = useState<Set<number>>(new Set());
+  const conversationControllersRef = useRef<Map<number, AbortController>>(new Map());
+  const conversationTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
 
   // Place the declaration of currentMessages after the definition of selectedConversationId
   // If a historical conversation is being loaded and there are no cached messages, return an empty array to avoid displaying error content
@@ -92,8 +77,8 @@ export function ChatInterface() {
   // Monitor changes in currentMessages
   // Calculate if the current conversation is streaming
   const isCurrentConversationStreaming =
-    conversationManagement.conversationId && conversationManagement.conversationId !== -1
-      ? streamingConversations.has(conversationManagement.conversationId)
+    conversationManagement.selectedConversationId != null
+      ? streamingConversations.has(conversationManagement.selectedConversationId)
       : false;
 
   const [viewingImage, setViewingImage] = useState<string | null>(null);
@@ -106,8 +91,6 @@ export function ChatInterface() {
   const abortControllerRef = useRef<AbortController | null>(null); // Add AbortController reference
   const timeoutRef = useRef<NodeJS.Timeout | null>(null); // Add timeout reference
 
-  // Add sidebar state control
-  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Add a state to track if we're loading a historical conversation
   const [isLoadingHistoricalConversation, setIsLoadingHistoricalConversation] =
@@ -117,9 +100,6 @@ export function ChatInterface() {
   const [completedConversations, setCompletedConversations] = useState<
     Set<number>
   >(new Set());
-
-  // Add a ref to track the currently selected conversation ID for real-time access
-  const currentSelectedConversationRef = useRef<number | null>(null);
 
   // Ensure right sidebar is closed by default
   const [showRightPanel, setShowRightPanel] = useState(false);
@@ -178,64 +158,43 @@ export function ChatInterface() {
     setAttachments(newAttachments);
   };
 
-  // Define sidebar toggle function
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
 
   // Handle right panel toggle - keep it simple and clear
   const toggleRightPanel = () => {
     setShowRightPanel(!showRightPanel);
   };
 
-  useEffect(() => {
-    if (!conversationManagement.initialized.current) {
-      conversationManagement.initialized.current = true;
-
-      // Get conversation history list, but don't auto-select the latest conversation
-      conversationManagement.fetchConversationList()
-        .then((dialogData) => {
-          // Create new conversation by default regardless of history
-          handleNewConversation();
-        })
-        .catch((err) => {
-          log.error(t("chatInterface.errorFetchingConversationList"), err);
-          // Create new conversation even if getting conversation list fails
-          handleNewConversation();
-        });
-    }
-  }, [appConfig]); // Add appConfig as dependency
-
   // Add useEffect to listen for conversationId changes, ensure right sidebar is always closed when conversation switches
   useEffect(() => {
     // Ensure right sidebar is reset to closed state whenever conversation ID changes
     setSelectedMessageId(undefined);
     setShowRightPanel(false);
-  }, [conversationManagement.conversationId]);
+  }, [conversationManagement.selectedConversationId]);
 
   // Helper function to clear completed conversation indicator
   const clearCompletedIndicator = useCallback(() => {
     if (
-      conversationManagement.conversationId &&
-      conversationManagement.conversationId !== -1
+      conversationManagement.selectedConversationId != null
     ) {
       setCompletedConversations((prev) => {
         // Use functional update to avoid dependency on completedConversations
-        if (prev.has(conversationManagement.conversationId)) {
+        if (conversationManagement.selectedConversationId != null && prev.has(conversationManagement.selectedConversationId)) {
           const newSet = new Set(prev);
-          newSet.delete(conversationManagement.conversationId);
+          newSet.delete(conversationManagement.selectedConversationId);
           return newSet;
         }
         return prev;
       });
     }
-  }, [conversationManagement.conversationId]);
+  }, [conversationManagement.selectedConversationId]);
+
+
 
   // Add useEffect to clear completed conversation indicator when user is viewing the current conversation
   useEffect(() => {
     // If current conversation is in completedConversations, clear it when user is viewing it
     clearCompletedIndicator();
-  }, [conversationManagement.conversationId, clearCompletedIndicator]);
+  }, [conversationManagement.selectedConversationId, clearCompletedIndicator]);
 
   // Add click event listener to clear completed conversation indicator when user clicks anywhere on the page
   useEffect(() => {
@@ -291,13 +250,9 @@ export function ChatInterface() {
     const userMessageId = uuidv4();
     const userMessageContent = input.trim();
 
-    // Get current conversation ID
-    let currentConversationId = conversationManagement.conversationId;
-
-    // Ensure ref reflects the current conversation state
-    if (currentConversationId && currentConversationId !== -1) {
-      conversationManagement.currentSelectedConversationRef.current = currentConversationId;
-    }
+    // Get current conversation ID (null when new conversation)
+    let currentConversationId = conversationManagement.selectedConversationId;
+    let cid: number | null = null; // set after guard, used in try/catch/finally
 
     // Prepare attachment information
     // Handle file upload
@@ -357,8 +312,8 @@ export function ChatInterface() {
 
     try {
       // Check if need to create new conversation
-      if (!currentConversationId || currentConversationId === -1) {
-        // If no session ID or ID is -1, create new conversation first
+      if (currentConversationId == null) {
+        // No conversation selected: create new conversation first
         try {
           const createData = await conversationService.create(
             t("chatInterface.newConversation")
@@ -366,18 +321,14 @@ export function ChatInterface() {
           currentConversationId = createData.conversation_id;
 
           // Update current session state
-          conversationManagement.setConversationId(currentConversationId);
           conversationManagement.setSelectedConversationId(currentConversationId);
-          // Update ref to track current selected conversation
-          conversationManagement.currentSelectedConversationRef.current = currentConversationId;
           conversationManagement.setConversationTitle(
             createData.conversation_title || t("chatInterface.newConversation")
           );
 
           // After creating new conversation, add it to streaming list
           setStreamingConversations((prev) => {
-            const newSet = new Set(prev).add(currentConversationId);
-
+            const newSet = new Set(prev).add(createData.conversation_id);
             return newSet;
           });
 
@@ -408,25 +359,25 @@ export function ChatInterface() {
         }
       }
 
-      // Ensure valid conversation ID before registering controller and streaming state
-      if (currentConversationId && currentConversationId !== -1) {
-        conversationControllersRef.current.set(
-          currentConversationId,
-          currentController
-        );
-        setStreamingConversations((prev) => {
-          const newSet = new Set(prev);
-          newSet.add(currentConversationId);
-          return newSet;
-        });
-      }
+      // Type guard: we have a number here (either from selection or from create above)
+      if (currentConversationId == null) return;
+      const id = currentConversationId;
+      cid = id;
+
+      // Register controller and streaming state for this conversation
+      conversationControllersRef.current.set(id, currentController);
+      setStreamingConversations((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(id);
+        return newSet;
+      });
 
       // Now add messages after conversation is created/confirmed
       // 1. When sending user message, complete ChatMessageType fields
       setSessionMessages((prev) => ({
         ...prev,
-        [currentConversationId]: [
-          ...(prev[currentConversationId] || []),
+        [id]: [
+          ...(prev[id] || []),
           {
             ...userMessage,
             id: userMessage.id || uuidv4(),
@@ -442,8 +393,8 @@ export function ChatInterface() {
       // 2. When adding AI reply message, complete ChatMessageType fields
       setSessionMessages((prev) => ({
         ...prev,
-        [currentConversationId]: [
-          ...(prev[currentConversationId] || []),
+        [id]: [
+          ...(prev[id] || []),
           {
             ...initialAssistantMessage,
             id: initialAssistantMessage.id || uuidv4(),
@@ -480,7 +431,7 @@ export function ChatInterface() {
       // Send request to backend API, add signal parameter
       const runAgentParams: any = {
         query: finalQuery, // Use preprocessed query or original query
-        conversation_id: currentConversationId,
+        conversation_id: id,
         is_set: isSwitchedConversation || currentMessages.length <= 1,
         history: currentMessages
           .filter((msg) => msg.id !== userMessage.id)
@@ -551,16 +502,12 @@ export function ChatInterface() {
 
       // Create resetTimeout function for current conversation
       const resetTimeout = () => {
-        const timeout = conversationTimeoutsRef.current.get(
-          currentConversationId
-        );
+        const timeout = conversationTimeoutsRef.current.get(id);
         if (timeout) {
           clearTimeout(timeout);
         }
         const newTimeout = setTimeout(async () => {
-          const controller = conversationControllersRef.current.get(
-            currentConversationId
-          );
+          const controller = conversationControllersRef.current.get(id);
           if (controller && !controller.signal.aborted) {
             try {
               controller.abort(t("chatInterface.requestTimeout"));
@@ -568,9 +515,7 @@ export function ChatInterface() {
               setSessionMessages((prev) => {
                 const newMessages = { ...prev };
                 const lastMsg =
-                  newMessages[currentConversationId]?.[
-                    newMessages[currentConversationId].length - 1
-                  ];
+                  newMessages[id]?.[newMessages[id].length - 1];
                 if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
                   lastMsg.error = t("chatInterface.requestTimeoutRetry");
                   lastMsg.isComplete = true;
@@ -579,23 +524,21 @@ export function ChatInterface() {
                 return newMessages;
               });
 
-              if (currentConversationId && currentConversationId !== -1) {
-                try {
-                  await conversationService.stop(currentConversationId);
-                } catch (error) {
-                  log.error(
-                    t("chatInterface.stopTimeoutRequestFailed"),
-                    error
-                  );
-                }
+              try {
+                await conversationService.stop(id);
+              } catch (error) {
+                log.error(
+                  t("chatInterface.stopTimeoutRequestFailed"),
+                  error
+                );
               }
             } catch (error) {
               log.error(t("chatInterface.errorCancelingRequest"), error);
             }
           }
-          conversationTimeoutsRef.current.delete(currentConversationId);
+          conversationTimeoutsRef.current.delete(id);
         }, 120000);
-        conversationTimeoutsRef.current.set(currentConversationId, newTimeout);
+        conversationTimeoutsRef.current.set(id, newTimeout);
       };
 
       // Before processing streaming response, set an initial timeout first
@@ -605,14 +548,14 @@ export function ChatInterface() {
       // Compatible with both function and direct assignment
       await handleStreamResponse(
         reader,
-        setCurrentSessionMessagesFactory(currentConversationId),
+        setCurrentSessionMessagesFactory(id),
         resetTimeout,
         stepIdCounter,
         setIsSwitchedConversation,
         conversationManagement.isNewConversation,
         conversationManagement.setConversationTitle,
         conversationManagement.fetchConversationList,
-        currentConversationId,
+        id,
         conversationService,
         false, // isDebug: false for normal chat mode
         t
@@ -623,101 +566,88 @@ export function ChatInterface() {
       setIsStreaming(false);
 
       // Clean up controller and timeout for current conversation
-      conversationControllersRef.current.delete(currentConversationId);
-      const timeout = conversationTimeoutsRef.current.get(
-        currentConversationId
-      );
+      conversationControllersRef.current.delete(id);
+      const timeout = conversationTimeoutsRef.current.get(id);
       if (timeout) {
         clearTimeout(timeout);
-        conversationTimeoutsRef.current.delete(currentConversationId);
+        conversationTimeoutsRef.current.delete(id);
       }
 
-      // Remove from streaming list (only when conversationId is not -1)
-      if (currentConversationId !== -1) {
-        setStreamingConversations((prev) => {
+      // Remove from streaming list when we have a valid conversation id
+      setStreamingConversations((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+
+      // When conversation is completed, only add to completed conversation list when user is not in current conversation interface
+      const currentUserConversation = conversationManagement.selectedConversationId;
+      if (currentUserConversation !== id) {
+        setCompletedConversations((prev) => {
           const newSet = new Set(prev);
-          newSet.delete(currentConversationId);
+          newSet.add(id);
           return newSet;
         });
-
-        // When conversation is completed, only add to completed conversation list when user is not in current conversation interface
-        // Use ref to get the actual conversation the user is in
-        const currentUserConversation = currentSelectedConversationRef.current;
-        if (currentUserConversation !== currentConversationId) {
-          setCompletedConversations((prev) => {
-            const newSet = new Set(prev);
-            newSet.add(currentConversationId);
-            return newSet;
-          });
-        }
       }
 
       // Note: Save operation is already implemented in agent run API, no need to save again in frontend
     } catch (error) {
       // If user actively canceled, don't show error message
       const err = error as Error;
-      if (err.name === "AbortError") {
-        setSessionMessages((prev) => {
-          const newMessages = { ...prev };
-          const lastMsg =
-            newMessages[currentConversationId]?.[
-              newMessages[currentConversationId].length - 1
-            ];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
-            lastMsg.content = t("chatInterface.conversationStopped");
-            lastMsg.isComplete = true;
-            lastMsg.thinking = undefined; // Explicitly clear thinking state
-          }
-          return newMessages;
-        });
-      } else {
-        log.error(t("chatInterface.errorLabel"), error);
-        // Show user-friendly error message instead of technical error details
-        const errorMessage = t("chatInterface.errorProcessingRequest");
-        setSessionMessages((prev) => {
-          const newMessages = { ...prev };
-          const lastMsg =
-            newMessages[currentConversationId]?.[
-              newMessages[currentConversationId].length - 1
-            ];
-          if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
-            lastMsg.content = errorMessage;
-            lastMsg.isComplete = true;
-            lastMsg.error = errorMessage;
-            lastMsg.thinking = undefined; // Explicitly clear thinking state
-          }
-          return newMessages;
-        });
+      if (cid != null) {
+        const idForCatch = cid;
+        if (err.name === "AbortError") {
+          setSessionMessages((prev) => {
+            const newMessages = { ...prev };
+            const lastMsg =
+              newMessages[idForCatch]?.[newMessages[idForCatch].length - 1];
+            if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+              lastMsg.content = t("chatInterface.conversationStopped");
+              lastMsg.isComplete = true;
+              lastMsg.thinking = undefined; // Explicitly clear thinking state
+            }
+            return newMessages;
+          });
+        } else {
+          log.error(t("chatInterface.errorLabel"), error);
+          const errorMessage = t("chatInterface.errorProcessingRequest");
+          setSessionMessages((prev) => {
+            const newMessages = { ...prev };
+            const lastMsg =
+              newMessages[idForCatch]?.[newMessages[idForCatch].length - 1];
+            if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
+              lastMsg.content = errorMessage;
+              lastMsg.isComplete = true;
+              lastMsg.error = errorMessage;
+              lastMsg.thinking = undefined; // Explicitly clear thinking state
+            }
+            return newMessages;
+          });
+        }
       }
 
       setIsLoading(false);
       setIsStreaming(false);
 
-      // Clean up controller and timeout for current conversation
-      conversationControllersRef.current.delete(currentConversationId);
-      const timeout = conversationTimeoutsRef.current.get(
-        currentConversationId
-      );
-      if (timeout) {
-        clearTimeout(timeout);
-        conversationTimeoutsRef.current.delete(currentConversationId);
-      }
-
-      // Remove from streaming list (only when conversationId is not -1)
-      if (currentConversationId !== -1) {
+      // Clean up when we had a conversation id (cid is set after the guard in try)
+      if (cid != null) {
+        const idForCatch = cid;
+        conversationControllersRef.current.delete(idForCatch);
+        const timeout = conversationTimeoutsRef.current.get(idForCatch);
+        if (timeout) {
+          clearTimeout(timeout);
+          conversationTimeoutsRef.current.delete(idForCatch);
+        }
         setStreamingConversations((prev) => {
           const newSet = new Set(prev);
-          newSet.delete(currentConversationId);
+          newSet.delete(idForCatch);
           return newSet;
         });
-
-        // When conversation is completed, only add to completed conversation list when user is not in current conversation interface
-        // Use ref to get the actual conversation the user is in
-        const currentUserConversation = currentSelectedConversationRef.current;
-        if (currentUserConversation !== currentConversationId) {
+        const currentUserConversation = conversationManagement.selectedConversationId;
+        if (currentUserConversation !== idForCatch) {
           setCompletedConversations((prev) => {
             const newSet = new Set(prev);
-            newSet.add(currentConversationId);
+            newSet.add(idForCatch);
             return newSet;
           });
         }
@@ -800,9 +730,8 @@ export function ChatInterface() {
     });
 
     // Check if there are cached messages
-    const hasCachedMessages =
-      sessionMessages[dialog.conversation_id] !== undefined;
-    const isCurrentActive = dialog.conversation_id === conversationManagement.conversationId;
+    const hasCachedMessages = sessionMessages[dialog.conversation_id] !== undefined;
+    const isCurrentActive = dialog.conversation_id === conversationManagement.selectedConversationId;
 
     // Log: click conversation
     // If there are cached messages, ensure not to show loading state
@@ -1059,7 +988,7 @@ export function ChatInterface() {
     // Create a copy to avoid directly modifying parameters
     const updatedMessages = [...messages];
     let hasUpdates = false;
-    const conversationIdToUse = targetConversationId || conversationManagement.conversationId;
+    const conversationIdToUse = targetConversationId ?? conversationManagement.selectedConversationId;
 
     // Process attachments for each message
     for (const message of updatedMessages) {
@@ -1088,82 +1017,12 @@ export function ChatInterface() {
       }
     }
 
-    // If there are updates, set new message array
-    if (hasUpdates) {
+    // If there are updates and we have a conversation id, set new message array
+    if (hasUpdates && conversationIdToUse != null) {
       setSessionMessages((prev) => ({
         ...prev,
         [conversationIdToUse]: updatedMessages,
       }));
-    }
-  };
-
-  // Left sidebar conversation title update
-  const handleConversationRename = async (dialogId: number, title: string) => {
-    try {
-      await conversationService.rename(dialogId, title);
-      await conversationManagement.fetchConversationList();
-
-      if (conversationManagement.selectedConversationId === dialogId) {
-        conversationManagement.setConversationTitle(title);
-      }
-    } catch (error) {
-      log.error(t("chatInterface.renameFailed"), error);
-    }
-  };
-
-  // Left sidebar conversation deletion
-  const handleConversationDeleteClick = async (dialogId: number) => {
-    try {
-      // If deleting the currently active conversation, stop conversation first
-      if (
-        conversationManagement.selectedConversationId === dialogId &&
-        isStreaming &&
-        conversationManagement.conversationId === dialogId
-      ) {
-        // Cancel current ongoing request first
-        if (abortControllerRef.current) {
-          try {
-            abortControllerRef.current.abort(
-              t("chatInterface.deleteConversation")
-            );
-          } catch (error) {
-            log.error(t("chatInterface.errorCancelingRequest"), error);
-          }
-          abortControllerRef.current = null;
-        }
-
-        // Clear timeout timer
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-
-        setIsStreaming(false);
-        setIsLoading(false);
-
-        try {
-          await conversationService.stop(dialogId);
-        } catch (error) {
-          log.error(
-            t("chatInterface.stopConversationToDeleteFailed"),
-            error
-          );
-          // Continue deleting even if stopping fails
-        }
-      }
-
-      await conversationService.delete(dialogId);
-      await conversationManagement.fetchConversationList();
-
-      if (conversationManagement.selectedConversationId === dialogId) {
-        conversationManagement.setSelectedConversationId(null);
-        // Update ref to track current selected conversation
-        conversationManagement.currentSelectedConversationRef.current = null;
-        conversationManagement.setConversationTitle(t("chatInterface.newConversation"));
-        handleNewConversation();
-      }
-    } catch (error) {
-      log.error(t("chatInterface.deleteFailed"), error);
     }
   };
 
@@ -1175,7 +1034,7 @@ export function ChatInterface() {
     setSessionMessages((prev) => {
       const newMessages = { ...prev };
       const lastMsg =
-        newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
+        newMessages[conversationManagement.selectedConversationId!]?.[newMessages[conversationManagement.selectedConversationId!].length - 1];
 
       if (lastMsg && lastMsg.role === ROLE_ASSISTANT && lastMsg.images) {
         // Filter out failed images
@@ -1195,21 +1054,21 @@ export function ChatInterface() {
   const handleStop = async () => {
     // Stop agent_run of current conversation
     const currentController =
-      conversationControllersRef.current.get(conversationManagement.conversationId);
+      conversationControllersRef.current.get(conversationManagement.selectedConversationId!);
     if (currentController) {
       try {
         currentController.abort(t("chatInterface.userManuallyStopped"));
       } catch (error) {
         log.error(t("chatInterface.errorCancelingRequest"), error);
       }
-      conversationControllersRef.current.delete(conversationManagement.conversationId);
+      conversationControllersRef.current.delete(conversationManagement.selectedConversationId!);
     }
 
     // Clear timeout timer for current conversation
-    const currentTimeout = conversationTimeoutsRef.current.get(conversationManagement.conversationId);
+    const currentTimeout = conversationTimeoutsRef.current.get(conversationManagement.selectedConversationId!);
     if (currentTimeout) {
       clearTimeout(currentTimeout);
-      conversationTimeoutsRef.current.delete(conversationManagement.conversationId);
+      conversationTimeoutsRef.current.delete(conversationManagement.selectedConversationId!);
     }
 
     // Immediately update frontend state
@@ -1217,19 +1076,19 @@ export function ChatInterface() {
     setIsLoading(false);
 
     // If no valid conversation ID, just reset frontend state
-    if (!conversationManagement.conversationId || conversationManagement.conversationId === -1) {
+    if (conversationManagement.selectedConversationId == null) {
       return;
     }
 
     try {
       // Call backend stop API - this will stop both agent run and preprocess tasks
-      await conversationService.stop(conversationManagement.conversationId);
+      await conversationService.stop(conversationManagement.selectedConversationId!);
 
       // Manually update messages, clear thinking state
       setSessionMessages((prev) => {
         const newMessages = { ...prev };
         const lastMsg =
-          newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
+          newMessages[conversationManagement.selectedConversationId!]?.[newMessages[conversationManagement.selectedConversationId!].length - 1];
         if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -1240,16 +1099,16 @@ export function ChatInterface() {
       // remove from streaming list
       setStreamingConversations((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(conversationManagement.conversationId);
+        newSet.delete(conversationManagement.selectedConversationId!);
         return newSet;
       });
 
       // when conversation is stopped, only add to completed conversations list when user is not in current conversation interface
-      const currentUserConversation = currentSelectedConversationRef.current;
-      if (currentUserConversation !== conversationManagement.conversationId) {
+      const currentUserConversation = conversationManagement.selectedConversationId;
+      if (currentUserConversation != null && currentUserConversation !== conversationManagement.selectedConversationId) {
         setCompletedConversations((prev) => {
           const newSet = new Set(prev);
-          newSet.add(conversationManagement.conversationId);
+          newSet.add(conversationManagement.selectedConversationId!);
           return newSet;
         });
       }
@@ -1260,7 +1119,7 @@ export function ChatInterface() {
       setSessionMessages((prev) => {
         const newMessages = { ...prev };
         const lastMsg =
-          newMessages[conversationManagement.conversationId]?.[newMessages[conversationManagement.conversationId].length - 1];
+          newMessages[conversationManagement.selectedConversationId!]?.[newMessages[conversationManagement.selectedConversationId!].length - 1];
         if (lastMsg && lastMsg.role === ROLE_ASSISTANT) {
           lastMsg.isComplete = true;
           lastMsg.thinking = undefined; // Explicitly clear thinking state
@@ -1362,30 +1221,15 @@ export function ChatInterface() {
 
 
   return (
-    <>
-      <div className="flex h-full">
-        <ChatSidebar
-          conversationList={conversationManagement.conversationList}
-          selectedConversationId={conversationManagement.selectedConversationId}
-          openDropdownId={openDropdownId}
-          streamingConversations={streamingConversations}
-          completedConversations={completedConversations}
-          onNewConversation={handleNewConversation}
-          onDialogClick={handleDialogClick}
-          onRename={handleConversationRename}
-          onDelete={handleConversationDeleteClick}
-          onSettingsClick={handleSettingsClick}
-          onDropdownOpenChange={(open: boolean, id: string | null) =>
-            setOpenDropdownId(open ? id : null)
-          }
-          onToggleSidebar={toggleSidebar}
-          expanded={sidebarOpen}
-          userEmail={user?.email}
-          userAvatarUrl={user?.avatarUrl}
-          userRole={user?.role}
-        />
+    <Layout hasSider className="flex h-full">
+      <ChatSidebar
+        streamingConversations={streamingConversations}
+        completedConversations={completedConversations}
+        conversationManagement={conversationManagement}
+        onConversationSelect={handleDialogClick}
+      />
 
-        <div className="flex-1 flex flex-col overflow-hidden">
+      <Layout className="flex-1 flex flex-col overflow-hidden min-w-0">
           <div className="flex flex-1 overflow-hidden">
             <div className="flex-1 flex flex-col">
               <ChatHeader
@@ -1415,7 +1259,7 @@ export function ChatInterface() {
                 onFileUpload={handleFileUpload}
                 onImageUpload={handleImageUpload}
                 onOpinionChange={handleOpinionChange}
-                currentConversationId={conversationManagement.conversationId}
+                currentConversationId={conversationManagement.selectedConversationId ?? undefined}
                 shouldScrollToBottom={shouldScrollToBottom}
                 selectedAgentId={selectedAgentId}
                 onAgentSelect={setSelectedAgentId}
@@ -1432,18 +1276,8 @@ export function ChatInterface() {
               toggleRightPanel={toggleRightPanel}
               selectedMessageId={selectedMessageId}
             />
-          </div>
         </div>
-      </div>
-      <TooltipProvider>
-        <Tooltip
-          title={t("chatInterface.stopGenerating")}
-          open={false}
-          placement="top"
-        >
-          <div className="fixed inset-0 pointer-events-none" />
-        </Tooltip>
-      </TooltipProvider>
-    </>
+      </Layout>
+    </Layout>
   );
 }

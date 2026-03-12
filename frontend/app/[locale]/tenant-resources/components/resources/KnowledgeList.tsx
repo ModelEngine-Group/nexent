@@ -23,7 +23,7 @@ export default function KnowledgeList({
   const knowledgeBases = data || [];
 
   // Fetch groups for group selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   const [editingKnowledge, setEditingKnowledge] = useState<KnowledgeBase | null>(null);

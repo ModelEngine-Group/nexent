@@ -11,11 +11,14 @@ export interface User {
   tenantId?: string;
 }
 
-// Session type definition - contains only authentication tokens
+// Session type definition
+// After HttpOnly cookie migration, tokens live in server-managed cookies.
+// Frontend only has access to expires_at (via a non-HttpOnly cookie).
 export interface Session {
-  access_token: string;
-  refresh_token: string;
+  access_token?: string;
+  refresh_token?: string;
   expires_at: number;
+  expires_in_seconds?: number;
 }
 
 // Error response interface

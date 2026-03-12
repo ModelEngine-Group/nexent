@@ -255,7 +255,11 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
         options.onContainerAdded?.();
         return { success: true, messageKey: "mcpService.message.addContainerSuccess" };
       } else {
-        return { success: false, message: result.message, messageKey: "mcpConfig.message.addContainerFailed" };
+        return { 
+          success: false, 
+          message: result.message, 
+          messageKey: (result as any).messageKey || "mcpConfig.message.addContainerFailed" 
+        };
       }
     } catch (error) {
       log.error("Failed to add container:", error);

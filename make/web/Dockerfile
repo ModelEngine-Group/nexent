@@ -37,7 +37,8 @@ RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=locked \
     "react": "18.2.0",\
     "react-dom": "18.2.0",\
     "http-proxy": "^1.18.1",\
-    "dotenv": "^16.4.7"\
+    "dotenv": "^16.4.7",\
+    "cookie": "^1.1.1"\
   }\
 }' > ../frontend-dist/package.json && \
     cd ../frontend-dist && \

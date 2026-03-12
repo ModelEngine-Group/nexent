@@ -111,12 +111,14 @@ class _MockProcessType:
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
 
+
 MessageObserver = _MockMessageObserver
 ProcessType = _MockProcessType
 
 
 mock_nexent_core_utils_module = types.ModuleType("nexent.core.utils")
-mock_nexent_core_utils_observer_module = types.ModuleType("nexent.core.utils.observer")
+mock_nexent_core_utils_observer_module = types.ModuleType(
+    "nexent.core.utils.observer")
 mock_nexent_core_utils_observer_module.MessageObserver = _MockMessageObserver
 mock_nexent_core_utils_observer_module.ProcessType = _MockProcessType
 
@@ -133,17 +135,20 @@ mock_sdk_nexent_core_utils_observer_module.ProcessType = _MockProcessType
 
 mock_sdk_module.__path__ = [str(SDK_SOURCE_ROOT)]
 mock_sdk_nexent_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent")]
-mock_sdk_nexent_core_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
+mock_sdk_nexent_core_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core")]
 mock_sdk_nexent_core_agents_module.__path__ = [
     str(SDK_SOURCE_ROOT / "nexent" / "core" / "agents")
 ]
-mock_sdk_nexent_core_utils_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "utils")]
+mock_sdk_nexent_core_utils_module.__path__ = [
+    str(SDK_SOURCE_ROOT / "nexent" / "core" / "utils")]
 mock_sdk_nexent_core_utils_observer_module.__path__ = []
 
 mock_prompt_template_utils_module = types.ModuleType(
     "nexent.core.utils.prompt_template_utils"
 )
-mock_prompt_template_utils_module.get_prompt_template = MagicMock(return_value="")
+mock_prompt_template_utils_module.get_prompt_template = MagicMock(
+    return_value="")
 
 mock_tools_common_message_module = types.ModuleType(
     "nexent.core.utils.tools_common_message"
@@ -199,7 +204,8 @@ mock_nexent_storage_module = types.ModuleType("nexent.storage")
 mock_nexent_storage_module.MinIOStorageClient = MagicMock()
 mock_nexent_module.storage = mock_nexent_storage_module
 mock_nexent_multi_modal_module = types.ModuleType("nexent.multi_modal")
-mock_nexent_load_save_module = types.ModuleType("nexent.multi_modal.load_save_object")
+mock_nexent_load_save_module = types.ModuleType(
+    "nexent.multi_modal.load_save_object")
 mock_nexent_load_save_module.LoadSaveObjectManager = MagicMock()
 mock_nexent_module.multi_modal = mock_nexent_multi_modal_module
 module_mocks = {
@@ -679,7 +685,7 @@ def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
         metadata={
             "llm_model": "llm_model_obj",
             "storage_client": "storage_client_obj",
-        "data_process_service_url": "https://example.com",
+            "data_process_service_url": "https://example.com",
         },
     )
 
@@ -785,14 +791,16 @@ def test_create_local_tool_knowledge_base_search_tool_with_conflicting_params(ne
         output_type="string",
         params={
             "top_k": 10,
-            "index_names": ["conflicting_index"],  # This should be filtered out
+            # This should be filtered out
+            "index_names": ["conflicting_index"],
             "vdb_core": "conflicting_vdb",  # This should be filtered out
             "embedding_model": "conflicting_model",  # This should be filtered out
             "observer": "conflicting_observer",  # This should be filtered out
         },
         source="local",
         metadata={
-            "index_names": ["index1", "index2"],  # These should be used instead
+            # These should be used instead
+            "index_names": ["index1", "index2"],
             "vdb_core": mock_vdb_core,
             "embedding_model": mock_embedding_model,
         },
@@ -814,13 +822,15 @@ def test_create_local_tool_knowledge_base_search_tool_with_conflicting_params(ne
     # Only non-excluded params should be passed to __init__ due to smolagents wrapper restrictions
     mock_kb_tool_class.assert_called_once_with(
         top_k=10,  # From filtered_params (not in conflict list)
-        index_names=["conflicting_index"],  # Not excluded by current implementation
+        # Not excluded by current implementation
+        index_names=["conflicting_index"],
     )
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_kb_tool_instance
     assert mock_kb_tool_instance.observer == nexent_agent_instance.observer
     assert mock_kb_tool_instance.vdb_core == mock_vdb_core  # From metadata, not params
-    assert mock_kb_tool_instance.embedding_model == mock_embedding_model  # From metadata, not params
+    # From metadata, not params
+    assert mock_kb_tool_instance.embedding_model == mock_embedding_model
 
 
 def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_agent_instance):
@@ -862,6 +872,7 @@ def test_create_local_tool_knowledge_base_search_tool_with_none_defaults(nexent_
     assert mock_kb_tool_instance.vdb_core is None
     assert mock_kb_tool_instance.embedding_model is None
     assert result == mock_kb_tool_instance
+
 
 def test_create_local_tool_analyze_text_file_tool(nexent_agent_instance):
     """Test AnalyzeTextFileTool creation injects observer and metadata."""
@@ -1345,6 +1356,215 @@ def test_agent_run_with_observer_with_reset_false(nexent_agent_instance, mock_co
     mock_core_agent.run.assert_called_once_with(
         "test query", stream=True, reset=False)
 
+
+def test_agent_run_with_observer_removes_think_prefix_chinese_colon(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer removes '思考：' prefix content until two newlines."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with Chinese colon "思考：" followed by content and two newlines
+    final_answer_with_think = (
+        "思考：用户需要一份营养早餐的搭配建议。作为健康饮食搭配助手，我需要基于营养学知识，提供一份科学、均衡、易于准备的早餐方案。由于没有可用工具，我将直接给出建议，包括食物种类、分量和营养说明。\n\n"
+        "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。以下是我的推荐："
+    )
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = final_answer_with_think
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify the "思考：" prefix content was removed
+    expected_final_answer = (
+        "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。以下是我的推荐："
+    )
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    )
+
+
+def test_agent_run_with_observer_removes_think_prefix_english_colon(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer removes '思考:' prefix content until two newlines."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with English colon "思考:" followed by content and two newlines
+    final_answer_with_think = (
+        "思考:This is a thinking process about the user's question.\n\n"
+        "Here is the actual answer to the question."
+    )
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = final_answer_with_think
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify the "思考:" prefix content was removed
+    expected_final_answer = "Here is the actual answer to the question."
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    )
+
+
+def test_agent_run_with_observer_preserves_think_prefix_without_two_newlines(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer preserves '思考：' content when not followed by two newlines."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with "思考：" but only one newline (should not be removed)
+    final_answer_with_think = (
+        "思考：This is thinking content.\n"
+        "Here is the actual answer."
+    )
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = final_answer_with_think
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify the content was preserved (not removed because no \n\n)
+    expected_final_answer = (
+        "思考：This is thinking content.\n"
+        "Here is the actual answer."
+    )
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    )
+
+
+def test_agent_run_with_observer_removes_both_think_tag_and_think_prefix(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer removes both THINK_TAG_PATTERN and THINK_PREFIX_PATTERN."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with both <think> tags and "思考：" prefix
+    final_answer_with_both = (
+        "<think>Some reasoning content</think>"
+        "思考：用户需要一份营养早餐的搭配建议。\n\n"
+        "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。"
+    )
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = final_answer_with_both
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify both patterns were removed
+    expected_final_answer = "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。"
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    )
+
+
+def test_agent_run_with_observer_think_prefix_in_middle(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer removes '思考：' even when it appears in the middle of text."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with "思考：" in the middle of the text
+    final_answer_with_think = (
+        "Some initial content. "
+        "思考：This is thinking content in the middle.\n\n"
+        "Here is the rest of the answer."
+    )
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = final_answer_with_think
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify the "思考：" content was removed
+    expected_final_answer = "Some initial content. Here is the rest of the answer."
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    )
+
+
+def test_agent_run_with_observer_no_think_prefix(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer handles content without '思考：' prefix normally."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with normal content without "思考：" prefix
+    final_answer_normal = "This is a normal final answer without any thinking prefix."
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = final_answer_normal
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify the content was preserved as-is
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, final_answer_normal
+    )
+
+
+def test_agent_run_with_observer_think_prefix_with_agent_text(nexent_agent_instance, mock_core_agent):
+    """Test agent_run_with_observer removes '思考：' prefix when final answer is AgentText."""
+    # Setup
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+
+    # Mock step logs
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.duration = 1.0
+    mock_action_step.error = None
+
+    # Test with AgentText containing "思考：" prefix
+    final_answer_with_think = (
+        "思考：用户需要一份营养早餐的搭配建议。\n\n"
+        "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。"
+    )
+    mock_final_answer = _AgentText(final_answer_with_think)
+
+    mock_core_agent.run.return_value = [mock_action_step]
+    mock_core_agent.run.return_value[-1].output = mock_final_answer
+
+    # Execute
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    # Verify the "思考：" prefix content was removed
+    expected_final_answer = "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。"
+    mock_core_agent.observer.add_message.assert_any_call(
+        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    )
+
+
 def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     """Test successful creation of DataMateSearchTool with metadata."""
     mock_datamate_tool_class = MagicMock()
@@ -1383,7 +1603,6 @@ def test_create_local_tool_datamate_search_tool_success(nexent_agent_instance):
     # Verify excluded parameters were set directly as attributes after instantiation
     assert result == mock_datamate_tool_instance
     assert mock_datamate_tool_instance.observer == nexent_agent_instance.observer
-
 
 
 def test_create_local_tool_datamate_search_tool_with_none_defaults(nexent_agent_instance):

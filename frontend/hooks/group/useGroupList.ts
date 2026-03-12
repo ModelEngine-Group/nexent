@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { listGroups } from "@/services/groupService";
 
-export function useGroupList(tenantId: string | null, page: number = 1, pageSize: number = 20) {
+export function useGroupList(tenantId: string | null, page?: number, pageSize?: number) {
   return useQuery({
     queryKey: ["groups", tenantId, page, pageSize],
     queryFn: () => listGroups(tenantId!, page, pageSize),

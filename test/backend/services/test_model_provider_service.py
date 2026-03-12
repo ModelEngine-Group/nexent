@@ -157,6 +157,8 @@ sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 class _ProviderEnumStub:
     SILICON = mock.Mock(value="silicon")
     MODELENGINE = mock.Mock(value="modelengine")
+    DASHSCOPE = mock.Mock(value="dashscope")
+    TOKENPONY = mock.Mock(value="tokenpony")
 
 
 sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
@@ -1903,3 +1905,125 @@ def test_get_model_engine_raw_url_trailing_slash():
     for input_url, expected in test_cases:
         result = get_model_engine_raw_url(input_url)
         assert result == expected, f"Failed for input: {input_url}"
+
+
+# ============================================================================
+# Test-cases for get_provider_models with DashScope provider
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_dashscope_success():
+    """Should successfully get models from DashScope provider."""
+    from backend.services.model_provider_service import DashScopeModelProvider
+
+    model_data = {
+        "provider": "dashscope",
+        "model_type": "llm",
+        "api_key": "test-key",
+    }
+
+    expected_models = [
+        {
+            "id": "qwen-turbo",
+            "model_tag": "chat",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.DashScopeModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = expected_models
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == expected_models
+        mock_provider_class.assert_called_once()
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_dashscope_empty_result():
+    """Should handle empty result from DashScope provider."""
+    model_data = {
+        "provider": "dashscope",
+        "model_type": "embedding",
+        "api_key": "test-key",
+    }
+
+    with mock.patch(
+        "backend.services.model_provider_service.DashScopeModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = []
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == []
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+# ============================================================================
+# Test-cases for get_provider_models with TokenPony provider
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_tokenpony_success():
+    """Should successfully get models from TokenPony provider."""
+    from backend.services.model_provider_service import TokenPonyModelProvider
+
+    model_data = {
+        "provider": "tokenpony",
+        "model_type": "llm",
+        "api_key": "test-key",
+    }
+
+    expected_models = [
+        {
+            "id": "gpt-4",
+            "model_tag": "chat",
+            "model_type": "llm",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+        }
+    ]
+
+    with mock.patch(
+        "backend.services.model_provider_service.TokenPonyModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = expected_models
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == expected_models
+        mock_provider_class.assert_called_once()
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_models_tokenpony_empty_result():
+    """Should handle empty result from TokenPony provider."""
+    model_data = {
+        "provider": "tokenpony",
+        "model_type": "embedding",
+        "api_key": "test-key",
+    }
+
+    with mock.patch(
+        "backend.services.model_provider_service.TokenPonyModelProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = []
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == []
+        mock_provider_instance.get_models.assert_called_once_with(model_data)

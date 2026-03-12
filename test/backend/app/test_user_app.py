@@ -61,8 +61,8 @@ client = TestClient(app)
 class TestGetUsersEndpoint:
     """Test get_users_endpoint (POST /users/list)"""
 
-    def test_get_users_success(self):
-        """Test successful user list retrieval"""
+    def test_get_users_success_with_pagination(self):
+        """Test successful user list retrieval with pagination"""
         with patch('apps.user_app.get_users') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
@@ -70,23 +70,114 @@ class TestGetUsersEndpoint:
                     {"id": "user2", "username": "user2@example.com", "role": "ADMIN", "tenant_id": "tenant1"}
                 ],
                 "total": 2,
+                "page": 1,
+                "page_size": 20,
                 "total_pages": 1
             }
 
             response = client.post(
                 "/users/list",
-                json={"tenant_id": "tenant1", "page": 1, "page_size": 20}
+                json={"tenant_id": "tenant1", "page": 1, "page_size": 20, "sort_by": "created_at", "sort_order": "desc"}
             )
 
             assert response.status_code == HTTPStatus.OK
             data = response.json()
             assert data["message"] == "Users retrieved successfully"
             assert len(data["data"]) == 2
+            assert data["total"] == 2
             assert data["pagination"]["total"] == 2
             assert data["pagination"]["page"] == 1
             assert data["pagination"]["page_size"] == 20
             assert data["pagination"]["total_pages"] == 1
             mock_get_users.assert_called_once_with("tenant1", 1, 20, "created_at", "desc")
+
+    def test_get_users_success_without_pagination(self):
+        """Test successful user list retrieval without pagination (returns all data)"""
+        with patch('apps.user_app.get_users') as mock_get_users:
+            mock_get_users.return_value = {
+                "users": [
+                    {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"},
+                    {"id": "user2", "username": "user2@example.com", "role": "ADMIN", "tenant_id": "tenant1"},
+                    {"id": "user3", "username": "user3@example.com", "role": "USER", "tenant_id": "tenant1"}
+                ],
+                "total": 3
+            }
+
+            response = client.post(
+                "/users/list",
+                json={"tenant_id": "tenant1"}
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Users retrieved successfully"
+            assert len(data["data"]) == 3
+            assert data["total"] == 3
+            assert "pagination" not in data
+            mock_get_users.assert_called_once_with("tenant1", None, None, "created_at", "desc")
+
+    def test_get_users_success_with_only_page(self):
+        """Test user list retrieval with only page parameter (no pagination info in response)"""
+        with patch('apps.user_app.get_users') as mock_get_users:
+            mock_get_users.return_value = {
+                "users": [
+                    {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
+                ],
+                "total": 1
+            }
+
+            response = client.post(
+                "/users/list",
+                json={"tenant_id": "tenant1", "page": 1}
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Users retrieved successfully"
+            assert "pagination" not in data
+
+    def test_get_users_success_with_only_page_size(self):
+        """Test user list retrieval with only page_size parameter (no pagination info in response)"""
+        with patch('apps.user_app.get_users') as mock_get_users:
+            mock_get_users.return_value = {
+                "users": [
+                    {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
+                ],
+                "total": 1
+            }
+
+            response = client.post(
+                "/users/list",
+                json={"tenant_id": "tenant1", "page_size": 20}
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Users retrieved successfully"
+            assert "pagination" not in data
+
+    def test_get_users_success_with_asc_sort(self):
+        """Test successful user list retrieval with ascending sort order"""
+        with patch('apps.user_app.get_users') as mock_get_users:
+            mock_get_users.return_value = {
+                "users": [
+                    {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "total_pages": 1
+            }
+
+            response = client.post(
+                "/users/list",
+                json={"tenant_id": "tenant1", "page": 1, "page_size": 20, "sort_by": "created_at", "sort_order": "asc"}
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Users retrieved successfully"
+            mock_get_users.assert_called_once_with("tenant1", 1, 20, "created_at", "asc")
 
     def test_get_users_empty_list(self):
         """Test user list retrieval with no users"""
@@ -94,6 +185,8 @@ class TestGetUsersEndpoint:
             mock_get_users.return_value = {
                 "users": [],
                 "total": 0,
+                "page": 1,
+                "page_size": 20,
                 "total_pages": 0
             }
 
@@ -108,14 +201,16 @@ class TestGetUsersEndpoint:
             assert len(data["data"]) == 0
             assert data["pagination"]["total"] == 0
 
-    def test_get_users_with_pagination(self):
-        """Test user list retrieval with custom pagination"""
+    def test_get_users_with_custom_pagination(self):
+        """Test user list retrieval with custom pagination (multiple pages)"""
         with patch('apps.user_app.get_users') as mock_get_users:
             mock_get_users.return_value = {
                 "users": [
                     {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
                 ],
                 "total": 25,
+                "page": 2,
+                "page_size": 10,
                 "total_pages": 3
             }
 
@@ -131,6 +226,28 @@ class TestGetUsersEndpoint:
             assert data["pagination"]["total"] == 25
             assert data["pagination"]["total_pages"] == 3
             mock_get_users.assert_called_once_with("tenant1", 2, 10, "created_at", "desc")
+
+    def test_get_users_with_missing_total_pages(self):
+        """Test user list retrieval when total_pages is missing (should calculate it)"""
+        with patch('apps.user_app.get_users') as mock_get_users:
+            mock_get_users.return_value = {
+                "users": [
+                    {"id": "user1", "username": "user1@example.com", "role": "USER", "tenant_id": "tenant1"}
+                ],
+                "total": 25,
+                "page": 2,
+                "page_size": 10
+                # total_pages is missing
+            }
+
+            response = client.post(
+                "/users/list",
+                json={"tenant_id": "tenant1", "page": 2, "page_size": 10}
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["pagination"]["total_pages"] == 3  # Calculated: ceil(25/10) = 3
 
     def test_get_users_unexpected_error(self):
         """Test user list retrieval with unexpected error"""

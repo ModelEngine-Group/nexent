@@ -7,7 +7,6 @@ import { PlusOutlined } from '@ant-design/icons';
 import { Pencil } from 'lucide-react';
 
 import { useConfig } from '@/hooks/useConfig';
-import { configService } from "@/services/configService";
 import { presetIcons, colorOptions } from "@/const/avatar";
 import { generateAvatarUri } from "@/lib/avatar";
 import log from "@/lib/logger";
@@ -24,7 +23,7 @@ const DynamicModal = dynamic(() => import("antd/es/modal"), { ssr: false });
 export const AppConfigSection: React.FC = () => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { appConfig, updateAppConfig, getAppAvatarUrl, getConfig } =
+  const { appConfig, updateAppConfig, getAppAvatarUrl, saveConfig } =
     useConfig();
 
   // Add local state management for input values
@@ -67,19 +66,14 @@ export const AppConfigSection: React.FC = () => {
 
   const triggerAutoSave = useCallback(() => {
     const runSave = async () => {
-      try {
-        const ok = await configService.saveConfigToBackend(getConfig() as any);
-        if (!ok) {
-          message.error(t("setup.page.error.saveConfig"));
-        }
-      } catch (error) {
+      const ok = await saveConfig();
+      if (!ok) {
         message.error(t("setup.page.error.saveConfig"));
-        log.error("Failed to auto save app configuration", error);
       }
     };
 
     void runSave();
-  }, [getConfig, message, t]);
+  }, [saveConfig, message, t]);
 
   // Add configuration change listener, synchronize local state when config is loaded from backend
   useEffect(() => {
@@ -270,13 +264,8 @@ export const AppConfigSection: React.FC = () => {
         });
       }
 
-      // Auto-save configuration after avatar selection changes
-      try {
-        const ok = await configService.saveConfigToBackend(getConfig() as any);
-        if (!ok) {
-          message.error(t("setup.page.error.saveConfig"));
-        }
-      } catch (e) {
+      const ok = await saveConfig();
+      if (!ok) {
         message.error(t("setup.page.error.saveConfig"));
       }
     } catch (error) {

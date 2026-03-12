@@ -11,7 +11,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button } from "antd";
+import { Button, Row, Col } from "antd";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -55,9 +55,9 @@ export default function Homepage() {
   const navigateToSpace = () => navigateWithPermissionCheck("/space");
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center">
+    <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
       {/* Hero area */}
-      <section className="relative w-full py-4 flex flex-col items-center justify-center text-center">
+      <section className="relative w-full p-4 flex flex-col items-center justify-center text-center flex-shrink-0">
         <div className="absolute inset-0 bg-grid-slate-200 dark:bg-grid-slate-800 [mask-image:radial-gradient(ellipse_at_center,white_20%,transparent_75%)] -z-10"></div>
         <motion.h2
           initial={{ opacity: 0, y: -20 }}
@@ -80,37 +80,41 @@ export default function Homepage() {
           {t("page.description")}
         </motion.p>
 
-        {/* Three parallel buttons */}
+        {/* Three parallel buttons - responsive: row on wide, column on narrow */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.4 }}
-          className="flex flex-col sm:flex-row gap-4"
         >
-          
-          <Button
-            onClick={navigateToChat}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-          >
-            <Bot className="mr-2 h-5 w-5 group-hover:animate-pulse" />
-            {t("page.startChat")}
-          </Button>
-
-          <Button
-            onClick={navigateToSetup}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-          >
-            <Zap className="mr-2 h-5 w-5 group-hover:animate-pulse" />
-            {t("page.quickConfig")}
-          </Button>
-
-          <Button
-            onClick={navigateToSpace}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
-          >
-            <Globe className="mr-2 h-5 w-5 group-hover:animate-pulse" />
-            {t("page.agentSpace")}
-          </Button>
+          <Row gutter={[16, 16]} justify="center">
+            <Col xs={24} sm={24} md={8}>
+              <Button
+                onClick={navigateToChat}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+              >
+                <Bot className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                {t("page.startChat")}
+              </Button>
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Button
+                onClick={navigateToSetup}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+              >
+                <Zap className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                {t("page.quickConfig")}
+              </Button>
+            </Col>
+            <Col xs={24} sm={24} md={8}>
+              <Button
+                onClick={navigateToSpace}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 rounded-full text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-300 group"
+              >
+                <Globe className="mr-2 h-6 w-6 shrink-0 group-hover:animate-pulse" />
+                {t("page.agentSpace")}
+              </Button>
+            </Col>
+          </Row>
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
@@ -132,7 +136,7 @@ export default function Homepage() {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 0.6 }}
-        className="w-full mt-1 max-w-7xl"
+        className="w-full mt-1 max-w-7xl py-4 px-8"
       >
         <motion.h3
           initial={{ opacity: 0, y: -20 }}
@@ -207,7 +211,7 @@ function FeatureCard({ icon, title, description }: FeatureCardProps) {
           {icon}
         </div>
         <div className="flex-1 min-w-0 flex flex-col justify-center">
-          <h4 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+          <h4 className="text-lg font-semibold text-slate-900 dark:text-white mb-2 truncate">
             {title}
           </h4>
           <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-3">

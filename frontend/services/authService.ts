@@ -1,44 +1,48 @@
 /**
  * Authentication service
+ *
+ * After HttpOnly cookie migration:
+ * - Tokens are managed by server.js via HttpOnly cookies (Set-Cookie on login/refresh)
+ * - Frontend only stores user display info in localStorage
+ * - expires_at is readable from a non-HttpOnly cookie
  */
 import { API_ENDPOINTS } from "@/services/api";
 import { sessionService } from "@/services/sessionService";
 
-import { Session, User, SessionResponse, AuthInfoResponse } from "@/types/auth";
+import { Session, SessionResponse, AuthInfoResponse } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 
 import { generateAvatarUrl } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/auth";
-import { removeSessionFromStorage, getSessionFromStorage, saveSessionToStorage } from "@/lib/session";
+import {
+  removeSessionFromStorage,
+  getSessionFromStorage,
+  saveUserToStorage,
+  removeUserFromStorage,
+  checkSessionValid,
+} from "@/lib/session";
 import log from "@/lib/logger";
 
 
-// Authentication service
 export const authService = {
-  // Get current session
   getSession: async (): Promise<Session | null> => {
     try {
-      // Get session information from local storage
       const sessionObj = getSessionFromStorage();
-      if (!sessionObj?.access_token) return null;
+      if (!sessionObj) return null;
 
       try {
-        // Verify if the session is valid
         const response = await fetchWithAuth(API_ENDPOINTS.user.session);
 
-        // Check HTTP status code instead of data.code
         if (!response.ok) {
           log.warn(
             "Session verification failed, HTTP status code:",
             response.status
           );
 
-          // HTTP 401 means the token is expired or invalid
           if (response.status === STATUS_CODES.UNAUTHORIZED_HTTP) {
             return null;
           }
 
-          // Other errors, possibly server issues, continue using local session
           log.warn(
             "Backend session verification failed, but will continue using local session"
           );
@@ -49,7 +53,6 @@ export const authService = {
       } catch (error) {
         log.error("Error verifying session:", error);
 
-        // Check if it is a TOKEN_EXPIRED error
         if (
           error instanceof Error &&
           "code" in error &&
@@ -58,8 +61,6 @@ export const authService = {
           return null;
         }
 
-        // If it is another network error, do not immediately clear the session
-        // It may be that the backend service is not started or temporarily unavailable
         log.warn(
           "Backend session verification failed, but will continue using local session"
         );
@@ -71,24 +72,20 @@ export const authService = {
     }
   },
 
-  // Revoke (Delete account completely)
   revoke: async (): Promise<{ error: null }> => {
     try {
-      // Call backend revoke API
       await fetchWithAuth(API_ENDPOINTS.user.revoke, {
         method: "POST",
       });
     } catch (error) {
       log.error("Account revoke failed:", error);
     } finally {
-      // Always clear local session
       removeSessionFromStorage();
     }
 
     return { error: null };
   },
 
-  // check auth service available
   checkAuthServiceAvailable: async (): Promise<boolean> => {
     try {
       const response = await fetch(API_ENDPOINTS.user.serviceHealth, {
@@ -101,7 +98,6 @@ export const authService = {
     }
   },
 
-  // sign in
   signIn: async (email: string, password: string): Promise<SessionResponse> => {
     try {
       const response = await fetch(API_ENDPOINTS.user.signin, {
@@ -117,7 +113,6 @@ export const authService = {
 
       const data = await response.json();
 
-      // Check HTTP status code instead of data.code
       if (!response.ok) {
         return {
           error: {
@@ -128,10 +123,8 @@ export const authService = {
         };
       }
 
-      // Generate avatar URL
       const avatar_url = generateAvatarUrl(email);
 
-      // Build user object
       const user = {
         id: data.data.user.id,
         email: data.data.user.email,
@@ -139,35 +132,22 @@ export const authService = {
         avatarUrl: avatar_url,
       };
 
-      // Build session object
-      const session = {
-        user,
-        access_token: data.data.session.access_token,
-        refresh_token: data.data.session.refresh_token,
+      // Save user display info to localStorage
+      saveUserToStorage(user);
+
+      // Tokens are already set as HttpOnly cookies by server.js.
+      // Build session from the expires_at returned in the (sanitized) response.
+      const session: Session = {
         expires_at: data.data.session.expires_at,
       };
 
-      // Save session to local storage
-      saveSessionToStorage(session);
-
-      // Verify if the session is properly saved, if not, try again
-      setTimeout(() => {
-        const savedSession = getSessionFromStorage();
-        if (!savedSession || !savedSession.access_token) {
-          log.warn("Session not properly saved, retrying...");
-          saveSessionToStorage(session);
-        } else {
-          log.debug("Session successfully saved to local storage");
-        }
-      }, 100);
-
-      return { data: { session }, error: null };
+      return { data: { session, user }, error: null };
     } catch (error) {
       log.error("Login failed:", error);
       return {
         error: {
           message:
-            error instanceof Error ? error.message : "网络错误，请稍后重试",
+            error instanceof Error ? error.message : "Network error, please try again later",
           code:
             error instanceof Error && "code" in error
               ? (error as any).code
@@ -177,7 +157,6 @@ export const authService = {
     }
   },
 
-  // Register
   signUp: async (
     email: string,
     password: string,
@@ -199,26 +178,24 @@ export const authService = {
 
       const data = await response.json();
 
-      // Check HTTP status code instead of data.code
       if (!response.ok) {
         return {
           error: {
-            message: data.message || "注册失败",
+            message: data.message || "Registration failed",
             code: response.status,
             data: data.data || null,
           },
         };
       }
 
-
-      // If autoLogin is false, skip session building and storage
       if (!autoLogin) {
         return { data: { session: null }, error: null };
       }
 
-      // If the session information is not returned when registering, try to login
-      if (!data.data.session || !data.data.session.access_token) {
-        // Get login token
+      const avatar_url = generateAvatarUrl(email);
+
+      // If no session returned from signup, try explicit sign-in
+      if (!data.data.session || !data.data.session.expires_at) {
         const loginResponse = await fetch(API_ENDPOINTS.user.signin, {
           method: "POST",
           headers: {
@@ -230,33 +207,37 @@ export const authService = {
         const loginData = await loginResponse.json();
 
         if (!loginResponse.ok) {
-          // Return the result with only the user and no session
           return { data: { session: null }, error: null };
         }
 
-        // Build complete session
+        const user = {
+          id: loginData.data.user.id,
+          email: loginData.data.user.email,
+          role: loginData.data.user.role,
+          avatarUrl: avatar_url,
+        };
+        saveUserToStorage(user);
+
         const session: Session = {
-          access_token: loginData.data.session.access_token,
-          refresh_token: loginData.data.session.refresh_token,
           expires_at: loginData.data.session.expires_at,
         };
 
-        // Save session to local storage
-        saveSessionToStorage(session);
-
-        return { data: { session }, error: null };
+        return { data: { session, user }, error: null };
       } else {
-        // Use the session information returned by the registration interface
+        const userData = data.data.user;
+        const user = {
+          id: userData?.id || "",
+          email: userData?.email || email,
+          role: userData?.role || "USER",
+          avatarUrl: avatar_url,
+        };
+        saveUserToStorage(user);
+
         const session: Session = {
-          access_token: data.data.session.access_token,
-          refresh_token: data.data.session.refresh_token,
           expires_at: data.data.session.expires_at,
         };
 
-        // Save session to local storage
-        saveSessionToStorage(session);
-
-        return { data: { session }, error: null };
+        return { data: { session, user }, error: null };
       }
     } catch (error) {
       log.error("Registration failed:", error);
@@ -269,34 +250,29 @@ export const authService = {
     }
   },
 
-  // Logout
   signOut: async (): Promise<{ error: null }> => {
     try {
-      // Call the backend logout API
       await fetchWithAuth(API_ENDPOINTS.user.logout, {
         method: "POST",
       });
 
-      // Clear local session regardless of success or failure
+      // server.js clears HttpOnly cookies; clear local user info
       removeSessionFromStorage();
 
       return { error: null };
     } catch (error) {
       log.error("Logout failed:", error);
 
-      // Even if the API call fails, clear the local session
       removeSessionFromStorage();
 
       return { error: null };
     }
   },
 
-  // Get current user ID
   getCurrentUserId: async (): Promise<string | null> => {
     try {
       const response = await fetchWithAuth(API_ENDPOINTS.user.currentUserId);
 
-      // Check HTTP status code instead of data.code
       if (!response.ok) {
         log.warn("Failed to get user ID, HTTP status code:", response.status);
         return null;
@@ -314,10 +290,10 @@ export const authService = {
       return null;
     }
   },
+
   getCurrentUserInfo: async (): Promise<AuthInfoResponse | null> => {
     try {
       const response = await fetchWithAuth(API_ENDPOINTS.user.currentUserInfo);
-      // Check HTTP status code instead of data.code
       if (!response.ok) {
         log.warn("Failed to get user Info, HTTP status code:", response.status);
         return null;
@@ -346,16 +322,11 @@ export const authService = {
       return null;
     }
   },
-  // Refresh token
-  refreshToken: async (): Promise<boolean> => {
-    const sessionObj = getSessionFromStorage();
-    if (!sessionObj?.refresh_token) return false;
 
-    const newSession = await sessionService.refreshToken(sessionObj.refresh_token);
-    if (newSession) {
-      saveSessionToStorage(newSession);
-      return true;
-    }
-    return false;
+  refreshToken: async (): Promise<boolean> => {
+    if (!checkSessionValid()) return false;
+
+    const newSession = await sessionService.refreshToken();
+    return newSession !== null;
   },
-}; 
+};

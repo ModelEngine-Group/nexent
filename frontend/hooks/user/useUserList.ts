@@ -3,8 +3,8 @@ import { listUsers } from "@/services/userService";
 
 export function useUserList(
   tenantId: string | null,
-  page: number = 1,
-  pageSize: number = 20
+  page?: number,
+  pageSize?: number
 ) {
   return useQuery({
     queryKey: ["users", tenantId, page, pageSize],

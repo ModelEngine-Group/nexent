@@ -1155,6 +1155,163 @@ class TestAddMCPFromConfig:
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_lowercase(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server when image not found (lowercase 'not found')"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Error message contains "not found" (lowercase)
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed: Container startup failed: 404 Client Error for http+docker://localnpipe/v1.52/images/create?tag=latest&fromImage=nexent%2Fnexent-mcp: Not Found (\"failed to resolve reference \"docker.io/nexent/nexent-mcp:latest\": docker.io/nexent/nexent-mcp:latest: not found\")"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Image not found - MCP service startup image is missing" in data["detail"]
+        assert "test-service" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_uppercase(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server when image not found (uppercase 'Not Found')"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Error message contains "Not Found" (uppercase)
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed: Image Not Found"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Image not found - MCP service startup image is missing" in data["detail"]
+        assert "test-service" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_with_404(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
+        """Test adding MCP server when image not found (contains '404')"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # Error message contains "404"
+        mock_container_manager.start_mcp_container = AsyncMock(
+            side_effect=MCPContainerError("Container startup failed: 404 Client Error for http+docker://localnpipe/v1.52/images/create"))
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "test-service": {
+                        "command": "npx",
+                        "args": ["-y", "test-mcp"],
+                        "port": 5020
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        data = response.json()
+        assert "All MCP servers failed" in data["detail"]
+        assert "Image not found - MCP service startup image is missing" in data["detail"]
+        assert "test-service" in data["detail"]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.add_remote_mcp_server_list')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
+    def test_add_mcp_from_config_image_not_found_multiple_services(self, mock_check_name, mock_add_server, mock_container_manager_class, mock_get_user_info):
+        """Test adding multiple MCP servers when one has image not found error"""
+        from consts.exceptions import MCPContainerError
+
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        # First service fails with image not found, second succeeds
+        mock_container_manager.start_mcp_container = AsyncMock(side_effect=[
+            MCPContainerError("Container startup failed: Image not found"),
+            {
+                "container_id": "container-2",
+                "mcp_url": "http://localhost:5021/mcp",
+                "host_port": "5021",
+                "status": "started",
+                "container_name": "service2-user1234"
+            }
+        ])
+        mock_add_server.return_value = None
+
+        response = client.post(
+            "/mcp/add-from-config",
+            json={
+                "mcpServers": {
+                    "service1": {
+                        "command": "npx",
+                        "args": ["-y", "service1"],
+                        "port": 5020
+                    },
+                    "service2": {
+                        "command": "npx",
+                        "args": ["-y", "service2"],
+                        "port": 5021
+                    }
+                }
+            },
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["results"]) == 1
+        assert data["results"][0]["service_name"] == "service2"
+        assert len(data["errors"]) == 1
+        assert "Image not found - MCP service startup image is missing" in data["errors"][0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    @patch('apps.remote_mcp_app.check_mcp_name_exists', return_value=False)
     def test_add_mcp_from_config_unexpected_error_in_loop(self, mock_check_name, mock_container_manager_class, mock_get_user_info):
         """Test adding MCP server when unexpected exception occurs in loop (covers line 253-255)"""
         mock_get_user_info.return_value = ("user123", "tenant456", "en")
@@ -1833,53 +1990,124 @@ class TestUploadMCPImageValidation:
 
 
 # ---------------------------------------------------------------------------
-# Test get_container_logs
+# Test get_container_logs (SSE streaming)
 # ---------------------------------------------------------------------------
 
 
 class TestGetContainerLogs:
-    """Test endpoint for getting container logs"""
+    """Test endpoint for getting container logs via SSE stream"""
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
     def test_get_container_logs_success(self, mock_container_manager_class, mock_get_user_info):
-        """Test successful retrieval of container logs"""
+        """Test successful SSE streaming of container logs"""
+        import json
+        
         mock_get_user_info.return_value = ("user123", "tenant456", "en")
 
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.get_container_logs.return_value = "Log line 1\nLog line 2\nLog line 3"
+        
+        # Mock async generator for stream_container_logs
+        # Create an async generator function that yields 3 log lines
+        async def mock_stream_logs(container_id, tail, follow):
+            yield "Log line 1"
+            yield "Log line 2"
+            yield "Log line 3"
+        
+        # Assign the async generator function directly
+        # FastAPI will call it and iterate the generator
+        mock_container_manager.stream_container_logs = mock_stream_logs
 
         response = client.get(
-            "/mcp/container/container-123/logs?tail=100",
+            "/mcp/container/container-123/logs?tail=100&follow=false",
             headers={"Authorization": "Bearer test_token"}
         )
 
         assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["status"] == "success"
-        assert "Log line 1" in data["logs"]
-        mock_container_manager.get_container_logs.assert_called_once_with(
-            "container-123", tail=100)
+        assert "text/event-stream" in response.headers["content-type"]
+        assert "Cache-Control" in response.headers
+        assert "no-cache" in response.headers["Cache-Control"]
+        assert "Connection" in response.headers
+        assert "keep-alive" in response.headers["Connection"]
+        
+        # Parse SSE content - TestClient should read the full stream
+        # Use response.content.decode() to ensure we get all bytes
+        content = response.content.decode('utf-8')
+        
+        # Split by double newlines to get SSE messages
+        # Filter out empty lines and lines that don't start with 'data: '
+        lines = [l.strip() for l in content.split('\n\n') if l.strip()]
+        data_lines = [l for l in lines if l.startswith('data: ')]
+        
+        # Should have 3 SSE messages (each log line becomes one SSE message)
+        assert len(data_lines) == 3, f"Expected 3 SSE messages, got {len(data_lines)}. Content: {content[:500]}"
+        
+        # Verify all 3 log lines are present in the response
+        # Parse each SSE message
+        log_lines = []
+        for line in data_lines:
+            data_str = line.replace('data: ', '')
+            data_json = json.loads(data_str)
+            assert data_json["status"] == "success"
+            log_lines.append(data_json["logs"])
+        
+        assert log_lines == ["Log line 1", "Log line 2", "Log line 3"]
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_get_container_logs_custom_tail(self, mock_container_manager_class, mock_get_user_info):
-        """Test getting container logs with custom tail"""
+    def test_get_container_logs_with_follow(self, mock_container_manager_class, mock_get_user_info):
+        """Test SSE streaming with follow=True"""
+        import json
+        
         mock_get_user_info.return_value = ("user123", "tenant456", "en")
 
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.get_container_logs.return_value = "Log line 1"
+        
+        async def mock_stream_logs(container_id, tail, follow):
+            yield "Initial log"
+            yield "New log 1"
+        
+        # Use AsyncMock to wrap the generator function
+        mock_container_manager.stream_container_logs = AsyncMock(side_effect=mock_stream_logs)
 
         response = client.get(
-            "/mcp/container/container-123/logs?tail=50",
+            "/mcp/container/container-123/logs?tail=50&follow=true",
             headers={"Authorization": "Bearer test_token"}
         )
 
         assert response.status_code == HTTPStatus.OK
-        mock_container_manager.get_container_logs.assert_called_once_with(
-            "container-123", tail=50)
+        assert "text/event-stream" in response.headers["content-type"]
+        
+        # Verify follow parameter
+        call_args = mock_container_manager.stream_container_logs.call_args
+        assert call_args[1]["follow"] is True
+        assert call_args[1]["tail"] == 50
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_default_follow(self, mock_container_manager_class, mock_get_user_info):
+        """Test that follow defaults to True"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        
+        async def mock_stream_logs(container_id, tail, follow):
+            yield "Log line"
+        
+        # Use AsyncMock to wrap the generator function
+        mock_container_manager.stream_container_logs = AsyncMock(side_effect=mock_stream_logs)
+
+        response = client.get(
+            "/mcp/container/container-123/logs",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        call_args = mock_container_manager.stream_container_logs.call_args
+        assert call_args[1]["follow"] is True  # Default should be True
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
@@ -1902,23 +2130,125 @@ class TestGetContainerLogs:
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.MCPContainerManager')
-    def test_get_container_logs_exception(self, mock_container_manager_class, mock_get_user_info):
-        """Test getting logs when exception occurs"""
+    def test_get_container_logs_stream_error(self, mock_container_manager_class, mock_get_user_info):
+        """Test SSE streaming when stream raises exception"""
+        import json
+        
         mock_get_user_info.return_value = ("user123", "tenant456", "en")
 
         mock_container_manager = MagicMock()
         mock_container_manager_class.return_value = mock_container_manager
-        mock_container_manager.get_container_logs.side_effect = Exception(
-            "Unexpected error")
+        
+        # Mock stream that raises exception
+        async def mock_stream_logs(container_id, tail, follow):
+            yield "Log line 1"
+            raise Exception("Stream error")
+        
+        mock_container_manager.stream_container_logs = mock_stream_logs
+
+        response = client.get(
+            "/mcp/container/container-123/logs?tail=100&follow=false",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        assert "text/event-stream" in response.headers["content-type"]
+        
+        # Should have error message in stream
+        content = response.text
+        assert "Error" in content or "error" in content.lower()
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_exception(self, mock_container_manager_class, mock_get_user_info):
+        """Test getting logs when exception occurs during stream iteration"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        
+        # Exception during stream_container_logs iteration
+        # When async for tries to iterate, the exception is raised
+        # This is caught by generate_log_stream's try-except (line 564) and sent as SSE error
+        async def mock_stream_logs_raises(container_id, tail, follow):
+            # Exception is raised during iteration (when async for starts)
+            raise Exception("Unexpected error")
+            yield  # Unreachable but needed for async generator syntax
+        
+        # Assign the async generator function that raises exception
+        mock_container_manager.stream_container_logs = mock_stream_logs_raises
 
         response = client.get(
             "/mcp/container/container-123/logs",
             headers={"Authorization": "Bearer test_token"}
         )
 
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        data = response.json()
-        assert "Failed to get container logs" in data["detail"]
+        # The exception is caught in generate_log_stream (line 564) and sent as SSE error message
+        # So we get 200 OK with error in the stream, not 500
+        assert response.status_code == HTTPStatus.OK
+        assert "text/event-stream" in response.headers["content-type"]
+        content = response.text
+        # Should have error message in stream
+        assert "Error" in content or "error" in content.lower() or "Unexpected error" in content
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_with_tenant_id(self, mock_container_manager_class, mock_get_user_info):
+        """Test that explicit tenant_id parameter is used"""
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        
+        async def mock_stream_logs(container_id, tail, follow):
+            yield "Log line"
+        
+        # Use AsyncMock to wrap the generator function
+        mock_container_manager.stream_container_logs = AsyncMock(side_effect=mock_stream_logs)
+
+        response = client.get(
+            "/mcp/container/container-123/logs?tenant_id=explicit-tenant",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        # Verify get_current_user_info was called (tenant_id handling)
+        mock_get_user_info.assert_called_once()
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.MCPContainerManager')
+    def test_get_container_logs_sse_format(self, mock_container_manager_class, mock_get_user_info):
+        """Test that SSE format is correct"""
+        import json
+        
+        mock_get_user_info.return_value = ("user123", "tenant456", "en")
+
+        mock_container_manager = MagicMock()
+        mock_container_manager_class.return_value = mock_container_manager
+        
+        async def mock_stream_logs(container_id, tail, follow):
+            yield "Test log line"
+        
+        # Use AsyncMock to wrap the generator function
+        mock_container_manager.stream_container_logs = AsyncMock(side_effect=mock_stream_logs)
+
+        response = client.get(
+            "/mcp/container/container-123/logs?tail=100&follow=false",
+            headers={"Authorization": "Bearer test_token"}
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        content = response.text
+        
+        # Verify SSE format: data: {json}\n\n
+        lines = content.strip().split('\n\n')
+        for line in lines:
+            if line.startswith('data: '):
+                data_str = line.replace('data: ', '')
+                data_json = json.loads(data_str)
+                assert "logs" in data_json
+                assert "status" in data_json
+                assert data_json["status"] in ["success", "error"]
 
 
 # ---------------------------------------------------------------------------

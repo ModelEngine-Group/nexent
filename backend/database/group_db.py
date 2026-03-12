@@ -49,23 +49,21 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
             return groups
 
 
-def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
+def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
                            sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
     Query groups for a tenant with pagination and sorting
 
     Args:
         tenant_id (str): Tenant ID
-        page (int): Page number (1-based)
-        page_size (int): Number of items per page
+        page (Optional[int]): Page number (1-based). If None, returns all data
+        page_size (Optional[int]): Number of items per page. If None, returns all data
         sort_by (str): Field to sort by
         sort_order (str): Sort order (asc or desc)
 
     Returns:
         Dict[str, Any]: Dictionary containing groups list and total count
     """
-    offset = (page - 1) * page_size
-
     with get_db_session() as session:
         # Get total count
         total = session.query(TenantGroupInfo).filter(
@@ -86,8 +84,13 @@ def query_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
             else:
                 query = query.order_by(TenantGroupInfo.create_time.asc())
 
-        # Get paginated results
-        result = query.offset(offset).limit(page_size).all()
+        # Apply pagination only if both page and page_size are provided
+        if page is not None and page_size is not None:
+            offset = (page - 1) * page_size
+            result = query.offset(offset).limit(page_size).all()
+        else:
+            # Return all results when pagination is not specified
+            result = query.all()
 
         return {
             "groups": [as_dict(record) for record in result],

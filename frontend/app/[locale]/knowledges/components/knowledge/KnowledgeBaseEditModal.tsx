@@ -16,7 +16,7 @@ interface KnowledgeBaseEditModalProps {
   knowledgeBase: KnowledgeBase | null;
   tenantId: string | null;
   onCancel: () => void;
-  onSuccess: () => void;
+  onSuccess: (updatedKnowledgeBase: KnowledgeBase) => void;
 }
 
 export function KnowledgeBaseEditModal({
@@ -36,7 +36,7 @@ export function KnowledgeBaseEditModal({
   const originalNameRef = useRef<string>("");
 
   // Fetch groups for group selection
-  const { data: groupData } = useGroupList(tenantId, 1, 100);
+  const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
 
   // Reset form and states when knowledge base changes
@@ -98,10 +98,18 @@ export function KnowledgeBaseEditModal({
 
       message.success(t("tenantResources.knowledgeBase.updated"));
 
+      // Construct updated knowledge base object with new values
+      const updatedKnowledgeBase: KnowledgeBase = {
+        ...knowledgeBase,
+        name: values.knowledge_name,
+        ingroup_permission: values.ingroup_permission,
+        group_ids: values.group_ids,
+      };
+
       // Trigger knowledge base list refresh to seamlessly update UI
       knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
 
-      onSuccess();
+      onSuccess(updatedKnowledgeBase);
       onCancel();
     } catch (error: any) {
       if (error.errorFields) {

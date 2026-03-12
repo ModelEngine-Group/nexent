@@ -97,10 +97,12 @@ export default function AgentList({
       return;
     }
 
-    // First check if there are unsaved changes BEFORE switching to new agent
-    const canSwitch = await checkUnsavedChanges.saveWithModal();
-    if (!canSwitch) {
-      return;
+    // Only guard when leaving an existing agent or exiting create mode
+    if (currentAgentId !== null || useAgentConfigStore.getState().isCreatingMode) {
+      const canSwitch = await checkUnsavedChanges.saveWithModal();
+      if (!canSwitch) {
+        return;
+      }
     }
 
     // Load agent detail and set as current

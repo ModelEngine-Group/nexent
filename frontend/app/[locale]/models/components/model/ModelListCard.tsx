@@ -33,12 +33,12 @@ const PULSE_ANIMATION = `
       transform: scale(0.95);
       box-shadow: 0 0 0 0 rgba(41, 128, 185, 0.7);
     }
-    
+
     70% {
       transform: scale(1);
       box-shadow: 0 0 0 5px rgba(41, 128, 185, 0);
     }
-    
+
     100% {
       transform: scale(0.95);
       box-shadow: 0 0 0 0 rgba(41, 128, 185, 0);
@@ -162,27 +162,33 @@ export const ModelListCard = ({
     const model = modelsData.find(
       (m) => m.type === type && m.displayName === displayName
     );
-    
+
     if (!model) return t("model.source.unknown");
-    
+
     // Return source label based on model.source
     if (model.source === "modelengine") {
       return t("model.source.modelEngine");
     } else if (model.source === "silicon") {
       return t("model.source.silicon");
+    } else if (model.source==="dashscope"){
+      return t("model.source.dashscope");
+    }else  if (model.source==="tokenpony"){
+      return t("model.source.tokenpony");
     } else if (model.source === "OpenAI-API-Compatible") {
       return t("model.source.custom");
     }
-    
+
     return t("model.source.unknown");
   };
 
   const filteredModels = getFilteredModels();
-  
+
   // Group models by source for display
   const groupedModels = {
     modelengine: filteredModels.filter((m) => m.source === "modelengine"),
     silicon: filteredModels.filter((m) => m.source === "silicon"),
+    dashscope: filteredModels.filter((m) => m.source === "dashscope"),
+    tokenpony: filteredModels.filter((m) => m.source === "tokenpony"),
     custom: filteredModels.filter((m) => m.source === "OpenAI-API-Compatible"),
   };
 
@@ -343,6 +349,102 @@ export const ModelListCard = ({
             ))}
           </Select.OptGroup>
         )}
+        {groupedModels.dashscope.length > 0 && (
+          <Select.OptGroup label={t("model.group.dashscope")}>
+            {groupedModels.dashscope.map((model) => (
+              <Option
+                key={`${type}-${model.displayName}-dashscope`}
+                value={model.displayName}
+              >
+                <div
+                  className="flex items-center justify-between"
+                  style={{ minWidth: 0 }}
+                >
+                  <div
+                    className="flex items-center font-medium truncate"
+                    style={{ flex: "1 1 auto", minWidth: 0 }}
+                    title={model.displayName}
+                  >
+                    <img
+                      src={getProviderIconByUrl(model.apiUrl)}
+                      alt="provider"
+                      className="w-4 h-4 rounded mr-2 flex-shrink-0"
+                    />
+                    <span className="truncate">{model.displayName}</span>
+                  </div>
+                  <div
+                    style={{
+                      flex: "0 0 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    <Tooltip title={t("model.status.tooltip")}>
+                      <span
+                        onClick={(e) => handleStatusClick(e, model.displayName)}
+                        onMouseDown={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        style={getStatusStyle(model.connect_status)}
+                        className="status-indicator"
+                      />
+                    </Tooltip>
+                  </div>
+                </div>
+              </Option>
+            ))}
+          </Select.OptGroup>
+        )}
+        {groupedModels.tokenpony.length > 0 && (
+          <Select.OptGroup label={t("model.group.tokenpony")}>
+            {groupedModels.tokenpony.map((model) => (
+              <Option
+                key={`${type}-${model.displayName}-tokenpony`}
+                value={model.displayName}
+              >
+                <div
+                  className="flex items-center justify-between"
+                  style={{ minWidth: 0 }}
+                >
+                  <div
+                    className="flex items-center font-medium truncate"
+                    style={{ flex: "1 1 auto", minWidth: 0 }}
+                    title={model.displayName}
+                  >
+                    <img
+                      src={getProviderIconByUrl(model.apiUrl)}
+                      alt="provider"
+                      className="w-4 h-4 rounded mr-2 flex-shrink-0"
+                    />
+                    <span className="truncate">{model.displayName}</span>
+                  </div>
+                  <div
+                    style={{
+                      flex: "0 0 auto",
+                      display: "flex",
+                      alignItems: "center",
+                      marginLeft: "8px",
+                    }}
+                  >
+                    <Tooltip title={t("model.status.tooltip")}>
+                      <span
+                        onClick={(e) => handleStatusClick(e, model.displayName)}
+                        onMouseDown={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        style={getStatusStyle(model.connect_status)}
+                        className="status-indicator"
+                      />
+                    </Tooltip>
+                  </div>
+                </div>
+              </Option>
+            ))}
+          </Select.OptGroup>
+        )}
         {groupedModels.custom.length > 0 && (
           <Select.OptGroup label={t("model.group.custom")}>
             {groupedModels.custom.map((model) => (
@@ -394,4 +496,4 @@ export const ModelListCard = ({
       </Select>
     </div>
   );
-}; 
+};

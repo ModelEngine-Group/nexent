@@ -4,6 +4,7 @@ import concurrent.futures
 import io
 import logging
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -18,11 +19,17 @@ from celery import states, chain
 from transformers import CLIPProcessor, CLIPModel
 from nexent.data_process.core import DataProcessCore
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
+from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
+from consts.exceptions import OfficeConversionException
 from consts.model import BatchTaskRequest
+from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
+from utils.file_management_utils import convert_office_to_pdf
 from data_process.app import app as celery_app
 from data_process.tasks import process, forward
 from data_process.utils import get_task_info, get_all_task_ids_from_redis
+
+# Limit concurrent LibreOffice processes to avoid resource exhaustion
+_conversion_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONVERSIONS)
 
 # Configure logging
 logger = logging.getLogger("data_process.service")
@@ -550,6 +557,81 @@ class DataProcessService:
             "processing_time": processing_time,
             "chunking_strategy": chunking_strategy
         }
+
+    async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
+        """Full conversion pipeline: download → convert → upload → validate → cleanup.
+
+        All five steps run inside data-process so that LibreOffice only needs to be
+        installed in this container.
+
+        Args:
+            object_name: Source Office file path in MinIO.
+            pdf_object_name: Destination PDF path in MinIO (final, not temp).
+        """
+        async with _conversion_semaphore:
+            temp_dir = None
+            try:
+                temp_dir = tempfile.mkdtemp(prefix='office_convert_')
+
+                # Step 1: Download original Office file from MinIO
+                original_stream = get_file_stream(object_name)
+                if original_stream is None:
+                    raise OfficeConversionException(f"Source file not found in storage: {object_name}")
+
+                original_filename = os.path.basename(object_name)
+                input_path = os.path.join(temp_dir, original_filename)
+                with open(input_path, 'wb') as f:
+                    while chunk := original_stream.read(8192):
+                        f.write(chunk)
+
+                # Step 2: Local conversion using LibreOffice
+                try:
+                    pdf_path = await convert_office_to_pdf(input_path, temp_dir, timeout=30)
+                except Exception as exc:
+                    raise OfficeConversionException(f"LibreOffice conversion failed: {exc}") from exc
+
+                # Step 3: Upload converted PDF to MinIO
+                result = upload_file(file_path=pdf_path, object_name=pdf_object_name)
+                if not result.get('success'):
+                    raise OfficeConversionException(
+                        f"Failed to upload PDF to MinIO: {result.get('error', 'Unknown error')}"
+                    )
+
+                # Step 4: Validate the uploaded PDF (header check + minimum size)
+                remote_size = get_file_size_from_minio(pdf_object_name)
+                if remote_size <= 0:
+                    raise OfficeConversionException("PDF validation failed: cannot read remote file size")
+                if remote_size < 100:
+                    raise OfficeConversionException(
+                        f"PDF validation failed: file too small ({remote_size} bytes)"
+                    )
+                remote_stream = get_file_stream(pdf_object_name)
+                if remote_stream is None:
+                    raise OfficeConversionException("PDF validation failed: cannot read uploaded file")
+                try:
+                    header = remote_stream.read(5)
+                finally:
+                    try:
+                        remote_stream.close()
+                    except Exception:
+                        pass
+                if not header.startswith(b'%PDF-'):
+                    raise OfficeConversionException("PDF validation failed: invalid PDF header")
+
+            except OfficeConversionException:
+                # Clean up any partially-uploaded remote PDF so a future retry starts clean
+                if file_exists(pdf_object_name):
+                    delete_file(pdf_object_name)
+                raise
+            except Exception as exc:
+                raise OfficeConversionException(f"Unexpected error during conversion: {exc}") from exc
+            finally:
+                # Step 5: Clean up local temporary directory
+                if temp_dir and os.path.exists(temp_dir):
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception as cleanup_err:
+                        logger.warning(f"Failed to cleanup temp dir '{temp_dir}': {cleanup_err}")
 
     def convert_celery_states_to_custom(self, process_celery_state: Optional[str], forward_celery_state: Optional[str]) -> str:
         """Map Celery task states to a custom frontend state string.

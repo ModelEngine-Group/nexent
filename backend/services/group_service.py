@@ -69,15 +69,15 @@ def get_group_info(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[
     return result
 
 
-def get_groups_by_tenant(tenant_id: str, page: int = 1, page_size: int = 20,
+def get_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
                          sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
     """
     Get groups for a specific tenant with pagination and sorting.
 
     Args:
         tenant_id (str): Tenant ID
-        page (int): Page number (1-based)
-        page_size (int): Number of items per page
+        page (Optional[int]): Page number (1-based). If None, returns all data
+        page_size (Optional[int]): Number of items per page. If None, returns all data
         sort_by (str): Field to sort by
         sort_order (str): Sort order (asc or desc)
 

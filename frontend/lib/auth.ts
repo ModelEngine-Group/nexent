@@ -1,15 +1,18 @@
 /**
  * Authentication utilities
+ *
+ * After HttpOnly cookie migration, Authorization headers are injected by
+ * server.js proxy layer. Frontend no longer reads or sends JWT tokens directly.
+ * Cookies are sent automatically with same-origin requests.
  */
 
 import { ApiError, fetchWithErrorHandling } from "@/services/api";
-import { STORAGE_KEYS } from "@/const/auth";
 import { generateAvatarUrl as generateAvatar } from "@/lib/avatar";
 import { USER_ROLES } from "@/const/auth";
 import { STATUS_CODES } from "@/const/auth";
 import {
   checkSessionValid,
-  getSessionFromStorage,
+  hasAuthCookies,
   handleSessionExpired,
 } from "@/lib/session";
 
@@ -39,15 +42,13 @@ export function generateAvatarUrl(email: string): string {
 }
 
 /**
- * Request with authorization headers
- * Only builds the request with auth token - no expiration checking
- * Expiration should be handled when backend returns 401
+ * Request with content-type header and session expiry pre-check.
+ * Authorization is handled automatically via HttpOnly cookies + server.js proxy.
  */
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   // Frontend pre-check: detect session expiry without hitting backend
   if (typeof window !== "undefined") {
-    const session = getSessionFromStorage();
-    if (session && !checkSessionValid()) {
+    if (hasAuthCookies() && !checkSessionValid()) {
       handleSessionExpired();
       throw new ApiError(
         STATUS_CODES.TOKEN_EXPIRED,
@@ -56,18 +57,12 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
     }
   }
 
-  const sessionObj = getSessionFromStorage();
-
   const isFormData = options.body instanceof FormData;
   const headers = {
     ...(isFormData ? {} : { "Content-Type": "application/json" }),
-    ...(sessionObj?.access_token && {
-      Authorization: `Bearer ${sessionObj.access_token}`,
-    }),
     ...options.headers,
   };
 
-  // Use request interceptor with error handling
   return fetchWithErrorHandling(url, {
     ...options,
     headers,
@@ -75,20 +70,13 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
 };
 
 /**
- * Get the authorization header information for API requests
- * @returns HTTP headers object containing authentication and content type information
+ * Get common headers for API requests.
+ * Authorization is handled automatically via HttpOnly cookies + server.js proxy.
  */
 export const getAuthHeaders = () => {
-  const session =
-    typeof window !== "undefined" ? localStorage.getItem("session") : null;
-  const sessionObj = session ? JSON.parse(session) : null;
-
   return {
     "Content-Type": "application/json",
     "User-Agent": "AgentFrontEnd/1.0",
-    ...(sessionObj?.access_token && {
-      Authorization: `Bearer ${sessionObj.access_token}`,
-    }),
   };
 };
 

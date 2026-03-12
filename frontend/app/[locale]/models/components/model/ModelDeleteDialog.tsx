@@ -183,6 +183,10 @@ export const ModelDeleteDialog = ({
         return t("model.source.modelEngine");
       case MODEL_SOURCES.OPENAI_API_COMPATIBLE:
         return t("model.source.custom");
+      case MODEL_SOURCES.DASHSCOPE:
+        return t("model.source.dashscope");
+      case MODEL_SOURCES.TOKENPONY:
+        return t("model.source.tokenpony");
       default:
         return t("model.source.unknown");
     }
@@ -216,6 +220,18 @@ export const ModelDeleteDialog = ({
           bg: "bg-rose-50",
           text: "text-rose-600",
           border: "border-rose-100",
+        };
+      case MODEL_SOURCES.DASHSCOPE:
+        return {
+          bg: "bg-orange-50",
+          text: "text-orange-600",
+          border: "border-orange-100",
+        };
+      case MODEL_SOURCES.TOKENPONY:
+        return {
+          bg: "bg-cyan-50",
+          text: "text-cyan-600",
+          border: "border-cyan-100",
         };
       default:
         return {
@@ -253,6 +269,14 @@ export const ModelDeleteDialog = ({
             🛠️
           </span>
         );
+      case MODEL_SOURCES.DASHSCOPE:
+        return (
+          <img src="/aliyuncs.png" alt="DashScope" className="w-5 h-5" />
+        );
+      case MODEL_SOURCES.TOKENPONY:
+        return (
+          <img src="/tokenpony.png" alt="TokenPony" className="w-5 h-5" />
+        );
       default:
         return (
           <span role="img" aria-label="box">
@@ -287,6 +311,16 @@ export const ModelDeleteDialog = ({
       (m) => m.source === MODEL_SOURCES.MODELENGINE && m.type === type && m.apiKey
     );
     if (byModelEngine?.apiKey) return byModelEngine.apiKey;
+
+    const byDashScope = models.find(
+      (m) => m.source === MODEL_SOURCES.DASHSCOPE && m.type === type && m.apiKey
+    );
+    if (byDashScope?.apiKey) return byDashScope.apiKey;
+
+    const byTokenPony = models.find(
+      (m) => m.source === MODEL_SOURCES.TOKENPONY && m.type === type && m.apiKey
+    );
+    if (byTokenPony?.apiKey) return byTokenPony.apiKey;
 
     // Fallback: any model that has apiKey
     const anyWithKey = models.find((m) => m.apiKey);
@@ -327,7 +361,7 @@ export const ModelDeleteDialog = ({
     return anyModelWithUrl?.apiUrl || undefined;
   };
 
-  // Prefetch provider model list (supports Silicon and ModelEngine)
+  // Prefetch provider model list (supports Silicon, ModelEngine, DashScope, TokenPony)
   const prefetchProviderModels = async (
     provider: ModelSource,
     modelType: ModelType | null
@@ -350,6 +384,20 @@ export const ModelDeleteDialog = ({
           type: modelType,
           apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
           baseUrl: baseUrl || undefined,
+        });
+      } else if (provider === MODEL_SOURCES.DASHSCOPE) {
+        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.DASHSCOPE);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.DASHSCOPE,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
+        });
+      } else if (provider === MODEL_SOURCES.TOKENPONY) {
+        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.TOKENPONY);
+        result = await modelService.addProviderModel({
+          provider: MODEL_SOURCES.TOKENPONY,
+          type: modelType,
+          apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
         });
       } else {
         // Unsupported provider for prefetching
@@ -383,7 +431,12 @@ export const ModelDeleteDialog = ({
   const handleSourceSelect = async (source: ModelSource) => {
     setLoadingSource(source);
     try {
-      if (source === MODEL_SOURCES.SILICON || source === MODEL_SOURCES.MODELENGINE) {
+      if (
+        source === MODEL_SOURCES.SILICON ||
+        source === MODEL_SOURCES.MODELENGINE ||
+        source === MODEL_SOURCES.DASHSCOPE ||
+        source === MODEL_SOURCES.TOKENPONY
+      ) {
         await prefetchProviderModels(source, deletingModelType);
       } else if (source === MODEL_SOURCES.OPENAI) {
         // For OpenAI source, just set the selected source without prefetching
@@ -543,7 +596,9 @@ export const ModelDeleteDialog = ({
     setMaxTokens(maxTokens);
     if (
       (selectedSource === MODEL_SOURCES.SILICON ||
-        selectedSource === MODEL_SOURCES.MODELENGINE) &&
+        selectedSource === MODEL_SOURCES.MODELENGINE ||
+        selectedSource === MODEL_SOURCES.DASHSCOPE ||
+        selectedSource === MODEL_SOURCES.TOKENPONY) &&
       deletingModelType
     ) {
       try {
@@ -840,6 +895,98 @@ export const ModelDeleteDialog = ({
                       );
                     }
                   } else if (
+                    selectedSource === MODEL_SOURCES.DASHSCOPE &&
+                    deletingModelType
+                  ) {
+                    try {
+                      const allEnabledModels = providerModels.filter(
+                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                      );
+
+                      if (allEnabledModels) {
+                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.DASHSCOPE);
+                        const isEmbeddingType =
+                          deletingModelType === MODEL_TYPES.EMBEDDING ||
+                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                        await modelService.addBatchCustomModel({
+                          api_key:
+                            apiKey && apiKey.trim() !== ""
+                              ? apiKey
+                              : "sk-no-api-key",
+                          provider: MODEL_SOURCES.DASHSCOPE,
+                          type: deletingModelType,
+                          models: allEnabledModels.map((model) => {
+                            if (isEmbeddingType) {
+                              const { max_tokens, ...modelWithoutMaxTokens } =
+                                model;
+                              return modelWithoutMaxTokens;
+                            } else {
+                              return {
+                                ...model,
+                                max_tokens: model.max_tokens || 4096,
+                              };
+                            }
+                          }),
+                        });
+                      }
+
+                      await onSuccess();
+                      await prefetchProviderModels(selectedSource, deletingModelType);
+                      message.success(t("model.dialog.success.updateSuccess"));
+                      handleClose();
+                    } catch (e) {
+                      log.error("Failed to apply DashScope model updates", e);
+                      message.error(
+                        t("model.dialog.error.addFailed", { error: e as any })
+                      );
+                    }
+                  } else if (
+                    selectedSource === MODEL_SOURCES.TOKENPONY &&
+                    deletingModelType
+                  ) {
+                    try {
+                      const allEnabledModels = providerModels.filter(
+                        (pm: any) => pendingSelectedProviderIds.has(pm.id)
+                      );
+
+                      if (allEnabledModels) {
+                        const apiKey = getApiKeyByType(deletingModelType, MODEL_SOURCES.TOKENPONY);
+                        const isEmbeddingType =
+                          deletingModelType === MODEL_TYPES.EMBEDDING ||
+                          deletingModelType === MODEL_TYPES.MULTI_EMBEDDING;
+                        await modelService.addBatchCustomModel({
+                          api_key:
+                            apiKey && apiKey.trim() !== ""
+                              ? apiKey
+                              : "sk-no-api-key",
+                          provider: MODEL_SOURCES.TOKENPONY,
+                          type: deletingModelType,
+                          models: allEnabledModels.map((model) => {
+                            if (isEmbeddingType) {
+                              const { max_tokens, ...modelWithoutMaxTokens } =
+                                model;
+                              return modelWithoutMaxTokens;
+                            } else {
+                              return {
+                                ...model,
+                                max_tokens: model.max_tokens || 4096,
+                              };
+                            }
+                          }),
+                        });
+                      }
+
+                      await onSuccess();
+                      await prefetchProviderModels(selectedSource, deletingModelType);
+                      message.success(t("model.dialog.success.updateSuccess"));
+                      handleClose();
+                    } catch (e) {
+                      log.error("Failed to apply TokenPony model updates", e);
+                      message.error(
+                        t("model.dialog.error.addFailed", { error: e as any })
+                      );
+                    }
+                  } else if (
                     selectedSource === MODEL_SOURCES.OPENAI &&
                     deletingModelType
                   ) {
@@ -976,6 +1123,8 @@ export const ModelDeleteDialog = ({
                 MODEL_SOURCES.OPENAI,
                 MODEL_SOURCES.SILICON,
                 MODEL_SOURCES.OPENAI_API_COMPATIBLE,
+                MODEL_SOURCES.DASHSCOPE,
+                MODEL_SOURCES.TOKENPONY,
               ] as ModelSource[]
             ).map((source) => {
               const modelsOfSource = models.filter(
@@ -1074,7 +1223,9 @@ export const ModelDeleteDialog = ({
                   onClick={async () => {
                     if (
                       (selectedSource === MODEL_SOURCES.SILICON ||
-                        selectedSource === MODEL_SOURCES.MODELENGINE) &&
+                        selectedSource === MODEL_SOURCES.MODELENGINE ||
+                        selectedSource === MODEL_SOURCES.DASHSCOPE ||
+                        selectedSource === MODEL_SOURCES.TOKENPONY) &&
                       deletingModelType
                     ) {
                       try {

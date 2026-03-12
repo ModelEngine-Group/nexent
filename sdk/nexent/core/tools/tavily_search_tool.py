@@ -37,7 +37,7 @@ class TavilySearchTool(Tool):
         self.tavily = TavilyClient(api_key=tavily_api_key)
         self.max_results = max_results
         self.image_filter = image_filter
-        self.record_ops = 0  # Used to record sequence number
+        self.record_ops = 1  # Used to record sequence number
         self.running_prompt_en = "Searching the web..."
         self.running_prompt_zh = "网络搜索中..."
         

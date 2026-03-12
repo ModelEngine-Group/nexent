@@ -11,6 +11,8 @@ from database.model_management_db import get_models_by_tenant_factory_type
 from services.model_health_service import embedding_dimension_check
 from services.providers.base import AbstractModelProvider
 from services.providers.silicon_provider import SiliconModelProvider
+from services.providers.tokenpony_provider import TokenPonyModelProvider
+from services.providers.dashscope_provider import DashScopeModelProvider
 from services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
 from utils.model_name_utils import split_repo_name, add_repo_to_name
 
@@ -39,6 +41,12 @@ async def get_provider_models(model_data: dict) -> List[dict]:
         model_list = await provider.get_models(model_data)
     elif model_data["provider"] == ProviderEnum.MODELENGINE.value:
         provider = ModelEngineProvider()
+        model_list = await provider.get_models(model_data)
+    elif model_data["provider"] == ProviderEnum.DASHSCOPE.value:
+        provider = DashScopeModelProvider()
+        model_list = await provider.get_models(model_data)
+    elif model_data["provider"] == ProviderEnum.TOKENPONY.value:
+        provider = TokenPonyModelProvider()
         model_list = await provider.get_models(model_data)
 
     return model_list
@@ -117,7 +125,8 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
         if provider != ProviderEnum.MODELENGINE.value:
-            model_dict["base_url"] = f"{model_url}embeddings"
+            # Ensure proper slash between base URL and endpoint
+            model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         else:
             # For ModelEngine embedding models, append the embeddings path
             model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"

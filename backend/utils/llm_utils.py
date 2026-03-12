@@ -2,8 +2,9 @@ import logging
 from typing import Callable, List, Optional
 
 from consts.const import MESSAGE_ROLE, THINK_END_PATTERN, THINK_START_PATTERN
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from database.model_management_db import get_model_by_model_id
-from nexent.core.utils.observer import MessageObserver
 from nexent.core.models import OpenAIModel
 from utils.config_utils import get_model_name_from_config
 
@@ -122,8 +123,23 @@ def call_llm_for_system_prompt(
         return result
     except Exception as exc:
         logger.error("Failed to generate prompt from LLM: %s", str(exc))
-        raise
+        # Parse error code from exception message and raise appropriate AppException
+        # Use specific error codes for different scenarios
+        error_msg = str(exc)
+        if "401" in error_msg or "api key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            raise AppException(ErrorCode.MODEL_API_KEY_INVALID)
+        elif "403" in error_msg or "forbidden" in error_msg.lower():
+            raise AppException(ErrorCode.MODEL_API_KEY_NO_PERMISSION)
+        elif "404" in error_msg or "not found" in error_msg.lower():
+            raise AppException(ErrorCode.MODEL_NOT_FOUND)
+        elif "429" in error_msg or "rate limit" in error_msg.lower():
+            raise AppException(ErrorCode.MODEL_RATE_LIMIT_EXCEEDED)
+        elif "500" in error_msg or "502" in error_msg or "503" in error_msg or "504" in error_msg:
+            raise AppException(ErrorCode.MODEL_SERVICE_UNAVAILABLE)
+        elif "connection" in error_msg.lower() or "timeout" in error_msg.lower() or "refused" in error_msg.lower():
+            raise AppException(ErrorCode.MODEL_CONNECTION_ERROR)
+        else:
+            raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
 
 __all__ = ["call_llm_for_system_prompt", "_process_thinking_tokens"]
-

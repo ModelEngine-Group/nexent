@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
-import { configService } from "@/services/configService";
 import { ChatInterface } from "./internal/chatInterface";
 
 /**
@@ -15,13 +14,10 @@ export default function ChatContent() {
   const { appConfig } = useConfig();
 
   useEffect(() => {
-    // Load config from backend when entering chat page
-    configService.loadConfigToFrontend();
-
-    if (appConfig.appName) {
+    if (appConfig?.appName) {
       document.title = `${appConfig.appName}`;
     }
-  }, [appConfig.appName]);
+  }, [appConfig?.appName]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">

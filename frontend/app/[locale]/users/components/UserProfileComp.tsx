@@ -50,7 +50,7 @@ export default function UserProfileComp() {
   const { user, groupIds } = useAuthorizationContext()
 
   // Fetch groups for group name mapping
-  const { data: groupData } = useGroupList(user?.tenantId || null, 1, 100);
+  const { data: groupData } = useGroupList(user?.tenantId || null);
   const groups = groupData?.groups || [];
 
   // Create group name mapping from group_id to group_name

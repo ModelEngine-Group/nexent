@@ -7,8 +7,10 @@ from typing import Optional, List
 from jinja2 import StrictUndefined, Template
 
 from consts.const import LANGUAGE
-from consts.model import AgentInfoRequest
-from database.agent_db import update_agent, search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, \
+from consts.error_code import ErrorCode
+from consts.error_message import ErrorMessage
+from consts.exceptions import AppException
+from database.agent_db import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, \
     query_sub_agents_id_list
 from database.tool_db import query_tools_by_ids
 from services.agent_service import (
@@ -28,18 +30,30 @@ logger = logging.getLogger("prompt_service")
 
 
 def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None):
-    for system_prompt in generate_and_save_system_prompt_impl(
-        agent_id=agent_id,
-        model_id=model_id,
-        task_description=task_description,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        language=language,
-        tool_ids=tool_ids,
-        sub_agent_ids=sub_agent_ids
-    ):
-        # SSE format, each message ends with \n\n
-        yield f"data: {json.dumps({'success': True, 'data': system_prompt}, ensure_ascii=False)}\n\n"
+    try:
+        for system_prompt in generate_and_save_system_prompt_impl(
+            agent_id=agent_id,
+            model_id=model_id,
+            task_description=task_description,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            language=language,
+            tool_ids=tool_ids,
+            sub_agent_ids=sub_agent_ids
+        ):
+            # SSE format, each message ends with \n\n
+            yield f"data: {json.dumps({'success': True, 'data': system_prompt}, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        # Catch model unavailable or other errors and return error through SSE
+        logger.error(f"Error generating prompt: {e}")
+        # Use original error code if it's an AppException, otherwise use default
+        if isinstance(e, AppException):
+            error_code = e.error_code
+            error_message = e.message
+        else:
+            error_code = ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+            error_message = ErrorMessage.get_message(error_code)
+        yield f"data: {json.dumps({'success': False, 'error': {'code': error_code.value, 'message': error_message}}, ensure_ascii=False)}\n\n"
 
 
 def generate_and_save_system_prompt_impl(agent_id: int,
@@ -200,6 +214,14 @@ def generate_and_save_system_prompt_impl(agent_id: int,
             "Updating agent with business_description and prompt segments")
         logger.info("Prompt generation and agent update completed successfully")
 
+    # Check if any content was generated - if all fields are empty, model likely failed
+    all_fields = ["duty", "constraint", "few_shots",
+                  "agent_var_name", "agent_display_name", "agent_description"]
+    has_content = any(final_results.get(field, "").strip()
+                      for field in all_fields)
+    if not has_content:
+        raise Exception("Failed to generate prompt content.")
+
 
 def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, model_id: int, language: str = LANGUAGE["ZH"]):
     """Main function for generating system prompts"""
@@ -222,15 +244,18 @@ def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list
                   "agent_var_name": False, "agent_display_name": False, "agent_description": False}
 
     # Start all generation threads
-    threads = _start_generation_threads(
+    threads, error_holder = _start_generation_threads(
         content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id)
 
     # Stream results
-    yield from _stream_results(produce_queue, latest, stop_flags, threads)
+    yield from _stream_results(produce_queue, latest, stop_flags, threads, error_holder)
 
 
 def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id):
     """Start all prompt generation threads"""
+    # Shared error tracking across threads
+    error_holder = {"error": None}
+
     def make_callback(tag):
         def callback_fn(current_text):
             latest[tag] = current_text
@@ -243,6 +268,7 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
                 model_id, content, sys_prompt, make_callback(tag), tenant_id)
         except Exception as e:
             logger.error(f"Error in {tag} generation: {e}")
+            error_holder["error"] = e
         finally:
             stop_flags[tag] = True
 
@@ -266,10 +292,10 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         thread.start()
         threads.append(thread)
 
-    return threads
+    return threads, error_holder
 
 
-def _stream_results(produce_queue, latest, stop_flags, threads):
+def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
     """Stream prompt generation results"""
 
     # Real-time streaming output for the first three sections
@@ -277,6 +303,13 @@ def _stream_results(produce_queue, latest, stop_flags, threads):
                     "agent_var_name": "", "agent_display_name": "", "agent_description": ""}
 
     while not all(stop_flags.values()):
+        # Check if error occurred in any thread - raise immediately
+        if error_holder.get("error"):
+            # Wait for threads to finish
+            for thread in threads:
+                thread.join(timeout=5)
+            raise error_holder["error"]
+
         try:
             produce_queue.get(timeout=0.5)
         except queue.Empty:
@@ -292,6 +325,10 @@ def _stream_results(produce_queue, latest, stop_flags, threads):
                 }
                 yield result_data
                 last_results[tag] = latest[tag]
+
+    # Check if error occurred before final output
+    if error_holder.get("error"):
+        raise error_holder["error"]
 
     # Wait for all threads to complete
     for thread in threads:

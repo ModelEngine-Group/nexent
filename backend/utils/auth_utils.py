@@ -9,7 +9,17 @@ import jwt
 from fastapi import Request
 from supabase import create_client
 
-from consts.const import DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_URL, SUPABASE_KEY, SERVICE_ROLE_KEY, DEBUG_JWT_EXPIRE_SECONDS, LANGUAGE
+from consts.const import (
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    IS_SPEED_MODE,
+    SUPABASE_JWT_SECRET,
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    SERVICE_ROLE_KEY,
+    DEBUG_JWT_EXPIRE_SECONDS,
+    LANGUAGE,
+)
 from consts.exceptions import LimitExceededError, SignatureValidationError, UnauthorizedError
 from database.user_tenant_db import get_user_tenant_by_user_id
 
@@ -272,26 +282,50 @@ def calculate_expires_at(token: Optional[str] = None) -> int:
 
 def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
     """
-    Extract user ID from JWT token
+    Extract user ID from JWT token after verifying signature and expiration.
 
     Args:
         authorization: Authorization header value
 
     Returns:
         Optional[str]: User ID, return None if parsing fails
+
+    Raises:
+        UnauthorizedError: If token is invalid, expired, or signature verification fails
     """
+    if not SUPABASE_JWT_SECRET:
+        logging.error("SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT")
+        raise UnauthorizedError("JWT verification is not configured")
+
     try:
         # Format authorization header
         token = authorization.replace("Bearer ", "") if authorization.startswith(
             "Bearer ") else authorization
 
-        # Decode JWT token (without signature verification, only parse content)
-        decoded = jwt.decode(token, options={"verify_signature": False})
+        # Decode and verify JWT (signature + expiration)
+        # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
+        decoded = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_exp": True, "verify_aud": False},
+        )
 
         # Extract user ID from JWT claims
         user_id = decoded.get("sub")
 
         return user_id
+    except jwt.ExpiredSignatureError:
+        logging.warning("Token expired")
+        raise UnauthorizedError("Token has expired")
+    except jwt.InvalidSignatureError:
+        logging.warning("JWT signature verification failed")
+        raise UnauthorizedError("Invalid or expired authentication token")
+    except jwt.InvalidTokenError as e:
+        logging.warning(f"Invalid JWT: {e}")
+        raise UnauthorizedError("Invalid or expired authentication token")
+    except UnauthorizedError:
+        raise
     except Exception as e:
         logging.error(f"Failed to extract user ID from token: {str(e)}")
         raise UnauthorizedError("Invalid or expired authentication token")
@@ -307,11 +341,15 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     Returns:
         tuple[str, str]: (user_id, tenant_id)
     """
-    # if deploy in speed mode or authorization is None, return default user id and tenant id
-    if IS_SPEED_MODE or authorization is None:
+    # In speed mode, allow unauthenticated access with default user for demo/dev
+    if IS_SPEED_MODE:
         logging.debug(
-            "Speed mode or no valid authorization header detected - returning default user ID and tenant ID")
+            "Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
+
+    # In normal mode, missing auth header means unauthorized - return 401, not default user
+    if authorization is None or (isinstance(authorization, str) and not authorization.strip()):
+        raise UnauthorizedError("No authorization header provided")
 
     try:
         user_id = _extract_user_id_from_jwt_token(authorization)

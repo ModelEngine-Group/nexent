@@ -18,9 +18,7 @@ import {
   CARD_THEMES,
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
-import { configStore } from "@/lib/config";
 import { modelService } from "@/services/modelService";
-import { configService } from "@/services/configService";
 import { ModelOption, ModelType } from "@/types/modelConfig";
 import log from "@/lib/logger";
 
@@ -97,8 +95,8 @@ export const ModelConfigSection = forwardRef<
   const { message } = App.useApp();
 
   const { skipVerification = false } = props;
-  const { modelConfig, updateModelConfig, appConfig } = useConfig();
-  const modelEngineEnable = appConfig.modelEngineEnabled;
+  const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
+  const modelEngineEnable = appConfig?.modelEngineEnabled ?? false;
 
   const modelData = getModelData(t);
   const { confirm } = useConfirmModal();
@@ -124,17 +122,13 @@ export const ModelConfigSection = forwardRef<
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Debounced auto-save scheduler
   const scheduleAutoSave = () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = setTimeout(async () => {
       try {
-        const currentConfig = configStore.getConfig();
-        await configService.saveConfigToBackend(currentConfig as any);
-      } catch (e) {
-        // Errors are logged in configService
+        await saveConfig();
       } finally {
         saveTimerRef.current = null;
       }
@@ -152,17 +146,14 @@ export const ModelConfigSection = forwardRef<
     voice: { tts: "", stt: "" },
   });
 
-  // Initialize loading
+  // Load model lists once config data is available from React Query
+  const initialLoadDoneRef = useRef(false);
   useEffect(() => {
-    // Load configuration from backend first, then load model lists when component mounts
-    const fetchData = async () => {
-      await configService.loadConfigToFrontend();
-      configStore.reloadFromStorage();
-      await loadModelLists(true);
-    };
-
-    fetchData();
-  }, [skipVerification]);
+    if (modelConfig && !initialLoadDoneRef.current) {
+      initialLoadDoneRef.current = true;
+      loadModelLists(true);
+    }
+  }, [modelConfig]);
 
   // Listen to field error highlight events
   useEffect(() => {
@@ -252,7 +243,7 @@ export const ModelConfigSection = forwardRef<
 
   // Load model lists
   const loadModelLists = async (skipVerify: boolean = false) => {
-    const modelConfig = configStore.getConfig().models;
+    if (!modelConfig) return;
 
     try {
       const allModels = await modelService.getAllModels();
@@ -443,6 +434,8 @@ export const ModelConfigSection = forwardRef<
 
     // If no selected models in state, try to get directly from configuration
     if (!hasSelectedModels) {
+      if (!modelConfig) return;
+
       // Directly check if each model exists in configuration
       const hasLlmMain = !!modelConfig.llm.modelName;
       const hasEmbedding = !!modelConfig.embedding.modelName;
@@ -455,7 +448,6 @@ export const ModelConfigSection = forwardRef<
         hasLlmMain || hasEmbedding || hasReranker || hasVlm || hasTts || hasStt;
 
       if (hasSelectedModels) {
-        // Override current selected models with models from configuration
         currentSelectedModels.llm.main = modelConfig.llm.modelName;
         currentSelectedModels.embedding.embedding =
           modelConfig.embedding.modelName;

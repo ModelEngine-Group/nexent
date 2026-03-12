@@ -24,6 +24,9 @@ RUN apt-get update && \
         libreoffice \
         libgl1 \
         coreutils \
+        fontconfig \
+        fonts-noto-cjk \
+    && fc-cache -fv \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

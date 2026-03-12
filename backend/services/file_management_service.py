@@ -1,20 +1,33 @@
 import asyncio
+import hashlib
 import logging
 import os
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+import httpx
 from fastapi import UploadFile
 
-from consts.const import UPLOAD_FOLDER, MAX_CONCURRENT_UPLOADS, MODEL_CONFIG_MAPPING
+from consts.const import (
+    DATA_PROCESS_SERVICE,
+    FILE_PREVIEW_SIZE_LIMIT,
+    MAX_CONCURRENT_UPLOADS,
+    MODEL_CONFIG_MAPPING,
+    OFFICE_MIME_TYPES,
+    UPLOAD_FOLDER,
+)
+from consts.exceptions import FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
 from database.attachment_db import (
-    upload_fileobj,
-    get_file_url,
-    get_content_type,
-    get_file_stream,
+    copy_file,
     delete_file,
-    list_files
+    file_exists,
+    get_content_type,
+    get_file_size_from_minio,
+    get_file_stream,
+    get_file_url,
+    list_files,
+    upload_fileobj,
 )
 from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
@@ -27,6 +40,10 @@ from nexent.core.models import OpenAILongContextModel
 upload_dir = Path(UPLOAD_FOLDER)
 upload_dir.mkdir(exist_ok=True)
 upload_semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
+
+# Per-file locks prevent duplicate conversions of the same file
+_conversion_locks: dict[str, asyncio.Lock] = {}
+_conversion_locks_guard = asyncio.Lock()
 
 logger = logging.getLogger("file_management_service")
 
@@ -196,3 +213,133 @@ def get_llm_model(tenant_id: str):
         ssl_verify=main_model_config.get("ssl_verify", True),
     )
     return long_text_to_text_model
+
+
+async def preview_file_impl(object_name: str) -> Tuple[BytesIO, str]:
+    """
+    Preview a file by returning its contents as a stream.
+
+    Args:
+        object_name: File object name in storage
+
+    Returns:
+        Tuple[BytesIO, str]: (file_stream, content_type)
+    """
+    file_size = get_file_size_from_minio(object_name)
+    if file_size > FILE_PREVIEW_SIZE_LIMIT:
+        raise FileTooLargeException(
+            f"File size {file_size} bytes exceeds the {FILE_PREVIEW_SIZE_LIMIT // (1024 * 1024)} MB preview limit"
+        )
+
+    content_type = get_content_type(object_name)
+
+    # PDF, images, and text files - return directly
+    if content_type == 'application/pdf' or content_type.startswith('image/') or content_type in ['text/plain', 'text/csv', 'text/markdown']:
+        file_stream = get_file_stream(object_name)
+        if file_stream is None:
+            raise NotFoundException("File not found or failed to read from storage")
+        return file_stream, content_type
+
+    # Office documents - convert to PDF with caching
+    elif content_type in OFFICE_MIME_TYPES:
+        name_without_ext = object_name.rsplit('.', 1)[0] if '.' in object_name else object_name
+        hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
+        pdf_object_name = f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
+        temp_pdf_object_name = f"preview/converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
+
+        # Fast path: return from cache without acquiring any lock
+        cached_stream = _get_cached_pdf_stream(pdf_object_name)
+        if cached_stream is not None:
+            return cached_stream, 'application/pdf'
+
+        # Slow path: convert with locking
+        file_stream = await _convert_office_to_cached_pdf(object_name, pdf_object_name, temp_pdf_object_name)
+        return file_stream, 'application/pdf'
+
+    # Unsupported file type
+    else:
+        raise UnsupportedFileTypeException(f"Unsupported file type for preview: {content_type}")
+
+
+def _get_cached_pdf_stream(pdf_object_name: str) -> Optional[BytesIO]:
+    """
+    Return the cached PDF stream if available, or None if missing or corrupted.
+
+    If the file exists but cannot be read, the corrupted entry is deleted so
+    a subsequent call will trigger a fresh conversion.
+    """
+    if file_exists(pdf_object_name):
+        file_stream = get_file_stream(pdf_object_name)
+        if file_stream is None:
+            logger.warning(f"Corrupted cache detected (cannot read), deleting: {pdf_object_name}")
+            delete_file(pdf_object_name)
+            return None
+        return file_stream
+    return None
+
+
+async def _convert_office_to_cached_pdf(
+    object_name: str,
+    pdf_object_name: str,
+    temp_pdf_object_name: str,
+) -> BytesIO:
+    """
+    Convert an Office document to PDF and store the result in MinIO.
+
+    Args:
+        object_name: Source Office file path in MinIO
+        pdf_object_name: Final cached PDF path in MinIO
+        temp_pdf_object_name: Temporary PDF path used during conversion
+
+    Returns:
+        BytesIO stream of the converted PDF
+    """
+    # Get or create a lock for this specific file to prevent duplicate conversions
+    async with _conversion_locks_guard:
+        if object_name not in _conversion_locks:
+            _conversion_locks[object_name] = asyncio.Lock()
+        file_lock = _conversion_locks[object_name]
+
+    try:
+        async with file_lock:
+            # Double-check: another request may have completed the conversion while we waited
+            cached_stream = _get_cached_pdf_stream(pdf_object_name)
+            if cached_stream is not None:
+                return cached_stream
+
+            # Conversion semaphore is enforced inside the data-process service
+            try:
+                # Request conversion: data-process downloads, converts, uploads to temp path, validates
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.post(
+                        f"{DATA_PROCESS_SERVICE}/tasks/convert_to_pdf",
+                        data={
+                            "object_name": object_name,
+                            "pdf_object_name": temp_pdf_object_name,
+                        },
+                    )
+                if response.status_code != 200:
+                    raise Exception(
+                        f"data-process conversion returned {response.status_code}: {response.text}"
+                    )
+
+                # Atomic move from temp to final location, then clean up temp
+                copy_result = copy_file(source_object=temp_pdf_object_name, dest_object=pdf_object_name)
+                if not copy_result.get('success'):
+                    raise Exception(f"Failed to finalize PDF cache: {copy_result.get('error', 'Unknown error')}")
+                delete_file(temp_pdf_object_name)
+
+            except Exception as e:
+                if file_exists(temp_pdf_object_name):
+                    delete_file(temp_pdf_object_name)
+                logger.error(f"Office conversion failed: {str(e)}")
+                raise OfficeConversionException(f"Failed to convert Office document to PDF: {str(e)}") from e
+    finally:
+        # Clean up the file lock (prevents memory leak for many unique files)
+        async with _conversion_locks_guard:
+            _conversion_locks.pop(object_name, None)
+
+    file_stream = get_file_stream(pdf_object_name)
+    if file_stream is None:
+        raise NotFoundException("Converted PDF not found or failed to read from storage")
+    return file_stream

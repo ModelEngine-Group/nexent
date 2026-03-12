@@ -191,11 +191,11 @@ class TestGroupRetrieval:
 class TestGroupListing:
     """Test group listing endpoint"""
 
-    def test_get_groups_success(self):
-        """Test successful group listing"""
+    def test_get_groups_success_with_pagination(self):
+        """Test successful group listing with pagination"""
         mock_groups = [
-            {"group_id": 1, "group_name": "Group 1"},
-            {"group_id": 2, "group_name": "Group 2"}
+            {"group_id": 1, "group_name": "Group 1", "user_count": 5},
+            {"group_id": 2, "group_name": "Group 2", "user_count": 3}
         ]
         mock_result = {"groups": mock_groups, "total": 2}
 
@@ -208,7 +208,9 @@ class TestGroupListing:
             request_data = {
                 "tenant_id": "tenant-123",
                 "page": 1,
-                "page_size": 20
+                "page_size": 20,
+                "sort_by": "created_at",
+                "sort_order": "desc"
             }
 
             response = client.post("/groups/list", json=request_data)
@@ -217,10 +219,166 @@ class TestGroupListing:
             data = response.json()
             assert data["message"] == "Groups retrieved successfully"
             assert data["data"] == mock_groups
+            assert data["total"] == 2
             assert data["pagination"]["page"] == 1
             assert data["pagination"]["page_size"] == 20
             assert data["pagination"]["total"] == 2
             assert data["pagination"]["total_pages"] == 1
+            mock_get_groups.assert_called_once_with(
+                tenant_id="tenant-123",
+                page=1,
+                page_size=20,
+                sort_by="created_at",
+                sort_order="desc"
+            )
+
+    def test_get_groups_success_without_pagination(self):
+        """Test successful group listing without pagination (returns all data)"""
+        mock_groups = [
+            {"group_id": 1, "group_name": "Group 1", "user_count": 5},
+            {"group_id": 2, "group_name": "Group 2", "user_count": 3},
+            {"group_id": 3, "group_name": "Group 3", "user_count": 7}
+        ]
+        mock_result = {"groups": mock_groups, "total": 3}
+
+        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
+             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = mock_result
+
+            request_data = {
+                "tenant_id": "tenant-123"
+            }
+
+            response = client.post("/groups/list", json=request_data)
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Groups retrieved successfully"
+            assert data["data"] == mock_groups
+            assert data["total"] == 3
+            assert "pagination" not in data
+            mock_get_groups.assert_called_once_with(
+                tenant_id="tenant-123",
+                page=None,
+                page_size=None,
+                sort_by="created_at",
+                sort_order="desc"
+            )
+
+    def test_get_groups_success_with_only_page(self):
+        """Test group listing with only page parameter (no pagination info in response)"""
+        mock_groups = [
+            {"group_id": 1, "group_name": "Group 1", "user_count": 5}
+        ]
+        mock_result = {"groups": mock_groups, "total": 1}
+
+        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
+             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = mock_result
+
+            request_data = {
+                "tenant_id": "tenant-123",
+                "page": 1
+            }
+
+            response = client.post("/groups/list", json=request_data)
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Groups retrieved successfully"
+            assert "pagination" not in data
+
+    def test_get_groups_success_with_only_page_size(self):
+        """Test group listing with only page_size parameter (no pagination info in response)"""
+        mock_groups = [
+            {"group_id": 1, "group_name": "Group 1", "user_count": 5}
+        ]
+        mock_result = {"groups": mock_groups, "total": 1}
+
+        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
+             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = mock_result
+
+            request_data = {
+                "tenant_id": "tenant-123",
+                "page_size": 20
+            }
+
+            response = client.post("/groups/list", json=request_data)
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Groups retrieved successfully"
+            assert "pagination" not in data
+
+    def test_get_groups_success_with_asc_sort(self):
+        """Test successful group listing with ascending sort order"""
+        mock_groups = [
+            {"group_id": 1, "group_name": "Group 1", "user_count": 5}
+        ]
+        mock_result = {"groups": mock_groups, "total": 1}
+
+        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
+             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = mock_result
+
+            request_data = {
+                "tenant_id": "tenant-123",
+                "page": 1,
+                "page_size": 20,
+                "sort_by": "created_at",
+                "sort_order": "asc"
+            }
+
+            response = client.post("/groups/list", json=request_data)
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Groups retrieved successfully"
+            mock_get_groups.assert_called_once_with(
+                tenant_id="tenant-123",
+                page=1,
+                page_size=20,
+                sort_by="created_at",
+                sort_order="asc"
+            )
+
+    def test_get_groups_success_with_custom_pagination(self):
+        """Test successful group listing with custom pagination (multiple pages)"""
+        mock_groups = [
+            {"group_id": 2, "group_name": "Group 2", "user_count": 3}
+        ]
+        mock_result = {"groups": mock_groups, "total": 25}
+
+        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
+             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = mock_result
+
+            request_data = {
+                "tenant_id": "tenant-123",
+                "page": 2,
+                "page_size": 10
+            }
+
+            response = client.post("/groups/list", json=request_data)
+
+            assert response.status_code == HTTPStatus.OK
+            data = response.json()
+            assert data["message"] == "Groups retrieved successfully"
+            assert data["pagination"]["page"] == 2
+            assert data["pagination"]["page_size"] == 10
+            assert data["pagination"]["total"] == 25
+            assert data["pagination"]["total_pages"] == 3  # ceil(25/10) = 3
 
     def test_get_groups_tenant_not_found(self):
         """Test group listing when tenant doesn't exist"""

@@ -7,6 +7,7 @@ import { formatDate, formatUrl } from "@/lib/utils";
 import { convertImageUrlToApiUrl, extractObjectNameFromUrl, storageService } from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
+import { useConfig } from "@/hooks/useConfig";
 
 
 export function ChatRightPanel({
@@ -18,7 +19,7 @@ export function ChatRightPanel({
   selectedMessageId,
 }: ChatRightPanelProps) {
   const { t } = useTranslation("common");
-  // Local state
+  const { appConfig } = useConfig();
   const [expandedImages, setExpandedImages] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [processedImages, setProcessedImages] = useState<string[]>([]);
@@ -242,6 +243,10 @@ export function ChatRightPanel({
       try {
         // Handle datamate source type
         if (source_type === "datamate") {
+          if (!appConfig?.modelEngineEnabled) {
+            message.error("DataMate download not available: ModelEngine is not enabled");
+            return;
+          }
           if (!datamateDatasetId || !datamateFileId || !datamateBaseUrl) {
             if (!url || url === "#") {
               message.error(t("chatRightPanel.fileDownloadError", "Missing Datamate dataset or file information"));
@@ -468,13 +473,13 @@ export function ChatRightPanel({
     <div
       className={`transition-all duration-300 ease-in-out ${
         isVisible ? "lg:flex w-[400px]" : "lg:flex w-0 opacity-0"
-      } hidden border-l bg-background relative flex-col h-full`}
+      } hidden border-l bg-background relative flex-col h-full bg-white`}
       style={{ maxWidth: "400px", overflow: "hidden" }}
     >
       {/* Image viewer modal */}
       {viewingImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80"
           onClick={() => setViewingImage(null)}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">

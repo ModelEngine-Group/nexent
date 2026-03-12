@@ -8,6 +8,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+# Install consts.exceptions at module level so OfficeConversionException is bound
+# in the app module's namespace on first import.
+_exc_mod = types.ModuleType("consts.exceptions")
+
+
+class _OfficeConversionException(Exception):
+    """Stub exception for Office document conversion failures."""
+
+
+_exc_mod.OfficeConversionException = _OfficeConversionException  # type: ignore[attr-defined]
+sys.modules["consts.exceptions"] = _exc_mod
+
 
 class _TaskRequest(BaseModel):
     source: str
@@ -135,6 +147,14 @@ class _ServiceStub:
         if process_celery_state == "SUCCESS" and forward_celery_state == "SUCCESS":
             return "COMPLETED"
         return "WAIT_FOR_PROCESSING"
+
+    async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
+        """Stub: raise OfficeConversionException for sentinel inputs, otherwise succeed."""
+        from consts.exceptions import OfficeConversionException
+        if object_name == "fail.docx":
+            raise OfficeConversionException("conversion failed")
+        if object_name == "err.docx":
+            raise RuntimeError("unexpected error")
 
 
 @pytest.fixture(autouse=True)
@@ -451,3 +471,47 @@ def test_convert_state_http_exception(monkeypatch):
     resp = client.post("/tasks/convert_state",
                        json={"process_state": "PENDING", "forward_state": ""})
     assert resp.status_code == HTTPStatus.NOT_ACCEPTABLE
+
+
+def test_convert_to_pdf_success():
+    """Valid request returns 200 {success: True}."""
+    app = _build_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/tasks/convert_to_pdf",
+        data={"object_name": "uploads/doc.docx", "pdf_object_name": "converted/doc.pdf"},
+    )
+    assert resp.status_code == HTTPStatus.OK
+    assert resp.json()["success"] is True
+
+
+def test_convert_to_pdf_office_conversion_exception(monkeypatch):
+    """OfficeConversionException from service maps to HTTP 500."""
+    app = _build_app()
+    client = TestClient(app)
+    # Trigger the sentinel path in _ServiceStub
+    resp = client.post(
+        "/tasks/convert_to_pdf",
+        data={"object_name": "fail.docx", "pdf_object_name": "converted/fail.pdf"},
+    )
+    assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "conversion failed" in resp.json()["detail"]
+
+
+def test_convert_to_pdf_unexpected_exception():
+    """Unexpected RuntimeError from service also maps to HTTP 500."""
+    app = _build_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/tasks/convert_to_pdf",
+        data={"object_name": "err.docx", "pdf_object_name": "converted/err.pdf"},
+    )
+    assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def test_convert_to_pdf_missing_params():
+    """Missing required form fields returns HTTP 422 Unprocessable Entity."""
+    app = _build_app()
+    client = TestClient(app)
+    resp = client.post("/tasks/convert_to_pdf", data={})
+    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

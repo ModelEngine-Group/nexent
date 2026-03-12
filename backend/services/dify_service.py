@@ -12,6 +12,8 @@ from typing import Any, Dict
 
 import httpx
 
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from nexent.utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("dify_service")
@@ -67,11 +69,21 @@ def fetch_dify_datasets_impl(
     """
     # Validate inputs
     if not dify_api_base or not isinstance(dify_api_base, str):
-        raise ValueError(
-            "dify_api_base is required and must be a non-empty string")
+        raise AppException(
+            ErrorCode.DIFY_CONFIG_INVALID,
+            "Dify API URL is required and must be a non-empty string"
+        )
+
+    # Validate URL format
+    if not (dify_api_base.startswith("http://") or dify_api_base.startswith("https://")):
+        raise AppException(
+            ErrorCode.DIFY_CONFIG_INVALID,
+            "Dify API URL must start with http:// or https://"
+        )
 
     if not api_key or not isinstance(api_key, str):
-        raise ValueError("api_key is required and must be a non-empty string")
+        raise AppException(ErrorCode.DIFY_CONFIG_INVALID,
+                           "Dify API key is required and must be a non-empty string")
 
     # Normalize API base URL
     api_base = dify_api_base.rstrip("/")
@@ -95,7 +107,7 @@ def fetch_dify_datasets_impl(
         # Use shared HttpClientManager for connection pooling
         client = http_client_manager.get_sync_client(
             base_url=api_base,
-            timeout=30.0,
+            timeout=10.0,
             verify_ssl=False
         )
         response = client.get(url, headers=headers)
@@ -157,15 +169,35 @@ def fetch_dify_datasets_impl(
 
     except httpx.RequestError as e:
         logger.error(f"Dify API request failed: {str(e)}")
-        raise Exception(f"Dify API request failed: {str(e)}")
+        raise AppException(ErrorCode.DIFY_CONNECTION_ERROR,
+                           f"Dify API request failed: {str(e)}")
     except httpx.HTTPStatusError as e:
-        logger.error(f"Dify API HTTP error: {str(e)}")
-        raise Exception(f"Dify API HTTP error: {str(e)}")
+        logger.error(
+            f"Dify API HTTP error: {str(e)}, status_code: {e.response.status_code}")
+        # Map HTTP status to specific error code
+        if e.response.status_code == 401:
+            logger.error("Raising DIFY_AUTH_ERROR for 401 error")
+            raise AppException(ErrorCode.DIFY_AUTH_ERROR,
+                               f"Dify authentication failed: {str(e)}")
+        elif e.response.status_code == 403:
+            logger.error("Raising DIFY_AUTH_ERROR for 403 error")
+            raise AppException(ErrorCode.DIFY_AUTH_ERROR,
+                               f"Dify access forbidden: {str(e)}")
+        elif e.response.status_code == 429:
+            logger.error("Raising DIFY_RATE_LIMIT for 429 error")
+            raise AppException(ErrorCode.DIFY_RATE_LIMIT,
+                               f"Dify API rate limit exceeded: {str(e)}")
+        else:
+            logger.error(
+                f"Raising DIFY_SERVICE_ERROR for status {e.response.status_code}")
+            raise AppException(ErrorCode.DIFY_SERVICE_ERROR,
+                               f"Dify API HTTP error {e.response.status_code}: {str(e)}")
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Dify API response: {str(e)}")
-        raise Exception(f"Failed to parse Dify API response: {str(e)}")
+        raise AppException(ErrorCode.DIFY_RESPONSE_ERROR,
+                           f"Failed to parse Dify API response: {str(e)}")
     except KeyError as e:
         logger.error(
             f"Unexpected Dify API response format: missing key {str(e)}")
-        raise Exception(
-            f"Unexpected Dify API response format: missing key {str(e)}")
+        raise AppException(ErrorCode.DIFY_RESPONSE_ERROR,
+                           f"Unexpected Dify API response format: missing key {str(e)}")
