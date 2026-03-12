@@ -110,3 +110,159 @@ async def test_check_connectivity_failure(vl_model_instance):
     ):
         result = await vl_model_instance.check_connectivity()
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for encode_image
+# ---------------------------------------------------------------------------
+
+
+def test_encode_image_with_file_path(vl_model_instance, tmp_path):
+    """encode_image should correctly encode an image file to base64."""
+
+    # Create a simple test image file
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake image data")
+
+    result = vl_model_instance.encode_image(str(test_image))
+
+    import base64
+    expected = base64.b64encode(b"fake image data").decode('utf-8')
+    assert result == expected
+
+
+def test_encode_image_with_binary_io(vl_model_instance):
+    """encode_image should correctly encode a BinaryIO object to base64."""
+
+    # Create a mock BinaryIO object
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"binary image data"
+
+    result = vl_model_instance.encode_image(mock_file)
+
+    import base64
+    expected = base64.b64encode(b"binary image data").decode('utf-8')
+    assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests for prepare_image_message
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_image_message_with_png_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle PNG files."""
+
+    # Create a PNG test file
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert "data:image/png;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_jpg_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle JPG files and convert to jpeg format."""
+
+    # Create a JPG test file
+    test_image = tmp_path / "test.jpg"
+    test_image.write_bytes(b"fake jpg data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_jpeg_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle jpeg files."""
+
+    test_image = tmp_path / "test.jpeg"
+    test_image.write_bytes(b"fake jpeg data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_gif_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle GIF files."""
+
+    test_image = tmp_path / "test.gif"
+    test_image.write_bytes(b"fake gif data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/gif;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_webp_file(vl_model_instance, tmp_path):
+    """prepare_image_message should correctly handle WebP files."""
+
+    test_image = tmp_path / "test.webp"
+    test_image.write_bytes(b"fake webp data")
+
+    messages = vl_model_instance.prepare_image_message(str(test_image))
+
+    assert "data:image/webp;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_with_binary_io(vl_model_instance):
+    """prepare_image_message should correctly handle BinaryIO input and default to jpeg."""
+
+    mock_file = MagicMock()
+    mock_file.read.return_value = b"binary data"
+
+    messages = vl_model_instance.prepare_image_message(mock_file)
+
+    assert "data:image/jpeg;base64," in messages[1]["content"][0]["image_url"]["url"]
+
+
+def test_prepare_image_message_custom_system_prompt(vl_model_instance, tmp_path):
+    """prepare_image_message should use custom system prompt when provided."""
+
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    custom_prompt = "What is in this image?"
+    messages = vl_model_instance.prepare_image_message(str(test_image), system_prompt=custom_prompt)
+
+    assert messages[0]["content"][0]["text"] == custom_prompt
+
+
+# ---------------------------------------------------------------------------
+# Tests for analyze_image
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_image_calls_prepare_image_message(vl_model_instance, tmp_path):
+    """analyze_image should call prepare_image_message with correct parameters."""
+
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    with patch.object(vl_model_instance, "prepare_image_message", return_value=[{"role": "user", "content": "test"}]) as mock_prepare:
+        with patch.object(vl_model_instance, "__call__", return_value=MagicMock()) as mock_call:
+            vl_model_instance.analyze_image(str(test_image), system_prompt="Test prompt", stream=False)
+
+            mock_prepare.assert_called_once_with(str(test_image), "Test prompt")
+            mock_call.assert_called_once()
+
+
+def test_analyze_image_with_custom_params(vl_model_instance, tmp_path):
+    """analyze_image should pass additional kwargs to __call__."""
+
+    test_image = tmp_path / "test.png"
+    test_image.write_bytes(b"fake png data")
+
+    with patch.object(vl_model_instance, "prepare_image_message", return_value=[{"role": "user", "content": "test"}]):
+        with patch.object(vl_model_instance, "__call__", return_value=MagicMock()) as mock_call:
+            vl_model_instance.analyze_image(str(test_image), temperature=0.5, top_p=0.9)
+
+            mock_call.assert_called_once()
+            # Check that kwargs were passed
+            call_kwargs = mock_call.call_args.kwargs
+            assert "temperature" in call_kwargs or call_kwargs == {"messages": [{"role": "user", "content": "test"}]}
